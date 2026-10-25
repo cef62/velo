@@ -195,6 +195,7 @@ impl Vault {
         std::fs::remove_file(from).context("removing plaintext note")?;
         self.index.remove(path)?;
         self.reindex(&to, None)?;
+        self.index.checkpoint()?; // drop pre-lock WAL frames holding plaintext
         self.unlocked.insert(s(&to), lossy(&plain));
         Ok(s(&to))
     }
@@ -296,17 +297,20 @@ mod tests {
     #[test] fn lock_keeps_plaintext_off_disk_and_db() {
         let (dir, db) = setup(); let id = crypto::new_identity();
         let mut v = Vault::open(dir.clone(), &db, None).unwrap(); let d = v.open_or_create("s", None).unwrap();
-        let _r = v.save_note(&d.path, "uniqueplain", &d.hash, None).unwrap(); let p = v.lock_note(&d.path, &id).unwrap();
+        let _r = v.save_note(&d.path, "uniqueplain zqxjvkplmwqbyfh", &d.hash, None).unwrap(); let p = v.lock_note(&d.path, &id).unwrap();
         assert!(p.ends_with(".md.age")); assert!(!Path::new(&d.path).exists());
         assert!(!std::fs::read(&p).unwrap().windows(11).any(|w| w == b"uniqueplain"));
         drop(v);
         for suffix in ["", "-wal", "-shm"] {
             let f = format!("{}{suffix}", db.display());
-            if let Ok(b) = std::fs::read(&f) { assert!(!b.windows(11).any(|w| w == b"uniqueplain"), "{f}"); }
+            if let Ok(b) = std::fs::read(&f) { assert!(!b.windows(11).any(|w| w == b"uniqueplain"), "{f}");
+                // FTS trigram index keeps overlapping 3-byte terms; none may survive
+                let word = b"zqxjvkplmwqbyfh";
+                assert!(!word.windows(3).any(|g| b.windows(3).any(|w| w == g)), "trigram leak in {f}"); }
         }
         let mut v = Vault::open(dir.clone(), &db, Some(&id)).unwrap(); assert_eq!(v.search("uniqueplain").unwrap().len(), 1);
         v.lock_all(); assert!(v.search("uniqueplain").unwrap().is_empty());
-        assert!(v.open_note(&p, None).is_err()); assert_eq!(v.open_note(&p, Some(&id)).unwrap().text, "uniqueplain");
+        assert!(v.open_note(&p, None).is_err()); assert_eq!(v.open_note(&p, Some(&id)).unwrap().text, "uniqueplain zqxjvkplmwqbyfh");
     }
     #[test] fn rename_rewrites_backlinks() {
         let (dir, db) = setup();

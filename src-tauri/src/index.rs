@@ -66,7 +66,15 @@ impl Index {
         let _: String = db.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
         db.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON;")?;
         db.execute_batch(SCHEMA)?;
+        // FTS5 deletes otherwise leave old segments (all trigrams) in notes_fts_data.
+        db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1);")?;
         Ok(Index { db })
+    }
+
+    /// Fold the WAL into the main file and truncate it (no-op outside WAL mode).
+    pub fn checkpoint(&self) -> anyhow::Result<()> {
+        self.db.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        Ok(())
     }
 
     pub fn known(&self) -> anyhow::Result<HashMap<String, Meta>> {
