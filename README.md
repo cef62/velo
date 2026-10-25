@@ -60,6 +60,10 @@ Release builds are not signed or notarized.
 - macOS: right-click the app, choose Open, then confirm. Or run `xattr -dr com.apple.quarantine /Applications/velo.app`.
 - Windows: on the SmartScreen dialog click "More info", then "Run anyway".
 
+## Known limitations
+
+- Quitting from the Dock or at logout bypasses the unsaved-edits prompt; edits are autosaved within about 0.5 s. Cmd+Q (and closing the window) asks first.
+
 ## Development
 
 Requires Node 24, pnpm, and a Rust toolchain (plus [Tauri's platform prerequisites](https://v2.tauri.app/start/prerequisites/)).
