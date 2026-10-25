@@ -94,6 +94,10 @@ impl Vault {
         self.index.search(query, 200, &self.unlocked)
     }
 
+    pub fn titles(&self) -> anyhow::Result<Vec<String>> {
+        self.index.titles()
+    }
+
     pub fn open_note(&mut self, path: &str, identity: Option<&str>) -> anyhow::Result<NoteDoc> {
         let p = Path::new(path);
         let nf = parse(p)?;

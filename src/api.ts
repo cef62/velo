@@ -9,6 +9,7 @@ export type Settings = { notes_dir: string | null; hotkey: string; layout: "vert
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<void>("set_settings", { settings });
 export const search = (query: string) => invoke<Hit[]>("search", { query });
+export const listTitles = () => invoke<string[]>("list_titles");
 export const openNote = (path: string) => invoke<NoteDoc>("open_note", { path });
 export const openOrCreate = (title: string) => invoke<NoteDoc>("open_or_create", { title });
 export const saveNote = (path: string, text: string, baseHash: string) => invoke<SaveResult>("save_note", { path, text, baseHash });

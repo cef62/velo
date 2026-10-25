@@ -181,6 +181,11 @@ impl Index {
         Ok(st.query_map([fold(title)], |r| r.get(0))?.next().transpose()?)
     }
 
+    pub fn titles(&self) -> anyhow::Result<Vec<String>> {
+        let mut st = self.db.prepare("SELECT title FROM notes")?;
+        Ok(st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?)
+    }
+
     pub fn backlinks(&self, title: &str) -> anyhow::Result<Vec<String>> {
         let mut st = self.db.prepare("SELECT DISTINCT src FROM links WHERE dst_folded=? ORDER BY src")?;
         Ok(st.query_map([fold(title)], |r| r.get(0))?.collect::<Result<_, _>>()?)
@@ -227,6 +232,10 @@ mod tests {
     #[test] fn backlinks_and_find_title() { let i = idx(&[("a.md", "see [[Target Note]]", 1), ("Target Note.md", "", 2)]);
         assert_eq!(i.backlinks("target note").unwrap(), vec!["a.md"]);
         assert_eq!(i.find_title("TARGET NOTE").unwrap().as_deref(), Some("Target Note.md")); }
+    #[test] fn titles_lists_all_incl_encrypted() { let mut i = idx(&[("a.md", "", 1), ("B c.md", "", 2)]);
+        i.upsert("s.md.age", &NoteFile { title: "s".into(), encrypted: true }, &Meta { mtime: 1, size: 1 }, None).unwrap();
+        let mut t = i.titles().unwrap(); t.sort();
+        assert_eq!(t, vec!["B c", "a", "s"]); }
     #[test] fn remove_clears_all_tables() { let mut i = idx(&[("a.md", "see [[B]] zebra", 1)]); i.remove("a.md").unwrap();
         assert!(i.search("zebra", 10, &HashMap::new()).unwrap().is_empty()); assert!(i.backlinks("b").unwrap().is_empty()); }
 }

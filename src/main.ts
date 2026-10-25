@@ -40,7 +40,7 @@ const preview = mountPreview($("preview"), {
 
 async function refreshTitles() {
   try {
-    titles = new Set((await api.search("")).map((h) => fold(h.title)));
+    titles = new Set((await api.listTitles()).map(fold));
     preview.refresh();
   } catch (e) {
     console.error("title cache refresh failed", e);

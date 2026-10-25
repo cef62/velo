@@ -47,6 +47,7 @@ pub fn run() {
             commands::get_settings,
             commands::set_settings,
             commands::search,
+            commands::list_titles,
             commands::open_note,
             commands::open_or_create,
             commands::save_note,

@@ -139,6 +139,11 @@ pub fn search(st: State<AppState>, query: String) -> Res<Vec<Hit>> {
 }
 
 #[tauri::command]
+pub fn list_titles(st: State<AppState>) -> Res<Vec<String>> {
+    with_vault(&st, |v, _| v.titles())
+}
+
+#[tauri::command]
 pub fn open_note(st: State<AppState>, path: String) -> Res<NoteDoc> {
     with_vault(&st, |v, id| v.open_note(&path, id))
 }
