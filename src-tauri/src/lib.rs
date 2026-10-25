@@ -1,3 +1,4 @@
+pub mod index;
 pub mod names;
 pub mod text;
 
