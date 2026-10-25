@@ -1,4 +1,5 @@
 pub mod names;
+pub mod text;
 
 pub fn run() {
     tauri::Builder::default()
