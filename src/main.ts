@@ -2,7 +2,9 @@ import { listen } from "@tauri-apps/api/event";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import * as api from "./api";
 import type { Hit } from "./api";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { mountEditor } from "./editor";
+import { latest } from "./latest";
 import { enterAction, moveSelection } from "./search";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -18,7 +20,11 @@ let hits: Hit[] = [];
 let sel = -1;
 let searchSeq = 0;
 
-const editor = mountEditor($("editor"), { onEscape: focusSearch });
+const newShow = latest();
+const editor = mountEditor($("editor"), {
+  onEscape: focusSearch,
+  onError: (m) => (errEl.textContent = m ?? ""),
+});
 
 function focusSearch() {
   q.focus();
@@ -57,9 +63,11 @@ function render() {
 }
 
 async function show(path: string) {
+  const current = newShow();
   try {
     await editor.flush();
     const doc = await api.openNote(path);
+    if (!current()) return;
     editor.load(doc);
     titleEl.textContent = doc.title;
     errEl.textContent = "";
@@ -188,6 +196,12 @@ void listen<{ paths: string[] }>("notes-changed", async (ev) => {
   if (open && ev.payload.paths.includes(open)) editor.onExternalChange(open);
 });
 void listen("focus-search", focusSearch);
+
+window.addEventListener("blur", () => void editor.flush());
+void getCurrentWindow().onCloseRequested(async (e) => {
+  await editor.flush();
+  if (editor.isDirty()) e.preventDefault(); // save failed; error is shown, keep the window open
+});
 
 void (async () => {
   const s = await api.getSettings();

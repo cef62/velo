@@ -1,6 +1,7 @@
 import { EditorView, keymap } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { markdown } from "@codemirror/lang-markdown";
+import { SaveController } from "./saver";
 import { openNote, saveNote, type NoteDoc } from "./api";
 
 export interface Editor {
@@ -13,10 +14,9 @@ export interface Editor {
   focus(): void;
 }
 
-const SAVE_DELAY_MS = 500;
 const stem = (p: string) => (p.split(/[\\/]/).pop() ?? p).replace(/\.[^.]+$/, "");
 
-export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void } = {}): Editor {
+export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onError?: (msg: string | null) => void } = {}): Editor {
   const banner = document.createElement("div");
   banner.className = "banner";
   banner.hidden = true;
@@ -24,11 +24,7 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void } = {
   host.className = "cm-host";
   el.append(banner, host);
 
-  let cur = { path: null as string | null, baseHash: "" };
-  let dirty = false;
-  let version = 0; // bumps on every user edit; a save only clears dirty if no edit happened meanwhile
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let queue: Promise<void> = Promise.resolve();
+  let ctrl: SaveController;
   let loading = false;
 
   const view = new EditorView({
@@ -40,10 +36,7 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void } = {
       keymap.of([{ key: "Escape", run: () => (opts.onEscape?.(), true) }]),
       EditorView.updateListener.of((u) => {
         if (!u.docChanged || loading) return;
-        dirty = true;
-        version++;
-        clearTimeout(timer);
-        timer = setTimeout(() => void ed.flush(), SAVE_DELAY_MS);
+        ctrl.edit();
       }),
     ],
   });
@@ -68,58 +61,24 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void } = {
     banner.hidden = false;
   }
 
-  // `target` is captured so a save queued before load() still goes to the old note.
-  function enqueueSave(target: typeof cur, text: string, v: number) {
-    queue = queue.then(async () => {
-      if (!target.path) return;
-      try {
-        const r = await saveNote(target.path, text, target.baseHash);
-        if (r.kind === "saved") {
-          target.baseHash = r.hash;
-          if (target === cur && v === version) dirty = false;
-        } else if (target === cur) {
-          // Disk version wins in the editor; our text lives in the conflict note.
-          const disk = await openNote(target.path);
-          target.baseHash = disk.hash;
-          setText(disk.text);
-          dirty = false;
-          showBanner(r.conflict_path);
-        }
-      } catch (e) {
-        console.error("save failed", e); // stays dirty; next edit or change event retries
-      }
-    });
-    return queue;
-  }
+  ctrl = new SaveController({
+    saveNote,
+    openNote,
+    getText: () => view.state.doc.toString(),
+    setText,
+    onConflict: showBanner,
+    onError: (m) => opts.onError?.(m),
+  });
 
   const ed: Editor = {
     load(doc) {
-      if (dirty) enqueueSave(cur, view.state.doc.toString(), version);
-      clearTimeout(timer);
-      cur = { path: doc.path, baseHash: doc.hash };
-      dirty = false;
       banner.hidden = true;
-      setText(doc.text);
+      ctrl.load(doc);
     },
-    isDirty: () => dirty,
-    currentPath: () => cur.path,
-    onExternalChange(path) {
-      if (path !== cur.path) return;
-      if (dirty) return void ed.flush();
-      const target = cur;
-      openNote(path)
-        .then((d) => {
-          if (target !== cur || dirty || d.hash === cur.baseHash) return;
-          cur.baseHash = d.hash;
-          setText(d.text);
-        })
-        .catch(() => {}); // file vanished: keep content, next save recreates it
-    },
-    flush() {
-      clearTimeout(timer);
-      if (dirty && cur.path) return enqueueSave(cur, view.state.doc.toString(), version);
-      return queue;
-    },
+    isDirty: ctrl.isDirty,
+    currentPath: ctrl.currentPath,
+    onExternalChange: (p) => ctrl.external(p),
+    flush: () => ctrl.flush(),
     focus: () => view.focus(),
   };
   return ed;
