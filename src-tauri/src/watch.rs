@@ -43,7 +43,12 @@ mod tests {
     #[test] fn watcher_reports_external_write() {
         let tmp = tempfile::tempdir().unwrap(); let dir = tmp.path().to_path_buf();
         let (tx, rx) = std::sync::mpsc::channel(); let _w = spawn(dir.clone(), move |p| { tx.send(p).ok(); }).unwrap();
-        std::thread::sleep(Duration::from_millis(200)); std::fs::write(dir.join(".x.md.tmp"), "t").unwrap(); std::fs::write(dir.join("y.png"), "p").unwrap(); std::fs::write(dir.join("x.md"), "hi").unwrap();
-        let got = rx.recv_timeout(Duration::from_secs(3)).unwrap(); assert!(got.contains(&dir.join("x.md")));
+        std::thread::sleep(Duration::from_millis(200));
+        std::fs::write(dir.join(".x.md.tmp"), "t").unwrap(); std::fs::write(dir.join("y.png"), "p").unwrap(); std::fs::write(dir.join("x.md"), "hi").unwrap();
+        let mut got: Vec<PathBuf> = rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        while let Ok(more) = rx.recv_timeout(Duration::from_millis(1000)) { got.extend(more); }
+        assert!(got.contains(&dir.join("x.md")), "{got:?}");
+        assert!(got.iter().all(|p| parse_note_file(p).is_some()), "non-note delivered: {got:?}");
     }
+    #[test] fn applies_only_to_own_folder() { assert!(applies_to(Path::new("/a"), Path::new("/a"))); assert!(!applies_to(Path::new("/b"), Path::new("/a"))); }
 }

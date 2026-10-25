@@ -194,6 +194,15 @@ pub fn has_identity(st: State<AppState>) -> bool {
     has
 }
 
+/// None only when the file does not exist; any other read error must abort.
+fn read_identity_file(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
+    match std::fs::read(path) {
+        Ok(b) => Ok(Some(b)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 /// Pick the identity for `setup_passphrase`: the folder's wrapped one wins, else reuse the
 /// keychain one (never replace it), else make a new one. Returns bytes to write to identity.age.
 fn resolve_identity(file: Option<&[u8]>, existing: Option<String>, passphrase: &str) -> Result<(String, Option<Vec<u8>>), &'static str> {
@@ -210,12 +219,15 @@ pub fn setup_passphrase(app: AppHandle, st: State<AppState>, passphrase: String)
     let dir = st.settings.lock().unwrap().notes_dir.clone().ok_or("no-folder")?;
     let file = dir.join(crypto::IDENTITY_FILE);
     let existing = identity(&st).or_else(crypto::keychain_get);
-    let bytes = std::fs::read(&file).ok();
+    let bytes = read_identity_file(&file).map_err(|e| e.to_string())?;
     let (id, to_write) = resolve_identity(bytes.as_deref(), existing.clone(), &passphrase).map_err(String::from)?;
     if let Some(wrapped) = to_write {
         std::fs::create_dir_all(file.parent().unwrap()).map_err(|e| e.to_string())?;
         let tmp = file.with_extension("age.tmp");
-        std::fs::write(&tmp, wrapped).and_then(|_| std::fs::rename(&tmp, &file)).map_err(|e| e.to_string())?;
+        // hard_link fails if identity.age appeared meanwhile: never overwrite an existing identity
+        let linked = std::fs::write(&tmp, wrapped).and_then(|_| std::fs::hard_link(&tmp, &file));
+        std::fs::remove_file(&tmp).ok();
+        linked.map_err(|e| e.to_string())?;
     }
     if existing.as_deref() != Some(id.as_str()) {
         crypto::keychain_set(&id).map_err(err)?;
@@ -227,6 +239,13 @@ pub fn setup_passphrase(app: AppHandle, st: State<AppState>, passphrase: String)
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn read_identity_file_only_maps_not_found_to_none() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(read_identity_file(&d.path().join("missing")).unwrap().is_none());
+        assert!(read_identity_file(d.path()).is_err()); // a directory: read fails, not NotFound
+        std::fs::write(d.path().join("f"), "x").unwrap();
+        assert_eq!(read_identity_file(&d.path().join("f")).unwrap().unwrap(), b"x");
+    }
     #[test] fn resolve_identity_cases() {
         let id = crypto::new_identity(); let wrapped = crypto::wrap_identity(&id, "pw").unwrap();
         assert_eq!(resolve_identity(Some(&wrapped), None, "pw").unwrap(), (id.clone(), None));
