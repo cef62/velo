@@ -231,7 +231,7 @@ fn resolve_identity(file: Option<&[u8]>, existing: Option<String>, passphrase: &
 }
 
 #[tauri::command]
-pub fn setup_passphrase(app: AppHandle, st: State<AppState>, passphrase: String) -> Res<()> {
+pub fn setup_passphrase(app: AppHandle, st: State<AppState>, passphrase: String) -> Res<Option<String>> {
     let dir = st.settings.lock().unwrap().notes_dir.clone().ok_or("no-folder")?;
     let file = dir.join(crypto::IDENTITY_FILE);
     let existing = identity(&st).or_else(crypto::keychain_get);
@@ -245,11 +245,15 @@ pub fn setup_passphrase(app: AppHandle, st: State<AppState>, passphrase: String)
         std::fs::remove_file(&tmp).ok();
         linked.map_err(|e| e.to_string())?;
     }
-    if existing.as_deref() != Some(id.as_str()) {
-        crypto::keychain_set(&id).map_err(err)?;
-    }
+    let warning = keychain_warning(existing.as_deref() != Some(id.as_str()), || crypto::keychain_set(&id));
     *st.identity.lock().unwrap() = Some(id);
-    open_vault(&app, &st, &dir).map_err(err) // reopening re-decrypts locked notes
+    open_vault(&app, &st, &dir).map_err(err)?; // reopening re-decrypts locked notes
+    Ok(warning)
+}
+
+/// A keychain write failure is not fatal: the identity stays in memory for this session.
+fn keychain_warning<E>(needs_set: bool, set: impl FnOnce() -> Result<(), E>) -> Option<String> {
+    (needs_set && set().is_err()).then(|| "keychain-unavailable".into())
 }
 
 #[cfg(test)]
@@ -268,6 +272,11 @@ mod tests {
         std::fs::create_dir(d.path().join(".velo")).unwrap();
         std::fs::write(d.path().join(crypto::IDENTITY_FILE), b"x").unwrap();
         assert!(identity_file_exists_in(d.path()).unwrap());
+    }
+    #[test] fn keychain_warning_cases() {
+        assert_eq!(keychain_warning(true, || Err::<(), _>("no keychain")), Some("keychain-unavailable".into()));
+        assert_eq!(keychain_warning(true, || Ok::<(), ()>(())), None);
+        assert_eq!(keychain_warning(false, || Err::<(), _>("never called")), None);
     }
     #[test] fn resolve_identity_cases() {
         let id = crypto::new_identity(); let wrapped = crypto::wrap_identity(&id, "pw").unwrap();

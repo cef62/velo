@@ -51,7 +51,7 @@ age -d -i key.txt "Note.md.age" > "Note.md"
 rm key.txt                                    # key.txt is your plaintext private key: delete it
 ```
 
-On Linux the keychain needs a Secret Service provider such as gnome-keyring (or KeePassXC) running for automatic unlock; without one, velo asks for the passphrase.
+On Linux the keychain needs a Secret Service provider such as gnome-keyring (or KeePassXC) running for automatic unlock. If no OS keychain/Secret Service is available, velo asks for your passphrase each time it starts and keeps the key in memory only for that session.
 
 ## Unsigned builds
 

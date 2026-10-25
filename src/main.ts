@@ -105,7 +105,9 @@ async function show(path: string, retried = false): Promise<boolean> {
 /** Passphrase dialog; true once the identity is available. Wording depends on identity.age existing. */
 async function promptPassphrase(): Promise<boolean> {
   try {
-    return await askPassphrase(await api.identityFileExists(), api.setupPassphrase);
+    return await askPassphrase(await api.identityFileExists(), async (pw) => {
+      if ((await api.setupPassphrase(pw)) === "keychain-unavailable") errEl.textContent = "Keychain unavailable — you'll be asked for your passphrase each launch";
+    });
   } catch (e) {
     errEl.textContent = String(e);
     return false;
