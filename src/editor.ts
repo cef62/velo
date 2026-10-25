@@ -1,3 +1,4 @@
+import { Compartment } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { markdown } from "@codemirror/lang-markdown";
@@ -27,6 +28,7 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
 
   let ctrl: SaveController;
   let loading = false;
+  const editable = new Compartment(); // read-only until a note is loaded (no path to save to)
 
   const view = new EditorView({
     parent: host,
@@ -34,6 +36,7 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
       basicSetup,
       markdown(),
       EditorView.lineWrapping,
+      editable.of(EditorView.editable.of(false)),
       keymap.of([{ key: "Escape", run: () => (opts.onEscape?.(), true) }]),
       EditorView.updateListener.of((u) => {
         if (!u.docChanged || loading) return;
@@ -74,6 +77,7 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
     load(doc) {
       if (!ctrl.load(doc)) return false;
       banner.hidden = true;
+      view.dispatch({ effects: editable.reconfigure(EditorView.editable.of(true)) });
       return true;
     },
     isDirty: ctrl.isDirty,

@@ -38,6 +38,7 @@ export class SaveController {
   }
 
   edit() {
+    if (!this.cur.path) return; // nothing to save to; the editor is read-only until a note loads
     this.dirty = true;
     this.version++;
     this.schedule(this.delay);
@@ -45,6 +46,7 @@ export class SaveController {
 
   /** Saves pending edits; resolves true when the editor is clean afterwards. */
   async flush(): Promise<boolean> {
+    if (!this.cur.path) return true;
     clearTimeout(this.timer);
     if (this.dirty && this.cur.path) await this.enqueue(this.cur, this.d.getText(), this.version);
     else await this.queue;

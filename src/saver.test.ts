@@ -101,3 +101,13 @@ test("failing save + switch: refused, text kept, still dirty", async () => {
   expect(c.currentPath()).toBe("a.md");
   expect(c.isDirty()).toBe(true);
 });
+
+test("no note open: typing is not dirty, flush is clean, load succeeds", async () => {
+  const d = { saveNote: vi.fn(), openNote: vi.fn(), getText: () => text, setText: (t: string) => void (text = t), onConflict: vi.fn(), onError: vi.fn() };
+  const c = new SaveController(d, 500);
+  type(c, "orphan");
+  expect(c.isDirty()).toBe(false);
+  expect(await c.flush()).toBe(true);
+  expect(c.load(doc)).toBe(true);
+  expect(d.saveNote).not.toHaveBeenCalled();
+});
