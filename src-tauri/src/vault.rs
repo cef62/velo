@@ -344,6 +344,16 @@ mod tests {
         let r = v.rename_note(&old, "New", true).unwrap();
         assert_eq!(r.rewritten, 1); assert_eq!(std::fs::read_to_string(dir.join("a.md")).unwrap(), "see [[New]]");
     }
+    #[test] fn leading_dot_titles_stay_visible_and_indexed() {
+        let mut v = open_empty();
+        let d = v.open_or_create(".foo", None).unwrap();
+        assert!(!Path::new(&d.path).file_name().unwrap().to_str().unwrap().starts_with('.'));
+        assert_eq!(v.search("").unwrap().len(), 1);
+        let r = v.rename_note(&d.path, ".bar", false).unwrap();
+        assert!(!Path::new(&r.path).file_name().unwrap().to_str().unwrap().starts_with('.'));
+        assert_eq!(v.search("").unwrap().len(), 1);
+        assert!(v.open_note(&r.path, None).is_ok());
+    }
     #[test] fn fs_changes_skip_self_writes() {
         let mut v = open_empty(); let d = v.open_or_create("w", None).unwrap();
         v.save_note(&d.path, "x", &d.hash, None).unwrap(); assert!(v.apply_fs_changes(&[d.path.clone().into()], None).is_empty());

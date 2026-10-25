@@ -17,7 +17,10 @@ pub fn title_to_stem(title: &str) -> String {
     }
     s.truncate(end);
     let s = s.trim_end_matches(['.', ' ']);
-    if s.is_empty() { "Untitled".into() } else { s.into() }
+    // a leading '.' would make a hidden file that parse_note_file ignores (the note would vanish)
+    let dots = s.len() - s.trim_start_matches('.').len();
+    let s = format!("{}{}", "-".repeat(dots), &s[dots..]);
+    if s.is_empty() { "Untitled".into() } else { s }
 }
 
 pub fn note_path(dir: &Path, title: &str, encrypted: bool) -> PathBuf {
@@ -42,6 +45,7 @@ mod tests {
 
     #[test] fn stem_replaces_illegal() { assert_eq!(title_to_stem("a/b:c*?\"<>|d"), "a-b-c------d"); }
     #[test] fn stem_trims_dots_spaces() { assert_eq!(title_to_stem("  notes. . "), "notes"); }
+    #[test] fn stem_leading_dots_not_hidden() { assert_eq!(title_to_stem(".NET tips"), "-NET tips"); assert_eq!(title_to_stem("..x"), "--x"); assert_eq!(title_to_stem("a.b"), "a.b"); }
     #[test] fn stem_empty_is_untitled() { assert_eq!(title_to_stem(" / "), "-"); assert_eq!(title_to_stem("   "), "Untitled"); }
     #[test] fn stem_truncates_on_char_boundary() { let s = title_to_stem(&"é".repeat(150)); assert!(s.len() <= 200); assert!(s.chars().all(|c| c == 'é')); }
     #[test] fn parse_variants() {
