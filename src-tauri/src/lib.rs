@@ -1,5 +1,6 @@
 pub mod index;
 pub mod names;
+pub mod store;
 pub mod text;
 
 pub fn run() {
