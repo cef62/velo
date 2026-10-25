@@ -17,6 +17,7 @@ const q = $<HTMLInputElement>("q");
 const list = $<HTMLUListElement>("list");
 const titleEl = $<HTMLSpanElement>("title");
 const errEl = $<HTMLSpanElement>("err");
+const statusEl = $<HTMLSpanElement>("status");
 
 const isMac = navigator.platform.startsWith("Mac");
 const mod = (e: KeyboardEvent) => (isMac ? e.metaKey : e.ctrlKey);
@@ -35,6 +36,23 @@ const clearErr = () => {
   errEl.textContent = notice;
   notice = "";
 };
+
+let indexing = false;
+const STILL_INDEXING = "Still indexing…";
+/** Search field and editor are locked while the backend indexes; commands reject with "indexing" meanwhile. */
+function setIndexing(on: boolean, done = 0, total = 0) {
+  if (on) {
+    statusEl.textContent = `Indexing… ${done.toLocaleString()} / ${total.toLocaleString()}`;
+    if (!indexing) editor.suspend();
+  } else {
+    statusEl.textContent = "";
+    if (indexing) editor.resume();
+  }
+  indexing = on;
+  q.disabled = on;
+}
+/** Error text for the UI; the "indexing" rejection is not an error. */
+const errText = (e: unknown) => (e === "indexing" ? STILL_INDEXING : String(e));
 
 let titles = new Set<string>(); // folded titles of all notes, for wikilink existence
 const newShow = latest();
@@ -112,7 +130,7 @@ async function show(path: string, retried = false): Promise<boolean> {
     clearErr();
   } catch (e) {
     if (e === "locked" && !retried && (await promptPassphrase())) return show(path, true);
-    errEl.textContent = e === "locked" ? "Note is locked" : String(e);
+    errEl.textContent = e === "locked" ? "Note is locked" : errText(e);
   }
   return true;
 }
@@ -127,7 +145,7 @@ async function promptPassphrase(): Promise<boolean> {
       }
     });
   } catch (e) {
-    errEl.textContent = String(e);
+    errEl.textContent = errText(e);
     return false;
   }
 }
@@ -153,7 +171,7 @@ async function lockHandoff(path: string) {
     if (!(await api.hasIdentity()) && !(await promptPassphrase())) return;
     if (!(await editor.flush())) return; // error already visible
   } catch (e) {
-    errEl.textContent = String(e);
+    errEl.textContent = errText(e);
     return;
   }
   if (editor.currentPath() !== path) return; // belt and braces: the open note changed during the awaits
@@ -163,7 +181,7 @@ async function lockHandoff(path: string) {
     np = isLockedPath(path) ? await api.unlockNote(path) : await api.lockNote(path);
   } catch (e) {
     editor.resume(); // nothing moved: old path is still valid
-    errEl.textContent = e === "already-exists" ? "A note with that title already exists in the other form" : String(e);
+    errEl.textContent = e === "already-exists" ? "A note with that title already exists in the other form" : errText(e);
     return;
   }
   try {
@@ -203,7 +221,7 @@ async function lockEverything() {
     } else editor.resume();
     await runSearch(false);
   } catch (e) {
-    errEl.textContent = String(e);
+    errEl.textContent = errText(e);
   } finally {
     busy = false;
   }
@@ -272,7 +290,7 @@ async function runSearch(selectFirst: boolean) {
     }
   } catch (e) {
     if (e === "no-folder") $("setup").hidden = false;
-    else console.error("search failed", e);
+    else if (e !== "indexing") console.error("search failed", e);
   }
 }
 
@@ -285,7 +303,7 @@ async function enter() {
     } else if (!(await openTitle(a.title))) return;
     editor.focus();
   } catch (e) {
-    errEl.textContent = String(e);
+    errEl.textContent = errText(e);
   }
 }
 
@@ -305,7 +323,7 @@ async function openTitle(title: string): Promise<boolean> {
     void refreshTitles();
     return true;
   } catch (e) {
-    errEl.textContent = String(e);
+    errEl.textContent = errText(e);
     return false;
   }
 }
@@ -336,7 +354,7 @@ function startRename() {
       errEl.textContent = "";
       await runSearch(false);
     } catch (e) {
-      errEl.textContent = e === "already-exists" ? "A note with that title exists" : String(e);
+      errEl.textContent = e === "already-exists" ? "A note with that title exists" : errText(e);
     }
     editor.focus();
   };
@@ -410,6 +428,18 @@ void listen<{ paths: string[] }>("notes-changed", async (ev) => {
   if (open && ev.payload.paths.includes(open)) editor.onExternalChange(open);
 });
 void listen("focus-search", focusSearch);
+void listen<{ done: number; total: number }>("index-progress", (ev) => setIndexing(true, ev.payload.done, ev.payload.total));
+void listen("index-done", async () => {
+  setIndexing(false);
+  $("setup").hidden = true;
+  await runSearch(true);
+  void refreshTitles();
+});
+void listen<{ message: string }>("index-error", (ev) => {
+  setIndexing(false);
+  errEl.textContent = ev.payload.message;
+  void runSearch(false); // no vault -> shows the setup screen
+});
 
 window.addEventListener("blur", () => void editor.flush());
 void getCurrentWindow().onCloseRequested(async (e) => {
@@ -423,8 +453,10 @@ void getCurrentWindow().onCloseRequested(async (e) => {
 
 void (async () => {
   const s = await api.getSettings();
+  const st = await api.indexStatus();
+  if (st) setIndexing(true, st[0], st[1]);
   if (!s.notes_dir) $("setup").hidden = false;
-  else {
+  else if (!st) {
     await runSearch(true);
     void refreshTitles();
   }

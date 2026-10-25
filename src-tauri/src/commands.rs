@@ -6,6 +6,7 @@ use crate::vault::{NoteDoc, RenameResult, Vault};
 use crate::watch;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
@@ -15,6 +16,10 @@ pub struct AppState {
     pub watcher: Mutex<Option<watch::Watcher>>,
     /// keychain identity, read at startup and after `setup_passphrase`
     pub identity: Mutex<Option<String>>,
+    /// (done, total) while a vault is being indexed; note commands refuse with "indexing"
+    pub indexing: Mutex<Option<(usize, usize)>>,
+    /// bumped by every open/close; an open whose number is no longer current is stale and discards its result
+    pub open_gen: AtomicU64,
     pub settings_path: PathBuf,
     pub data_dir: PathBuf,
 }
@@ -33,18 +38,57 @@ fn identity(st: &AppState) -> Option<String> {
     st.identity.lock().unwrap().clone()
 }
 
+fn check_gate(gate: &Mutex<Option<(usize, usize)>>) -> Result<(), &'static str> {
+    if gate.lock().unwrap().is_some() { Err("indexing") } else { Ok(()) }
+}
+
+/// Runs `f` with the gate set; the gate is cleared on every return path (a panic is out of scope).
+fn gated<T>(gate: &Mutex<Option<(usize, usize)>>, f: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<T> {
+    *gate.lock().unwrap() = Some((0, 0));
+    let r = f();
+    *gate.lock().unwrap() = None;
+    r
+}
+
 fn with_vault<T>(st: &AppState, f: impl FnOnce(&mut Vault, Option<&str>) -> anyhow::Result<T>) -> Res<T> {
+    check_gate(&st.indexing)?;
     let id = identity(st);
     let mut guard = st.vault.lock().unwrap();
     let v = guard.as_mut().ok_or("no-folder")?;
     f(v, id.as_deref()).map_err(err)
 }
 
-/// (Re)open the vault and watcher for `dir`. On error the previous vault/watcher stay untouched.
+/// (Re)open the vault and watcher for `dir`, emitting index-progress/index-done/index-error. No lock is held
+/// while indexing. On error the previous vault/watcher stay untouched. If another open/close started
+/// meanwhile, this one is stale: it emits nothing and discards its result (the newer open wins).
 pub fn open_vault(app: &AppHandle, st: &AppState, dir: &Path) -> anyhow::Result<()> {
+    let me = st.open_gen.fetch_add(1, Ordering::SeqCst) + 1;
+    let current = || st.open_gen.load(Ordering::SeqCst) == me;
+    let r = gated(&st.indexing, || open_vault_inner(app, st, dir, me));
+    if current() {
+        match &r {
+            Ok(()) => app.emit("index-done", serde_json::json!({})),
+            Err(e) => app.emit("index-error", serde_json::json!({ "message": e.to_string() })),
+        }
+        .ok();
+    }
+    r
+}
+
+fn open_vault_inner(app: &AppHandle, st: &AppState, dir: &Path, me: u64) -> anyhow::Result<()> {
+    let current = || st.open_gen.load(Ordering::SeqCst) == me;
     std::fs::create_dir_all(&st.data_dir)?;
     let db = st.data_dir.join(format!("index-{}.sqlite", store::hash(dir.to_string_lossy().as_bytes())));
-    let vault = Vault::open(dir.to_path_buf(), &db, identity(st).as_deref())?;
+    let vault = Vault::open_with_progress(dir.to_path_buf(), &db, identity(st).as_deref(), &mut |done, total| {
+        if current() {
+            // a stale open finishing first clears the gate; the newer open's next callback restores it
+            *st.indexing.lock().unwrap() = Some((done, total));
+            app.emit("index-progress", serde_json::json!({ "done": done, "total": total })).ok();
+        }
+    })?;
+    if !current() {
+        return Ok(());
+    }
     let handle = app.clone();
     let base = dir.to_path_buf();
     let w = watch::spawn(dir.to_path_buf(), move |paths| {
@@ -58,6 +102,10 @@ pub fn open_vault(app: &AppHandle, st: &AppState, dir: &Path) -> anyhow::Result<
             handle.emit("notes-changed", serde_json::json!({ "paths": changed })).ok();
         }
     })?;
+    if !current() {
+        w.stop();
+        return Ok(());
+    }
     let old = st.watcher.lock().unwrap().replace(w);
     *st.vault.lock().unwrap() = Some(vault);
     if let Some(old) = old {
@@ -119,6 +167,7 @@ pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings)
         let opened = match &settings.notes_dir {
             Some(dir) => open_vault(&app, &st, dir).map_err(err),
             None => {
+                st.open_gen.fetch_add(1, Ordering::SeqCst); // discard any open still in flight
                 let w = st.watcher.lock().unwrap().take();
                 *st.vault.lock().unwrap() = None;
                 w.map(|w| w.stop());
@@ -138,6 +187,11 @@ pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings)
     settings::save(&st.settings_path, &settings).map_err(err)?;
     *st.settings.lock().unwrap() = settings;
     Ok(())
+}
+
+#[tauri::command]
+pub fn index_status(st: State<AppState>) -> Option<(usize, usize)> {
+    *st.indexing.lock().unwrap()
 }
 
 #[tauri::command]
@@ -266,6 +320,21 @@ fn keychain_warning<E>(needs_set: bool, set: impl FnOnce() -> Result<(), E>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn indexing_gate_cleared_on_error() {
+        let gate = Mutex::new(None);
+        let r: anyhow::Result<()> = gated(&gate, || {
+            assert_eq!(*gate.lock().unwrap(), Some((0, 0)));
+            Err(anyhow::anyhow!("boom"))
+        });
+        assert!(r.is_err());
+        assert_eq!(*gate.lock().unwrap(), None);
+        assert_eq!(gated(&gate, || Ok(1)).unwrap(), 1);
+        assert_eq!(*gate.lock().unwrap(), None);
+    }
+    #[test] fn with_vault_refuses_while_indexing() {
+        assert_eq!(check_gate(&Mutex::new(Some((1, 2)))), Err("indexing"));
+        assert_eq!(check_gate(&Mutex::new(None)), Ok(()));
+    }
     #[test] fn read_identity_file_only_maps_not_found_to_none() {
         let d = tempfile::tempdir().unwrap();
         assert!(read_identity_file(&d.path().join("missing")).unwrap().is_none());

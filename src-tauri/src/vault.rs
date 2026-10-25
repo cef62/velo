@@ -54,17 +54,27 @@ fn parse(p: &Path) -> anyhow::Result<NoteFile> {
 
 impl Vault {
     pub fn open(dir: PathBuf, db_path: &Path, identity: Option<&str>) -> anyhow::Result<Vault> {
+        Self::open_with_progress(dir, db_path, identity, &mut |_, _| {})
+    }
+
+    /// `progress(done, total)` counts files needing (re)indexing; every 250 files and at the end, never when none.
+    pub fn open_with_progress(dir: PathBuf, db_path: &Path, identity: Option<&str>, progress: &mut dyn FnMut(usize, usize)) -> anyhow::Result<Vault> {
         let mut v = Vault { store: Store::new(dir), index: Index::open(db_path)?, unlocked: HashMap::new() };
         let known = v.index.known()?;
         let files = v.store.list()?;
-        for (path, nf, meta) in &files {
-            let key = s(path);
-            if known.get(&key).is_some_and(|k| k.mtime == meta.mtime && k.size == meta.size) {
-                continue;
+        let stale: Vec<_> = files
+            .iter()
+            .filter(|(path, _, meta)| !known.get(&s(path)).is_some_and(|k| k.mtime == meta.mtime && k.size == meta.size))
+            .collect();
+        let total = stale.len();
+        for (i, (path, nf, meta)) in stale.into_iter().enumerate() {
+            if let Ok(bytes) = v.store.read(path) {
+                let body = (!nf.encrypted).then(|| lossy(&bytes));
+                v.index.upsert(&s(path), nf, meta, body.as_deref())?;
             }
-            let Ok(bytes) = v.store.read(path) else { continue };
-            let body = (!nf.encrypted).then(|| lossy(&bytes));
-            v.index.upsert(&key, nf, meta, body.as_deref())?;
+            if (i + 1) % 250 == 0 || i + 1 == total {
+                progress(i + 1, total);
+            }
         }
         let present: std::collections::HashSet<String> = files.iter().map(|(p, ..)| s(p)).collect();
         for gone in known.keys().filter(|k| !present.contains(*k)) {
@@ -289,6 +299,22 @@ mod tests {
         let v = Vault::open(dir.clone(), &db, None).unwrap();
         assert_eq!(v.search("zebra", Sort::Modified, 0).unwrap().hits.len(), 1); drop(v); std::fs::remove_file(&db).unwrap();
         assert_eq!(Vault::open(dir, &db, None).unwrap().search("zebra", Sort::Modified, 0).unwrap().hits.len(), 1);
+    }
+    #[test] fn progress_reports_total_and_end() {
+        let (dir, db) = setup();
+        for i in 0..600 { std::fs::write(dir.join(format!("n{i}.md")), format!("body {i}")).unwrap(); }
+        let mut calls = vec![];
+        Vault::open_with_progress(dir, &db, None, &mut |d, t| calls.push((d, t))).unwrap();
+        assert_eq!(calls.last(), Some(&(600, 600)));
+        assert!(calls.iter().all(|c| c.1 == 600) && calls.len() <= 4, "{calls:?}");
+    }
+    #[test] fn warm_open_reports_nothing() {
+        let (dir, db) = setup();
+        for i in 0..5 { std::fs::write(dir.join(format!("n{i}.md")), "x").unwrap(); }
+        Vault::open(dir.clone(), &db, None).unwrap();
+        let mut n = 0;
+        Vault::open_with_progress(dir, &db, None, &mut |_, _| n += 1).unwrap();
+        assert_eq!(n, 0);
     }
     #[test] fn reconcile_tolerates_non_utf8() {
         let (dir, db) = setup();

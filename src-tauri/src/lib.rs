@@ -61,13 +61,20 @@ pub fn run() {
                 vault: Mutex::new(None),
                 watcher: Mutex::new(None),
                 identity: Mutex::new(crypto::keychain_get()),
+                // gated from the start so an early UI query sees "indexing", not "no-folder"
+                indexing: Mutex::new(dir.is_some().then_some((0, 0))),
+                open_gen: Default::default(),
                 settings_path,
                 data_dir,
             });
-            if let Some(dir) = dir
-                && let Err(e) = commands::open_vault(&h, &h.state(), &dir)
-            {
-                eprintln!("velo: cannot open notes folder: {e}");
+            if let Some(dir) = dir {
+                // detached on purpose: quitting must not wait for indexing
+                let h = h.clone();
+                std::thread::spawn(move || {
+                    if let Err(e) = commands::open_vault(&h, &h.state(), &dir) {
+                        eprintln!("velo: cannot open notes folder: {e}");
+                    }
+                });
             }
             if let Err(e) = commands::register_hotkey(&h, &hotkey) {
                 eprintln!("velo: hotkey not registered: {e}");
@@ -77,6 +84,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::set_settings,
+            commands::index_status,
             commands::search,
             commands::list_titles,
             commands::open_note,

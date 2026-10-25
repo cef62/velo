@@ -22,3 +22,4 @@ export const lockAll = () => invoke<void>("lock_all");
 export const hasIdentity = () => invoke<boolean>("has_identity");
 export const setupPassphrase = (passphrase: string) => invoke<string | null>("setup_passphrase", { passphrase });
 export const identityFileExists = () => invoke<boolean>("identity_file_exists");
+export const indexStatus = () => invoke<[number, number] | null>("index_status");
