@@ -26,13 +26,15 @@ export class SaveController {
   isDirty = () => this.dirty;
   currentPath = () => this.cur.path;
 
-  load(doc: NoteDoc) {
-    if (this.dirty) this.enqueue(this.cur, this.d.getText(), this.version);
+  /** Refuses (returns false) while edits are unsaved: switching would drop them. */
+  load(doc: NoteDoc): boolean {
+    if (this.dirty) return false;
     clearTimeout(this.timer);
     this.cur = { path: doc.path, baseHash: doc.hash };
     this.dirty = false;
     this.retryMs = 1000;
     this.d.setText(doc.text);
+    return true;
   }
 
   edit() {
@@ -41,10 +43,12 @@ export class SaveController {
     this.schedule(this.delay);
   }
 
-  flush(): Promise<void> {
+  /** Saves pending edits; resolves true when the editor is clean afterwards. */
+  async flush(): Promise<boolean> {
     clearTimeout(this.timer);
-    if (this.dirty && this.cur.path) return this.enqueue(this.cur, this.d.getText(), this.version);
-    return this.queue;
+    if (this.dirty && this.cur.path) await this.enqueue(this.cur, this.d.getText(), this.version);
+    else await this.queue;
+    return !this.dirty;
   }
 
   external(path: string) {

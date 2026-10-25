@@ -91,3 +91,13 @@ test("latest(): last request wins", () => {
   expect(a()).toBe(false);
   expect(b()).toBe(true);
 });
+
+test("failing save + switch: refused, text kept, still dirty", async () => {
+  const { c } = mk({ saveNote: vi.fn().mockRejectedValue("locked") });
+  type(c, "precious");
+  expect(await c.flush()).toBe(false);
+  expect(c.load({ ...doc, path: "b.md", text: "other" })).toBe(false);
+  expect(text).toBe("precious");
+  expect(c.currentPath()).toBe("a.md");
+  expect(c.isDirty()).toBe(true);
+});

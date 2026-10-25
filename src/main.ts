@@ -4,6 +4,7 @@ import * as api from "./api";
 import type { Hit } from "./api";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { mountEditor } from "./editor";
+import { shouldClose } from "./close";
 import { latest } from "./latest";
 import { enterAction, moveSelection } from "./search";
 
@@ -62,24 +63,29 @@ function render() {
   list.querySelector(".sel")?.scrollIntoView({ block: "nearest" });
 }
 
-async function show(path: string) {
+/** false = refused: unsaved edits could not be saved (error stays visible), nothing changed. */
+async function show(path: string): Promise<boolean> {
   const current = newShow();
   try {
-    await editor.flush();
+    if (!(await editor.flush())) return false;
     const doc = await api.openNote(path);
-    if (!current()) return;
-    editor.load(doc);
+    if (!current()) return true;
+    if (!editor.load(doc)) return false;
     titleEl.textContent = doc.title;
     errEl.textContent = "";
   } catch (e) {
     errEl.textContent = e === "locked" ? "Note is locked" : String(e);
   }
+  return true;
 }
 
-function select(i: number) {
+async function select(i: number) {
   sel = i;
   render();
-  if (hits[i]) void show(hits[i].path);
+  if (hits[i] && !(await show(hits[i].path))) {
+    sel = hits.findIndex((h) => h.path === editor.currentPath());
+    render();
+  }
 }
 
 async function runSearch(selectFirst: boolean) {
@@ -105,11 +111,12 @@ async function enter() {
   const a = enterAction(q.value, hits);
   if (!a) return;
   try {
-    if (a.kind === "open") await show(a.path);
-    else {
-      await editor.flush();
+    if (a.kind === "open") {
+      if (!(await show(a.path))) return;
+    } else {
+      if (!(await editor.flush())) return;
       const doc = await api.openOrCreate(a.title);
-      editor.load(doc);
+      if (!editor.load(doc)) return;
       titleEl.textContent = doc.title;
       await runSearch(false);
     }
@@ -136,11 +143,11 @@ function startRename() {
     titleEl.textContent = old;
     if (!commit || !title || title === old) return editor.focus();
     try {
-      await editor.flush();
+      if (!(await editor.flush())) return editor.focus();
       const n = await api.backlinkCount(old);
       const rewrite = n > 0 && (await ask(`Update ${n} links to the new title?`, { title: "Rename", kind: "info" }));
       const r = await api.renameNote(path, title, rewrite);
-      editor.load(await api.openNote(r.path));
+      if (!editor.load(await api.openNote(r.path))) return;
       titleEl.textContent = title;
       errEl.textContent = "";
       await runSearch(false);
@@ -199,8 +206,12 @@ void listen("focus-search", focusSearch);
 
 window.addEventListener("blur", () => void editor.flush());
 void getCurrentWindow().onCloseRequested(async (e) => {
-  await editor.flush();
-  if (editor.isDirty()) e.preventDefault(); // save failed; error is shown, keep the window open
+  const ok = await shouldClose({
+    flush: () => editor.flush(),
+    ask: (msg) => ask(msg, { title: "Unsaved edits", kind: "warning" }),
+    lastError: () => errEl.textContent ?? "",
+  });
+  if (!ok) e.preventDefault();
 });
 
 void (async () => {

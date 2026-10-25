@@ -5,12 +5,13 @@ import { SaveController } from "./saver";
 import { openNote, saveNote, type NoteDoc } from "./api";
 
 export interface Editor {
-  load(doc: NoteDoc): void;
+  /** false = refused because of unsaved edits. */
+  load(doc: NoteDoc): boolean;
   isDirty(): boolean;
   currentPath(): string | null;
   onExternalChange(path: string): void;
-  /** Save pending edits now; resolves when all queued saves finished. */
-  flush(): Promise<void>;
+  /** Save pending edits now; resolves true when clean afterwards. */
+  flush(): Promise<boolean>;
   focus(): void;
 }
 
@@ -53,9 +54,8 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
     a.textContent = stem(conflictPath);
     a.onclick = async (e) => {
       e.preventDefault();
-      banner.hidden = true;
-      await ed.flush();
-      ed.load(await openNote(conflictPath));
+      if (!(await ed.flush())) return;
+      if (ed.load(await openNote(conflictPath))) banner.hidden = true;
     };
     banner.replaceChildren("Your edits were saved to ", a);
     banner.hidden = false;
@@ -72,8 +72,9 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
 
   const ed: Editor = {
     load(doc) {
+      if (!ctrl.load(doc)) return false;
       banner.hidden = true;
-      ctrl.load(doc);
+      return true;
     },
     isDirty: ctrl.isDirty,
     currentPath: ctrl.currentPath,
