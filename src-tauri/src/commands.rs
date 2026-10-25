@@ -100,8 +100,8 @@ pub fn get_settings(st: State<AppState>) -> Settings {
     st.settings.lock().unwrap().clone()
 }
 
-#[tauri::command]
-pub fn set_settings(app: AppHandle, st: State<AppState>, settings: Settings) -> Res<()> {
+#[tauri::command(async)]
+pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings) -> Res<()> {
     let old = st.settings.lock().unwrap().clone();
     let hotkey_changed = old.hotkey != settings.hotkey;
     if hotkey_changed {
@@ -230,8 +230,8 @@ fn resolve_identity(file: Option<&[u8]>, existing: Option<String>, passphrase: &
     Ok((id, Some(wrapped)))
 }
 
-#[tauri::command]
-pub fn setup_passphrase(app: AppHandle, st: State<AppState>, passphrase: String) -> Res<Option<String>> {
+#[tauri::command(async)]
+pub fn setup_passphrase(app: AppHandle, st: State<'_, AppState>, passphrase: String) -> Res<Option<String>> {
     let dir = st.settings.lock().unwrap().notes_dir.clone().ok_or("no-folder")?;
     let file = dir.join(crypto::IDENTITY_FILE);
     let existing = identity(&st).or_else(crypto::keychain_get);
