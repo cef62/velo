@@ -128,7 +128,12 @@ impl Vault {
 
     pub fn save_note(&mut self, path: &str, text: &str, base_hash: &str, identity: Option<&str>) -> anyhow::Result<SaveResult> {
         let p = Path::new(path);
-        let encrypted = parse(p)?.encrypted;
+        let nf = parse(p)?;
+        let encrypted = nf.encrypted;
+        // A stale editor bound to the pre-lock path must not resurrect the plaintext next to Title.md.age.
+        if !encrypted && note_path(&self.store.dir, &nf.title, true).exists() {
+            return Err(anyhow!("locked-sibling"));
+        }
         let bytes = if encrypted {
             crypto::encrypt(identity.ok_or_else(|| anyhow!("locked"))?, text.as_bytes())?
         } else {
@@ -315,6 +320,21 @@ mod tests {
         let mut v = Vault::open(dir.clone(), &db, Some(&id)).unwrap(); assert_eq!(v.search("uniqueplain").unwrap().len(), 1);
         v.lock_all(); assert!(v.search("uniqueplain").unwrap().is_empty());
         assert!(v.open_note(&p, None).is_err()); assert_eq!(v.open_note(&p, Some(&id)).unwrap().text, "uniqueplain zqxjvkplmwqbyfh");
+    }
+    #[test] fn save_to_plain_path_refused_when_locked_sibling_exists() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = Vault::open(dir.clone(), &db, Some(&id)).unwrap(); let d = v.open_or_create("s", None).unwrap();
+        v.lock_note(&d.path, &id).unwrap();
+        let e = v.save_note(&d.path, "stale zqxjvkplmwqbyfh", &d.hash, Some(&id)).err().unwrap();
+        assert_eq!(e.to_string(), "locked-sibling");
+        assert!(!Path::new(&d.path).exists());
+        drop(v);
+        for suffix in ["", "-wal", "-shm"] {
+            if let Ok(b) = std::fs::read(format!("{}{suffix}", db.display())) {
+                let word = b"zqxjvkplmwqbyfh";
+                assert!(!word.windows(3).any(|g| b.windows(3).any(|w| w == g)), "trigram leak");
+            }
+        }
     }
     #[test] fn rename_rewrites_backlinks() {
         let (dir, db) = setup();

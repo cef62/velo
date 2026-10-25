@@ -20,15 +20,36 @@ export class SaveController {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private queue: Promise<void> = Promise.resolve();
   private retryMs = 1000;
+  private suspended = false;
 
   constructor(private d: SaverDeps, private delay = 500) {}
 
   isDirty = () => this.dirty;
   currentPath = () => this.cur.path;
 
+  /** While suspended nothing is saved or marked dirty (lock hand-off: the file is about to move). */
+  suspend() {
+    clearTimeout(this.timer);
+    this.suspended = true;
+  }
+  resume() {
+    this.suspended = false;
+  }
+
+  /** Detach from the current note (clean only; false if dirty). Used after Lock all so autosave can't re-cache plaintext. */
+  unload(): boolean {
+    if (this.dirty) return false;
+    clearTimeout(this.timer);
+    this.cur = { path: null, baseHash: "" };
+    this.suspended = false;
+    this.d.setText("");
+    return true;
+  }
+
   /** Refuses (returns false) while edits are unsaved: switching would drop them. */
   load(doc: NoteDoc): boolean {
     if (this.dirty) return false;
+    this.suspended = false; // an explicit switch to a valid note ends any suspension
     clearTimeout(this.timer);
     this.cur = { path: doc.path, baseHash: doc.hash };
     this.dirty = false;
@@ -48,7 +69,7 @@ export class SaveController {
   }
 
   edit() {
-    if (!this.cur.path) return; // nothing to save to; the editor is read-only until a note loads
+    if (!this.cur.path || this.suspended) return; // nothing to save to; the editor is read-only until a note loads
     this.dirty = true;
     this.version++;
     this.schedule(this.delay);
@@ -56,7 +77,7 @@ export class SaveController {
 
   /** Saves pending edits; resolves true when the editor is clean afterwards. */
   async flush(): Promise<boolean> {
-    if (!this.cur.path) return true;
+    if (!this.cur.path || this.suspended) return true;
     clearTimeout(this.timer);
     if (this.dirty && this.cur.path) await this.enqueue(this.cur, this.d.getText(), this.version);
     else await this.queue;
@@ -64,7 +85,7 @@ export class SaveController {
   }
 
   external(path: string) {
-    if (path !== this.cur.path) return;
+    if (path !== this.cur.path || this.suspended) return;
     if (this.dirty) return void this.flush();
     const target = this.cur;
     const v = this.version;

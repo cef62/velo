@@ -128,3 +128,46 @@ test("rebind on a clean editor loads the doc", () => {
   expect(text).toBe("new");
   expect(c.currentPath()).toBe("a.md.age");
 });
+
+test("suspended: timer, flush and external do not save", async () => {
+  const { c, d } = mk();
+  type(c, "x");
+  c.suspend();
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(await c.flush()).toBe(true);
+  c.external("a.md");
+  expect(d.saveNote).not.toHaveBeenCalled();
+  expect(d.openNote).not.toHaveBeenCalled();
+});
+
+test("lock hand-off: typing between flush and rebind never saves to the old path", async () => {
+  const { c, d } = mk();
+  expect(await c.flush()).toBe(true);
+  c.suspend();
+  type(c, "sneaky"); // would-be keystroke / blur / watcher during the hand-off
+  await c.flush();
+  c.external("a.md");
+  await vi.advanceTimersByTimeAsync(5000);
+  c.rebind({ ...doc, path: "a.md.age", hash: "h9" });
+  c.resume();
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(d.saveNote).not.toHaveBeenCalled();
+  expect(c.currentPath()).toBe("a.md.age");
+});
+
+test("unload detaches: no further saves, editor emptied", async () => {
+  const { c, d } = mk();
+  expect(c.unload()).toBe(true);
+  expect(text).toBe("");
+  expect(c.currentPath()).toBeNull();
+  type(c, "x");
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(d.saveNote).not.toHaveBeenCalled();
+});
+
+test("unload refuses while dirty", () => {
+  const { c } = mk();
+  type(c, "x");
+  expect(c.unload()).toBe(false);
+  expect(c.currentPath()).toBe("a.md");
+});

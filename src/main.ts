@@ -112,30 +112,60 @@ async function promptPassphrase(): Promise<boolean> {
   }
 }
 
-/** Lock/unlock the open note. Flush first (aborts visibly if it can't), then follow the file to its new path. */
+/**
+ * Lock/unlock the open note. The editor is suspended (read-only, no saves) from after the flush until
+ * it is rebound to the new path, so no autosave/blur/watcher save can recreate the old path.
+ */
 async function toggleLock() {
   const path = editor.currentPath();
   if (!path) return;
   try {
-    if (!(await editor.flush())) return;
     if (!(await api.hasIdentity()) && !(await promptPassphrase())) return;
-    const np = isLockedPath(path) ? await api.unlockNote(path) : await api.lockNote(path);
+    if (!(await editor.flush())) return; // error already visible
+  } catch (e) {
+    errEl.textContent = String(e);
+    return;
+  }
+  editor.suspend();
+  let np: string;
+  try {
+    np = isLockedPath(path) ? await api.unlockNote(path) : await api.lockNote(path);
+  } catch (e) {
+    editor.resume(); // nothing moved: old path is still valid
+    errEl.textContent = e === "already-exists" ? "A note with that title already exists in the other form" : String(e);
+    return;
+  }
+  try {
     const doc = await api.openNote(np);
-    editor.rebind(doc); // keeps any keystrokes typed meanwhile instead of dropping or re-saving to the old path
+    editor.rebind(doc);
+    editor.resume();
     titleEl.textContent = doc.title;
     errEl.textContent = "";
     await runSearch(false);
     sel = hits.findIndex((h) => h.path === np);
     render();
   } catch (e) {
-    errEl.textContent = e === "already-exists" ? "A note with that title already exists in the other form" : String(e);
+    // The file moved but could not be reopened: stay read-only (never resume on the old path).
+    errEl.textContent = `Note moved but could not be reopened (${e}); pick it from the list`;
+    void runSearch(false);
   }
 }
 
 async function lockEverything() {
+  const path = editor.currentPath();
   try {
     if (!(await editor.flush())) return;
-    await api.lockAll();
+    editor.suspend();
+    try {
+      await api.lockAll();
+    } catch (e) {
+      editor.resume();
+      throw e;
+    }
+    if (path && isLockedPath(path)) {
+      editor.unload(); // drop the decrypted text from the editor and stop autosave re-caching it
+      titleEl.textContent = "";
+    } else editor.resume();
     await runSearch(false);
   } catch (e) {
     errEl.textContent = String(e);

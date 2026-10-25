@@ -10,6 +10,11 @@ export interface Editor {
   load(doc: NoteDoc): boolean;
   /** Like load() but never refuses: for the open note's file being renamed by lock/unlock. */
   rebind(doc: NoteDoc): void;
+  /** Read-only and no saving until resume()/load(): for the lock hand-off. */
+  suspend(): void;
+  resume(): void;
+  /** Detach from the (clean) open note and empty the editor; false if dirty. */
+  unload(): boolean;
   isDirty(): boolean;
   currentPath(): string | null;
   onExternalChange(path: string): void;
@@ -78,16 +83,32 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
     onError: (m) => opts.onError?.(m),
   });
 
+  const setEditable = (on: boolean) => view.dispatch({ effects: editable.reconfigure(EditorView.editable.of(on)) });
+
   const ed: Editor = {
     load(doc) {
       if (!ctrl.load(doc)) return false;
       banner.hidden = true;
-      view.dispatch({ effects: editable.reconfigure(EditorView.editable.of(true)) });
+      setEditable(true);
       return true;
     },
     rebind(doc) {
       ctrl.rebind(doc);
       banner.hidden = true;
+    },
+    suspend() {
+      ctrl.suspend();
+      setEditable(false);
+    },
+    resume() {
+      ctrl.resume();
+      setEditable(!!ctrl.currentPath());
+    },
+    unload() {
+      if (!ctrl.unload()) return false;
+      setEditable(false);
+      banner.hidden = true;
+      return true;
     },
     isDirty: ctrl.isDirty,
     currentPath: ctrl.currentPath,
