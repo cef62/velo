@@ -1,10 +1,10 @@
 // Generates a deterministic folder of markdown notes for spike benchmarks.
-// Usage: node spikes/seed.mjs [count=10000] [dir=spikes/fixtures/notes]
+// Usage: node scripts/seed.mjs [count=10000] [dir=fixtures/notes]
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 const count = Number(process.argv[2] ?? 10000);
-const dir = process.argv[3] ?? 'spikes/fixtures/notes';
+const dir = process.argv[3] ?? 'fixtures/notes';
 const words = ('alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa ' +
   'quebec romeo sierra tango uniform victor whiskey xray yankee zulu café naïve résumé meeting project recipe ' +
   'garden budget travel invoice server deploy kubernetes rust golang tauri wails sqlite search index note idea ' +

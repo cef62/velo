@@ -6,3 +6,7 @@ build/bin/
 .DS_Store
 spikes/tauri/
 spikes/wails/
+.superpowers/
+fixtures/
+src-tauri/target/
+src-tauri/gen/

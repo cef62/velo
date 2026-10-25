@@ -1,0 +1,28 @@
+{
+  "name": "velo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "tauri": "tauri"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4",
+    "@types/node": "^26.6.5",
+    "typescript": "~6.0.3",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.4"
+  }
+}
