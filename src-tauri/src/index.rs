@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS notes(path TEXT PRIMARY KEY, title TEXT NOT NULL, tit
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(path UNINDEXED, body, tokenize="trigram remove_diacritics 1");
 CREATE TABLE IF NOT EXISTS links(src TEXT NOT NULL, dst_folded TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS links_dst ON links(dst_folded);
+CREATE INDEX IF NOT EXISTS links_src ON links(src);
 "#;
 
 fn preview(title: &str, body: &str) -> String {
@@ -39,6 +40,15 @@ fn preview(title: &str, body: &str) -> String {
         _ => body,
     };
     rest.chars().take(120).collect()
+}
+
+/// ~12-word window around the first word containing `term` (folded); `fallback` when none does.
+fn snippet(body: &str, term: &str, fallback: String) -> String {
+    let words: Vec<&str> = body.split_whitespace().collect();
+    let Some(i) = words.iter().position(|w| fold(w).contains(term)) else { return fallback };
+    let start = i.saturating_sub(3);
+    let end = (start + 12).min(words.len());
+    format!("{}{}{}", if start > 0 { "…" } else { "" }, words[start..end].join(" "), if end < words.len() { "…" } else { "" })
 }
 
 fn like_escape(t: &str) -> String {
@@ -67,7 +77,7 @@ impl Index {
 
     pub fn upsert(&mut self, path: &str, nf: &NoteFile, meta: &Meta, body: Option<&str>) -> anyhow::Result<()> {
         let tx = self.db.transaction()?;
-        for sql in ["DELETE FROM notes WHERE path=?1", "DELETE FROM notes_fts WHERE path=?1", "DELETE FROM links WHERE src=?1"] {
+        for sql in ["DELETE FROM notes_fts WHERE rowid=(SELECT rowid FROM notes WHERE path=?1)", "DELETE FROM notes WHERE path=?1", "DELETE FROM links WHERE src=?1"] {
             tx.execute(sql, [path])?;
         }
         let body = if nf.encrypted { None } else { body };
@@ -76,7 +86,9 @@ impl Index {
             params![path, nf.title, fold(&nf.title), meta.mtime, meta.size as i64, nf.encrypted, body.map(|b| preview(&nf.title, b)).unwrap_or_default()],
         )?;
         if let Some(b) = body {
-            tx.execute("INSERT INTO notes_fts(path, body) VALUES(?,?)", params![path, b])?;
+            // FTS rowid == notes.rowid so deletes and joins are rowid lookups, not scans.
+            let rowid = tx.last_insert_rowid();
+            tx.execute("INSERT INTO notes_fts(rowid, path, body) VALUES(?,?,?)", params![rowid, path, b])?;
             let dsts: HashSet<String> = extract_links(b).iter().map(|l| fold(l)).collect();
             for d in dsts {
                 tx.execute("INSERT INTO links(src,dst_folded) VALUES(?,?)", params![path, d])?;
@@ -87,7 +99,7 @@ impl Index {
 
     pub fn remove(&mut self, path: &str) -> anyhow::Result<()> {
         let tx = self.db.transaction()?;
-        for sql in ["DELETE FROM notes WHERE path=?1", "DELETE FROM notes_fts WHERE path=?1", "DELETE FROM links WHERE src=?1"] {
+        for sql in ["DELETE FROM notes_fts WHERE rowid=(SELECT rowid FROM notes WHERE path=?1)", "DELETE FROM notes WHERE path=?1", "DELETE FROM links WHERE src=?1"] {
             tx.execute(sql, [path])?;
         }
         Ok(tx.commit()?)
@@ -114,21 +126,25 @@ impl Index {
         if !long.is_empty() && out.len() < limit {
             let m = long.iter().map(|&i| format!("\"{}\"", terms[i].replace('"', "\"\""))).collect::<Vec<_>>().join(" ");
             let short_cond: String = short.iter().map(|_| " AND n.title_folded LIKE '%' || ? || '%' ESCAPE '\\'").collect();
-            // Snippets are built only for the final page: computing them inside the sorted query costs ~200 ms on common terms.
+            // No FTS snippet(): it re-runs the MATCH per row. Read the body by rowid and cut the window in Rust.
             let mut st = self.db.prepare(&format!(
-                "SELECT n.path, n.title, n.mtime, n.encrypted, notes_fts.rowid \
-                 FROM notes_fts JOIN notes n ON n.path = notes_fts.path \
+                "SELECT n.path, n.title, n.mtime, n.encrypted, n.preview, n.rowid \
+                 FROM notes_fts JOIN notes n ON n.rowid = notes_fts.rowid \
                  WHERE notes_fts MATCH ?{short_cond} ORDER BY n.mtime DESC LIMIT {}",
                 limit + n_title
             ))?;
-            let args = [m.clone()].into_iter().chain(short.iter().map(|&i| esc[i].clone()));
-            let rows: Vec<(String, String, i64, bool, i64)> = st
-                .query_map(params_from_iter(args), |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?
+            let args = [m].into_iter().chain(short.iter().map(|&i| esc[i].clone()));
+            let rows: Vec<(String, String, i64, bool, String, i64)> = st
+                .query_map(params_from_iter(args), |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?
                 .collect::<Result<_, _>>()?;
-            let mut snip = self.db.prepare("SELECT snippet(notes_fts, 1, '', '', '…', 12) FROM notes_fts WHERE notes_fts MATCH ? AND rowid = ?")?;
-            for (path, title, mtime, encrypted, rowid) in rows {
+            let mut body_of = self.db.prepare("SELECT body FROM notes_fts WHERE rowid = ?")?;
+            for (path, title, mtime, encrypted, prev, rowid) in rows {
+                if out.len() >= limit {
+                    break;
+                }
                 if seen.insert(path.clone()) {
-                    let snippet = snip.query_row(params![m, rowid], |r| r.get(0))?;
+                    let body: String = body_of.query_row([rowid], |r| r.get(0))?;
+                    let snippet = snippet(&body, &terms[long[0]], prev);
                     out.push(Hit { path, title, snippet, mtime, encrypted });
                 }
             }

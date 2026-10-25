@@ -15,6 +15,7 @@ fn search_p95_under_50ms() {
     let dir = std::env::var("VELO_FIXTURE").unwrap_or_else(|_| "../fixtures/notes".into());
     let tmp = tempfile::tempdir().unwrap();
     let mut idx = Index::open(&tmp.path().join("index.db")).unwrap();
+    let build = Instant::now();
     let mut n = 0;
     for e in std::fs::read_dir(&dir).unwrap() {
         let p = e.unwrap().path();
@@ -27,13 +28,14 @@ fn search_p95_under_50ms() {
         idx.upsert(p.file_name().unwrap().to_str().unwrap(), &nf, &meta, Some(&body)).unwrap();
         n += 1;
     }
+    println!("cold build of {n} notes: {:.1} s", build.elapsed().as_secs_f64());
     assert!(n > 0, "no fixture notes in {dir}");
     let none = HashMap::new();
     let mut times = Vec::new();
     for q in QUERIES {
         for _ in 0..10 {
             let t = Instant::now();
-            idx.search(q, 50, &none).unwrap();
+            idx.search(q, 200, &none).unwrap();
             times.push(t.elapsed().as_secs_f64() * 1000.0);
         }
     }
