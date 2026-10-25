@@ -1,3 +1,4 @@
+pub mod crypto;
 pub mod index;
 pub mod names;
 pub mod store;
