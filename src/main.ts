@@ -24,6 +24,7 @@ const mod = (e: KeyboardEvent) => (isMac ? e.metaKey : e.ctrlKey);
 let hits: Hit[] = [];
 let sel = -1;
 let searchSeq = 0;
+let sort: api.Settings["sort"] = "modified"; // mirrors settings.sort (Task 6 owns toggling)
 
 // Set while a lock/unlock hand-off is in flight: the open note's file is moving, so navigation is refused.
 let busy = false;
@@ -236,6 +237,7 @@ async function openSettings() {
       return;
     }
     applyLook(next);
+    sort = next.sort ?? "modified";
     dlg.close();
     if (next.notes_dir !== cur.notes_dir) {
       $("setup").hidden = true;
@@ -258,7 +260,7 @@ async function select(i: number) {
 async function runSearch(selectFirst: boolean) {
   const seq = ++searchSeq;
   try {
-    const r = await api.search(q.value);
+    const r = (await api.search(q.value, sort, 0)).hits;
     if (seq !== searchSeq) return;
     const keep = hits[sel]?.path;
     hits = r;
@@ -427,5 +429,6 @@ void (async () => {
     void refreshTitles();
   }
   applyLook(s);
+  sort = s.sort ?? "modified";
   focusSearch();
 })();

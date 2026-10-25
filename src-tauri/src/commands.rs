@@ -1,5 +1,5 @@
 use crate::crypto;
-use crate::index::Hit;
+use crate::index::{Page, Sort};
 use crate::settings::{self, Settings};
 use crate::store::{self, SaveResult};
 use crate::vault::{NoteDoc, RenameResult, Vault};
@@ -141,8 +141,8 @@ pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings)
 }
 
 #[tauri::command]
-pub fn search(st: State<AppState>, query: String) -> Res<Vec<Hit>> {
-    with_vault(&st, |v, _| v.search(&query))
+pub fn search(st: State<AppState>, query: String, sort: Sort, offset: usize) -> Res<Page> {
+    with_vault(&st, |v, _| v.search(&query, sort, offset))
 }
 
 #[tauri::command]
