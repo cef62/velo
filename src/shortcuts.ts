@@ -1,0 +1,117 @@
+// Remappable shortcuts. Binding = "+"-joined modifiers (Mod, Ctrl, Alt, Shift, in that order) + one KeyboardEvent.code.
+// Mod = ⌘ on macOS, Ctrl elsewhere. Ctrl = physical Control (macOS only).
+export type Action =
+  | "focus_search" | "next_note" | "prev_note" | "toggle_preview" | "rename" | "toggle_lock"
+  | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "toggle_window";
+
+export const DEFAULTS: Record<Action, string> = {
+  focus_search: "Mod+KeyL",
+  next_note: "Mod+KeyJ",
+  prev_note: "Mod+KeyK",
+  toggle_preview: "Mod+Shift+KeyP",
+  rename: "Mod+KeyR",
+  toggle_lock: "Mod+Shift+KeyE",
+  lock_all: "Mod+Alt+KeyE",
+  settings: "Mod+Comma",
+  toggle_sort: "Mod+Shift+KeyS",
+  back: "Mod+BracketLeft",
+  forward: "Mod+BracketRight",
+  toggle_window: "Mod+Shift+Space",
+};
+
+export const LABELS: Record<Action, string> = {
+  focus_search: "Focus search",
+  next_note: "Next note",
+  prev_note: "Previous note",
+  toggle_preview: "Toggle preview",
+  rename: "Rename note",
+  toggle_lock: "Lock / unlock note",
+  lock_all: "Lock all notes",
+  settings: "Settings",
+  toggle_sort: "Toggle sort",
+  back: "Back",
+  forward: "Forward",
+  toggle_window: "Show / hide velo (global)",
+};
+
+type Ev = Pick<KeyboardEvent, "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">;
+const MODS = ["Mod", "Ctrl", "Alt", "Shift"] as const;
+const RESERVED = new Set(["Mod+KeyQ", "Mod+KeyC", "Mod+KeyV", "Mod+KeyX", "Mod+KeyZ", "Mod+Shift+KeyZ", "Mod+KeyA"]);
+const MODIFIER_CODES = /^(Meta|Control|Alt|Shift|OS)(Left|Right)?$/;
+const NAMED = ("Space Comma Period Slash Backslash Semicolon Quote Backquote Minus Equal BracketLeft BracketRight " +
+  "Enter Tab Backspace Delete Insert Home End PageUp PageDown ArrowUp ArrowDown ArrowLeft ArrowRight Escape").split(" ");
+const MOD_ALIASES: Record<string, string> = {
+  mod: "Mod", commandorcontrol: "Mod", cmdorctrl: "Mod", cmdorcontrol: "Mod", command: "Mod", cmd: "Mod", super: "Mod", meta: "Mod",
+  ctrl: "Ctrl", control: "Ctrl", alt: "Alt", option: "Alt", shift: "Shift",
+};
+
+const isFKey = (key: string) => /^F([1-9]|1[0-2])$/.test(key);
+
+/** Canonical form of a binding (incl. old plugin-format hotkeys like "CommandOrControl+Shift+Space"), or null. */
+export function normalizeBinding(s: string): string | null {
+  const mods = new Set<string>();
+  let key: string | null = null;
+  for (const raw of s.split("+")) {
+    const t = raw.trim().toLowerCase();
+    if (MOD_ALIASES[t]) mods.add(MOD_ALIASES[t]);
+    else if (key !== null) return null;
+    else if (/^[a-z]$/.test(t)) key = "Key" + t.toUpperCase();
+    else if (/^[0-9]$/.test(t)) key = "Digit" + t;
+    else {
+      const m = /^key([a-z])$/.exec(t) ?? /^digit([0-9])$/.exec(t);
+      if (m) key = (t.startsWith("key") ? "Key" + m[1].toUpperCase() : "Digit" + m[1]);
+      else key = NAMED.find((n) => n.toLowerCase() === t) ?? (isFKey(t.toUpperCase()) ? t.toUpperCase() : null);
+      if (key === null) return null;
+    }
+  }
+  if (key === null) return null;
+  return [...MODS.filter((m) => mods.has(m)), key].join("+");
+}
+
+/** Defaults overlaid with saved entries that parse; unknown keys dropped. */
+export function resolve(saved: Record<string, string> | undefined): Record<Action, string> {
+  const out = { ...DEFAULTS };
+  for (const a of Object.keys(DEFAULTS) as Action[]) {
+    const n = saved?.[a] ? normalizeBinding(saved[a]) : null;
+    if (n) out[a] = n;
+  }
+  return out;
+}
+
+/** null for pure modifier presses. */
+export function eventToBinding(e: Ev, isMac: boolean): string | null {
+  if (MODIFIER_CODES.test(e.code)) return null;
+  const mod = isMac ? e.metaKey : e.ctrlKey;
+  const parts = [mod && "Mod", isMac && e.ctrlKey && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift"].filter(Boolean);
+  return [...parts, e.code].join("+");
+}
+
+export const matches = (e: Ev, binding: string, isMac: boolean) => eventToBinding(e, isMac) === binding;
+
+const KEY_GLYPHS: Record<string, string> = {
+  BracketLeft: "[", BracketRight: "]", Comma: ",", Period: ".", Slash: "/", Backslash: "\\", Semicolon: ";",
+  Quote: "'", Backquote: "`", Minus: "-", Equal: "=", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→",
+};
+
+export function formatBinding(binding: string, isMac: boolean): string {
+  const parts = binding.split("+");
+  const code = parts.pop()!;
+  const key = KEY_GLYPHS[code] ?? code.replace(/^(Key|Digit)/, "");
+  if (!isMac) return [...parts.map((m) => (m === "Mod" ? "Ctrl" : m)), key].join("+");
+  // ⌃⌥⌘⇧ order, matching the app's existing hints (⌘⇧E, ⌥⌘E).
+  const glyph: Record<string, string> = { Ctrl: "⌃", Alt: "⌥", Mod: "⌘", Shift: "⇧" };
+  return ["Ctrl", "Alt", "Mod", "Shift"].filter((m) => parts.includes(m)).map((m) => glyph[m]).join("") + key;
+}
+
+export function validateBinding(
+  map: Record<Action, string>,
+  action: Action,
+  binding: string,
+): { ok: true } | { ok: false; reason: string } {
+  const parts = binding.split("+");
+  const key = parts[parts.length - 1];
+  if (!isFKey(key) && !parts.some((p) => p === "Mod" || p === "Ctrl" || p === "Alt")) return { ok: false, reason: "needs a modifier" };
+  if (RESERVED.has(binding)) return { ok: false, reason: "reserved by the system" };
+  const other = (Object.keys(map) as Action[]).find((a) => a !== action && map[a] === binding);
+  return other ? { ok: false, reason: `already used by ${LABELS[other]}` } : { ok: true };
+}

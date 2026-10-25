@@ -11,6 +11,7 @@ import { mountPreview } from "./preview";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { askPassphrase, isLockedPath } from "./passphrase";
 import { applyLook, toSettings } from "./settingsform";
+import { matches, resolve, type Action } from "./shortcuts";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const q = $<HTMLInputElement>("q");
@@ -20,7 +21,6 @@ const errEl = $<HTMLSpanElement>("err");
 const statusEl = $<HTMLSpanElement>("status");
 
 const isMac = navigator.platform.startsWith("Mac");
-const mod = (e: KeyboardEvent) => (isMac ? e.metaKey : e.ctrlKey);
 
 let hits: Hit[] = [];
 let sel = -1;
@@ -255,6 +255,7 @@ async function openSettings() {
       return;
     }
     applyLook(next);
+    keys = resolve(next.shortcuts);
     sort = next.sort ?? "modified";
     dlg.close();
     if (next.notes_dir !== cur.notes_dir) {
@@ -375,42 +376,52 @@ q.addEventListener("keydown", (e) => {
 });
 titleEl.addEventListener("dblclick", startRename);
 
-// Capture phase so CodeMirror's keymap (e.g. ⌘⇧L, ⌘,) never sees these.
-window.addEventListener(
-  "keydown",
-  (e) => {
-    if (!mod(e) || document.querySelector("dialog[open]")) return;
-    const k = e.key.toLowerCase();
-    const act = e.shiftKey && k === "e" ? toggleLock : e.shiftKey && k === "l" ? lockEverything : !e.shiftKey && k === "," ? openSettings : null;
-    if (!act) return;
-    e.preventDefault();
-    e.stopPropagation();
-    void act();
-  },
-  true,
-);
 $("lock").onclick = () => void toggleLock();
 $("lockall").onclick = () => void lockEverything();
 $("gear").onclick = () => void openSettings();
 
-window.addEventListener("keydown", (e) => {
-  const inEditor = !!(e.target as HTMLElement).closest?.("#editor");
-  const down = e.key === "ArrowDown" || (mod(e) && e.key === "j");
-  const up = e.key === "ArrowUp" || (mod(e) && e.key === "k");
-  if ((down || up) && !(inEditor && !mod(e))) {
-    e.preventDefault();
-    select(moveSelection(sel, down ? 1 : -1, hits.length));
-  } else if (mod(e) && e.shiftKey && e.key.toLowerCase() === "p") {
-    e.preventDefault();
-    preview.toggle();
-  } else if (mod(e) && e.key === "l") {
-    e.preventDefault();
-    focusSearch();
-  } else if (mod(e) && e.key === "r") {
-    e.preventDefault();
-    startRename();
-  }
-});
+const toggleSort = () => {}; // Task 6
+const goBack = () => {}; // Task 7
+const goForward = () => {}; // Task 7
+
+const step = (d: 1 | -1) => select(moveSelection(sel, d, hits.length));
+const ACTIONS: Record<Exclude<Action, "toggle_window">, () => void> = {
+  focus_search: focusSearch,
+  next_note: () => void step(1),
+  prev_note: () => void step(-1),
+  toggle_preview: () => preview.toggle(),
+  rename: startRename,
+  toggle_lock: () => void toggleLock(),
+  lock_all: () => void lockEverything(),
+  settings: () => void openSettings(),
+  toggle_sort: toggleSort,
+  back: goBack,
+  forward: goForward,
+};
+let keys = resolve(undefined); // refreshed from settings at startup and after save
+
+// One capture-phase handler: runs before CodeMirror's keymap and the webview defaults (so e.g. ⌘R works from the editor).
+window.addEventListener(
+  "keydown",
+  (e) => {
+    const t = e.target as HTMLElement;
+    if (document.querySelector("dialog[open]") || t.closest?.("#title")) return; // dialogs and the rename field own their keys
+    const arrow = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+    if (arrow && !t.closest?.("#editor")) {
+      e.preventDefault();
+      void step(arrow);
+      return;
+    }
+    for (const [action, run] of Object.entries(ACTIONS)) {
+      if (!matches(e, keys[action as Action], isMac)) continue;
+      e.preventDefault();
+      e.stopPropagation();
+      run();
+      return;
+    }
+  },
+  true,
+);
 
 $("choose").onclick = async () => {
   const dir = await open({ directory: true });
@@ -461,6 +472,7 @@ void (async () => {
     void refreshTitles();
   }
   applyLook(s);
+  keys = resolve(s.shortcuts);
   sort = s.sort ?? "modified";
   focusSearch();
 })();
