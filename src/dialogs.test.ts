@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { isLockedPath, passphraseDialogMode, passphraseError } from "./passphrase";
 import { clampFont, layoutClass, toSettings } from "./settingsform";
 
-const base = { notes_dir: "/n", hotkey: "A", layout: "vertical" as const, font_size: 14 };
+const base = { notes_dir: "/n", layout: "vertical" as const, font_size: 14, sort: "modified" as const, shortcuts: { toggle_window: "Mod+KeyA", rename: "Mod+KeyR" } };
 
 test("dialog wording follows identity file", () => {
   expect(passphraseDialogMode(true)).toEqual({ title: "Enter your velo passphrase", confirm: false });
@@ -29,7 +29,7 @@ test("font clamps to 10-32, junk falls back", () => {
 });
 
 test("form to settings", () => {
-  expect(toSettings(base, { hotkey: " B ", layout: "horizontal", fontSize: "40" })).toEqual({ ...base, hotkey: "B", layout: "horizontal", font_size: 32 });
+  expect(toSettings(base, { hotkey: " Mod+KeyB ", layout: "horizontal", fontSize: "40" })).toEqual({ ...base, shortcuts: { ...base.shortcuts, toggle_window: "Mod+KeyB" }, layout: "horizontal", font_size: 32 });
   expect(toSettings(base, { hotkey: "", layout: "bogus", fontSize: "12" })).toEqual({ ...base, font_size: 12 });
 });
 

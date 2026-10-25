@@ -55,7 +55,7 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)?;
             let settings_path = config_dir.join("settings.json");
             let settings = settings::load(&settings_path);
-            let (dir, hotkey) = (settings.notes_dir.clone(), settings.hotkey.clone());
+            let (dir, hotkey) = (settings.notes_dir.clone(), settings.toggle_window_binding());
             app.manage(commands::AppState {
                 settings: Mutex::new(settings),
                 vault: Mutex::new(None),

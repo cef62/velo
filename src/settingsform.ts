@@ -9,11 +9,12 @@ export function clampFont(raw: string, fallback: number): number {
 
 export interface SettingsForm { hotkey: string; layout: string; fontSize: string }
 
+/** Task 5 replaces the hotkey text field with a recorder. */
 /** Form values -> Settings, keeping `cur` where input is blank or invalid. notes_dir is untouched. */
 export function toSettings(cur: Settings, f: SettingsForm): Settings {
   return {
     ...cur,
-    hotkey: f.hotkey.trim() || cur.hotkey,
+    shortcuts: { ...cur.shortcuts, toggle_window: f.hotkey.trim() || cur.shortcuts.toggle_window || "Mod+Shift+Space" },
     layout: f.layout === "horizontal" || f.layout === "vertical" ? f.layout : cur.layout,
     font_size: clampFont(f.fontSize, cur.font_size),
   };

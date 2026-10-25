@@ -217,7 +217,7 @@ async function openSettings() {
   let dir = cur.notes_dir;
   const field = (id: string) => $<HTMLInputElement>(id);
   $("s-dir").textContent = dir ?? "(none)";
-  field("s-hotkey").value = cur.hotkey;
+  field("s-hotkey").value = cur.shortcuts.toggle_window ?? "Mod+Shift+Space";
   field("s-layout").value = cur.layout;
   field("s-font").value = String(cur.font_size);
   msg.textContent = "";

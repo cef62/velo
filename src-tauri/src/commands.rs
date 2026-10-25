@@ -69,8 +69,13 @@ pub fn open_vault(app: &AppHandle, st: &AppState, dir: &Path) -> anyhow::Result<
 pub fn toggle_window(app: &AppHandle) {
     let Some(w) = app.get_webview_window("main") else { return };
     if w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false) {
+        #[cfg(target_os = "macos")]
+        app.hide().ok(); // hides the whole app so macOS refocuses the previously active one
+        #[cfg(not(target_os = "macos"))]
         w.hide().ok();
     } else {
+        #[cfg(target_os = "macos")]
+        app.show().ok();
         w.show().ok();
         w.unminimize().ok();
         w.set_focus().ok();
@@ -78,8 +83,9 @@ pub fn toggle_window(app: &AppHandle) {
     }
 }
 
-pub fn register_hotkey(app: &AppHandle, hotkey: &str) -> Result<(), String> {
-    let sc: Shortcut = hotkey.parse().map_err(|e| format!("invalid hotkey: {e}"))?;
+/// `binding` is in velo format ("Mod+Shift+Space").
+pub fn register_hotkey(app: &AppHandle, binding: &str) -> Result<(), String> {
+    let sc: Shortcut = settings::to_plugin_format(binding).parse().map_err(|e| format!("invalid hotkey: {e}"))?;
     app.global_shortcut()
         .on_shortcut(sc, |app, _, ev| {
             if ev.state == ShortcutState::Pressed {
@@ -89,8 +95,8 @@ pub fn register_hotkey(app: &AppHandle, hotkey: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-fn unregister_hotkey(app: &AppHandle, hotkey: &str) {
-    if let Ok(sc) = hotkey.parse::<Shortcut>() {
+fn unregister_hotkey(app: &AppHandle, binding: &str) {
+    if let Ok(sc) = settings::to_plugin_format(binding).parse::<Shortcut>() {
         app.global_shortcut().unregister(sc).ok();
     }
 }
@@ -103,9 +109,10 @@ pub fn get_settings(st: State<AppState>) -> Settings {
 #[tauri::command(async)]
 pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings) -> Res<()> {
     let old = st.settings.lock().unwrap().clone();
-    let hotkey_changed = old.hotkey != settings.hotkey;
+    let (old_key, new_key) = (old.toggle_window_binding(), settings.toggle_window_binding());
+    let hotkey_changed = old_key != new_key;
     if hotkey_changed {
-        register_hotkey(&app, &settings.hotkey)?; // on failure the old hotkey stays registered
+        register_hotkey(&app, &new_key)?; // on failure the old hotkey stays registered
     }
     let closed = st.vault.lock().unwrap().is_none();
     if old.notes_dir != settings.notes_dir || (closed && settings.notes_dir.is_some()) {
@@ -120,13 +127,13 @@ pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings)
         };
         if let Err(e) = opened {
             if hotkey_changed {
-                unregister_hotkey(&app, &settings.hotkey);
+                unregister_hotkey(&app, &new_key);
             }
             return Err(e);
         }
     }
     if hotkey_changed {
-        unregister_hotkey(&app, &old.hotkey);
+        unregister_hotkey(&app, &old_key);
     }
     settings::save(&st.settings_path, &settings).map_err(err)?;
     *st.settings.lock().unwrap() = settings;
