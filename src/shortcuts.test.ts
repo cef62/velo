@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { eventToBinding, formatBinding, matches, normalizeBinding, resolve, validateBinding } from "./shortcuts";
+import { eventToBinding, formatBinding, isAltGraph, matches, normalizeBinding, resolve, validateBinding } from "./shortcuts";
 
 const ev = (code: string, m: Partial<Record<"metaKey" | "ctrlKey" | "altKey" | "shiftKey", boolean>> = {}) =>
   ({ code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...m });
@@ -35,3 +35,13 @@ test("normalizeBinding maps legacy plugin format", () => {
   for (const bad of ["", "Mod", "Mod+Nope", "Mod+A+B", "Mod+F13"]) expect(normalizeBinding(bad)).toBeNull();
 });
 test("resolve normalizes saved legacy values", () => expect(resolve({ toggle_window: "Cmd+Alt+N" }).toggle_window).toBe("Mod+Alt+KeyN"));
+test("resolve rejects saved bindings that fail the rules", () => {
+  expect(resolve({ rename: "KeyR" }).rename).toBe("Mod+KeyR");
+  expect(resolve({ rename: "Mod+KeyC" }).rename).toBe("Mod+KeyR");
+});
+test("AltGr (reported as Ctrl+Alt) never matches on non-mac", () => {
+  const altGr = { ...ev("KeyE", { ctrlKey: true, altKey: true }), getModifierState: (k: string) => k === "AltGraph" };
+  expect(isAltGraph(altGr, false)).toBe(true);
+  expect(matches(altGr, "Mod+Alt+KeyE", false)).toBe(false);
+  expect(matches(ev("KeyE", { ctrlKey: true, altKey: true }), "Mod+Alt+KeyE", false)).toBe(true);
+});

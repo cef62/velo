@@ -73,7 +73,7 @@ export function resolve(saved: Record<string, string> | undefined): Record<Actio
   const out = { ...DEFAULTS };
   for (const a of Object.keys(DEFAULTS) as Action[]) {
     const n = saved?.[a] ? normalizeBinding(saved[a]) : null;
-    if (n) out[a] = n;
+    if (n && !basicProblem(n)) out[a] = n;
   }
   return out;
 }
@@ -86,7 +86,12 @@ export function eventToBinding(e: Ev, isMac: boolean): string | null {
   return [...parts, e.code].join("+");
 }
 
-export const matches = (e: Ev, binding: string, isMac: boolean) => eventToBinding(e, isMac) === binding;
+// WebView2 reports AltGr as Ctrl+Alt: ignore it off-mac so typing AltGr characters never fires a Mod+Alt binding.
+export const isAltGraph = (e: Ev & { getModifierState?: (k: string) => boolean }, isMac: boolean) =>
+  !isMac && !!e.getModifierState?.("AltGraph");
+
+export const matches = (e: Ev & { getModifierState?: (k: string) => boolean }, binding: string, isMac: boolean) =>
+  !isAltGraph(e, isMac) && eventToBinding(e, isMac) === binding;
 
 const KEY_GLYPHS: Record<string, string> = {
   BracketLeft: "[", BracketRight: "]", Comma: ",", Period: ".", Slash: "/", Backslash: "\\", Semicolon: ";",
@@ -103,15 +108,19 @@ export function formatBinding(binding: string, isMac: boolean): string {
   return ["Ctrl", "Alt", "Mod", "Shift"].filter((m) => parts.includes(m)).map((m) => glyph[m]).join("") + key;
 }
 
+function basicProblem(binding: string): string | null {
+  const parts = binding.split("+");
+  if (!isFKey(parts[parts.length - 1]) && !parts.some((p) => p === "Mod" || p === "Ctrl" || p === "Alt")) return "needs a modifier";
+  return RESERVED.has(binding) ? "reserved by the system" : null;
+}
+
 export function validateBinding(
   map: Record<Action, string>,
   action: Action,
   binding: string,
 ): { ok: true } | { ok: false; reason: string } {
-  const parts = binding.split("+");
-  const key = parts[parts.length - 1];
-  if (!isFKey(key) && !parts.some((p) => p === "Mod" || p === "Ctrl" || p === "Alt")) return { ok: false, reason: "needs a modifier" };
-  if (RESERVED.has(binding)) return { ok: false, reason: "reserved by the system" };
+  const problem = basicProblem(binding);
+  if (problem) return { ok: false, reason: problem };
   const other = (Object.keys(map) as Action[]).find((a) => a !== action && map[a] === binding);
   return other ? { ok: false, reason: `already used by ${LABELS[other]}` } : { ok: true };
 }
