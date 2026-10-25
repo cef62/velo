@@ -64,7 +64,7 @@ impl Index {
         let db = Connection::open(db_path)?;
         // journal_mode returns a row, so read it instead of executing.
         let _: String = db.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
-        db.execute_batch("PRAGMA synchronous=NORMAL;")?;
+        db.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON;")?;
         db.execute_batch(SCHEMA)?;
         Ok(Index { db })
     }
