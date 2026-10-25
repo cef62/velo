@@ -162,8 +162,8 @@ pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings)
     if hotkey_changed {
         register_hotkey(&app, &new_key)?; // on failure the old hotkey stays registered
     }
-    let closed = st.vault.lock().unwrap().is_none();
-    if old.notes_dir != settings.notes_dir || (closed && settings.notes_dir.is_some()) {
+    let (no_vault, indexing) = (st.vault.lock().unwrap().is_none(), st.indexing.lock().unwrap().is_some());
+    if needs_reopen(&old.notes_dir, &settings.notes_dir, no_vault, indexing) {
         let opened = match &settings.notes_dir {
             Some(dir) => open_vault(&app, &st, dir).map_err(err),
             None => {
@@ -187,6 +187,11 @@ pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings)
     settings::save(&st.settings_path, &settings).map_err(err)?;
     *st.settings.lock().unwrap() = settings;
     Ok(())
+}
+
+/// Reopen when the folder changed, or when a folder is set but there is no vault and no open in flight.
+fn needs_reopen(old: &Option<PathBuf>, new: &Option<PathBuf>, no_vault: bool, indexing: bool) -> bool {
+    old != new || (no_vault && !indexing && new.is_some())
 }
 
 #[tauri::command]
@@ -293,6 +298,7 @@ fn resolve_identity(file: Option<&[u8]>, existing: Option<String>, passphrase: &
 
 #[tauri::command(async)]
 pub fn setup_passphrase(app: AppHandle, st: State<'_, AppState>, passphrase: String) -> Res<Option<String>> {
+    check_gate(&st.indexing)?; // its final reopen would race the in-flight index
     let dir = st.settings.lock().unwrap().notes_dir.clone().ok_or("no-folder")?;
     let file = dir.join(crypto::IDENTITY_FILE);
     let existing = identity(&st).or_else(crypto::keychain_get);
@@ -341,6 +347,14 @@ mod tests {
         assert!(read_identity_file(d.path()).is_err()); // a directory: read fails, not NotFound
         std::fs::write(d.path().join("f"), "x").unwrap();
         assert_eq!(read_identity_file(&d.path().join("f")).unwrap().unwrap(), b"x");
+    }
+    #[test] fn needs_reopen_cases() {
+        let (a, b) = (Some(PathBuf::from("a")), Some(PathBuf::from("b")));
+        assert!(!needs_reopen(&a, &a, true, true)); // startup open still running
+        assert!(needs_reopen(&a, &a, true, false)); // truly closed
+        assert!(!needs_reopen(&a, &a, false, false));
+        assert!(needs_reopen(&a, &b, false, true)); // folder changed
+        assert!(!needs_reopen(&None, &None, true, false));
     }
     #[test] fn identity_file_exists_in_cases() {
         let d = tempfile::tempdir().unwrap();

@@ -58,7 +58,7 @@ let titles = new Set<string>(); // folded titles of all notes, for wikilink exis
 const newShow = latest();
 const editor = mountEditor($("editor"), {
   onEscape: focusSearch,
-  onError: (m) => (errEl.textContent = m ?? ""),
+  onError: (m) => (errEl.textContent = m ? errText(m) : ""),
   onChange: () => preview.refresh(),
 });
 const preview = mountPreview($("preview"), {
