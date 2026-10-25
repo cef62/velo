@@ -78,7 +78,12 @@ impl Store {
                 let stem = parse_note_file(path).map_or_else(|| name.to_string(), |n| n.title);
                 let ext = if name.ends_with(".age") { "md.age" } else { "md" };
                 let stamp = chrono::Local::now().format("%Y-%m-%d %H%M");
-                let conflict = path.with_file_name(format!("{stem} (conflict {stamp}).{ext}"));
+                let mut conflict = path.with_file_name(format!("{stem} (conflict {stamp}).{ext}"));
+                let mut n = 2;
+                while conflict.symlink_metadata().is_ok() {
+                    conflict = path.with_file_name(format!("{stem} (conflict {stamp}) {n}.{ext}"));
+                    n += 1;
+                }
                 self.write_atomic(&conflict, bytes)?;
                 Ok(SaveResult::Conflict {
                     conflict_path: conflict.to_string_lossy().into_owned(),
@@ -115,6 +120,10 @@ impl Store {
                 return Err(e);
             }
         } else {
+            // rename() replaces silently on Unix; residual race between this check and the rename is accepted
+            if to.symlink_metadata().is_ok() {
+                return Err(io::ErrorKind::AlreadyExists.into());
+            }
             std::fs::rename(from, &to)?;
         }
         Ok(to)
@@ -191,5 +200,27 @@ mod tests {
         let p = s.rename(&a, "A").unwrap(); assert_eq!(p.file_name().unwrap(), "A.md");
         assert_eq!(fs::read(&p).unwrap(), b"a");
         assert_eq!(sorted_titles(&s.list().unwrap()), vec!["A", "b"]);
+    }
+    #[test] fn save_conflicts_do_not_clobber() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Store::new(d.path().to_path_buf());
+        let p = d.path().join("a.md");
+        fs::write(&p, b"external").unwrap();
+        let mut paths = Vec::new();
+        for c in [&b"mine1"[..], b"mine2"] {
+            match s.save(&p, c, "stale").unwrap() { SaveResult::Conflict { conflict_path, .. } => paths.push(conflict_path), _ => panic!() }
+        }
+        assert_ne!(paths[0], paths[1]);
+        assert_eq!(fs::read(&paths[0]).unwrap(), b"mine1");
+        assert_eq!(fs::read(&paths[1]).unwrap(), b"mine2");
+    }
+    #[test] fn rename_onto_existing_non_note_refused() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Store::new(d.path().to_path_buf());
+        let a = d.path().join("a.md"); fs::write(&a, "a").unwrap();
+        fs::create_dir(d.path().join("B.md")).unwrap();
+        assert_eq!(s.rename(&a, "B").unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&a).unwrap(), b"a");
+        assert!(d.path().join("B.md").is_dir());
     }
 }
