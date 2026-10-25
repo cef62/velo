@@ -10,7 +10,8 @@ body { font: 14px system-ui, sans-serif; background: var(--bg); color: var(--fg)
 #list li.sel { background: var(--sel); }
 #list .m { color: var(--mute); font-size: 12px; }
 #list .s { grid-column: 1 / -1; color: var(--mute); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#note { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+#panes { flex: 1; display: flex; min-height: 0; }
+#note { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 #titlebar { padding: 4px 10px; font-weight: 600; display: flex; gap: 12px; }
 #titlebar input { font: inherit; }
 #err { color: #c33; font-weight: normal; }
@@ -19,5 +20,10 @@ body { font: 14px system-ui, sans-serif; background: var(--bg); color: var(--fg)
 .cm-host .cm-editor { height: 100%; background: var(--bg); color: var(--fg); }
 .cm-host .cm-editor.cm-focused { outline: none; }
 .banner { background: var(--warn); padding: 4px 10px; }
+#preview { flex: 1; min-width: 0; overflow-y: auto; padding: 8px 14px; }
+#preview a { color: #2a6fdb; }
+#preview a.missing { color: #c33; }
+.horizontal #preview { border-left: 1px solid var(--line); }
+.vertical.preview-on #note { display: none; }
 #setup { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); z-index: 10; }
 #setup[hidden], #preview[hidden], .banner[hidden] { display: none; }

@@ -14,11 +14,12 @@ export interface Editor {
   /** Save pending edits now; resolves true when clean afterwards. */
   flush(): Promise<boolean>;
   focus(): void;
+  getText(): string;
 }
 
 const stem = (p: string) => (p.split(/[\\/]/).pop() ?? p).replace(/\.[^.]+$/, "");
 
-export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onError?: (msg: string | null) => void } = {}): Editor {
+export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onError?: (msg: string | null) => void; onChange?: () => void } = {}): Editor {
   const banner = document.createElement("div");
   banner.className = "banner";
   banner.hidden = true;
@@ -39,7 +40,9 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
       editable.of(EditorView.editable.of(false)),
       keymap.of([{ key: "Escape", run: () => (opts.onEscape?.(), true) }]),
       EditorView.updateListener.of((u) => {
-        if (!u.docChanged || loading) return;
+        if (!u.docChanged) return;
+        opts.onChange?.(); // also fires on load so the preview follows note switches
+        if (loading) return;
         ctrl.edit();
       }),
     ],
@@ -85,6 +88,7 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
     onExternalChange: (p) => ctrl.external(p),
     flush: () => ctrl.flush(),
     focus: () => view.focus(),
+    getText: () => view.state.doc.toString(),
   };
   return ed;
 }

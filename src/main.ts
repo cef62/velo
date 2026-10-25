@@ -6,7 +6,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { mountEditor } from "./editor";
 import { shouldClose } from "./close";
 import { latest } from "./latest";
-import { enterAction, moveSelection } from "./search";
+import { enterAction, fold, moveSelection } from "./search";
+import { mountPreview } from "./preview";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const q = $<HTMLInputElement>("q");
@@ -21,11 +23,29 @@ let hits: Hit[] = [];
 let sel = -1;
 let searchSeq = 0;
 
+let titles = new Set<string>(); // folded titles of all notes, for wikilink existence
 const newShow = latest();
 const editor = mountEditor($("editor"), {
   onEscape: focusSearch,
   onError: (m) => (errEl.textContent = m ?? ""),
+  onChange: () => preview.refresh(),
 });
+const preview = mountPreview($("preview"), {
+  getText: () => editor.getText(),
+  exists: (t) => titles.has(fold(t)),
+  onWikilink: (t) => void openTitle(t),
+  openExternal: (u) => void openUrl(u).catch((e) => (errEl.textContent = String(e))),
+  onToggle: (on) => $("app").classList.toggle("preview-on", on),
+});
+
+async function refreshTitles() {
+  try {
+    titles = new Set((await api.search("")).map((h) => fold(h.title)));
+    preview.refresh();
+  } catch (e) {
+    console.error("title cache refresh failed", e);
+  }
+}
 
 function focusSearch() {
   q.focus();
@@ -113,16 +133,27 @@ async function enter() {
   try {
     if (a.kind === "open") {
       if (!(await show(a.path))) return;
-    } else {
-      if (!(await editor.flush())) return;
-      const doc = await api.openOrCreate(a.title);
-      if (!editor.load(doc)) return;
-      titleEl.textContent = doc.title;
-      await runSearch(false);
-    }
+    } else if (!(await openTitle(a.title))) return;
     editor.focus();
   } catch (e) {
     errEl.textContent = String(e);
+  }
+}
+
+/** Open the note titled `title`, creating it if missing; same flush-then-load path as everywhere. */
+async function openTitle(title: string): Promise<boolean> {
+  try {
+    if (!(await editor.flush())) return false;
+    const doc = await api.openOrCreate(title);
+    if (!editor.load(doc)) return false;
+    titleEl.textContent = doc.title;
+    errEl.textContent = "";
+    await runSearch(false);
+    void refreshTitles();
+    return true;
+  } catch (e) {
+    errEl.textContent = String(e);
+    return false;
   }
 }
 
@@ -180,6 +211,9 @@ window.addEventListener("keydown", (e) => {
   if ((down || up) && !(inEditor && !mod(e))) {
     e.preventDefault();
     select(moveSelection(sel, down ? 1 : -1, hits.length));
+  } else if (mod(e) && e.shiftKey && e.key.toLowerCase() === "p") {
+    e.preventDefault();
+    preview.toggle();
   } else if (mod(e) && e.key === "l") {
     e.preventDefault();
     focusSearch();
@@ -195,10 +229,12 @@ $("choose").onclick = async () => {
   await api.setSettings({ ...(await api.getSettings()), notes_dir: dir });
   $("setup").hidden = true;
   await runSearch(true);
+  void refreshTitles();
 };
 
 void listen<{ paths: string[] }>("notes-changed", async (ev) => {
   await runSearch(false);
+  void refreshTitles();
   const open = editor.currentPath();
   if (open && ev.payload.paths.includes(open)) editor.onExternalChange(open);
 });
@@ -217,6 +253,10 @@ void getCurrentWindow().onCloseRequested(async (e) => {
 void (async () => {
   const s = await api.getSettings();
   if (!s.notes_dir) $("setup").hidden = false;
-  else await runSearch(true);
+  else {
+    await runSearch(true);
+    void refreshTitles();
+  }
+  $("app").classList.add(s.layout); // read once; Task 11 toggles the class live
   focusSearch();
 })();
