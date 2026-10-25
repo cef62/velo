@@ -111,3 +111,20 @@ test("no note open: typing is not dirty, flush is clean, load succeeds", async (
   expect(c.load(doc)).toBe(true);
   expect(d.saveNote).not.toHaveBeenCalled();
 });
+
+test("rebind keeps dirty edits and saves them to the new path", async () => {
+  const { c, d } = mk();
+  type(c, "typed");
+  c.rebind({ ...doc, path: "a.md.age", hash: "h9" });
+  expect(c.currentPath()).toBe("a.md.age");
+  expect(c.isDirty()).toBe(true);
+  await vi.advanceTimersByTimeAsync(500);
+  expect(d.saveNote).toHaveBeenCalledWith("a.md.age", "typed", "h9");
+});
+
+test("rebind on a clean editor loads the doc", () => {
+  const { c } = mk();
+  c.rebind({ ...doc, path: "a.md.age", hash: "h9", text: "new" });
+  expect(text).toBe("new");
+  expect(c.currentPath()).toBe("a.md.age");
+});

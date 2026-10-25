@@ -199,6 +199,17 @@ pub fn has_identity(st: State<AppState>) -> bool {
     has
 }
 
+/// Whether `<dir>/.velo/identity.age` exists; lets the UI choose between "enter" and "create" wording.
+fn identity_file_exists_in(dir: &Path) -> std::io::Result<bool> {
+    Ok(read_identity_file(&dir.join(crypto::IDENTITY_FILE))?.is_some())
+}
+
+#[tauri::command]
+pub fn identity_file_exists(st: State<AppState>) -> Res<bool> {
+    let dir = st.settings.lock().unwrap().notes_dir.clone().ok_or("no-folder")?;
+    identity_file_exists_in(&dir).map_err(|e| e.to_string())
+}
+
 /// None only when the file does not exist; any other read error must abort.
 fn read_identity_file(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
     match std::fs::read(path) {
@@ -250,6 +261,13 @@ mod tests {
         assert!(read_identity_file(d.path()).is_err()); // a directory: read fails, not NotFound
         std::fs::write(d.path().join("f"), "x").unwrap();
         assert_eq!(read_identity_file(&d.path().join("f")).unwrap().unwrap(), b"x");
+    }
+    #[test] fn identity_file_exists_in_cases() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(!identity_file_exists_in(d.path()).unwrap());
+        std::fs::create_dir(d.path().join(".velo")).unwrap();
+        std::fs::write(d.path().join(crypto::IDENTITY_FILE), b"x").unwrap();
+        assert!(identity_file_exists_in(d.path()).unwrap());
     }
     #[test] fn resolve_identity_cases() {
         let id = crypto::new_identity(); let wrapped = crypto::wrap_identity(&id, "pw").unwrap();

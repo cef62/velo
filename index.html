@@ -9,11 +9,34 @@
   </head>
   <body>
     <div id="setup" hidden><button id="choose">Choose notes folder</button></div>
+    <dialog id="pp">
+      <form method="dialog">
+        <h3></h3>
+        <input type="password" autocomplete="off" placeholder="Passphrase" />
+        <input type="password" autocomplete="off" placeholder="Confirm passphrase" />
+        <div class="msg" role="alert"></div>
+        <div class="row"><button type="button" value="cancel">Cancel</button><button type="submit">OK</button></div>
+      </form>
+    </dialog>
+    <dialog id="settings">
+      <form method="dialog">
+        <h3>Settings</h3>
+        <label>Notes folder <span id="s-dir"></span> <button type="button" id="s-choose">Change…</button></label>
+        <label>Global hotkey <input id="s-hotkey" type="text" spellcheck="false" /></label>
+        <label>Layout <select id="s-layout"><option value="vertical">Vertical</option><option value="horizontal">Horizontal</option></select></label>
+        <label>Font size <input id="s-font" type="number" min="10" max="32" /></label>
+        <div class="msg" role="alert"></div>
+        <div class="row"><button type="button" value="cancel">Cancel</button><button type="submit">Save</button></div>
+      </form>
+    </dialog>
     <div id="app">
       <header id="top">
         <input id="q" type="text" placeholder="Search or create…" autocomplete="off" spellcheck="false" />
-        <!-- toolbar hook (Task 11): lock/settings buttons go here -->
-        <div id="toolbar"></div>
+        <div id="toolbar">
+          <button id="lock" type="button" title="Lock / unlock note (⌘⇧E)">🔒</button>
+          <button id="lockall" type="button" title="Lock all notes (⌘⇧L)">Lock all</button>
+          <button id="gear" type="button" title="Settings (⌘,)">⚙</button>
+        </div>
       </header>
       <ul id="list"></ul>
       <div id="panes">

@@ -37,6 +37,16 @@ export class SaveController {
     return true;
   }
 
+  /**
+   * The open note's file moved (lock/unlock). Unlike load() it never refuses: dirty edits are kept
+   * and saved to the new path, so a failed hand-off cannot recreate the old (plaintext) file.
+   */
+  rebind(doc: NoteDoc) {
+    if (!this.dirty) return void this.load(doc);
+    this.cur = { path: doc.path, baseHash: doc.hash };
+    this.schedule(this.delay);
+  }
+
   edit() {
     if (!this.cur.path) return; // nothing to save to; the editor is read-only until a note loads
     this.dirty = true;

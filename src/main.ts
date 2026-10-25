@@ -9,6 +9,8 @@ import { latest } from "./latest";
 import { enterAction, fold, moveSelection } from "./search";
 import { mountPreview } from "./preview";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { askPassphrase, isLockedPath } from "./passphrase";
+import { applyLook, toSettings } from "./settingsform";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const q = $<HTMLInputElement>("q");
@@ -84,7 +86,7 @@ function render() {
 }
 
 /** false = refused: unsaved edits could not be saved (error stays visible), nothing changed. */
-async function show(path: string): Promise<boolean> {
+async function show(path: string, retried = false): Promise<boolean> {
   const current = newShow();
   try {
     if (!(await editor.flush())) return false;
@@ -94,9 +96,88 @@ async function show(path: string): Promise<boolean> {
     titleEl.textContent = doc.title;
     errEl.textContent = "";
   } catch (e) {
+    if (e === "locked" && !retried && (await promptPassphrase())) return show(path, true);
     errEl.textContent = e === "locked" ? "Note is locked" : String(e);
   }
   return true;
+}
+
+/** Passphrase dialog; true once the identity is available. Wording depends on identity.age existing. */
+async function promptPassphrase(): Promise<boolean> {
+  try {
+    return await askPassphrase(await api.identityFileExists(), api.setupPassphrase);
+  } catch (e) {
+    errEl.textContent = String(e);
+    return false;
+  }
+}
+
+/** Lock/unlock the open note. Flush first (aborts visibly if it can't), then follow the file to its new path. */
+async function toggleLock() {
+  const path = editor.currentPath();
+  if (!path) return;
+  try {
+    if (!(await editor.flush())) return;
+    if (!(await api.hasIdentity()) && !(await promptPassphrase())) return;
+    const np = isLockedPath(path) ? await api.unlockNote(path) : await api.lockNote(path);
+    const doc = await api.openNote(np);
+    editor.rebind(doc); // keeps any keystrokes typed meanwhile instead of dropping or re-saving to the old path
+    titleEl.textContent = doc.title;
+    errEl.textContent = "";
+    await runSearch(false);
+    sel = hits.findIndex((h) => h.path === np);
+    render();
+  } catch (e) {
+    errEl.textContent = e === "already-exists" ? "A note with that title already exists in the other form" : String(e);
+  }
+}
+
+async function lockEverything() {
+  try {
+    if (!(await editor.flush())) return;
+    await api.lockAll();
+    await runSearch(false);
+  } catch (e) {
+    errEl.textContent = String(e);
+  }
+}
+
+async function openSettings() {
+  if (!(await editor.flush())) return;
+  const cur = await api.getSettings();
+  const dlg = $<HTMLDialogElement>("settings");
+  const form = dlg.querySelector("form")!;
+  const msg = form.querySelector(".msg") as HTMLElement;
+  let dir = cur.notes_dir;
+  const field = (id: string) => $<HTMLInputElement>(id);
+  $("s-dir").textContent = dir ?? "(none)";
+  field("s-hotkey").value = cur.hotkey;
+  field("s-layout").value = cur.layout;
+  field("s-font").value = String(cur.font_size);
+  msg.textContent = "";
+  $("s-choose").onclick = async () => {
+    const d = await open({ directory: true });
+    if (typeof d === "string") $("s-dir").textContent = dir = d;
+  };
+  (form.querySelector("[value=cancel]") as HTMLButtonElement).onclick = () => dlg.close();
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const next = { ...toSettings(cur, { hotkey: field("s-hotkey").value, layout: field("s-layout").value, fontSize: field("s-font").value }), notes_dir: dir };
+    try {
+      await api.setSettings(next); // on hotkey registration failure this throws and the old hotkey stays
+    } catch (err) {
+      msg.textContent = String(err);
+      return;
+    }
+    applyLook(next);
+    dlg.close();
+    if (next.notes_dir !== cur.notes_dir) {
+      $("setup").hidden = true;
+      await runSearch(true);
+      void refreshTitles();
+    }
+  };
+  dlg.showModal();
 }
 
 async function select(i: number) {
@@ -204,6 +285,24 @@ q.addEventListener("keydown", (e) => {
 });
 titleEl.addEventListener("dblclick", startRename);
 
+// Capture phase so CodeMirror's keymap (e.g. ⌘⇧L, ⌘,) never sees these.
+window.addEventListener(
+  "keydown",
+  (e) => {
+    if (!mod(e) || document.querySelector("dialog[open]")) return;
+    const k = e.key.toLowerCase();
+    const act = e.shiftKey && k === "e" ? toggleLock : e.shiftKey && k === "l" ? lockEverything : !e.shiftKey && k === "," ? openSettings : null;
+    if (!act) return;
+    e.preventDefault();
+    e.stopPropagation();
+    void act();
+  },
+  true,
+);
+$("lock").onclick = () => void toggleLock();
+$("lockall").onclick = () => void lockEverything();
+$("gear").onclick = () => void openSettings();
+
 window.addEventListener("keydown", (e) => {
   const inEditor = !!(e.target as HTMLElement).closest?.("#editor");
   const down = e.key === "ArrowDown" || (mod(e) && e.key === "j");
@@ -257,6 +356,6 @@ void (async () => {
     await runSearch(true);
     void refreshTitles();
   }
-  $("app").classList.add(s.layout); // read once; Task 11 toggles the class live
+  applyLook(s);
   focusSearch();
 })();

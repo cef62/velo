@@ -58,6 +58,7 @@ pub fn run() {
             commands::lock_all,
             commands::has_identity,
             commands::setup_passphrase,
+            commands::identity_file_exists,
         ])
         .run(tauri::generate_context!())
         .expect("error while running velo");

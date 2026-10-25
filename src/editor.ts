@@ -8,6 +8,8 @@ import { openNote, saveNote, type NoteDoc } from "./api";
 export interface Editor {
   /** false = refused because of unsaved edits. */
   load(doc: NoteDoc): boolean;
+  /** Like load() but never refuses: for the open note's file being renamed by lock/unlock. */
+  rebind(doc: NoteDoc): void;
   isDirty(): boolean;
   currentPath(): string | null;
   onExternalChange(path: string): void;
@@ -82,6 +84,10 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
       banner.hidden = true;
       view.dispatch({ effects: editable.reconfigure(EditorView.editable.of(true)) });
       return true;
+    },
+    rebind(doc) {
+      ctrl.rebind(doc);
+      banner.hidden = true;
     },
     isDirty: ctrl.isDirty,
     currentPath: ctrl.currentPath,

@@ -1,7 +1,7 @@
 :root { color-scheme: light dark; --bg: #fff; --fg: #1d1d1f; --mute: #86868b; --line: #d8d8dc; --sel: #cfe3ff; --warn: #fff3c4; }
 @media (prefers-color-scheme: dark) { :root { --bg: #1e1e20; --fg: #e8e8ea; --line: #3a3a3e; --sel: #26466f; --warn: #4a4120; } }
 html, body { height: 100%; margin: 0; }
-body { font: 14px system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+body { font: var(--font-size, 14px) system-ui, sans-serif; background: var(--bg); color: var(--fg); }
 #app { display: flex; flex-direction: column; height: 100%; }
 #top { display: flex; gap: 8px; padding: 8px; border-bottom: 1px solid var(--line); }
 #q { flex: 1; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: inherit; }
@@ -27,3 +27,16 @@ body { font: 14px system-ui, sans-serif; background: var(--bg); color: var(--fg)
 .vertical.preview-on #note { display: none; }
 #setup { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); z-index: 10; }
 #setup[hidden], #preview[hidden], .banner[hidden] { display: none; }
+.cm-host .cm-editor { font-size: var(--font-size, 14px); }
+#toolbar { display: flex; gap: 4px; }
+.horizontal#app { display: grid; grid-template-columns: 260px 1fr; grid-template-rows: auto 1fr; }
+.horizontal#app #top { grid-column: 1 / -1; }
+.horizontal#app #list { height: auto; border-bottom: 0; border-right: 1px solid var(--line); }
+.horizontal#app #panes { min-width: 0; min-height: 0; }
+dialog { background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; min-width: 320px; }
+dialog form { display: flex; flex-direction: column; gap: 8px; }
+dialog h3 { margin: 0; font-size: 1em; }
+dialog label { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+dialog input[hidden] { display: none; }
+dialog .msg { color: #c33; min-height: 1.2em; }
+dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
