@@ -54,7 +54,18 @@ Matteo is strongest in TypeScript/web, willing to learn Go or Rust.
 - Encrypted notes: `*.md.age`, index stores title + `encrypted=1` only.
 - Future: `sqlite-vec` table for embeddings, link graph for agents.
 
-## Runtime (decided: spike both, then choose)
+## Runtime (decided 2026-10-25: Tauri 2)
+
+**Matteo chose Tauri 2 after the spikes** (results: `docs/spikes/`). Reasons: smaller bundle (5.7 MB .app vs 12 MB), stable plugin ecosystem, `notify` uses FSEvents on macOS (Go fsnotify used kqueue = 1 fd per note), Wails v3 still beta. Both met latency targets.
+
+Spike learnings to carry into v1:
+- FTS5 `trigram` cannot match queries <3 chars; spikes fell back to `LIKE` full scan (worst ~26 ms at 10k). Keep fallback, or match short queries on titles only.
+- Fold diacritics for title matching (Wails spike did; Tauri spike did not).
+- Escape `%`/`_` in LIKE patterns.
+- Benchmark only release builds; debug SQLite is ~2x slower.
+- Index was rebuilt on every launch in spikes; v1 must reconcile by mtime/hash.
+
+Original comparison kept for reference:
 Candidates: **Tauri 2** (Rust core + TS UI) — recommended; **Wails** (Go core + TS UI) — runner-up. Native Rust UI (egui/iced) and native Go UI (Fyne/Gio) rejected: discard TS skills, weak rich-text editing. Electron not considered (heavy) unless both spikes disappoint.
 
 UI layer is identical in both: TypeScript + Vite, editor **CodeMirror 6**, preview **markdown-it**, framework **Svelte or plain TS** (builder's call; keep it light). Backend responsibilities (thin): folder scan, file watch, atomic writes, SQLite/FTS5, age encrypt/decrypt, global hotkey.

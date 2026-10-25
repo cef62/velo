@@ -1,0 +1,8 @@
+spikes/fixtures/
+node_modules/
+target/
+dist/
+build/bin/
+.DS_Store
+spikes/tauri/
+spikes/wails/
