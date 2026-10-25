@@ -8,8 +8,8 @@ import { openNote, saveNote, type NoteDoc } from "./api";
 export interface Editor {
   /** false = refused because of unsaved edits. */
   load(doc: NoteDoc): boolean;
-  /** Like load() but never refuses: for the open note's file being renamed by lock/unlock. */
-  rebind(doc: NoteDoc): void;
+  /** Like load() but never refuses: for the open note's file being renamed by lock/unlock. False (no-op) if `fromPath` is no longer open. */
+  rebind(fromPath: string, doc: NoteDoc): boolean;
   /** Read-only and no saving until resume()/load(): for the lock hand-off. */
   suspend(): void;
   resume(): void;
@@ -92,9 +92,10 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
       setEditable(true);
       return true;
     },
-    rebind(doc) {
-      ctrl.rebind(doc);
+    rebind(fromPath, doc) {
+      if (!ctrl.rebind(fromPath, doc)) return false;
       banner.hidden = true;
+      return true;
     },
     suspend() {
       ctrl.suspend();

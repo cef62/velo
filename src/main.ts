@@ -25,6 +25,16 @@ let hits: Hit[] = [];
 let sel = -1;
 let searchSeq = 0;
 
+// Set while a lock/unlock hand-off is in flight: the open note's file is moving, so navigation is refused.
+let busy = false;
+const BUSY_MSG = "Busy locking/unlocking — try again in a moment";
+// One-shot notice (e.g. keychain unavailable) that survives the next errEl reset.
+let notice = "";
+const clearErr = () => {
+  errEl.textContent = notice;
+  notice = "";
+};
+
 let titles = new Set<string>(); // folded titles of all notes, for wikilink existence
 const newShow = latest();
 const editor = mountEditor($("editor"), {
@@ -87,6 +97,10 @@ function render() {
 
 /** false = refused: unsaved edits could not be saved (error stays visible), nothing changed. */
 async function show(path: string, retried = false): Promise<boolean> {
+  if (busy) {
+    errEl.textContent = BUSY_MSG;
+    return false;
+  }
   const current = newShow();
   try {
     if (!(await editor.flush())) return false;
@@ -94,7 +108,7 @@ async function show(path: string, retried = false): Promise<boolean> {
     if (!current()) return true;
     if (!editor.load(doc)) return false;
     titleEl.textContent = doc.title;
-    errEl.textContent = "";
+    clearErr();
   } catch (e) {
     if (e === "locked" && !retried && (await promptPassphrase())) return show(path, true);
     errEl.textContent = e === "locked" ? "Note is locked" : String(e);
@@ -106,7 +120,10 @@ async function show(path: string, retried = false): Promise<boolean> {
 async function promptPassphrase(): Promise<boolean> {
   try {
     return await askPassphrase(await api.identityFileExists(), async (pw) => {
-      if ((await api.setupPassphrase(pw)) === "keychain-unavailable") errEl.textContent = "Keychain unavailable — you'll be asked for your passphrase each launch";
+      if ((await api.setupPassphrase(pw)) === "keychain-unavailable") {
+        notice = "Keychain unavailable — you'll be asked for your passphrase each launch";
+        errEl.textContent = notice;
+      }
     });
   } catch (e) {
     errEl.textContent = String(e);
@@ -119,8 +136,18 @@ async function promptPassphrase(): Promise<boolean> {
  * it is rebound to the new path, so no autosave/blur/watcher save can recreate the old path.
  */
 async function toggleLock() {
+  if (busy) return;
   const path = editor.currentPath();
   if (!path) return;
+  busy = true;
+  try {
+    await lockHandoff(path);
+  } finally {
+    busy = false;
+  }
+}
+
+async function lockHandoff(path: string) {
   try {
     if (!(await api.hasIdentity()) && !(await promptPassphrase())) return;
     if (!(await editor.flush())) return; // error already visible
@@ -128,6 +155,7 @@ async function toggleLock() {
     errEl.textContent = String(e);
     return;
   }
+  if (editor.currentPath() !== path) return; // belt and braces: the open note changed during the awaits
   editor.suspend();
   let np: string;
   try {
@@ -139,12 +167,13 @@ async function toggleLock() {
   }
   try {
     const doc = await api.openNote(np);
-    editor.rebind(doc);
-    editor.resume();
-    titleEl.textContent = doc.title;
-    errEl.textContent = "";
+    if (editor.rebind(path, doc)) {
+      editor.resume();
+      titleEl.textContent = doc.title;
+      clearErr();
+    }
     await runSearch(false);
-    sel = hits.findIndex((h) => h.path === np);
+    sel = hits.findIndex((h) => h.path === editor.currentPath());
     render();
   } catch (e) {
     // The file moved but could not be reopened: stay read-only (never resume on the old path).
@@ -154,9 +183,12 @@ async function toggleLock() {
 }
 
 async function lockEverything() {
-  const path = editor.currentPath();
+  if (busy) return;
+  busy = true;
   try {
+    const path = editor.currentPath();
     if (!(await editor.flush())) return;
+    if (editor.currentPath() !== path) return;
     editor.suspend();
     try {
       await api.lockAll();
@@ -171,6 +203,8 @@ async function lockEverything() {
     await runSearch(false);
   } catch (e) {
     errEl.textContent = String(e);
+  } finally {
+    busy = false;
   }
 }
 
@@ -255,6 +289,10 @@ async function enter() {
 
 /** Open the note titled `title`, creating it if missing; same flush-then-load path as everywhere. */
 async function openTitle(title: string): Promise<boolean> {
+  if (busy) {
+    errEl.textContent = BUSY_MSG;
+    return false;
+  }
   try {
     if (!(await editor.flush())) return false;
     const doc = await api.openOrCreate(title);

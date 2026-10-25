@@ -115,7 +115,7 @@ test("no note open: typing is not dirty, flush is clean, load succeeds", async (
 test("rebind keeps dirty edits and saves them to the new path", async () => {
   const { c, d } = mk();
   type(c, "typed");
-  c.rebind({ ...doc, path: "a.md.age", hash: "h9" });
+  c.rebind("a.md", { ...doc, path: "a.md.age", hash: "h9" });
   expect(c.currentPath()).toBe("a.md.age");
   expect(c.isDirty()).toBe(true);
   await vi.advanceTimersByTimeAsync(500);
@@ -124,7 +124,7 @@ test("rebind keeps dirty edits and saves them to the new path", async () => {
 
 test("rebind on a clean editor loads the doc", () => {
   const { c } = mk();
-  c.rebind({ ...doc, path: "a.md.age", hash: "h9", text: "new" });
+  c.rebind("a.md", { ...doc, path: "a.md.age", hash: "h9", text: "new" });
   expect(text).toBe("new");
   expect(c.currentPath()).toBe("a.md.age");
 });
@@ -148,11 +148,24 @@ test("lock hand-off: typing between flush and rebind never saves to the old path
   await c.flush();
   c.external("a.md");
   await vi.advanceTimersByTimeAsync(5000);
-  c.rebind({ ...doc, path: "a.md.age", hash: "h9" });
+  c.rebind("a.md", { ...doc, path: "a.md.age", hash: "h9" });
   c.resume();
   await vi.advanceTimersByTimeAsync(5000);
   expect(d.saveNote).not.toHaveBeenCalled();
   expect(c.currentPath()).toBe("a.md.age");
+});
+
+test("rebind from a stale path is a no-op: edits typed in another note stay in it", async () => {
+  const { c, d } = mk();
+  c.suspend(); // toggleLock on a.md
+  expect(c.load({ ...doc, path: "b.md", hash: "hb", text: "B" })).toBe(true); // user selected b.md meanwhile
+  type(c, "B edited");
+  expect(c.rebind("a.md", { ...doc, path: "a.md.age", hash: "h9" })).toBe(false);
+  expect(c.currentPath()).toBe("b.md");
+  expect(text).toBe("B edited");
+  await vi.advanceTimersByTimeAsync(500);
+  expect(d.saveNote).toHaveBeenCalledTimes(1);
+  expect(d.saveNote).toHaveBeenCalledWith("b.md", "B edited", "hb");
 });
 
 test("unload detaches: no further saves, editor emptied", async () => {
