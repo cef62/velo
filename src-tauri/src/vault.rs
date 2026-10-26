@@ -515,16 +515,10 @@ mod tests {
         assert!(fm.is_none()); assert_eq!(std::fs::read_to_string(&d.path).unwrap(), "hello");
     }
     #[test] fn current_block_same_second_is_unchanged() {
-        let mut v = open_empty(); let d = v.open_or_create("n", None, false).unwrap();
+        // save_note reports front_matter only when stamp() changed the text; same `now` must be a no-op
         let now = chrono::Local::now().fixed_offset();
-        // retry across a second boundary
-        for _ in 0..5 {
-            let t = frontmatter::stamp("body", now, now);
-            let cur = chrono::Local::now().fixed_offset();
-            if cur.timestamp() != now.timestamp() { continue; }
-            let (fm, _) = fm_of(v.save_note(&d.path, &t, &stat_hash(&d.path), None, true).unwrap());
-            assert!(fm.is_none()); return;
-        }
+        let t = frontmatter::stamp("body", now, now);
+        assert_eq!(frontmatter::stamp(&t, now, now), t);
     }
     fn stat_hash(p: &str) -> String { hash(&std::fs::read(p).unwrap()) }
     #[test] fn locked_note_encrypts_stamped_text() {
@@ -541,5 +535,33 @@ mod tests {
         let d = v.open_or_create("a", None, true).unwrap(); assert!(d.text.starts_with("---\ncreated: ") && d.text.ends_with("---\n"));
         assert_eq!(d.meta.created_src, "frontmatter");
         assert_eq!(v.open_or_create("b", None, false).unwrap().text, "");
+    }
+    #[test] fn second_save_with_returned_hash_is_saved() {
+        let mut v = open_empty(); let d = v.open_or_create("n", None, false).unwrap();
+        let (_, h) = fm_of(v.save_note(&d.path, "one", &d.hash, None, true).unwrap());
+        for t in ["one", "onex"] {
+            let r = v.save_note(&d.path, t, &h, None, true).unwrap();
+            assert!(matches!(r, SaveResult::Saved { .. }));
+            let SaveResult::Saved { hash, .. } = r else { unreachable!() };
+            assert_eq!(hash, stat_hash(&d.path));
+            let r = v.save_note(&d.path, t, &hash, None, true).unwrap(); assert!(matches!(r, SaveResult::Saved { .. }));
+        }
+    }
+    #[test] fn second_save_locked_is_saved() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = Vault::open(dir, &db, None).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
+        let p = v.lock_note(&d.path, &id).unwrap();
+        let (_, h) = fm_of(v.save_note(&p, "secret", &stat_hash(&p), Some(&id), true).unwrap());
+        assert!(matches!(v.save_note(&p, "secretx", &h, Some(&id), true).unwrap(), SaveResult::Saved { .. }));
+    }
+    #[test] fn stamped_conflict_copy_keeps_both_sides() {
+        let mut v = open_empty(); let d = v.open_or_create("n", None, false).unwrap();
+        std::fs::write(&d.path, "external").unwrap();
+        let r = v.save_note(&d.path, "mine", &d.hash, None, true).unwrap();
+        let SaveResult::Conflict { conflict_path, .. } = r else { panic!("expected conflict") };
+        assert_eq!(std::fs::read_to_string(&d.path).unwrap(), "external");
+        let c = std::fs::read_to_string(&conflict_path).unwrap();
+        let f = frontmatter::parse(&c).unwrap();
+        assert!(f.created.is_some() && f.modified.is_some() && c.ends_with("mine"), "{c:?}");
     }
 }
