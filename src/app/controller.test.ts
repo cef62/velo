@@ -378,3 +378,24 @@ test("toggle_front_matter persists", async () => {
   expect(store.get().showFrontMatter).toBe(true);
   expect(editor.showFrontMatter).toBe(true);
 });
+
+test("restore snapshots keys typed during the revision read, and refuses while busy", async () => {
+  const { c, api, editor, store } = setup();
+  await c.runSearch(true);
+  await settle();
+  editor.text = "now";
+  const rev = deferred<string>();
+  api.readRevision.mockReturnValueOnce(rev.promise);
+  const p = c.restoreRevision("42");
+  await settle();
+  editor.text = "now+typed";
+  rev.resolve("then");
+  await p;
+  expect(api.snapshotText).toHaveBeenLastCalledWith(P("A"), "now+typed");
+  expect(editor.text).toBe("then");
+
+  c.busy = true;
+  await c.restoreRevision("42");
+  expect(store.get().err).toBe("Busy — try again in a moment");
+  expect(api.readRevision).toHaveBeenCalledTimes(1);
+});

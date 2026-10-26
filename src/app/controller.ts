@@ -695,11 +695,19 @@ export class Controller {
 
   /** Replace the open note with revision `id` as a user edit, after snapshotting the current text. Task 6 adds the confirm. */
   async restoreRevision(id: string) {
+    if (this.busy) return this.setErr(BUSY_MSG); // lock hand-off: the editor is suspended, the file is moving
     const path = this.editor.currentPath();
     if (!path || !(await this.editor.flush())) return;
     try {
       const text = await this.api.readRevision(path, id);
-      await this.api.snapshotText(path, this.editor.getText()); // a failed snapshot aborts: the current text must stay recoverable
+      // Snapshot what the editor holds right before the replace; again if keys were typed meanwhile.
+      // A failed snapshot aborts: the current text must stay recoverable.
+      let cur;
+      do {
+        cur = this.editor.getText();
+        await this.api.snapshotText(path, cur);
+      } while (this.editor.getText() !== cur);
+      if (this.busy) return this.setErr(BUSY_MSG);
       if (this.editor.currentPath() === path) this.editor.replaceText(text);
     } catch (e) {
       this.setErr(errText(e));

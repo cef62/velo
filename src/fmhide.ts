@@ -33,9 +33,14 @@ export function frontMatterHide(hidden: boolean): Extension {
   });
   if (!hidden) return [field, shownTheme];
 
+  // User edits skip the block (other changes in the same transaction go through). Undo/redo pass untouched so
+  // history can't wedge on a step that touches the block; load and stamp changes carry no user event.
+  const protect = EditorState.changeFilter.of((tr) => {
+    if (tr.annotation(Transaction.userEvent) === undefined || tr.isUserEvent("undo") || tr.isUserEvent("redo")) return true;
+    const r = docFrontMatter(tr.startState.doc);
+    return r ? [0, r.to] : true; // inserting at r.to (body start) is at the edge, so allowed
+  });
   const guard = EditorState.transactionFilter.of((tr) => {
-    const before = docFrontMatter(tr.startState.doc);
-    if (before && tr.docChanged && tr.annotation(Transaction.userEvent) !== undefined && tr.changes.touchesRange(0, before.to - 1)) return {};
     if (!tr.selection) return tr;
     const r = docFrontMatter(tr.newDoc);
     if (!r || tr.newSelection.ranges.every((s) => s.from >= r.to)) return tr;
@@ -43,5 +48,5 @@ export function frontMatterHide(hidden: boolean): Extension {
     const sel = EditorSelection.create(tr.newSelection.ranges.map((s) => EditorSelection.range(clamp(s.anchor), clamp(s.head))), tr.newSelection.mainIndex);
     return [tr, { selection: sel, sequential: true }];
   });
-  return [field, EditorView.atomicRanges.of((v) => v.state.field(field)), guard];
+  return [field, EditorView.atomicRanges.of((v) => v.state.field(field)), protect, guard];
 }
