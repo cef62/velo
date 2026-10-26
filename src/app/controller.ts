@@ -124,11 +124,12 @@ export class Controller {
   }
 
   /** Rows changed (reset/refresh/page loaded): publish them so the list re-renders. */
-  protected listChanged() {
+  protected listChanged(reset = false) {
     const r = this.results;
     const q = fold(this.store.get().query.trim()); // trimmed like enterAction, so the Create hint matches what Enter does
     this.store.set((s) => ({
       listVersion: s.listVersion + 1,
+      listReset: s.listReset + (reset ? 1 : 0),
       count: r.count,
       hasMore: r.hasMore,
       total: r.total,
@@ -301,7 +302,7 @@ export class Controller {
     try {
       await (selectFirst ? r.reset() : r.refresh());
       if (seq !== this.searchSeq) return;
-      this.listChanged();
+      this.listChanged(selectFirst);
       if (selectFirst) {
         if (keepOpen && r.indexOf(this.editor.currentPath() ?? "") >= 0) this.selectOpen();
         else if (keepOpen === "highlight" && this.editor.currentPath() === null) {
@@ -320,7 +321,7 @@ export class Controller {
     try {
       await this.results.reset();
       if (seq !== this.searchSeq) return;
-      this.listChanged();
+      this.listChanged(true);
       this.selectOpen();
     } catch (e) {
       if (e !== "indexing") console.error("search failed", e);

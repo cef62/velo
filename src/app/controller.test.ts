@@ -324,3 +324,15 @@ test("context menu: one popup per open (menuBusy), previous menu closed on the n
   expect(menus.filter((m) => !m.closed).length).toBe(1);
   expect(menus[0].closed).toBe(true);
 });
+
+test("listReset bumps on a fresh result set, not on refresh or paging", async () => {
+  const { c, store } = setup();
+  await c.runSearch(true);
+  const r = store.get().listReset;
+  expect(r).toBe(1);
+  await c.runSearch(false);
+  expect(store.get().listReset).toBe(r);
+  c.setQuery("a");
+  await settle();
+  expect(store.get().listReset).toBeGreaterThan(r);
+});

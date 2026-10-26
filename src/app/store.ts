@@ -29,6 +29,7 @@ export interface AppState {
   query: string;
   indexing: { done: number; total: number } | null;
   listVersion: number; // bumped whenever the rows change
+  listReset: number; // bumped when the result set restarts (new query/sort): the list scrolls to top
   count: number;
   hasMore: boolean;
   total: number;
@@ -62,6 +63,7 @@ export const initialState = (isMac: boolean): AppState => ({
   query: "",
   indexing: null,
   listVersion: 0,
+  listReset: 0,
   count: 0,
   hasMore: false,
   total: 0,

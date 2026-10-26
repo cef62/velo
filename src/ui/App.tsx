@@ -7,6 +7,7 @@ import { useStore } from "./useStore";
 import { Header } from "./Header";
 import { EditorHost } from "./EditorHost";
 import { PreviewHost } from "./PreviewHost";
+import { NoteList } from "./NoteList";
 
 // Layout per design README: vertical = header / list / divider / note; horizontal = header over [list | divider | note].
 // platform.applyLook writes data-layout on <html>; the divider sizes come from --list-h / --list-w (Task 11).
@@ -23,15 +24,6 @@ const app = css({
     gridTemplateRows: "auto minmax(0, 1fr)",
   },
 });
-const list = css({
-  h: "var(--list-h, 30%)",
-  flex: "none",
-  overflowY: "auto",
-  display: "flex",
-  flexDirection: "column",
-  p: "1",
-  "[data-layout=horizontal] &": { h: "auto", minH: "0" },
-});
 const note = css({ flex: "1", minH: "0", minW: "0", display: "flex", flexDirection: "column", position: "relative" });
 const titleBar = css({
   display: "flex",
@@ -47,33 +39,6 @@ const titleBar = css({
   "& [data-err]": { color: "red.11", fontSize: "uiSm", fontWeight: "normal" },
 });
 
-// placeholder: replaced in Task 10
-function ListPlaceholder({ controller, store }: { controller: Controller; store: Store<AppState> }) {
-  useStore(store, (s) => s.listVersion);
-  const count = useStore(store, (s) => s.count);
-  const sel = useStore(store, (s) => s.sel);
-  return (
-    <>
-      {Array.from({ length: count }, (_, i) => (
-        <button
-          key={i}
-          type="button"
-          data-row={i}
-          aria-current={i === sel}
-          className={css({ textAlign: "left", px: "2.5", h: "var(--velo-row-h)", flex: "none", borderRadius: "l2", fontSize: "var(--velo-list-fs)", "&[aria-current=true]": { bg: "velo.accent", color: "white" } })}
-          onClick={() => void controller.select(i)}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            void controller.openContextMenu(i);
-          }}
-        >
-          {controller.row(i)?.title ?? "…"}
-        </button>
-      ))}
-    </>
-  );
-}
-
 export function App({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const s = useStore(store);
   // The hosts' layout effects (attachEditor/attachPreview) run before this effect, so start() sees them; once only under StrictMode.
@@ -87,9 +52,7 @@ export function App({ controller, store }: { controller: Controller; store: Stor
   return (
     <div className={app} data-preview-on={s.previewOn || undefined}>
       <Header controller={controller} store={store} />
-      <div className={list}>
-        <ListPlaceholder controller={controller} store={store} />
-      </div>
+      <NoteList controller={controller} store={store} />
       <div className={paneDivider({ orientation: s.layout === "horizontal" ? "vertical" : "horizontal" })} role="separator" aria-label="Resize note list" />
       <section className={note}>
         {/* placeholder: replaced in Task 11 */}
