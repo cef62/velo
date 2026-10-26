@@ -2,6 +2,7 @@ import { Compartment } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { writingSetup } from "./editortheme";
 import { refreshRich, richMarkdown, type RichOpts } from "./richmd";
+import { TASK_ITEM } from "./preview";
 import { SaveController } from "./saver";
 import { openNote, saveNote, type NoteDoc } from "./api";
 
@@ -30,6 +31,8 @@ export interface Editor {
   setRich(on: boolean): void;
   /** Re-check wikilink targets after the note titles changed. */
   refreshLinks(): void;
+  /** Flip "[ ]" / "[x]" of the task item on this 0-based line (from the preview); false if not editable or not a task. */
+  toggleTask(line: number): boolean;
 }
 
 const stem = (p: string) => (p.split(/[\\/]/).pop() ?? p).replace(/\.[^.]+$/, "");
@@ -141,6 +144,16 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
     getText: () => view.state.doc.toString(),
     setRich: (on) => view.dispatch({ effects: rich.reconfigure(on && opts.rich ? richMarkdown(opts.rich) : []) }),
     refreshLinks: () => view.dispatch({ effects: refreshRich.of(null) }),
+    toggleTask(line) {
+      const doc = view.state.doc;
+      if (!view.state.facet(EditorView.editable) || line < 0 || line >= doc.lines) return false; // no note, indexing, lock hand-off
+      const l = doc.line(line + 1);
+      const m = TASK_ITEM.exec(l.text);
+      if (!m) return false;
+      const pos = l.from + m[1].length;
+      view.dispatch({ changes: { from: pos, to: pos + 1, insert: m[2] === " " ? "x" : " " } });
+      return true;
+    },
   };
   return ed;
 }

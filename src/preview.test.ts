@@ -39,3 +39,23 @@ test("preview renders tag chips, not in code or headings", () => {
   expect(out).not.toContain('data-tag="Head"');
 });
 test("tag chip escapes", () => expect(renderMarkdown('#a"b', () => true)).not.toContain('data-tag="a"b"'));
+test("task lists: checkboxes with source lines, nested and in quotes", () => {
+  const out = renderMarkdown("intro\n\n- [ ] todo\n- [x] done\n  - [X] nested\n\n> - [ ] quoted\n\n- not [ ] a task", () => true);
+  expect(out).toContain('<input type="checkbox" class="task" data-line="2"> todo');
+  expect(out).toContain('<input type="checkbox" class="task" data-line="3" checked> done');
+  expect(out).toContain('data-line="4" checked> nested');
+  expect(out).toContain('data-line="6"> quoted');
+  expect(out.match(/class="task"/g)).toHaveLength(4);
+  expect(out).toContain('<li class="task-list-item">');
+});
+test("GitHub alerts, tables, strikethrough, autolinks, footnotes", () => {
+  const out = renderMarkdown("> [!WARNING]\n> Careful **now**\n\n> plain quote\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n~~old~~ https://x.y\n\nNote[^1].\n\n[^1]: The footnote.", () => true);
+  expect(out).toContain('<blockquote class="markdown-alert markdown-alert-warning">');
+  expect(out).toContain('<p class="markdown-alert-title">Warning</p>');
+  expect(out).toContain("<p>Careful <strong>now</strong></p>");
+  expect(out).toContain("<blockquote>\n<p>plain quote");
+  expect(out).toContain("<table>");
+  expect(out).toContain("<s>old</s>");
+  expect(out).toContain('<a href="https://x.y">https://x.y</a>');
+  expect(out).toContain('class="footnotes"');
+});

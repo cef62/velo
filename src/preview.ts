@@ -1,7 +1,9 @@
 import MarkdownIt from "markdown-it";
+import footnote from "markdown-it-footnote";
 import { readTag } from "./tags";
 
-const md = new MarkdownIt({ html: false, linkify: true });
+// GitHub flavor: tables, ~~strike~~ and autolinks are built in; task lists and alerts are the rules below.
+const md = new MarkdownIt({ html: false, linkify: true }).use(footnote);
 const esc = md.utils.escapeHtml;
 
 // Set per renderMarkdown call; the renderer is synchronous so this is safe.
@@ -31,6 +33,47 @@ md.inline.ruler.before("link", "tag", (state, silent) => {
   return true;
 });
 md.renderer.rules.tag = (tokens, i) => `<a href="#" class="tag" data-tag="${esc(tokens[i].content)}">#${esc(tokens[i].content)}</a>`;
+
+// "- [ ] x" / "- [x] x": a checkbox carrying the item's source line, so a click can toggle it in the note.
+const TASK = /^\[([ xX])\][ \t]/;
+/** Source line of a task item (optionally inside blockquotes): group 1 ends just before the box's state char. */
+export const TASK_ITEM = /^(\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s+\[)([ xX])\]/;
+// "> [!NOTE]" (TIP, IMPORTANT, WARNING, CAUTION) as the first line of a blockquote, like GitHub alerts.
+const ALERT = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*(?:\n|$)/i;
+md.core.ruler.after("inline", "gfm_tasks_alerts", (state) => {
+  const t = state.tokens;
+  for (let i = 2; i < t.length; i++) {
+    if (t[i].type !== "inline" || t[i - 1].type !== "paragraph_open") continue;
+    const open = t[i - 2];
+    const first = t[i].children?.[0];
+    const task = open.type === "list_item_open" && first?.type === "text" ? TASK.exec(first.content) : null;
+    if (task && first) {
+      first.content = first.content.slice(task[0].length);
+      const box = new state.Token("task_checkbox", "", 0);
+      box.meta = { checked: task[1] !== " ", line: open.map?.[0] ?? -1 };
+      t[i].children!.unshift(box);
+      open.attrJoin("class", "task-list-item");
+    }
+    const alert = open.type === "blockquote_open" ? ALERT.exec(t[i].content) : null;
+    if (alert) {
+      const kind = alert[1].toLowerCase();
+      open.attrJoin("class", `markdown-alert markdown-alert-${kind}`);
+      t[i].content = t[i].content.slice(alert[0].length);
+      const children: typeof t = [];
+      state.md.inline.parse(t[i].content, state.md, state.env, children);
+      t[i].children = children;
+      const title = new state.Token("alert_title", "", 0);
+      title.content = kind[0].toUpperCase() + kind.slice(1);
+      t.splice(i - 1, 0, title);
+      i++;
+    }
+  }
+});
+md.renderer.rules.task_checkbox = (tokens, i) => {
+  const { line, checked } = tokens[i].meta as { line: number; checked: boolean };
+  return `<input type="checkbox" class="task" data-line="${line}"${checked ? " checked" : ""}> `;
+};
+md.renderer.rules.alert_title = (tokens, i) => `<p class="markdown-alert-title">${esc(tokens[i].content)}</p>\n`;
 
 export function renderMarkdown(text: string, existsFn: (title: string) => boolean): string {
   exists = existsFn;
@@ -80,6 +123,8 @@ export function mountPreview(
     onTag: (tag: string) => void;
     openExternal: (url: string) => void;
     onToggle?: (visible: boolean) => void;
+    /** A task checkbox was clicked: toggle the item on this 0-based source line. */
+    onToggleTask?: (line: number) => void;
   },
 ): Preview {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -91,6 +136,12 @@ export function mountPreview(
     else el.innerHTML = renderMarkdown(text, opts.exists);
   };
   el.addEventListener("click", (e) => {
+    const box = e.target as HTMLElement;
+    if (box instanceof HTMLInputElement && box.classList.contains("task")) {
+      e.preventDefault(); // the note is the source of truth: the re-render after the edit shows the new state
+      opts.onToggleTask?.(Number(box.dataset.line));
+      return;
+    }
     const a = (e.target as HTMLElement).closest?.("a");
     if (!a) return;
     e.preventDefault(); // never navigate the app window

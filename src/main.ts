@@ -98,6 +98,7 @@ const preview = mountPreview($("preview"), {
   getText: () => editor.getText(),
   toggleLabel: () => formatBinding(keys.toggle_preview, isMac),
   ...links,
+  onToggleTask: (line) => void editor.toggleTask(line),
   onToggle: (on) => {
     $("app").classList.toggle("preview-on", on);
     $("preview-badge").hidden = !on;
