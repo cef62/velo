@@ -89,13 +89,14 @@ impl Index {
         // journal_mode returns a row, so read it instead of executing.
         let _: String = db.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
         db.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON;")?;
+        // Older indexes lack tags: drop them so the vault's reconcile reindexes every note.
+        // DROP, not DELETE: deleting every FTS5 row one by one took ~1 min at 10k notes.
+        if db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? < 2 {
+            db.execute_batch("DROP TABLE IF EXISTS notes_fts; DROP TABLE IF EXISTS notes; DROP TABLE IF EXISTS links; DROP TABLE IF EXISTS tags; PRAGMA user_version=2;")?;
+        }
         db.execute_batch(SCHEMA)?;
         // FTS5 deletes otherwise leave old segments (all trigrams) in notes_fts_data.
         db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1);")?;
-        // Older indexes lack tags: clear them so the vault's reconcile reindexes every note.
-        if db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? < 2 {
-            db.execute_batch("DELETE FROM notes_fts; DELETE FROM notes; DELETE FROM links; DELETE FROM tags; PRAGMA user_version=2;")?;
-        }
         Ok(Index { db })
     }
 
