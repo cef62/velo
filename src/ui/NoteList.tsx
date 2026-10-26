@@ -11,28 +11,44 @@ import { HighlightedText } from "./HighlightedText";
 import { useStore } from "./useStore";
 
 const LOAD_AHEAD = 50; // start paging this many rows before the loaded end
+const PAD = 4; // space around the rows inside the scroll content (css p: "1")
 
 const scroller = css({
   h: "var(--list-h, 30%)",
   flex: "none",
   overflowY: "auto",
-  p: "1",
   "[data-layout=horizontal] &": { h: "auto", minH: "0" },
 });
 const loader = css({ position: "absolute", left: "0", right: "0", display: "flex", alignItems: "center", gap: "2", px: "2.5", color: "velo.fgMuted", fontSize: "var(--velo-snippet-fs)" });
 const empty = css({ h: "full", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "1.5", textAlign: "center", color: "velo.fgMuted", fontSize: "uiSm", p: "4", "& strong": { color: "velo.fg", fontWeight: "600" }, "& span": { display: "inline-flex", alignItems: "center", gap: "1.5" } });
 
 export function NoteList({ controller, store }: { controller: Controller; store: Store<AppState> }) {
-  useStore(store, (s) => s.listVersion);
-  const { count, hasMore, sel, listActive, layout, fontSize, query, isMac, listReset } = useStore(store);
+  useStore(store, (s) => s.listVersion); // rows are read through controller.row, so a page/refresh must re-render
+  const listReset = useStore(store, (s) => s.listReset);
+  const count = useStore(store, (s) => s.count);
+  const hasMore = useStore(store, (s) => s.hasMore);
+  const sel = useStore(store, (s) => s.sel);
+  const listActive = useStore(store, (s) => s.listActive);
+  const layout = useStore(store, (s) => s.layout);
+  const fontSize = useStore(store, (s) => s.fontSize);
+  const query = useStore(store, (s) => s.query);
+  const isMac = useStore(store, (s) => s.isMac);
   const rowH = rowHeight(fontSize, layout);
   const el = useRef<HTMLDivElement>(null);
-  const [view, setView] = useState({ top: 0, h: 0 });
+  // Rendered window; state only changes when the first/last row changes, not on every scroll pixel.
+  const [a, setA] = useState(0);
+  const [b, setB] = useState(0);
 
-  const measure = () => el.current && setView({ top: el.current.scrollTop, h: el.current.clientHeight });
+  const measure = () => {
+    const e = el.current;
+    if (!e) return;
+    const s = store.get();
+    const [x, y] = visibleRange(Math.max(0, e.scrollTop - PAD), e.clientHeight, rowHeight(s.fontSize, s.layout), s.count);
+    setA(x);
+    setB(y);
+  };
   useLayoutEffect(() => {
     const e = el.current!;
-    measure();
     const ro = new ResizeObserver(measure); // divider drag, window resize
     ro.observe(e);
     return () => ro.disconnect();
@@ -47,21 +63,23 @@ export function NoteList({ controller, store }: { controller: Controller; store:
       e.scrollTop = 0;
     }
     if (sel >= 0) {
-      const top = sel * rowH;
-      if (top < e.scrollTop) e.scrollTop = top;
-      else if (top + rowH > e.scrollTop + e.clientHeight) e.scrollTop = top + rowH - e.clientHeight;
+      const top = PAD + sel * rowH;
+      if (top - PAD < e.scrollTop) e.scrollTop = top - PAD;
+      else if (top + rowH + PAD > e.scrollTop + e.clientHeight) e.scrollTop = top + rowH + PAD - e.clientHeight;
     }
     measure();
-  }, [sel, listReset, rowH]);
+  }, [sel, listReset, rowH, count]);
 
-  const [a, b] = visibleRange(view.top, view.h, rowH, count);
   useEffect(() => {
     if (hasMore && b >= count - LOAD_AHEAD) void controller.ensureRows(count);
   }, [controller, hasMore, b, count]);
 
   const state = listActive ? "selected" : "selectedIdle";
   const rows = [];
-  for (let i = a; i < b; i++) {
+  const idx = [];
+  for (let i = a; i < Math.min(b, count); i++) idx.push(i);
+  if (sel >= 0 && sel < count && (sel < a || sel >= b)) idx.push(sel); // keep the tab stop alive when scrolled away
+  for (const i of idx) {
     const h = controller.row(i);
     if (!h) continue;
     const on = i === sel;
@@ -113,13 +131,15 @@ export function NoteList({ controller, store }: { controller: Controller; store:
           <span>or <Kbd>Esc</Kbd> to clear the search</span>
         </div>
       ) : (
-        <div role="listbox" aria-label="Notes" style={{ position: "relative", height: (count + (hasMore ? 1 : 0)) * rowH }}>
+        <div style={{ padding: PAD }}>
+        <div role="listbox" aria-label="Notes" tabIndex={sel < 0 || sel >= count ? 0 : undefined} style={{ position: "relative", height: (count + (hasMore ? 1 : 0)) * rowH }}>
           {rows}
           {hasMore && (
             <div className={loader} style={{ top: count * rowH, height: rowH }}>
               <Spinner size="sm" /> Loading…
             </div>
           )}
+        </div>
         </div>
       )}
     </div>
