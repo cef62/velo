@@ -6,7 +6,7 @@ import { css } from "styled-system/css";
 import type { Settings } from "../api";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
-import { Button, Dialog, IconButton, Input, Kbd, SegmentGroup, Select, Tabs } from "@/components/ui";
+import { Button, Checkbox, Dialog, IconButton, Input, Kbd, SegmentGroup, Select, Tabs } from "@/components/ui";
 import { clampFont, recorderStep, toSettings } from "../settingsform";
 import { DEFAULTS, LABELS, formatBinding, resolve, type Action } from "../shortcuts";
 import { conflictsOf } from "./settingsModel";
@@ -56,6 +56,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
     theme: cur.theme as string,
     sort: cur.sort as string,
     fontSize: String(cur.font_size),
+    headerLabels: cur.header_labels === true,
     shortcuts: resolve(cur.shortcuts, isMac),
   }));
   const set = (p: Partial<typeof d>) => setD((x) => ({ ...x, ...p }));
@@ -152,6 +153,14 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
               <Input id="set-font" type="number" min={10} max={32} value={d.fontSize} onChange={(e) => set({ fontSize: e.target.value })} onBlur={() => set({ fontSize: String(clampFont(d.fontSize, cur.font_size)) })} className={css({ w: "72px", textAlign: "right" })} />
               <span className={help}>px · 10–32 · scales editor and list rows</span>
             </div>
+          </div>
+          <div className={frow}>
+            <span className={flab}>Header</span>
+            <Checkbox.Root checked={d.headerLabels} onCheckedChange={(x) => set({ headerLabels: x.checked === true })} size="sm">
+              <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+              <Checkbox.Label>Show labels on header buttons</Checkbox.Label>
+              <Checkbox.HiddenInput />
+            </Checkbox.Root>
           </div>
           <div className={frow}>
             <span className={flab} id="set-sort">Sort</span>

@@ -164,6 +164,7 @@ export class Controller {
       keys: resolve(s.shortcuts, this.opts.isMac),
       sort: s.sort ?? "modified", // before the first search, which pages with it
       editorStyle: s.editor_style === "plain" ? "plain" : "rich",
+      headerLabels: s.header_labels === true,
     });
     this.syncStyle();
     if (!s.notes_dir) this.store.set({ phase: "setup" });
@@ -410,7 +411,7 @@ export class Controller {
     }
   }
 
-  /** Arrow keys: move the selection, opening the row without recording a visit. */
+  /** Arrow keys: move the selection and open the row (recorded in history). */
   async step(d: 1 | -1) {
     try {
       await this.results.ensure(this.store.get().sel + d); // may page in more rows past the loaded end
@@ -418,7 +419,7 @@ export class Controller {
       console.error("load more failed", e);
     }
     this.listChanged();
-    await this.select(moveSelection(this.store.get().sel, d, this.results.count), "auto");
+    await this.select(moveSelection(this.store.get().sel, d, this.results.count));
   }
 
   /** Window blur: save now. */
@@ -709,7 +710,7 @@ export class Controller {
       return err === "not-found" ? "Folder not found" : String(err);
     }
     this.applyLook(next);
-    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, settings: null });
+    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, headerLabels: next.header_labels, settings: null });
     this.preview?.refresh(); // watermark shows the binding
     this.syncStyle();
     if (next.notes_dir !== cur.notes_dir) {

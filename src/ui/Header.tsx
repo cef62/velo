@@ -4,7 +4,7 @@ import { css } from "styled-system/css";
 import { previewPill } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
-import { IconButton, SegmentGroup, Tooltip } from "@/components/ui";
+import { Button, IconButton, SegmentGroup, Tooltip } from "@/components/ui";
 import { formatBinding, NONE, type Action } from "../shortcuts";
 import { headerMode } from "./breakpoints";
 import { OverflowMenu } from "./OverflowMenu";
@@ -26,6 +26,9 @@ const bar = css({
   "[data-layout=horizontal] &": { gridColumn: "1 / -1" },
 });
 const sep = css({ w: "1px", h: "5", bg: "velo.divider", mx: "1", flex: "none" });
+// hover on the unselected segments; the selected one keeps the indicator look
+const segHover = css({ "&:not([data-state=checked]):hover": { bg: "velo.subtle", color: "velo.fg" } });
+const overlay = css({ position: "absolute", inset: "0" });
 const pressed = css({ "&[aria-pressed=true]": { bg: "velo.accentSubtleHover", color: "velo.accentText" } });
 
 function useWidth() {
@@ -47,6 +50,7 @@ export function Header({ controller, store }: { controller: Controller; store: S
   const editorStyle = useStore(store, (s) => s.editorStyle);
   const previewOn = useStore(store, (s) => s.previewOn);
   const encrypted = useStore(store, (s) => s.encrypted);
+  const headerLabels = useStore(store, (s) => s.headerLabels);
   const mode = headerMode(useWidth());
   const tip = (text: string, action: Action | null, child: ReactElement) => {
     const b = action && keys[action] !== NONE ? formatBinding(keys[action], isMac) : "";
@@ -56,54 +60,64 @@ export function Header({ controller, store }: { controller: Controller; store: S
       </Tooltip>
     );
   };
-  const icon = (text: string, action: Action | null, glyph: ReactNode, onClick: () => void, extra: { disabled?: boolean; pressed?: boolean; controls?: string } = {}) =>
-    tip(
+  const labels = headerLabels && mode === "full";
+  const icon = (text: string, action: Action | null, glyph: ReactNode, onClick: () => void, extra: { disabled?: boolean; pressed?: boolean; controls?: string; label?: string } = {}) => {
+    const props = {
+      variant: "plain" as const,
+      size: "sm" as const,
+      "aria-label": text,
+      disabled: extra.disabled,
+      "aria-pressed": extra.pressed,
+      "aria-expanded": extra.controls ? extra.pressed : undefined,
+      "aria-controls": extra.controls,
+      className: pressed,
+      onClick,
+    };
+    return tip(
       text,
       action,
-      <IconButton
-        variant="plain"
-        size="sm"
-        aria-label={text}
-        disabled={extra.disabled}
-        aria-pressed={extra.pressed}
-        aria-expanded={extra.controls ? extra.pressed : undefined}
-        aria-controls={extra.controls}
-        className={pressed}
-        onClick={onClick}
-      >
-        {glyph}
-      </IconButton>,
+      labels && extra.label ? (
+        <Button {...props}>
+          {glyph}
+          {extra.label}
+        </Button>
+      ) : (
+        <IconButton {...props}>{glyph}</IconButton>
+      ),
     );
+  };
   const noNote = openPath === null;
   const iconOnly = mode !== "full";
-  const seg = <V extends string>(name: string, value: V, set: () => void, items: { value: V; text: string; glyph: ReactNode; action: Action }[]) => (
+  const seg = <V extends string>(name: string, value: V, set: () => void, items: { value: V; text: string; tip: string; glyph: ReactNode; action: Action }[]) => (
     <SegmentGroup.Root size="sm" value={value} onValueChange={(d) => d.value !== value && set()} aria-label={name}>
       <SegmentGroup.Indicator />
       {items.map((it) => (
-        <Tooltip key={it.value} content={`${it.text}${keys[it.action] === NONE ? "" : ` (${formatBinding(keys[it.action], isMac)})`}`} openDelay={500} disabled={!iconOnly}>
-          <SegmentGroup.Item value={it.value}>
-            {it.glyph}
-            {!iconOnly && <SegmentGroup.ItemText>{it.text}</SegmentGroup.ItemText>}
-            <SegmentGroup.ItemHiddenInput aria-label={it.text} />
-          </SegmentGroup.Item>
-        </Tooltip>
+        <SegmentGroup.Item key={it.value} value={it.value} className={segHover}>
+          {it.glyph}
+          {!iconOnly && <SegmentGroup.ItemText>{it.text}</SegmentGroup.ItemText>}
+          <SegmentGroup.ItemHiddenInput aria-label={it.text} />
+          {/* the trigger is an overlay: Tooltip.Trigger would overwrite the Item's data-state=checked, which the indicator and styles read */}
+          <Tooltip content={`${it.tip}${keys[it.action] === NONE ? "" : ` (${formatBinding(keys[it.action], isMac)})`}`} openDelay={500}>
+            <span aria-hidden className={overlay} />
+          </Tooltip>
+        </SegmentGroup.Item>
       ))}
     </SegmentGroup.Root>
   );
 
   return (
-    <header className={bar} data-tauri-drag-region={isMac || undefined} style={{ paddingLeft: isMac ? 80 : 14 }}>
+    <header className={bar} data-tauri-drag-region={isMac || undefined} style={{ paddingLeft: isMac ? 96 : 14 }}>
       <SearchField controller={controller} store={store} />
-      {icon("Tags", "toggle_tags", <Hash />, () => controller.showTags(!tagPanelOpen), { pressed: tagPanelOpen, controls: "tag-panel" })}
+      {icon("Tags", "toggle_tags", <Hash />, () => controller.showTags(!tagPanelOpen), { pressed: tagPanelOpen, controls: "tag-panel", label: "Tags" })}
       {mode !== "folded" && (
         <>
           {seg("Sort", sort, () => void controller.toggleSort(), [
-            { value: "modified", text: "Recent", glyph: <Clock size={14} />, action: "toggle_sort" },
-            { value: "title", text: "A→Z", glyph: <ArrowDownAZ size={14} />, action: "toggle_sort" },
+            { value: "modified", text: "Recent", tip: "Sort by last modified", glyph: <Clock size={14} />, action: "toggle_sort" },
+            { value: "title", text: "A→Z", tip: "Sort by title", glyph: <ArrowDownAZ size={14} />, action: "toggle_sort" },
           ])}
           {seg("Edit style", editorStyle, () => void controller.toggleStyle(), [
-            { value: "rich", text: "Rich", glyph: <Type size={14} />, action: "toggle_rich" },
-            { value: "plain", text: "Plain", glyph: <Code size={14} />, action: "toggle_rich" },
+            { value: "rich", text: "Rich", tip: "Rich editing", glyph: <Type size={14} />, action: "toggle_rich" },
+            { value: "plain", text: "Plain", tip: "Plain editing", glyph: <Code size={14} />, action: "toggle_rich" },
           ])}
         </>
       )}
@@ -115,18 +129,18 @@ export function Header({ controller, store }: { controller: Controller; store: S
               Preview
             </button>,
           )
-        : icon("Preview", "toggle_preview", <Eye />, () => controller.togglePreview(), { pressed: false })}
+        : icon("Preview", "toggle_preview", <Eye />, () => controller.togglePreview(), { pressed: false, label: "Preview" })}
       {mode === "full" && <span className={sep} role="separator" />}
       {mode === "folded" ? (
         <OverflowMenu controller={controller} store={store} />
       ) : (
         <>
-          {icon(encrypted ? "Unlock note" : "Lock note", "toggle_lock", encrypted ? <LockOpen /> : <Lock />, () => void controller.toggleLock(), { disabled: noNote })}
-          {icon("Lock all", "lock_all", <FolderLock />, () => void controller.lockEverything())}
-          {icon("Move to Trash", "delete_note", <Trash2 />, () => void controller.deleteNote(), { disabled: noNote })}
+          {icon(encrypted ? "Unlock note" : "Lock note", "toggle_lock", encrypted ? <LockOpen /> : <Lock />, () => void controller.toggleLock(), { disabled: noNote, label: encrypted ? "Unlock" : "Lock" })}
+          {icon("Lock all", "lock_all", <FolderLock />, () => void controller.lockEverything(), { label: "Lock all" })}
+          {icon("Move to Trash", "delete_note", <Trash2 />, () => void controller.deleteNote(), { disabled: noNote, label: "Trash" })}
         </>
       )}
-      {icon("Settings", "settings", <Settings />, () => void controller.openSettings())}
+      {icon("Settings", "settings", <Settings />, () => void controller.openSettings(), { label: "Settings" })}
     </header>
   );
 }

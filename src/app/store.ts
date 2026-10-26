@@ -48,6 +48,7 @@ export interface AppState {
   layout: "vertical" | "horizontal";
   theme: "system" | "light" | "dark";
   fontSize: number;
+  headerLabels: boolean;
   sort: "modified" | "title";
   keys: Record<Action, string>;
   isMac: boolean;
@@ -82,6 +83,7 @@ export const initialState = (isMac: boolean): AppState => ({
   layout: "vertical",
   theme: "system",
   fontSize: 14,
+  headerLabels: false,
   sort: "modified",
   keys: resolve(undefined, isMac),
   isMac,

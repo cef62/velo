@@ -40,19 +40,17 @@ test("select refused snaps back", async () => {
   expect(store.get().openPath).toBe(P("A"));
 });
 
-test("auto-shown note not in history until edited", async () => {
-  const { c, api, store } = setup();
+test("an arrow visit is recorded in history", async () => {
+  const { c, store } = setup();
   await c.runSearch(true);
   await settle();
   await c.select(0); // explicit A
-  await c.step(1); // arrow: B, auto
+  await c.step(1); // arrow: B
   expect(store.get().openPath).toBe(P("B"));
   await c.navigate("back");
   expect(store.get().openPath).toBe(P("A"));
-  api.openNote.mockClear();
-  await c.navigate("forward"); // B was never recorded
-  expect(api.openNote).not.toHaveBeenCalled();
-  expect(store.get().openPath).toBe(P("A"));
+  await c.navigate("forward");
+  expect(store.get().openPath).toBe(P("B"));
 });
 
 test("an auto-shown note joins history on its first edit", async () => {
@@ -60,7 +58,7 @@ test("an auto-shown note joins history on its first edit", async () => {
   await c.runSearch(true);
   await settle();
   await c.select(0);
-  await c.step(1);
+  await c.select(1, "auto");
   c.editorOpts().onEdit();
   await c.navigate("back");
   await c.navigate("forward");
