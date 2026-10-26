@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Note title bar and conflict banner</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+.frame{border:1px solid var(--g5);border-radius:8px;overflow:hidden;background:var(--bg)}
+.sh{font:600 12px/1 Inter,system-ui,sans-serif;color:var(--g11);margin:0}
+</style>
+</helmet>
+<div class="board" style="width: 1840px; height: 1080px; padding: 56px 60px; display: flex; gap: 80px">
+  <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+    <div class="{{t.cls}} sheet" style="width: 820px; padding: 24px; display: flex; flex-direction: column; gap: 12px; flex: none">
+      <h2 class="h-sec" style="margin-bottom: 6px">{{t.label}}</h2>
+
+      <p class="sh">Default — double-click or ⌘R to rename</p>
+      <div class="frame"><div class="tbar"><h2 class="ttl">Velo roadmap</h2></div></div>
+
+      <p class="sh">Inline rename</p>
+      <div class="frame"><div class="tbar"><input class="ren" aria-label="Note title" value="Velo roadmap — 1.0"><span class="hint"><span class="kbd">↩</span> Rename <span class="kbd" style="margin-left: 6px">Esc</span> Cancel</span></div></div>
+
+      <p class="sh">Saving</p>
+      <div class="frame"><div class="tbar"><h2 class="ttl">Velo roadmap</h2><span class="st" role="status"><svg class="i s spin" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>Saving…</span></div></div>
+
+      <p class="sh">Indexing (first launch / folder change)</p>
+      <div class="frame"><div class="tbar"><h2 class="ttl">Velo roadmap</h2><span class="st" role="status"><svg class="i s spin" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>Indexing… 3,200 / 10,004<span class="prog" aria-hidden="true"><i style="width: 32%"></i></span></span></div></div>
+
+      <p class="sh">Error</p>
+      <div class="frame"><div class="tbar"><h2 class="ttl">Velo roadmap</h2><span class="st err" role="alert"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4M12 17h.01"/></svg>Couldn’t save — the notes folder is read-only</span><button class="btn outline sm">Retry</button></div></div>
+
+      <p class="sh">Long title truncates; status never wraps</p>
+      <div class="frame"><div class="tbar"><h2 class="ttl">Meeting notes: design sync with the platform group about the Tauri 2 migration and window state</h2><span class="st" role="status"><svg class="i s spin" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>Saving…</span></div></div>
+
+      <p class="sh" style="margin-top: 10px">8 · Conflict banner — above the editor, under the title bar</p>
+      <div class="frame">
+        <div class="tbar"><h2 class="ttl">Velo roadmap</h2></div>
+        <div class="banner" role="status">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4M12 17h.01"/></svg>
+          <span>This file changed on disk. Your edits were saved to <a href="#">Velo roadmap (conflict 2026-10-26 14.32)</a></span>
+          <button class="ib xs" aria-label="Dismiss"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        </div>
+        <div class="edw" style="height: 150px; flex: none">
+          <div class="col md" style="padding-top: 20px">
+            <h1>Velo roadmap</h1>
+            <p>Ship the <strong>1.0</strong> refresh before the winter break. Speed first, then <em>polish</em>.</p>
+          </div>
+        </div>
+      </div>
+      <p class="cap" style="color: var(--g11)">Amber.3 surface / amber.12 text (10.5:1 light, 13:1 dark). Link opens the conflict copy (also ⌘J to come back). Stays until dismissed or the note changes.</p>
+    </div>
+  </sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1840,"height":1080}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { themes: [{ label: 'Light', cls: 'vl' }, { label: 'Dark', cls: 'vd' }] };
+  }
+}
+</script>
+</body>
+</html>

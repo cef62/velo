@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Preview pane</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+</style>
+</helmet>
+<div class="board" style="width: 1920px; height: 1300px; padding: 56px 60px; display: flex; flex-direction: column; gap: 48px">
+  <div style="display: flex; flex-direction: column; gap: 16px">
+    <div style="display: flex; align-items: baseline; gap: 16px"><h2 class="h-sec">Preview</h2><p class="cap">Three cues, none heavy: the header indicator turns into a solid pill, a 30 px indigo strip names the mode, and the caret disappears. Typography is identical to Rich.</p></div>
+    <div style="display: flex; gap: 80px">
+      <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+        <div class="{{t.cls}} win" style="width: 860px; height: 620px">
+          <header class="hdr">
+            <div class="tl" aria-hidden="true"><i></i><i></i><i></i></div>
+            <label class="inp srch"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input aria-label="Search or create" placeholder="Search or create…"><span class="kbd">⌘L</span></label>
+            <button class="ib" aria-pressed="false" aria-label="Tags (⌘⇧T)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></svg></button>
+            <div class="seg" role="radiogroup" aria-label="Sort"><button role="radio" aria-checked="true">Recent</button><button role="radio" aria-checked="false">A→Z</button></div>
+            <div class="seg" role="radiogroup" aria-label="Edit style"><button role="radio" aria-checked="true">Rich</button><button role="radio" aria-checked="false">Plain</button></div>
+            <button class="pv-on" aria-pressed="true" aria-label="Preview on (⌘⇧P)"><i></i>Preview</button>
+            <span class="sep"></span>
+            <button class="ib" aria-label="Lock note"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
+            <button class="ib" aria-label="Lock all"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="8" height="5" x="14" y="17" rx="1"/><path d="M10 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v2.5"/><path d="M20 17v-2a2 2 0 1 0-4 0v2"/></svg></button>
+            <button class="ib" aria-label="Move to Trash"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>
+            <button class="ib" aria-label="Settings"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.650 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+          </header>
+          <div class="tbar"><h2 class="ttl">Velo roadmap</h2></div>
+          <div class="pvbar" role="status"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>Preview — read only<span style="margin-left: auto; display: inline-flex; align-items: center; gap: 6px"><span class="kbd">⌘⇧P</span> to edit</span></div>
+          <div class="edw">
+            <div class="col md">
+              <h1>Velo roadmap</h1>
+              <p>Ship the <strong>1.0</strong> refresh before the winter break. Speed first, then <em>polish</em>. See <a class="wl" href="#">Search ranking</a> and the <a href="#">Tauri docs</a>. <span class="tg">#work</span> <span class="tg">#idea</span></p>
+              <h2>This week</h2>
+              <ul>
+                <li>Virtualized list — test against the 10k-note fixture</li>
+                <li class="task"><input type="checkbox" class="cb" checked aria-label="Park UI tokens in the Panda preset"><span class="done">Park UI tokens in the Panda preset</span></li>
+                <li class="task"><input type="checkbox" class="cb" aria-label="Conflict banner copy"><span>Conflict banner copy</span></li>
+              </ul>
+              <blockquote>Nothing should get between a thought and the page.</blockquote>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 16px">
+    <div style="display: flex; align-items: baseline; gap: 16px"><h2 class="h-sec">Empty note in preview</h2><p class="cap">Watermark centered in the pane, fg.muted, never selectable; disappears as soon as the note has content.</p></div>
+    <div style="display: flex; gap: 80px">
+      <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+        <div class="{{t.cls}} win" style="width: 860px; height: 420px">
+          <div class="tbar"><h2 class="ttl">Groceries</h2></div>
+          <div class="pvbar" role="status"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>Preview — read only<span style="margin-left: auto; display: inline-flex; align-items: center; gap: 6px"><span class="kbd">⌘⇧P</span> to edit</span></div>
+          <div class="edw">
+            <div class="wm" style="user-select: none">
+              <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 28px; height: 28px; stroke-width: 1.5"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>
+              <span style="display: inline-flex; align-items: center; gap: 8px">Empty note — press <span class="kbd" style="height: 22px; font-size: 12px">⌘⇧P</span> to edit</span>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1920,"height":1300}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { themes: [{ label: 'Light', cls: 'vl' }, { label: 'Dark', cls: 'vd' }] };
+  }
+}
+</script>
+</body>
+</html>

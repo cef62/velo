@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tag panel and filter line</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+</style>
+</helmet>
+<div class="board" style="width: 2000px; height: 960px; padding: 56px 60px; display: flex; gap: 80px">
+  <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+    <div style="display: flex; flex-direction: column; gap: 16px; width: 900px">
+      <p class="lbl">{{t.label}} · tag panel open (⌘⇧T)</p>
+      <div class="{{t.cls}} win" style="width: 900px; height: 420px">
+        <header class="hdr">
+          <div class="tl" aria-hidden="true"><i></i><i></i><i></i></div>
+          <label class="inp srch"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input aria-label="Search or create" placeholder="Search or create…"><span class="kbd">⌘L</span></label>
+          <button class="ib" aria-pressed="true" aria-label="Tags (⌘⇧T)" aria-expanded="true" aria-controls="tags"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></svg></button>
+          <div class="seg" role="radiogroup" aria-label="Sort"><button role="radio" aria-checked="true">Recent</button><button role="radio" aria-checked="false">A→Z</button></div>
+          <div class="seg" role="radiogroup" aria-label="Edit style"><button role="radio" aria-checked="true">Rich</button><button role="radio" aria-checked="false">Plain</button></div>
+          <button class="ib" aria-label="Preview (⌘⇧P)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          <span class="sep"></span>
+          <button class="ib" aria-label="Lock note (⌘⇧E)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
+          <button class="ib" aria-label="Lock all (⌥⌘E)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="8" height="5" x="14" y="17" rx="1"/><path d="M10 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v2.5"/><path d="M20 17v-2a2 2 0 1 0-4 0v2"/></svg></button>
+          <button class="ib" aria-label="Move to Trash (⌘⌫)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>
+          <button class="ib" aria-label="Settings (⌘,)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+        </header>
+        <section class="tpanel" id="tags" aria-label="Tags">
+          <div style="display: flex; align-items: center; gap: 10px">
+            <span style="font-size: 12px; font-weight: 600; color: var(--g12)">Tags</span>
+            <span style="font-size: 12px; color: var(--g11)">2 selected · 214 notes</span>
+            <button class="btn ghost sm" style="margin-left: auto">Clear</button>
+            <span class="hint"><span class="kbd">⌘⇧T</span> close</span>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px">
+            <sc-for list="{{tags}}" as="c" hint-placeholder-count="18">
+              <button class="chip {{c.cls}}" aria-pressed="{{c.on}}">#{{c.n}} <span class="n">{{c.c}}</span></button>
+            </sc-for>
+          </div>
+        </section>
+        <div class="list" style="flex: none">
+          <div class="row sel2"><span class="tt">Velo roadmap</span><span class="sn">Ship the 1.0 refresh before the winter break</span><span class="dt">now</span></div>
+          <div class="row"><span class="tt">Search ranking ideas</span><span class="sn">Title prefix &gt; title word &gt; body; recency as tiebreak</span><span class="dt">4d</span></div>
+          <div class="row"><span class="tt">Design sync — Oct 24</span><span class="sn">Header collapse rules, divider affordance</span><span class="dt">2d</span></div>
+        </div>
+      </div>
+
+      <p class="lbl" style="margin-top: 20px">{{t.label}} · panel closed, filter still applied</p>
+      <div class="{{t.cls}} win" style="width: 900px; height: 280px">
+        <header class="hdr">
+          <div class="tl" aria-hidden="true"><i></i><i></i><i></i></div>
+          <label class="inp srch"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input aria-label="Search or create" placeholder="Search or create…"><span class="kbd">⌘L</span></label>
+          <button class="ib" aria-pressed="false" aria-label="Tags (⌘⇧T), 2 active"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></svg></button>
+          <div class="seg" role="radiogroup" aria-label="Sort"><button role="radio" aria-checked="true">Recent</button><button role="radio" aria-checked="false">A→Z</button></div>
+          <div class="seg" role="radiogroup" aria-label="Edit style"><button role="radio" aria-checked="true">Rich</button><button role="radio" aria-checked="false">Plain</button></div>
+          <button class="ib" aria-label="Preview (⌘⇧P)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          <span class="sep"></span>
+          <button class="ib" aria-label="Lock note"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
+          <button class="ib" aria-label="Lock all"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="8" height="5" x="14" y="17" rx="1"/><path d="M10 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v2.5"/><path d="M20 17v-2a2 2 0 1 0-4 0v2"/></svg></button>
+          <button class="ib" aria-label="Move to Trash"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>
+          <button class="ib" aria-label="Settings"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+        </header>
+        <div class="fbar" role="status">Filtered by <b>#work</b> <b>#idea</b> <span aria-hidden="true">·</span> <button class="btn link sm" style="height: 22px; font-size: 12px">Clear</button><span style="margin-left: auto">214 notes</span></div>
+        <div class="list" style="flex: none">
+          <div class="row sel2"><span class="tt">Velo roadmap</span><span class="sn">Ship the 1.0 refresh before the winter break</span><span class="dt">now</span></div>
+          <div class="row"><span class="tt">Search ranking ideas</span><span class="sn">Title prefix &gt; title word &gt; body; recency as tiebreak</span><span class="dt">4d</span></div>
+          <div class="row"><span class="tt">Design sync — Oct 24</span><span class="sn">Header collapse rules, divider affordance</span><span class="dt">2d</span></div>
+          <div class="row"><span class="tt">Panda CSS notes</span><span class="sn">Recipes vs. slot recipes</span><span class="dt">2w</span></div>
+        </div>
+      </div>
+      <p class="cap">Chips: Tab enters the group, ←/→ move, Space toggles, Esc closes the panel and returns focus to search. Filter line is 30 px, indigo.2, and the only place Clear lives once the panel is closed.</p>
+    </div>
+  </sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2000,"height":960}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const sel = ['work', 'idea'];
+    const raw = [['work',148],['idea',62],['recipes',31],['reading',27],['velo',24],['meeting',22],['travel',9],['journal',18],['design',16],['tauri',14],['italian',12],['books',11],['home',9],['gift',7],['finance',6],['music',5],['someday',4],['draft',3],['archive',2]];
+    return {
+      themes: [{ label: 'Light', cls: 'vl' }, { label: 'Dark', cls: 'vd' }],
+      tags: raw.map(([n, c], i) => ({ n, c, on: sel.includes(n) ? 'true' : 'false', cls: n === 'velo' ? 'fv' : (n === 'recipes' ? 'h' : '') }))
+    };
+  }
+}
+</script>
+</body>
+</html>

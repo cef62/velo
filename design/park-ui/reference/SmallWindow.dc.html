@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Small window behaviour</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+.mi .ck{width:16px;display:inline-flex;color:var(--a11)}
+.sm-col{padding:18px 20px 24px !important}
+</style>
+</helmet>
+<div class="board" style="width: 1400px; height: 1060px; padding: 48px 60px; display: flex; flex-direction: column; gap: 36px">
+  <div style="display: flex; flex-direction: column; gap: 14px">
+    <p class="lbl">600 × 400 · vertical · overflow menu open (⋯) — the shortcuts still work when actions are folded away</p>
+    <div style="display: flex; gap: 80px">
+      <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+        <div class="{{t.cls}} win" style="width: 600px; height: 400px">
+          <header class="hdr">
+            <div class="tl" aria-hidden="true"><i></i><i></i><i></i></div>
+            <label class="inp srch"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input aria-label="Search or create" placeholder="Search or create…"><span class="kbd">⌘L</span></label>
+            <button class="ib" aria-pressed="false" aria-label="Tags (⌘⇧T)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></svg></button>
+            <button class="ib" aria-pressed="false" aria-label="Preview (⌘⇧P)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button>
+            <span style="position: relative; display: inline-flex">
+              <button class="ib" aria-pressed="true" aria-haspopup="menu" aria-expanded="true" aria-label="More actions"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+              <div class="menu" role="menu" aria-label="More actions" style="top: 38px; right: -38px">
+                <div class="mh">Sort</div>
+                <button class="mi h" role="menuitemradio" aria-checked="true"><span class="ck"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></span>Recent</button>
+                <button class="mi" role="menuitemradio" aria-checked="false"><span class="ck"></span>Title A→Z</button>
+                <div class="mh">Edit style</div>
+                <button class="mi" role="menuitemradio" aria-checked="true"><span class="ck"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></span>Rich<span class="kbd">⌘⇧R</span></button>
+                <button class="mi" role="menuitemradio" aria-checked="false"><span class="ck"></span>Plain</button>
+                <div class="msep" role="separator"></div>
+                <button class="mi" role="menuitem"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Lock note<span class="kbd">⌘⇧E</span></button>
+                <button class="mi" role="menuitem"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="8" height="5" x="14" y="17" rx="1"/><path d="M10 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v2.5"/><path d="M20 17v-2a2 2 0 1 0-4 0v2"/></svg>Lock all<span class="kbd">⌥⌘E</span></button>
+                <button class="mi" role="menuitem"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>Move to Trash<span class="kbd">⌘⌫</span></button>
+              </div>
+            </span>
+            <button class="ib" aria-label="Settings (⌘,)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+          </header>
+          <div class="list" style="flex: none; height: 128px">
+            <div class="row sel2"><span class="tt">Velo roadmap</span><span class="sn">Ship the 1.0 refresh before the winter break</span><span class="dt">now</span></div>
+            <div class="row"><span class="tt">Reading list</span><span class="sn">Piranesi, The Overstory</span><span class="dt">3h</span></div>
+            <div class="row"><span class="tt">Ragù alla bolognese</span><span class="sn">Soffritto low and slow</span><span class="dt">5h</span></div>
+            <div class="row"><span class="tt">Design sync — Oct 24</span><span class="sn">Header collapse rules</span><span class="dt">2d</span></div>
+          </div>
+          <div class="split-h" role="separator" aria-label="Resize list" tabindex="0"></div>
+          <div class="tbar" style="padding: 0 16px"><h2 class="ttl">Velo roadmap</h2><span class="st"><svg class="i s spin" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>Saving…</span></div>
+          <div class="edw"><div class="col md sm-col"><p>Ship the <strong>1.0</strong> refresh before the winter break. Speed first, then <em>polish</em>. See <a class="wl" href="#">Search ranking</a>.</p></div></div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 14px">
+    <p class="lbl">600 × 400 · horizontal · list min 200 px, note min 320 px</p>
+    <div style="display: flex; gap: 80px">
+      <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+        <div class="{{t.cls}} win" style="width: 600px; height: 400px">
+          <header class="hdr">
+            <div class="tl" aria-hidden="true"><i></i><i></i><i></i></div>
+            <label class="inp srch f"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input aria-label="Search or create" value="ragu"><span class="hint"><span class="kbd">⇧↩</span></span></label>
+            <button class="ib" aria-pressed="false" aria-label="Tags (⌘⇧T)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></svg></button>
+            <button class="pv-on" aria-pressed="true" aria-label="Preview on (⌘⇧P)" style="padding: 0 8px"><i></i>Preview</button>
+            <button class="ib" aria-haspopup="menu" aria-label="More actions"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+            <button class="ib" aria-label="Settings (⌘,)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+          </header>
+          <div style="flex: 1; display: flex; min-height: 0">
+            <div class="list" style="flex: none; width: 220px">
+              <div class="row row2 sel"><div class="l1"><span class="tt">Ragù alla bolognese</span><span class="dt">5h</span></div><span class="sn">Soffritto low and slow, 20 min</span></div>
+              <div class="row row2"><div class="l1"><span class="tt">Ragù bianco</span><span class="dt">3mo</span></div><span class="sn">No tomato; white wine, nutmeg</span></div>
+            </div>
+            <div class="split-v" role="separator" aria-label="Resize list" tabindex="0"></div>
+            <div style="flex: 1; display: flex; flex-direction: column; min-width: 0">
+              <div class="tbar" style="padding: 0 16px"><h2 class="ttl">Ragù alla bolognese</h2></div>
+              <div class="pvbar" style="padding: 0 16px">Preview — read only<span style="margin-left: auto" class="kbd">⌘⇧P</span></div>
+              <div class="edw"><div class="col md sm-col"><h2 style="margin-top: 0">Soffritto</h2><ul><li>Carrot, celery, onion — fine dice</li><li>Low heat, 20 minutes</li></ul></div></div>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+  <div class="vl sheet" style="padding: 16px 20px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; font-size: 12px; line-height: 1.5">
+    <p style="margin: 0"><b>≥ 900 px</b> — full header: labelled segments, separator, four icon buttons.</p>
+    <p style="margin: 0"><b>720–899 px</b> — segments go icon-only (clock / A→Z, type / code), separator drops; tooltips carry the labels.</p>
+    <p style="margin: 0"><b>&lt; 720 px</b> — Sort, Edit style, Lock, Lock all, Trash fold into ⋯. Search, #, Preview, ⋯, Settings stay. Search never shrinks below 180 px; title truncates before status.</p>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1400,"height":1060}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { themes: [{ label: 'Light', cls: 'vl' }, { label: 'Dark', cls: 'vd' }] };
+  }
+}
+</script>
+</body>
+</html>

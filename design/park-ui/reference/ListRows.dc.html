@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Note list rows</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+.sh{font:600 12px/1 Inter,system-ui,sans-serif;color:var(--g11);margin:0;display:flex;justify-content:space-between}
+.sh span{font-weight:400;font-family:"JetBrains Mono",monospace;font-size:11px}
+.frame{border:1px solid var(--g5);border-radius:8px;overflow:hidden;background:var(--bg)}
+</style>
+</helmet>
+<div class="board" style="width: 1440px; height: 1560px; padding: 56px 60px; display: flex; gap: 80px">
+  <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+    <div class="{{t.cls}} sheet" style="width: 620px; padding: 24px; display: flex; flex-direction: column; gap: 18px; flex: none">
+      <h2 class="h-sec">{{t.label}}</h2>
+
+      <p class="sh">Compact row — vertical layout<span>h = round(2.15 × S) · 30 @ 14</span></p>
+      <div class="frame"><div class="list" role="listbox" aria-label="Notes" style="flex: none">
+        <div class="row" role="option" aria-selected="false"><span class="tt">Reading list</span><span class="sn">Piranesi, The Overstory, Hyperion, Tomorrow and Tomorrow</span><span class="dt">3h</span></div>
+        <div class="row sel" role="option" aria-selected="true"><span class="tt">Velo roadmap</span><span class="sn">Ship the 1.0 refresh before the winter break. Speed first</span><span class="dt">now</span></div>
+        <div class="row" role="option" aria-selected="false"><span class="lk"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span><span class="tt">Journal 2026</span><span class="sn"></span><span class="dt">5d</span></div>
+        <div class="row" role="option" aria-selected="false"><span class="tt">A note whose title is long enough that it has to truncate</span><span class="sn">and the snippet gives way first</span><span class="dt">2mo</span></div>
+        <div class="row ld"><svg class="i s spin" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>Loading…</div>
+      </div></div>
+
+      <p class="sh">Two-line row — horizontal layout<span>h = round(3.3 × S) · 46 @ 14</span></p>
+      <div class="frame" style="width: 340px"><div class="list" role="listbox" aria-label="Notes" style="flex: none">
+        <div class="row row2" role="option" aria-selected="false"><div class="l1"><span class="tt">Reading list</span><span class="dt">3h</span></div><span class="sn">Piranesi, The Overstory, Hyperion, Tomorrow and…</span></div>
+        <div class="row row2 sel" role="option" aria-selected="true"><div class="l1"><span class="tt">Velo roadmap</span><span class="dt">now</span></div><span class="sn">Ship the 1.0 refresh before the winter break…</span></div>
+        <div class="row row2 sel2" role="option" aria-selected="true"><div class="l1"><span class="tt">Velo roadmap</span><span class="dt">now</span></div><span class="sn">Idle selection — focus is in the editor</span></div>
+        <div class="row row2" role="option" aria-selected="false"><div class="l1"><span class="lk"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span><span class="tt">Journal 2026</span><span class="dt">5d</span></div><span class="sn">Locked</span></div>
+      </div></div>
+      <p class="cap" style="color: var(--g11); margin-top: -8px">Locked rows: lock glyph + title only; the snippet line reads “Locked” in two-line mode so row height stays fixed.</p>
+
+      <sc-for list="{{sizes}}" as="z" hint-placeholder-count="3">
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <p class="sh">Font size {{z.s}} px<span>{{z.spec}}</span></p>
+          <div class="frame"><div class="list" style="flex: none">
+            <sc-for list="{{z.rows}}" as="r" hint-placeholder-count="3">
+              <div class="row {{r.cls}}" style="height: {{z.h}}; font-size: {{z.f1}}"><span class="tt">{{r.t}}</span><span class="sn" style="font-size: {{z.f2}}">{{r.s}}</span><span class="dt" style="font-size: {{z.f3}}">{{r.d}}</span></div>
+            </sc-for>
+          </div></div>
+        </div>
+      </sc-for>
+
+      <p class="sh">Empty results<span>replaces the list body</span></p>
+      <div class="frame" style="height: 170px; display: flex">
+        <div class="empty">
+          <strong>No notes match “quarterly okr”</strong>
+          <span style="display: inline-flex; align-items: center; gap: 6px">Press <span class="kbd">⇧↩</span> to create a note with that title</span>
+          <span style="display: inline-flex; align-items: center; gap: 6px">or <span class="kbd">Esc</span> to clear the search</span>
+        </div>
+      </div>
+    </div>
+  </sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const rows = [
+      { t: 'Velo roadmap', s: 'Ship the 1.0 refresh before the winter break', d: 'now', cls: 'sel' },
+      { t: 'Ragù alla bolognese', s: 'Soffritto low and slow, 20 min', d: '5h', cls: '' },
+      { t: 'Panda CSS notes', s: 'Recipes vs. slot recipes', d: '2w', cls: '' }
+    ];
+    return {
+      themes: [{ label: 'Light', cls: 'vl' }, { label: 'Dark', cls: 'vd' }],
+      sizes: [
+        { s: '12', h: '26px', f1: '12px', f2: '11px', f3: '11px', spec: 'row 26 · title 12 · snippet 11', rows },
+        { s: '14', h: '30px', f1: '14px', f2: '13px', f3: '12px', spec: 'row 30 · title 14 · snippet 13 (default)', rows },
+        { s: '20', h: '43px', f1: '20px', f2: '19px', f3: '16px', spec: 'row 43 · title 20 · snippet 19', rows }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

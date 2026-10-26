@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>First run, choose notes folder</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+.mark{width:52px;height:52px;border-radius:12px;background:var(--a9);color:#fff;display:flex;align-items:center;justify-content:center;font:700 28px/1 Inter,system-ui,sans-serif;letter-spacing:-.04em}
+</style>
+</helmet>
+<div class="board" style="width: 2000px; height: 760px; padding: 48px 60px; display: flex; gap: 80px">
+  <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+    <div style="display: flex; flex-direction: column; gap: 14px">
+      <p class="lbl">{{t.label}} · first launch, no folder yet</p>
+      <div class="{{t.cls}} win" style="width: 900px; height: 620px">
+        <div style="height: 40px; display: flex; align-items: center; padding: 0 14px; background: var(--chrome); flex: none"><div class="tl" aria-hidden="true"><i></i><i></i><i></i></div></div>
+        <main style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; padding: 40px; text-align: center; background: var(--chrome)">
+          <div class="mark" aria-hidden="true">v</div>
+          <div style="display: flex; flex-direction: column; gap: 10px; align-items: center">
+            <h1 style="margin: 0; font: 700 26px/1.2 Inter, system-ui, sans-serif; letter-spacing: -0.02em; color: var(--g12)">Choose a notes folder</h1>
+            <p style="margin: 0; max-width: 420px; font-size: 15px; line-height: 1.55; color: var(--g11)">velo keeps every note as a plain Markdown file in a folder you pick. Existing files appear as notes — nothing is moved or renamed.</p>
+          </div>
+          <button class="btn solid lg fv"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>Choose folder… <span class="kbd" style="background: transparent; color: inherit; border-color: rgba(255,255,255,.55); box-shadow: none; margin-left: 4px">↩</span></button>
+          <p style="margin: 0; font-size: 12px; color: var(--g11)">You can change it later in Settings (⌘,).</p>
+        </main>
+      </div>
+    </div>
+  </sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2000,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { themes: [{ label: 'Light', cls: 'vl' }, { label: 'Dark', cls: 'vd' }] };
+  }
+}
+</script>
+</body>
+</html>

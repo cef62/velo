@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>velo foundations</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+</style>
+</helmet>
+<div class="board" style="width: 1800px; height: 1500px; padding: 56px 60px; display: flex; flex-direction: column; gap: 40px">
+  <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 40px">
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <h1 style="margin: 0; font: 700 40px/1.1 Inter, system-ui, sans-serif; letter-spacing: -0.02em">velo — visual direction</h1>
+      <p class="cap" style="font-size: 15px; max-width: 900px">Park UI preset: <b>accentColor: indigo</b> · <b>grayColor: slate</b> · <b>radius: md</b>. Cool, quiet neutrals so notes read first; one blue accent reserved for selection, links, focus and the primary action.</p>
+    </div>
+    <div style="display: flex; gap: 8px">
+      <span class="badge gray vl" style="background: #f0f0f3">Radix Indigo</span>
+      <span class="badge gray vl" style="background: #f0f0f3">Radix Slate</span>
+      <span class="badge gray vl" style="background: #f0f0f3">Inter · JetBrains Mono</span>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 80px">
+    <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+      <div class="{{t.cls}} sheet" style="padding: 28px; display: flex; flex-direction: column; gap: 22px">
+        <div style="display: flex; justify-content: space-between; align-items: baseline">
+          <h2 class="h-sec">{{t.label}}</h2>
+          <span style="font-size: 12px; color: var(--g11)">{{t.note}}</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <div style="font-size: 12px; font-weight: 600; color: var(--g11)">Accent — indigo.1 → indigo.12</div>
+          <div style="display: flex; gap: 4px">
+            <sc-for list="{{t.acc}}" as="s" hint-placeholder-count="12">
+              <div style="width: 58px; height: 58px; border-radius: 6px; background: {{s.hex}}; color: {{s.fg}}; display: flex; flex-direction: column; justify-content: space-between; padding: 6px; box-sizing: border-box; font: 500 10px/1.1 Inter, sans-serif; border: 1px solid rgba(128,128,140,.18)">
+                <span style="font-weight: 700; font-size: 12px">{{s.n}}</span><span>{{s.hex}}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <div style="font-size: 12px; font-weight: 600; color: var(--g11)">Gray — slate.1 → slate.12</div>
+          <div style="display: flex; gap: 4px">
+            <sc-for list="{{t.gray}}" as="s" hint-placeholder-count="12">
+              <div style="width: 58px; height: 58px; border-radius: 6px; background: {{s.hex}}; color: {{s.fg}}; display: flex; flex-direction: column; justify-content: space-between; padding: 6px; box-sizing: border-box; font: 500 10px/1.1 Inter, sans-serif; border: 1px solid rgba(128,128,140,.18)">
+                <span style="font-weight: 700; font-size: 12px">{{s.n}}</span><span>{{s.hex}}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <div style="font-size: 12px; font-weight: 600; color: var(--g11)">Status — red (errors, missing links) · amber (conflict) · grass (ok)</div>
+          <div style="display: flex; gap: 4px">
+            <sc-for list="{{t.status}}" as="s" hint-placeholder-count="7">
+              <div style="width: 104px; height: 44px; border-radius: 6px; background: {{s.hex}}; color: {{s.fg}}; display: flex; flex-direction: column; justify-content: center; padding: 0 8px; box-sizing: border-box; font: 500 10px/1.3 Inter, sans-serif; border: 1px solid rgba(128,128,140,.18)">
+                <span style="font-weight: 700; font-size: 11px">{{s.n}}</span><span>{{s.hex}}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <table class="tbl">
+          <thead><tr><th>Semantic token</th><th>Maps to</th><th>Used for</th><th style="text-align: right">Contrast</th></tr></thead>
+          <tbody>
+            <sc-for list="{{t.sem}}" as="r" hint-placeholder-count="12">
+              <tr>
+                <td style="height: 34px"><span style="display: inline-flex; align-items: center; gap: 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px"><i style="width: 14px; height: 14px; border-radius: 4px; display: inline-block; background: {{r.hex}}; border: 1px solid var(--g6)"></i>{{r.tok}}</span></td>
+                <td style="height: 34px; color: var(--g11); font-size: 12px">{{r.map}}</td>
+                <td style="height: 34px; font-size: 12px">{{r.use}}</td>
+                <td style="height: 34px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--g11)">{{r.cr}}</td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+    </sc-for>
+  </div>
+
+  <div class="vl" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px">
+    <div class="sheet" style="padding: 24px; display: flex; flex-direction: column; gap: 14px">
+      <h2 class="h-sec" style="font-size: 18px">Typography</h2>
+      <div style="display: flex; flex-direction: column; gap: 4px"><span style="font: 700 26px/1.25 Inter; letter-spacing: -0.015em">Velo roadmap</span><span class="cap">Editor H1 · Inter 700 · 1.6em</span></div>
+      <div style="display: flex; flex-direction: column; gap: 4px"><span style="font: 650 17px/1.2 Inter; letter-spacing: -0.01em">Note title bar</span><span class="cap">Title · Inter 650 · 17px (scales ×1.2 of font size)</span></div>
+      <div style="display: flex; flex-direction: column; gap: 4px"><span style="font: 400 16px/1.7 Inter">Writing body sits at 1.7 line height in a 46em column.</span><span class="cap">Editor body · Inter 400 · size+2 / 1.7</span></div>
+      <div style="display: flex; flex-direction: column; gap: 4px"><span style="font: 500 13px/1.4 Inter">Search or create…</span><span class="cap">UI · Inter 500 · 13px (fixed, does not scale)</span></div>
+      <div style="display: flex; flex-direction: column; gap: 4px"><span style="font: 400 13px/1.6 'JetBrains Mono', monospace; background: #f0f0f3; padding: 4px 8px; border-radius: 4px">velo index --rebuild</span><span class="cap">Code · JetBrains Mono 400 · 0.84em</span></div>
+    </div>
+    <div class="sheet" style="padding: 24px; display: flex; flex-direction: column; gap: 14px">
+      <h2 class="h-sec" style="font-size: 18px">Radii &amp; spacing</h2>
+      <div style="display: flex; gap: 12px; align-items: flex-end">
+        <div style="display: flex; flex-direction: column; gap: 6px; align-items: center"><div style="width: 56px; height: 56px; background: #e1e9ff; border: 1px solid #abbdf9; border-radius: 4px"></div><span class="cap">l1 · 4</span></div>
+        <div style="display: flex; flex-direction: column; gap: 6px; align-items: center"><div style="width: 56px; height: 56px; background: #e1e9ff; border: 1px solid #abbdf9; border-radius: 6px"></div><span class="cap">l2 · 6</span></div>
+        <div style="display: flex; flex-direction: column; gap: 6px; align-items: center"><div style="width: 56px; height: 56px; background: #e1e9ff; border: 1px solid #abbdf9; border-radius: 10px"></div><span class="cap">l3 · 10</span></div>
+        <div style="display: flex; flex-direction: column; gap: 6px; align-items: center"><div style="width: 56px; height: 28px; background: #e1e9ff; border: 1px solid #abbdf9; border-radius: 999px"></div><span class="cap">full</span></div>
+      </div>
+      <p class="cap">l1: kbd, tags-in-text, checkbox · l2: buttons, inputs, rows, segments · l3: window, dialogs, menus · full: tag chips.</p>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <sc-for list="{{space}}" as="s" hint-placeholder-count="7">
+          <div style="display: flex; align-items: center; gap: 10px"><span class="cap" style="width: 64px; font-family: 'JetBrains Mono', monospace">{{s.n}}</span><i style="display: block; height: 10px; width: {{s.w}}; background: #3e63dd; border-radius: 2px"></i><span class="cap">{{s.px}}</span></div>
+        </sc-for>
+      </div>
+    </div>
+    <div class="sheet" style="padding: 24px; display: flex; flex-direction: column; gap: 16px">
+      <h2 class="h-sec" style="font-size: 18px">Elevation &amp; focus</h2>
+      <div style="display: flex; gap: 16px">
+        <div style="flex: 1; height: 64px; border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(16,24,64,.06), 0 12px 32px rgba(16,24,64,.14); display: flex; align-items: center; justify-content: center"><span class="cap">shadow.lg · dialog, menu</span></div>
+        <div style="flex: 1; height: 64px; border-radius: 10px; background: #fff; border: 1px solid #d9d9e0; display: flex; align-items: center; justify-content: center"><span class="cap">border.default · window</span></div>
+      </div>
+      <div style="display: flex; gap: 16px; align-items: center">
+        <button class="btn outline fv">Change…</button>
+        <button class="ib fv" aria-label="Settings"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
+        <label class="inp f" style="width: 150px"><input aria-label="Focused input" value="Focused input"></label>
+      </div>
+      <p class="cap">Focus ring: 2px indigo.9, offset 2px (inset −2px on list rows). Inputs: border + 1px ring in indigo.8. Ring contrast ≥ 3:1 on both canvases (5.2:1 light, 3.6:1 dark).</p>
+    </div>
+    <div class="sheet" style="padding: 24px; display: flex; flex-direction: column; gap: 12px">
+      <h2 class="h-sec" style="font-size: 18px">User font size scaling</h2>
+      <p class="cap">One setting (10–32 px, default 14) drives the editor and list. Header chrome stays at 13 px.</p>
+      <table class="tbl">
+        <thead><tr><th>Size</th><th>Editor</th><th>Row (V)</th><th>Row (H)</th></tr></thead>
+        <tbody>
+          <tr><td style="height: 32px">12</td><td style="height: 32px">14 / 24</td><td style="height: 32px">26</td><td style="height: 32px">40</td></tr>
+          <tr><td style="height: 32px"><b>14</b></td><td style="height: 32px"><b>16 / 27</b></td><td style="height: 32px"><b>30</b></td><td style="height: 32px"><b>46</b></td></tr>
+          <tr><td style="height: 32px">20</td><td style="height: 32px">22 / 37</td><td style="height: 32px">43</td><td style="height: 32px">66</td></tr>
+        </tbody>
+      </table>
+      <p class="cap" style="font-family: 'JetBrains Mono', monospace; font-size: 11px">editor = S+2, lh 1.7 · title = S · snippet = S−1 · rowV = round(2.15·S) · rowH = round(3.3·S) · titlebar = 17·S/14</p>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1800,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const mk = (hexes, fgs) => hexes.map((hex, i) => ({ n: String(i + 1), hex, fg: fgs[i] }));
+    const dk = '#1c2024', lt = '#ffffff', dd = '#111113', dl = '#edeef0';
+    const lightFg = [dk,dk,dk,dk,dk,dk,dk,dk,lt,lt,lt,lt];
+    const darkFg = [dl,dl,dl,dl,dl,dl,dl,dl,lt,lt,dd,dd];
+    return {
+      themes: [
+        { label: 'Light', cls: 'vl', note: 'Window canvas #ffffff · chrome slate.2',
+          acc: mk(['#fdfdfe','#f7f9ff','#edf2fe','#e1e9ff','#d2deff','#c1d0ff','#abbdf9','#8da4ef','#3e63dd','#3358d4','#3a5bc7','#1f2d5c'], lightFg),
+          gray: mk(['#fcfcfd','#f9f9fb','#f0f0f3','#e8e8ec','#e0e1e6','#d9d9e0','#cdced6','#b9bbc6','#8b8d98','#80838d','#60646c','#1c2024'], lightFg),
+          status: [{n:'red.3',hex:'#feebec',fg:dk},{n:'red.9',hex:'#e5484d',fg:lt},{n:'red.11',hex:'#ce2c31',fg:lt},{n:'amber.3',hex:'#fff7c2',fg:dk},{n:'amber.6',hex:'#f3d673',fg:dk},{n:'amber.12',hex:'#4f3422',fg:lt},{n:'grass.11',hex:'#218358',fg:lt}],
+          sem: [
+            {tok:'bg.canvas',map:'white',use:'Editor, list',hex:'#ffffff',cr:'—'},
+            {tok:'bg.chrome',map:'slate.2',use:'Header, tag panel',hex:'#f9f9fb',cr:'—'},
+            {tok:'bg.subtle',map:'slate.3',use:'Row hover, segment track',hex:'#f0f0f3',cr:'—'},
+            {tok:'border.default',map:'slate.5 / 6 / 7',use:'Dividers · window · inputs',hex:'#d9d9e0',cr:'—'},
+            {tok:'fg.default',map:'slate.12',use:'Body, titles',hex:'#1c2024',cr:'16.4:1'},
+            {tok:'fg.muted',map:'slate.11',use:'Snippets, dates, md marks',hex:'#60646c',cr:'5.9:1'},
+            {tok:'accent.solid',map:'indigo.9',use:'Primary button, chip on',hex:'#3e63dd',cr:'5.2:1 (white)'},
+            {tok:'accent.text',map:'indigo.11',use:'Links, wikilinks, #tags',hex:'#3a5bc7',cr:'6.0:1'},
+            {tok:'selection',map:'indigo.10',use:'Row, list focused',hex:'#3358d4',cr:'6.0:1 · snippet 5.0:1'},
+            {tok:'selection.idle',map:'indigo.4',use:'Row, focus in editor',hex:'#e1e9ff',cr:'—'},
+            {tok:'danger.text',map:'red.11',use:'Errors, missing [[link]]',hex:'#ce2c31',cr:'5.2:1'},
+            {tok:'warning',map:'amber.3 / amber.12',use:'Conflict banner',hex:'#fff7c2',cr:'10.5:1'}
+          ] },
+        { label: 'Dark', cls: 'vd', note: 'Window canvas slate.1 · chrome slate.2',
+          acc: mk(['#11131f','#141726','#182449','#1d2e62','#253974','#304384','#3a4f97','#435db1','#3e63dd','#5472e4','#9eb1ff','#d6e1ff'], darkFg),
+          gray: mk(['#111113','#18191b','#212225','#272a2d','#2e3135','#363a3f','#43484e','#5a6169','#696e77','#777b84','#b0b4ba','#edeef0'], darkFg),
+          status: [{n:'red.3',hex:'#3b1219',fg:dl},{n:'red.9',hex:'#e5484d',fg:lt},{n:'red.11',hex:'#ff9592',fg:dd},{n:'amber.3',hex:'#302008',fg:dl},{n:'amber.6',hex:'#5c3d05',fg:dl},{n:'amber.12',hex:'#ffe7b3',fg:dd},{n:'grass.11',hex:'#3dd68c',fg:dd}],
+          sem: [
+            {tok:'bg.canvas',map:'slate.1',use:'Editor, list',hex:'#111113',cr:'—'},
+            {tok:'bg.chrome',map:'slate.2',use:'Header, tag panel',hex:'#18191b',cr:'—'},
+            {tok:'bg.subtle',map:'slate.3',use:'Row hover, segment track',hex:'#212225',cr:'—'},
+            {tok:'border.default',map:'slate.5 / 6 / 7',use:'Dividers · window · inputs',hex:'#363a3f',cr:'—'},
+            {tok:'fg.default',map:'slate.12',use:'Body, titles',hex:'#edeef0',cr:'16.3:1'},
+            {tok:'fg.muted',map:'slate.11',use:'Snippets, dates',hex:'#b0b4ba',cr:'9.1:1'},
+            {tok:'fg.mark',map:'slate.10½ #8e929b',use:'Markdown marks',hex:'#8e929b',cr:'6.1:1'},
+            {tok:'accent.solid',map:'indigo.9',use:'Primary button, chip on',hex:'#3e63dd',cr:'5.2:1 (white)'},
+            {tok:'accent.text',map:'indigo.11',use:'Links, wikilinks, #tags',hex:'#9eb1ff',cr:'9.2:1'},
+            {tok:'selection',map:'indigo.6',use:'Row, list focused',hex:'#304384',cr:'9.3:1 · snippet 7.1:1'},
+            {tok:'danger.text',map:'red.11',use:'Errors, missing [[link]]',hex:'#ff9592',cr:'9.0:1'},
+            {tok:'warning',map:'amber.3 / amber.12',use:'Conflict banner',hex:'#302008',cr:'13.0:1'}
+          ] }
+      ],
+      space: [{n:'1',px:'4 px',w:'4px'},{n:'1.5',px:'6 px',w:'6px'},{n:'2',px:'8 px',w:'8px'},{n:'3',px:'12 px',w:'12px'},{n:'4',px:'16 px',w:'16px'},{n:'5',px:'20 px',w:'20px'},{n:'7',px:'28 px',w:'28px'},{n:'10',px:'40 px',w:'40px'}]
+    };
+  }
+}
+</script>
+</body>
+</html>

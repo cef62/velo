@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Main window, horizontal layout</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+mark.q:empty{display:none}
+</style>
+</helmet>
+<div class="board" style="width: 2560px; height: 880px; padding: 56px 60px; display: flex; gap: 80px">
+  <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+    <div style="display: flex; flex-direction: column; gap: 16px">
+      <div style="display: flex; justify-content: space-between; align-items: baseline"><p class="lbl">{{t.label}} · 1180 × 720 · query “road” · index still loading</p><p class="cap">Typing keeps focus in search; ↑/↓ move the selection, ↩ opens</p></div>
+      <div class="{{t.cls}} win" style="width: 1180px; height: 720px">
+        <header class="hdr">
+          <div class="tl" aria-hidden="true"><i></i><i></i><i></i></div>
+          <label class="inp srch f"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input aria-label="Search or create" value="road"><span class="hint"><span class="kbd">↩</span> Open <span class="kbd" style="margin-left: 6px">⇧↩</span> Create</span></label>
+          <span style="position: relative; display: inline-flex">
+            <button class="ib h" aria-pressed="false" aria-label="Tags (⌘⇧T)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></svg></button>
+            <span class="tip" role="tooltip" style="position: absolute; top: 40px; left: 50%; transform: translateX(-50%); z-index: 5">Tags <span class="kbd">⌘⇧T</span></span>
+          </span>
+          <div class="seg" role="radiogroup" aria-label="Sort"><button role="radio" aria-checked="true">Recent</button><button role="radio" aria-checked="false">A→Z</button></div>
+          <div class="seg" role="radiogroup" aria-label="Edit style (⌘⇧R)"><button role="radio" aria-checked="true">Rich</button><button role="radio" aria-checked="false">Plain</button></div>
+          <button class="ib" aria-pressed="false" aria-label="Preview (⌘⇧P)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          <span class="sep"></span>
+          <button class="ib" aria-label="Lock note (⌘⇧E)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
+          <button class="ib" aria-label="Lock all (⌥⌘E)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="8" height="5" x="14" y="17" rx="1"/><path d="M10 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v2.5"/><path d="M20 17v-2a2 2 0 1 0-4 0v2"/></svg></button>
+          <button class="ib" aria-label="Move to Trash (⌘⌫)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>
+          <button class="ib" aria-label="Settings (⌘,)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
+        </header>
+        <div style="flex: 1; display: flex; min-height: 0">
+          <div class="list" role="listbox" aria-label="Notes" style="flex: none; width: 340px; background: var(--bg)">
+            <sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+              <div class="row row2 {{r.cls}}" role="option" aria-selected="{{r.on}}">
+                <div class="l1"><span class="tt">{{r.a}}<mark class="q">{{r.m}}</mark>{{r.b}}</span><span class="dt">{{r.d}}</span></div>
+                <span class="sn">{{r.sa}}<mark class="q">{{r.sm}}</mark>{{r.sb}}</span>
+              </div>
+            </sc-for>
+            <div class="row ld"><svg class="i s spin" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>Loading…</div>
+          </div>
+          <div class="split-v" role="separator" aria-orientation="vertical" aria-label="Resize list" tabindex="0"></div>
+          <div style="flex: 1; display: flex; flex-direction: column; min-width: 0">
+            <div class="tbar"><h2 class="ttl">Velo roadmap</h2><span class="st"><svg class="i s spin" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>Indexing… 3,200 / 10,004 <span class="prog" aria-hidden="true"><i style="width: 32%"></i></span></span></div>
+            <div class="edw">
+              <div class="col md">
+                <h1>Velo roadmap</h1>
+                <p>Ship the <strong>1.0</strong> refresh before the winter break. Speed first, then <em>polish</em>. See <a class="wl" href="#">Search ranking</a> and the <a href="#">Tauri docs</a>. <span class="tg">#work</span> <span class="tg">#idea</span></p>
+                <h2>This week</h2>
+                <ul>
+                  <li>Virtualized list — test against the 10k-note fixture</li>
+                  <li class="task"><input type="checkbox" class="cb" checked aria-label="Park UI tokens in the Panda preset"><span class="done">Park UI tokens in the Panda preset</span></li>
+                  <li class="task"><input type="checkbox" class="cb" checked aria-label="Keyboard map for header controls"><span class="done">Keyboard map for header controls</span></li>
+                  <li class="task"><input type="checkbox" class="cb" aria-label="Conflict banner copy"><span>Conflict banner copy</span></li>
+                  <li class="task"><input type="checkbox" class="cb" aria-label="Unlock flow"><span>Unlock flow → <a class="wl miss" href="#">Passphrase UX</a></span></li>
+                </ul>
+                <blockquote>Nothing should get between a thought and the page.</blockquote>
+                <pre><code>velo index --rebuild ~/Notes</code></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2560,"height":880}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const r = (a, m, b, sa, sm, sb, d, cls) => ({ a, m, b, sa, sm, sb, d, cls: cls || '', on: cls === 'sel' ? 'true' : 'false' });
+    return {
+      themes: [{ label: 'Light', cls: 'vl' }, { label: 'Dark', cls: 'vd' }],
+      rows: [
+        r('Velo ', 'road', 'map', 'Ship the 1.0 refresh before the winter break. Speed first…', '', '', 'now', 'sel'),
+        r('', 'Road', ' trip — Dolomiti', 'Verona → Cortina via Bolzano, lunch stop, then the pass', '', '', '1w'),
+        r('', 'Road', 'map review, Q3', 'What slipped: sync conflicts, tag panel. Carry over.', '', '', '3mo'),
+        r('Design sync — Oct 24', '', '', 'Agreed to revisit the ', 'road', 'map order after the list work', '2d', 'h'),
+        r('Rail', 'road', ' photos', 'Scans from the Brennero line, 35 mm, two rolls', '', '', '6mo'),
+        r('B', 'road', 'band contract', 'Renewal window opens in January; compare fibre offers', '', '', '8mo')
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

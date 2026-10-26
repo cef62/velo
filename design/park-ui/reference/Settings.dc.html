@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings dialog</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+.bar{height:10px;border-radius:5px;background:var(--g4)}
+.num{width:72px}
+.num input{text-align:right}
+.tbl td{height:36px}
+.tabs{display:flex;gap:4px;padding:0 14px;border-bottom:1px solid var(--g4);flex:none}
+.tab{display:inline-flex;align-items:center;gap:6px;height:38px;padding:0 8px;margin-bottom:-1px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--g11);font:500 13px/1 Inter,system-ui,sans-serif;cursor:pointer}
+.tab:hover{color:var(--g12)}
+.tab[aria-selected="true"]{color:var(--g12);border-bottom-color:var(--a9)}
+.tab:focus-visible{outline:2px solid var(--a9);outline-offset:-2px;border-radius:4px}
+.tcount{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;box-sizing:border-box;border-radius:999px;background:var(--r3);color:var(--r11);font:600 11px/1 Inter,system-ui,sans-serif}
+</style>
+</helmet>
+<div class="board" style="width: 2000px; height: 1640px; padding: 48px 60px; display: flex; flex-direction: column; gap: 40px">
+
+  <div style="display: flex; flex-direction: column; gap: 14px">
+    <p class="lbl">Tab 1 · General — ⌘, opens here; ←/→ switch tabs when the tab list has focus</p>
+    <div style="display: flex; gap: 80px">
+      <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+        <div class="{{t.cls}} scene" style="width: 900px; height: 560px">
+          <div class="hdr"><div class="tl" aria-hidden="true"><i></i><i></i><i></i></div><div class="bar" style="width: 320px; height: 32px; border-radius: 6px"></div></div>
+          <div style="padding: 16px; display: flex; flex-direction: column; gap: 14px">
+            <div class="bar" style="width: 70%"></div><div class="bar" style="width: 55%"></div><div class="bar" style="width: 62%"></div><div class="bar" style="width: 48%"></div>
+          </div>
+          <div class="ovl">
+            <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="sg-{{t.cls}}" style="width: 640px">
+              <div style="display: flex; align-items: center; padding: 16px 20px 8px">
+                <h2 id="sg-{{t.cls}}">Settings</h2>
+                <button class="ib" aria-label="Close (Esc)" style="margin-left: auto"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+              </div>
+              <div class="tabs" role="tablist" aria-label="Settings sections">
+                <button class="tab" role="tab" aria-selected="true">General</button>
+                <button class="tab" role="tab" aria-selected="false" tabindex="-1">Keyboard shortcuts</button>
+              </div>
+              <div role="tabpanel" style="padding: 20px; display: flex; flex-direction: column; gap: 10px">
+                <div class="frow"><span class="flab">Notes folder</span><div style="display: flex; gap: 8px"><label class="inp ro" style="flex: 1"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg><input aria-label="Notes folder" value="~/Notes" readonly></label><button class="btn outline">Change…</button></div></div>
+                <div class="frow"><span class="flab">Layout</span><div style="display: flex; align-items: center; gap: 10px"><div class="seg" role="radiogroup" aria-label="Layout"><button role="radio" aria-checked="true">Vertical</button><button role="radio" aria-checked="false">Horizontal</button></div><span class="hint"><span class="kbd">⌘⇧J</span></span></div></div>
+                <div class="frow"><span class="flab">Theme</span><div class="seg" role="radiogroup" aria-label="Theme" style="width: fit-content"><button role="radio" aria-checked="true">System</button><button role="radio" aria-checked="false">Light</button><button role="radio" aria-checked="false">Dark</button></div></div>
+                <div class="frow"><label class="flab" for="fs-{{t.cls}}">Font size</label><div style="display: flex; align-items: center; gap: 10px"><span class="inp num"><input id="fs-{{t.cls}}" type="number" min="10" max="32" value="14"></span><span class="help">px · 10–32 · scales editor and list rows</span></div></div>
+                <div class="frow"><label class="flab" for="so-{{t.cls}}">Sort</label><span class="selw"><select id="so-{{t.cls}}"><option>Most recent first</option><option>Title A→Z</option></select><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span></div>
+              </div>
+              <div class="dfoot">
+                <button class="btn outline">Cancel</button>
+                <button class="btn solid">Save <span class="kbd" style="background: transparent; color: inherit; border-color: rgba(255,255,255,.5); box-shadow: none">⌘↩</span></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 14px">
+    <p class="lbl">Tab 2 · Keyboard shortcuts — recording one, another in conflict (the tab shows the conflict count)</p>
+    <div style="display: flex; gap: 80px">
+      <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+        <div class="{{t.cls}} scene" style="width: 900px; height: 820px">
+          <div class="hdr"><div class="tl" aria-hidden="true"><i></i><i></i><i></i></div><div class="bar" style="width: 320px; height: 32px; border-radius: 6px"></div></div>
+          <div style="padding: 16px; display: flex; flex-direction: column; gap: 14px">
+            <div class="bar" style="width: 70%"></div><div class="bar" style="width: 55%"></div><div class="bar" style="width: 62%"></div><div class="bar" style="width: 48%"></div><div class="bar" style="width: 66%"></div>
+          </div>
+          <div class="ovl">
+            <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="sk-{{t.cls}}" style="width: 640px">
+              <div style="display: flex; align-items: center; padding: 16px 20px 8px">
+                <h2 id="sk-{{t.cls}}">Settings</h2>
+                <button class="ib" aria-label="Close (Esc)" style="margin-left: auto"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+              </div>
+              <div class="tabs" role="tablist" aria-label="Settings sections">
+                <button class="tab" role="tab" aria-selected="false" tabindex="-1">General</button>
+                <button class="tab" role="tab" aria-selected="true">Keyboard shortcuts <span class="tcount" aria-label="1 conflict">1</span></button>
+              </div>
+              <div role="tabpanel" style="padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 12px">
+                <div style="display: flex; align-items: center; gap: 12px"><p class="help">Click a key-cap, then press the new combination. Esc cancels, ⌫ clears.</p><button class="btn ghost sm" style="margin-left: auto"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>Reset all</button></div>
+                <div style="border: 1px solid var(--g5); border-radius: 8px; overflow: hidden">
+                  <table class="tbl">
+                    <thead><tr><th>Action</th><th style="width: 150px">Shortcut</th><th style="width: 76px"><span style="position: absolute; width: 1px; height: 1px; overflow: hidden">Reset</span></th></tr></thead>
+                    <tbody>
+                      <sc-for list="{{keys}}" as="k" hint-placeholder-count="12">
+                        <tr class="{{k.row}}">
+                          <td>
+                            <div style="display: flex; flex-direction: column; gap: 2px"><span>{{k.a}}</span><sc-if value="{{k.err}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4M12 17h.01"/></svg>{{k.err}}</span></sc-if></div>
+                          </td>
+                          <td><button class="kc {{k.kc}}" aria-label="{{k.a}} shortcut: {{k.b}}. Press to change">{{k.b}}</button></td>
+                          <td><button class="btn ghost sm {{k.rs}}" aria-label="Reset {{k.a}}">Reset</button></td>
+                        </tr>
+                      </sc-for>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="dfoot">
+                <span class="ferr" style="margin-right: auto">1 conflict — fix it to save</span>
+                <button class="btn outline">Cancel</button>
+                <button class="btn solid" disabled>Save <span class="kbd" style="background: transparent; color: inherit; border-color: rgba(255,255,255,.5); box-shadow: none">⌘↩</span></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2000,"height":1640}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const k = (a, b, o) => Object.assign({ a, b, kc: '', rs: 'dis', row: '', err: '' }, o || {});
+    return {
+      themes: [{ label: 'Light', cls: 'vl' }, { label: 'Dark', cls: 'vd' }],
+      keys: [
+        k('Search', '⌘L'),
+        k('Back', '⌘J'),
+        k('Forward', '⌘K'),
+        k('Toggle preview', '⌥⌘P', { kc: 'mod', rs: '' }),
+        k('Rich / Plain', '⌘⇧R'),
+        k('Tags', '⌘⇧T'),
+        k('Layout', '⌘⇧J'),
+        k('Rename', '⌘K', { kc: 'bad', rs: '', row: 'err', err: 'Already used by Forward' }),
+        k('Lock note', 'Press keys…', { kc: 'rec', row: 'rec' }),
+        k('Lock all', '⌥⌘E'),
+        k('Move to Trash', '⌘⌫'),
+        k('Settings', '⌘,')
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

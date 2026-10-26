@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Editor, plain and rich</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+.plain .ln{margin:0;min-height:1.7em}
+.plain .lp{color:var(--a11)}
+.plain .q{color:var(--g11)}
+.plain .cd{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:.86em;background:var(--g3);display:block;padding:0 1em}
+.plain .cd.t{border-radius:6px 6px 0 0;padding-top:.3em}
+.plain .cd.b{border-radius:0 0 6px 6px;padding-bottom:.3em}
+.plain h1,.plain h2{margin:0}
+.plain h2{margin-top:0}
+.pane{border:1px solid var(--g6);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;background:var(--bg)}
+</style>
+</helmet>
+<div class="board" style="width: 1920px; height: 2000px; padding: 56px 60px; display: flex; flex-direction: column; gap: 60px">
+
+  <div style="display: flex; flex-direction: column; gap: 16px">
+    <div style="display: flex; align-items: baseline; gap: 16px"><h2 class="h-sec">Plain</h2><p class="cap">Raw Markdown. Marks stay visible in fg.mark (slate.11 / #8e929b) — muted, still ≥ 5:1. Headings, bold, italic and code are styled in place.</p></div>
+    <div style="display: flex; gap: 80px">
+      <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+        <div class="{{t.cls}} pane" style="width: 860px; height: 860px">
+          <div class="tbar"><h2 class="ttl">Velo roadmap</h2><span class="badge gray">{{t.label}}</span></div>
+          <div class="edw">
+            <div class="col md plain">
+              <h1><span class="mk"># </span>Velo roadmap</h1>
+              <p class="ln"></p>
+              <p class="ln">Ship the <strong><span class="mk">**</span>1.0<span class="mk">**</span></strong> refresh before the winter break. Speed first, then <em><span class="mk">_</span>polish<span class="mk">_</span></em>. See <span class="mk">[[</span><span class="lp">Search ranking</span><span class="mk">]]</span> and the <span class="mk">[</span><span class="lp">Tauri docs</span><span class="mk">](</span><span class="url">https://tauri.app</span><span class="mk">)</span>. <span class="tgp">#work</span> <span class="tgp">#idea</span><span class="caret"></span></p>
+              <p class="ln"></p>
+              <h2><span class="mk">## </span>This week</h2>
+              <p class="ln"><span class="mk">- </span>Virtualized list — test against the 10k-note fixture</p>
+              <p class="ln"><span class="mk">- [x] </span>Park UI tokens in the Panda preset</p>
+              <p class="ln"><span class="mk">- [x] </span>Keyboard map for header controls</p>
+              <p class="ln"><span class="mk">- [ ] </span>Conflict banner copy</p>
+              <p class="ln"><span class="mk">- [ ] </span>Unlock flow → <span class="mk">[[</span><span class="lp">Passphrase UX</span><span class="mk">]]</span></p>
+              <p class="ln"></p>
+              <p class="ln q"><span class="mk">&gt; </span>Nothing should get between a thought and the page.</p>
+              <p class="ln"></p>
+              <span class="cd t"><span class="mk">```sh</span></span>
+              <span class="cd">velo index --rebuild ~/Notes</span>
+              <span class="cd b"><span class="mk">```</span></span>
+              <p class="ln"></p>
+              <p class="ln"><span class="mk">---</span></p>
+              <p class="ln"></p>
+              <p class="ln">Run <code><span class="mk">`</span>pnpm tauri dev<span class="mk">`</span></code> before Friday’s review.</p>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 16px">
+    <div style="display: flex; align-items: baseline; gap: 16px"><h2 class="h-sec">Rich</h2><p class="cap">Marks hidden except on the line holding the caret (here: the first paragraph). Links and [[wikilinks]] in indigo.11; a missing target turns red with a dashed underline; #tags become chips; tasks are real checkboxes.</p></div>
+    <div style="display: flex; gap: 80px">
+      <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+        <div class="{{t.cls}} pane" style="width: 860px; height: 860px">
+          <div class="tbar"><h2 class="ttl">Velo roadmap</h2><span class="badge gray">{{t.label}}</span></div>
+          <div class="edw">
+            <div class="col md">
+              <h1>Velo roadmap</h1>
+              <p>Ship the <strong><span class="mk">**</span>1.0<span class="mk">**</span></strong> refresh before the winter break. Speed first, then <em><span class="mk">_</span>polish<span class="mk">_</span></em>. See <span class="mk">[[</span><a class="wl" href="#">Search ranking</a><span class="mk">]]</span> and the <span class="mk">[</span><a href="#">Tauri docs</a><span class="mk">](https://tauri.app)</span>. <span class="mk">#</span>work <span class="mk">#</span>idea<span class="caret"></span></p>
+              <p style="margin-top: -0.4em"><span class="tg">#work</span> <span class="tg">#idea</span> <span style="font-size: 12px; color: var(--g11); margin-left: 6px">← same line once the caret leaves</span></p>
+              <h2>This week</h2>
+              <ul>
+                <li>Virtualized list — test against the 10k-note fixture</li>
+                <li class="task"><input type="checkbox" class="cb" checked aria-label="Park UI tokens in the Panda preset"><span class="done">Park UI tokens in the Panda preset</span></li>
+                <li class="task"><input type="checkbox" class="cb" checked aria-label="Keyboard map for header controls"><span class="done">Keyboard map for header controls</span></li>
+                <li class="task"><input type="checkbox" class="cb" aria-label="Conflict banner copy"><span>Conflict banner copy</span></li>
+                <li class="task"><input type="checkbox" class="cb" aria-label="Unlock flow"><span>Unlock flow → <a class="wl miss" href="#" title="No note named “Passphrase UX” — ⌘-click to create">Passphrase UX</a></span></li>
+              </ul>
+              <blockquote>Nothing should get between a thought and the page.</blockquote>
+              <pre><code>velo index --rebuild ~/Notes</code></pre>
+              <hr>
+              <p>Run <code>pnpm tauri dev</code> before Friday’s review. <span class="tg">#velo</span></p>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1920,"height":2000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { themes: [{ label: 'Light', cls: 'vl' }, { label: 'Dark', cls: 'vd' }] };
+  }
+}
+</script>
+</body>
+</html>
