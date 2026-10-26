@@ -74,10 +74,10 @@ export function Header({ controller, store }: { controller: Controller; store: S
       <SegmentGroup.Indicator />
       {items.map((it) => (
         <Tooltip key={it.value} content={`${it.text}${s.keys[it.action] === NONE ? "" : ` (${formatBinding(s.keys[it.action], s.isMac)})`}`} openDelay={500} disabled={!iconOnly}>
-          <SegmentGroup.Item value={it.value} aria-label={it.text}>
+          <SegmentGroup.Item value={it.value}>
             {it.glyph}
             {!iconOnly && <SegmentGroup.ItemText>{it.text}</SegmentGroup.ItemText>}
-            <SegmentGroup.ItemHiddenInput />
+            <SegmentGroup.ItemHiddenInput aria-label={it.text} />
           </SegmentGroup.Item>
         </Tooltip>
       ))}

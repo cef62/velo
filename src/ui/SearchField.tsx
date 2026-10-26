@@ -41,7 +41,11 @@ export function SearchField({ controller, store }: { controller: Controller; sto
       />
       <span className={hints} aria-hidden="true">
         {hint.map((h) => (
-          <Kbd key={h} fontFamily="inherit">{h}</Kbd>
+          <Kbd key={h} fontFamily="inherit" gap="1.5">
+            {h.split(" ").map((part) => (
+              <span key={part}>{part}</span>
+            ))}
+          </Kbd>
         ))}
       </span>
     </div>
