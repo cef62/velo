@@ -161,7 +161,7 @@ pub fn get_settings(st: State<AppState>) -> Settings {
 pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings) -> Res<()> {
     let old = st.settings.lock().unwrap().clone();
     let (old_key, new_key) = (old.toggle_window_binding(), settings.toggle_window_binding());
-    let hotkey_changed = old_key != new_key;
+    let hotkey_changed = old_key != new_key && !settings::same_shortcut(&old_key, &new_key); // re-registering the same keys would fail
     if hotkey_changed {
         register_hotkey(&app, &new_key)?; // on failure the old hotkey stays registered
     }

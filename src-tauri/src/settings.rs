@@ -34,15 +34,54 @@ pub fn to_plugin_format(binding: &str) -> String {
     binding.split('+').map(|t| match t { "Mod" => "CommandOrControl", "Ctrl" => "Control", t => t }).collect::<Vec<_>>().join("+")
 }
 
-/// Inverse of `to_plugin_format`; also upgrades v1 forms (`CmdOrCtrl`, `N` -> `KeyN`, `1` -> `Digit1`).
+const NAMED: &[&str] = &[
+    "Space", "Comma", "Period", "Slash", "Backslash", "Semicolon", "Quote", "Backquote", "Minus", "Equal", "BracketLeft",
+    "BracketRight", "Enter", "Tab", "Backspace", "Delete", "Insert", "Home", "End", "PageUp", "PageDown", "ArrowUp",
+    "ArrowDown", "ArrowLeft", "ArrowRight", "Escape",
+];
+
+/// Inverse of `to_plugin_format`; also upgrades v1 forms like the UI's normalizeBinding does
+/// (case-insensitive aliases `CmdOrCtrl`/`Command`/`Super`/`Option`..., `N` -> `KeyN`, `1` -> `Digit1`, Mod/Ctrl/Alt/Shift order).
 pub fn from_plugin_format(s: &str) -> String {
-    s.split('+').map(|t| match t {
-        "CommandOrControl" | "CmdOrCtrl" | "CommandOrCtrl" => "Mod".to_string(),
-        "Control" => "Ctrl".into(),
-        t if t.len() == 1 && t.chars().all(|c| c.is_ascii_alphabetic()) => format!("Key{}", t.to_ascii_uppercase()),
-        t if t.len() == 1 && t.chars().all(|c| c.is_ascii_digit()) => format!("Digit{t}"),
-        t => t.into(),
-    }).collect::<Vec<_>>().join("+")
+    let mut mods = [false; 4]; // Mod, Ctrl, Alt, Shift
+    let mut key = String::new();
+    for t in s.split('+').map(str::trim) {
+        let l = t.to_ascii_lowercase();
+        let m = match l.as_str() {
+            "mod" | "commandorcontrol" | "cmdorctrl" | "cmdorcontrol" | "commandorctrl" | "command" | "cmd" | "super" | "meta" => 0,
+            "ctrl" | "control" => 1,
+            "alt" | "option" => 2,
+            "shift" => 3,
+            _ => {
+                key = canonical_key(&l).unwrap_or_else(|| t.to_string());
+                continue;
+            }
+        };
+        mods[m] = true;
+    }
+    let names = ["Mod", "Ctrl", "Alt", "Shift"];
+    (0..4).filter(|&i| mods[i]).map(|i| names[i]).chain(Some(key.as_str()).filter(|k| !k.is_empty())).collect::<Vec<_>>().join("+")
+}
+
+fn canonical_key(l: &str) -> Option<String> {
+    let single = l.strip_prefix("key").or_else(|| l.strip_prefix("digit")).filter(|r| r.len() == 1).unwrap_or(l);
+    let c = single.chars().next()?;
+    if single.len() == 1 && c.is_ascii_alphabetic() {
+        return Some(format!("Key{}", c.to_ascii_uppercase()));
+    }
+    if single.len() == 1 && c.is_ascii_digit() {
+        return Some(format!("Digit{c}"));
+    }
+    if let Some(n) = NAMED.iter().find(|n| n.eq_ignore_ascii_case(l)) {
+        return Some(n.to_string());
+    }
+    l.strip_prefix('f').and_then(|n| n.parse::<u8>().ok()).filter(|n| (1..=12).contains(n)).map(|n| format!("F{n}"))
+}
+
+/// True when both bindings parse to the same physical shortcut (spelling and modifier order ignored).
+pub fn same_shortcut(a: &str, b: &str) -> bool {
+    let id = |k: &str| to_plugin_format(k).parse::<tauri_plugin_global_shortcut::Shortcut>().ok().map(|s| s.id());
+    matches!((id(a), id(b)), (Some(x), Some(y)) if x == y)
 }
 
 pub fn load(path: &Path) -> Settings {
@@ -92,6 +131,21 @@ mod tests {
         assert_eq!(load(&p).toggle_window_binding(), "Mod+KeyG");
     }
     #[test] fn defaults() { let s = Settings::default(); assert_eq!(s.sort, "modified"); assert_eq!(s.toggle_window_binding(), "Mod+Shift+Space"); }
+    #[test] fn from_plugin_format_matches_ui_normalization() {
+        assert_eq!(from_plugin_format("CmdOrControl+Alt+N"), "Mod+Alt+KeyN");
+        assert_eq!(from_plugin_format("command+alt+n"), "Mod+Alt+KeyN");
+        assert_eq!(from_plugin_format("Shift+Option+Control+Super+5"), "Mod+Ctrl+Alt+Shift+Digit5");
+        assert_eq!(from_plugin_format("CmdOrCtrl+bracketleft"), "Mod+BracketLeft");
+        assert_eq!(from_plugin_format("meta+shift+space"), "Mod+Shift+Space");
+        assert_eq!(from_plugin_format("Mod+f5"), "Mod+F5");
+        assert_eq!(from_plugin_format("Mod+keyb"), "Mod+KeyB");
+    }
+    #[test] fn same_shortcut_compares_physical_keys() {
+        assert!(same_shortcut("Mod+Alt+KeyN", "CommandOrControl+Alt+N"));
+        assert!(same_shortcut("Mod+Alt+KeyN", "Alt+Mod+KeyN"));
+        assert!(!same_shortcut("Mod+Alt+KeyN", "Mod+Alt+KeyM"));
+        assert!(!same_shortcut("Mod+Alt+KeyN", "garbage+++"));
+    }
     #[test] fn plugin_format_roundtrip() {
         assert_eq!(to_plugin_format("Mod+Shift+Space"), "CommandOrControl+Shift+Space");
         assert_eq!(from_plugin_format("CommandOrControl+Shift+Space"), "Mod+Shift+Space");
