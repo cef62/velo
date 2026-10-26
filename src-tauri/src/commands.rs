@@ -1,5 +1,6 @@
 use crate::crypto;
 use crate::index::{Page, Sort, TagCount};
+use crate::revisions::RevisionInfo;
 use crate::settings::{self, Settings};
 use crate::store::{self, SaveResult};
 use crate::vault::{NoteDoc, RenameResult, Vault};
@@ -252,6 +253,21 @@ pub fn lock_note(st: State<AppState>, path: String) -> Res<String> {
 #[tauri::command]
 pub fn unlock_note(st: State<AppState>, path: String) -> Res<String> {
     with_vault(&st, |v, id| v.unlock_note(&path, id.ok_or_else(|| anyhow::anyhow!("no-identity"))?))
+}
+
+#[tauri::command]
+pub fn list_revisions(st: State<AppState>, path: String) -> Res<Vec<RevisionInfo>> {
+    with_vault(&st, |v, _| v.list_revisions(&path))
+}
+
+#[tauri::command]
+pub fn read_revision(st: State<AppState>, path: String, id: String) -> Res<String> {
+    with_vault(&st, |v, ident| v.read_revision(&path, &id, ident))
+}
+
+#[tauri::command]
+pub fn snapshot_text(st: State<AppState>, path: String, text: String) -> Res<()> {
+    with_vault(&st, |v, ident| v.snapshot_text(&path, &text, ident))
 }
 
 #[tauri::command]

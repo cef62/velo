@@ -3,6 +3,7 @@ use crate::frontmatter;
 use crate::index::{Index, Meta, Page, Sort, TagCount, all_tags, effective_dates};
 
 const PAGE: usize = 200;
+use crate::revisions::{RevisionInfo, Revisions, fnv64};
 use crate::names::{NoteFile, note_path, parse_note_file};
 use crate::store::{SaveResult, Store, hash};
 use crate::text::rewrite_links;
@@ -45,10 +46,15 @@ pub struct Vault {
     pub index: Index,
     /// plaintext of unlocked encrypted notes, memory only
     unlocked: HashMap<String, String>,
+    revisions: Revisions,
 }
 
 fn s(p: &Path) -> String {
     p.to_string_lossy().into_owned()
+}
+
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
 }
 
 fn lossy(b: &[u8]) -> String {
@@ -94,7 +100,10 @@ impl Vault {
 
     /// `progress(done, total)` counts files needing (re)indexing; every 250 files and at the end, never when none.
     pub fn open_with_progress(dir: PathBuf, db_path: &Path, identity: Option<&str>, progress: &mut dyn FnMut(usize, usize)) -> anyhow::Result<Vault> {
-        let mut v = Vault { store: Store::new(dir), index: Index::open(db_path)?, unlocked: HashMap::new() };
+        // revisions live next to the index db (the app data dir), keyed by vault dir
+        let root = db_path.parent().unwrap_or(Path::new(".")).join("revisions").join(fnv64(&s(&dir)));
+        let mut v = Vault { store: Store::new(dir), index: Index::open(db_path)?, unlocked: HashMap::new(), revisions: Revisions::new(root) };
+        v.revisions.maybe_prune(now_ms());
         let known = v.index.known()?;
         let files = v.store.list()?;
         let stale: Vec<_> = files
@@ -209,6 +218,11 @@ impl Vault {
             SaveResult::Conflict { conflict_path, .. } => PathBuf::from(conflict_path),
         };
         self.reindex(&target, (!encrypted).then_some(text))?;
+        // a failed snapshot must never fail a save that already hit the disk; conflicts snapshot the conflict copy
+        if let Some(nt) = parse_note_file(&target) {
+            self.revisions.maybe_prune(now_ms());
+            self.revisions.snapshot_bytes(&nt.title, &bytes, encrypted, now_ms(), true).ok();
+        }
         if encrypted {
             self.unlocked.insert(s(&target), text.to_string());
         }
@@ -231,6 +245,7 @@ impl Vault {
             }
         }
         let nf = parse(&to)?;
+        self.revisions.rename(&old.title, &nf.title);
         let body = (!nf.encrypted).then(|| lossy(&self.store.read(&to).unwrap_or_default()));
         self.reindex(&to, body.as_deref())?;
 
@@ -267,6 +282,8 @@ impl Vault {
         if to.exists() {
             return Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists).into());
         }
+        // first: on failure nothing else has changed, and no plaintext snapshot survives a lock
+        self.revisions.encrypt_all(&nf.title, |b| crypto::encrypt(identity, b))?;
         let plain = self.store.read(from)?;
         self.store.write_atomic(&to, &crypto::encrypt(identity, &plain)?)?;
         std::fs::remove_file(from).context("removing plaintext note")?;
@@ -310,6 +327,35 @@ impl Vault {
         remove(p)?;
         self.index.remove(path)?;
         self.unlocked.remove(path);
+        Ok(())
+    }
+
+    pub fn list_revisions(&self, path: &str) -> anyhow::Result<Vec<RevisionInfo>> {
+        Ok(self.revisions.list(&parse(Path::new(path))?.title))
+    }
+
+    pub fn read_revision(&self, path: &str, id: &str, identity: Option<&str>) -> anyhow::Result<String> {
+        let (bytes, enc) = self.revisions.read(&parse(Path::new(path))?.title, id)?;
+        if !enc {
+            return Ok(lossy(&bytes));
+        }
+        Ok(lossy(&crypto::decrypt(identity.ok_or_else(|| anyhow!("locked"))?, &bytes)?))
+    }
+
+    /// Not throttled. Locked notes get ciphertext; their identical-content check decrypts the newest snapshot.
+    pub fn snapshot_text(&mut self, path: &str, text: &str, identity: Option<&str>) -> anyhow::Result<()> {
+        let nf = parse(Path::new(path))?;
+        if !nf.encrypted {
+            self.revisions.snapshot_bytes(&nf.title, text.as_bytes(), false, now_ms(), false)?;
+            return Ok(());
+        }
+        let id = identity.ok_or_else(|| anyhow!("locked"))?;
+        if let Some(newest) = self.revisions.list(&nf.title).first()
+            && self.read_revision(path, &newest.id, Some(id)).is_ok_and(|t| t == text)
+        {
+            return Ok(());
+        }
+        self.revisions.snapshot_bytes(&nf.title, &crypto::encrypt(id, text.as_bytes())?, true, now_ms(), false)?;
         Ok(())
     }
 
@@ -563,5 +609,28 @@ mod tests {
         let c = std::fs::read_to_string(&conflict_path).unwrap();
         let f = frontmatter::parse(&c).unwrap();
         assert!(f.created.is_some() && f.modified.is_some() && c.ends_with("mine"), "{c:?}");
+    }
+    #[test] fn lock_reencrypts_snapshots_and_snapshot_text_encrypts() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = Vault::open(dir.clone(), &db, Some(&id)).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
+        v.save_note(&d.path, "plainsecret", &d.hash, None, false).unwrap();
+        let root = db.parent().unwrap().join("revisions");
+        let files = |root: &Path| -> Vec<String> {
+            let mut out = vec![];
+            for k in std::fs::read_dir(root).unwrap().flatten() { for f in std::fs::read_dir(k.path()).unwrap().flatten() { out.push(f.file_name().to_string_lossy().into_owned()); } }
+            out
+        };
+        let vdir = std::fs::read_dir(&root).unwrap().next().unwrap().unwrap().path();
+        assert!(files(&vdir).iter().all(|f| f.ends_with(".md")));
+        let locked = v.lock_note(&d.path, &id).unwrap();
+        assert!(files(&vdir).iter().all(|f| f.ends_with(".md.age")));
+        let r = v.list_revisions(&locked).unwrap();
+        assert_eq!(v.read_revision(&locked, &r[0].id, Some(&id)).unwrap(), "plainsecret");
+        assert_eq!(v.read_revision(&locked, &r[0].id, None).err().unwrap().to_string(), "locked");
+        v.snapshot_text(&locked, "newer", Some(&id)).unwrap();
+        v.snapshot_text(&locked, "newer", Some(&id)).unwrap(); // identical: skipped
+        assert_eq!(v.list_revisions(&locked).unwrap().len(), 2);
+        assert!(files(&vdir).iter().all(|f| f.ends_with(".md.age")));
+        assert_eq!(v.snapshot_text(&locked, "x", None).err().unwrap().to_string(), "locked");
     }
 }

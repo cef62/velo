@@ -3,6 +3,7 @@ pub mod crypto;
 pub mod frontmatter;
 pub mod index;
 pub mod names;
+pub mod revisions;
 pub mod settings;
 pub mod store;
 pub mod text;
@@ -98,6 +99,9 @@ pub fn run() {
             commands::unlock_note,
             commands::lock_all,
             commands::delete_note,
+            commands::list_revisions,
+            commands::read_revision,
+            commands::snapshot_text,
             commands::has_identity,
             commands::setup_passphrase,
             commands::identity_file_exists,
