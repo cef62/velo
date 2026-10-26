@@ -637,7 +637,7 @@ mod tests {
         let mut v = Vault::open(dir.clone(), &db, Some(&id)).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
         v.lock_note(&d.path, &id).unwrap();
         let vdir = || std::fs::read_dir(db.parent().unwrap().join("revisions")).ok().and_then(|mut r| r.next()).map(|e| e.unwrap().path());
-        let names = || vdir().map(|d| std::fs::read_dir(d).unwrap().flatten().map(|f| f.file_name().to_string_lossy().into_owned()).collect::<Vec<_>>()).unwrap_or_default();
+        let names = || vdir().map(|d| std::fs::read_dir(d).unwrap().flatten().flat_map(|k| std::fs::read_dir(k.path()).unwrap().flatten().map(|f| f.file_name().to_string_lossy().into_owned()).collect::<Vec<_>>()).collect::<Vec<_>>()).unwrap_or_default();
         assert_eq!(v.snapshot_text(&d.path, "stalesecret", None).err().unwrap().to_string(), "locked");
         assert!(names().is_empty());
         v.snapshot_text(&d.path, "stalesecret", Some(&id)).unwrap();
