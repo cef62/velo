@@ -10,3 +10,6 @@ spikes/wails/
 fixtures/
 src-tauri/target/
 src-tauri/gen/
+
+# Panda
+styled-system

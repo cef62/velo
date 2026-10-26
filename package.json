@@ -6,13 +6,15 @@
   "packageManager": "pnpm@12.3.4",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "panda codegen && tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "panda codegen && vitest run",
     "changeset": "changeset",
     "version-packages": "changeset version && node scripts/sync-version.mjs",
     "release:tag": "changeset git-tag",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "codegen": "panda codegen",
+    "prepare": "panda codegen"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -21,25 +23,37 @@
   },
   "devDependencies": {
     "@changesets/cli": "3.0.3",
+    "@pandacss/dev": "1.12.1",
+    "@pandacss/preset-base": "1.12.1",
+    "@pandacss/preset-panda": "1.12.1",
     "@tauri-apps/cli": "^2.12.4",
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
     "typescript": "~6.0.3",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
   },
   "dependencies": {
+    "@ark-ui/react": "5.39.3",
     "@codemirror/commands": "^6.11.1",
     "@codemirror/lang-markdown": "^6.5.2",
     "@codemirror/language": "^6.13.1",
     "@codemirror/search": "^6.7.2",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",
+    "@fontsource-variable/inter": "5.3.0",
+    "@fontsource-variable/jetbrains-mono": "5.3.0",
     "@lezer/highlight": "^1.2.5",
     "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-dialog": "^2.8.3",
     "@tauri-apps/plugin-opener": "^2.7.2",
+    "lucide-react": "^1.61.0",
     "markdown-it": "^15.0.3",
-    "markdown-it-footnote": "4.0.0"
+    "markdown-it-footnote": "4.0.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   }
 }
