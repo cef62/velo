@@ -68,7 +68,8 @@ export function NoteList({ controller, store }: { controller: Controller; store:
       else if (top + rowH + PAD > e.scrollTop + e.clientHeight) e.scrollTop = top + rowH + PAD - e.clientHeight;
     }
     measure();
-  }, [sel, listReset, rowH, count]);
+  }, [sel, listReset, rowH]);
+  useLayoutEffect(measure, [count, rowH]); // never moves scrollTop (paging must not snap back to the selection)
 
   useEffect(() => {
     if (hasMore && b >= count - LOAD_AHEAD) void controller.ensureRows(count);
