@@ -1,65 +1,51 @@
-name: release
+name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
 
 jobs:
-  release:
-    permissions:
-      contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            args: --target aarch64-apple-darwin
-          - os: macos-latest
-            args: --target x86_64-apple-darwin
-          - os: ubuntu-22.04
-            args: ""
-          - os: windows-latest
-            args: ""
-    runs-on: ${{ matrix.os }}
+  version-or-tag:
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          version: 12
+          fetch-depth: 0
 
-      - uses: actions/setup-node@v7
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10 (6.1.0: pnpm steps silently no-op on Windows)
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 26
           cache: pnpm
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ startsWith(matrix.os, 'macos') && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
-
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Install Linux dependencies
-        if: startsWith(matrix.os, 'ubuntu')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libssl-dev libxdo-dev libdbus-1-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm test
-
-      - name: cargo test
-        working-directory: src-tauri
-        run: cargo test
-
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # With pending changesets: opens/updates the "Version Packages" PR.
+      # Without: runs `changeset git-tag` and pushes the new vX.Y.Z tag.
+      # GitHub Releases are created by build-release.yml, not here.
+      - uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        id: changesets
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: velo ${{ github.ref_name }}
-          releaseDraft: true
-          args: ${{ matrix.args }}
+          version-script: pnpm version-packages
+          publish-script: pnpm release:tag
+          create-github-releases: false
+          commit-message: "chore: version packages"
+          pr-title: "chore: version packages"
+
+      # A tag pushed with GITHUB_TOKEN never triggers `on: push: tags`, so start the
+      # build explicitly for the tag that was just created.
+      - if: steps.changesets.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-release.yml -f tag="v$(node -p "require('./package.json').version")"
