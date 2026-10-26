@@ -206,3 +206,25 @@ test("discard detaches even while dirty and never saves the dropped edits", asyn
   await vi.advanceTimersByTimeAsync(5000);
   expect(d.saveNote).not.toHaveBeenCalled();
 });
+
+test("onSaved fires after a successful save, not after a rejected one", async () => {
+  const onSaved = vi.fn();
+  const ok = mk({ onSaved });
+  type(ok.c, "x");
+  await ok.c.flush();
+  expect(onSaved).toHaveBeenCalledTimes(1);
+
+  onSaved.mockClear();
+  const bad = mk({ onSaved, saveNote: vi.fn(async () => { throw "indexing"; }) });
+  type(bad.c, "y");
+  await bad.c.flush();
+  expect(onSaved).not.toHaveBeenCalled();
+});
+
+test("onSaved fires after a conflict-copy save", async () => {
+  const onSaved = vi.fn();
+  const { c } = mk({ onSaved, saveNote: vi.fn(async () => ({ kind: "conflict" as const, conflict_path: "c.md", disk_hash: "hd" })) });
+  type(c, "mine");
+  await c.flush();
+  expect(onSaved).toHaveBeenCalledTimes(1);
+});

@@ -8,6 +8,8 @@ export interface SaverDeps {
   onConflict(conflictPath: string): void;
   /** Called with a message on save failure, and with null when a save succeeds. */
   onError(msg: string | null): void;
+  /** Called after a save landed on disk (also as a conflict copy), e.g. to refresh derived views like tags. */
+  onSaved?(): void;
 }
 
 const RETRY_MAX_MS = 30000;
@@ -142,6 +144,7 @@ export class SaveController {
         }
         this.retryMs = 1000;
         this.d.onError(null);
+        this.d.onSaved?.();
       } catch (e) {
         this.d.onError(`Save failed: ${e}`);
         this.schedule(this.retryMs);

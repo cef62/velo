@@ -72,6 +72,7 @@ const editor = mountEditor($("editor"), {
   onError: (m) => (errEl.textContent = m ? errText(m) : ""),
   onChange: () => preview.refresh(),
   onEdit: () => history.edited(editor.currentPath()),
+  onSaved: () => scheduleTagRefresh(),
 });
 const preview = mountPreview($("preview"), {
   getText: () => editor.getText(),
@@ -266,6 +267,7 @@ async function lockEverything() {
       titleEl.textContent = "";
     } else editor.resume();
     await runSearch(false);
+    void refreshTags(); // a tag only a now-locked note had must leave the panel and filter
   } catch (e) {
     errEl.textContent = errText(e);
   } finally {
@@ -377,11 +379,16 @@ function selectOpen() {
   list.setSelected(sel);
 }
 
-async function select(i: number, how: "explicit" | "auto" = "explicit") {
+/** false = the switch was refused (unsaved edits / busy). */
+async function select(i: number, how: "explicit" | "auto" = "explicit"): Promise<boolean> {
   sel = i;
   list.setSelected(i);
   const h = results.get(i);
-  if (h && !(await show(h.path, how))) selectOpen(); // refused: snap back to the open note
+  if (h && !(await show(h.path, how))) {
+    selectOpen(); // refused: snap back to the open note
+    return false;
+  }
+  return true;
 }
 
 const platform = isMac ? "mac" : /Windows/.test(navigator.userAgent) ? "windows" : "linux";
@@ -395,8 +402,7 @@ async function openContextMenu(i: number, atRow = false) {
   if (!h || menuBusy) return;
   menuBusy = true;
   try {
-    await select(i);
-    if (editor.currentPath() !== h.path) return;
+    if (!(await select(i)) || editor.currentPath() !== h.path) return;
     const open = () => editor.currentPath(); // actions use the note open when picked
     const run: Record<MenuAction, () => void | Promise<void>> = {
       open: () => settleAfterOpen(false, "enter"),
@@ -429,13 +435,13 @@ async function openContextMenu(i: number, atRow = false) {
 
 /** true = fresh first page (new query/folder/sort), selecting its first row; false = reload the loaded range in place. */
 let searching: Promise<void> = Promise.resolve(); // latest list reset, awaited by Enter so it never acts on stale rows
-function runSearch(selectFirst: boolean, keepOpen = false): Promise<void> {
+function runSearch(selectFirst: boolean, keepOpen: boolean | "highlight" = false): Promise<void> {
   const p = doSearch(selectFirst, keepOpen);
   if (selectFirst) searching = p;
   return p;
 }
-/** keepOpen: after a reset, stay on the open note when it is in the new first page instead of opening row 0. */
-async function doSearch(selectFirst: boolean, keepOpen: boolean) {
+/** keepOpen: after a reset, stay on the open note when it is in the new first page instead of opening row 0. "highlight": and with no note open, highlight row 0 without opening it. */
+async function doSearch(selectFirst: boolean, keepOpen: boolean | "highlight") {
   const seq = ++searchSeq;
   try {
     await (selectFirst ? results.reset() : results.refresh());
@@ -444,7 +450,10 @@ async function doSearch(selectFirst: boolean, keepOpen: boolean) {
       list.toTop();
       list.update();
       if (keepOpen && results.indexOf(editor.currentPath() ?? "") >= 0) selectOpen();
-      else void select(results.count ? 0 : -1, "auto");
+      else if (keepOpen === "highlight" && editor.currentPath() === null) {
+        sel = results.count ? 0 : -1; // nothing open: highlight row 0, don't open it
+        list.setSelected(sel);
+      } else void select(results.count ? 0 : -1, "auto");
     } else {
       list.update();
       selectOpen();
@@ -492,6 +501,7 @@ function showTags(on: boolean) {
   tagPanel.hidden = !on;
   tagBtn.setAttribute("aria-pressed", String(on));
   tagBtn.setAttribute("aria-label", on ? "Hide tags" : "Show tags");
+  if (on) void refreshTags(); // counts may have moved since the last refresh
 }
 
 /** Tag filter changed: fresh first page, keeping the open note selected if it is still listed. */
@@ -501,18 +511,32 @@ function setTags(next: string[]) {
   void runSearch(true, true);
 }
 
-async function refreshTags() {
+const newTagsReq = latest();
+let tagTimer: ReturnType<typeof setTimeout> | undefined;
+/** After an in-app save (self-writes are skipped by the watcher): coalesce typing bursts into one refresh. */
+function scheduleTagRefresh() {
+  clearTimeout(tagTimer);
+  tagTimer = setTimeout(() => void refreshTags(true), 300);
+}
+
+/** inPlace: when a filter is active, also reload the list so it reflects the new tag state. */
+async function refreshTags(inPlace = false) {
+  const fresh = newTagsReq();
+  let tags: api.TagCount[];
   try {
-    allTags = await api.listTags();
+    tags = await api.listTags();
   } catch (e) {
     if (e !== "indexing") console.error("tag refresh failed", e);
     return;
   }
+  if (!fresh()) return; // a newer refresh superseded this response
+  allTags = tags;
   const kept = pruneSelection(selectedTags, allTags);
   const pruned = kept.length !== selectedTags.length;
   selectedTags = kept;
   renderTags();
-  if (pruned) void runSearch(true, true);
+  if (pruned) void runSearch(true, "highlight");
+  else if (inPlace && selectedTags.length) void runSearch(false);
 }
 
 function syncSort() {
@@ -631,6 +655,7 @@ function startRename() {
       errEl.textContent = "";
       history.loaded(r.path, "explicit");
       await runSearch(false);
+      void refreshTags();
     } catch (e) {
       errEl.textContent = e === "already-exists" ? "A note with that title exists" : errText(e);
     }

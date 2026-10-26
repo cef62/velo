@@ -30,7 +30,7 @@ export interface Editor {
 
 const stem = (p: string) => (p.split(/[\\/]/).pop() ?? p).replace(/\.[^.]+$/, "");
 
-export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onError?: (msg: string | null) => void; onChange?: () => void; onEdit?: () => void } = {}): Editor {
+export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onError?: (msg: string | null) => void; onChange?: () => void; onEdit?: () => void; onSaved?: () => void } = {}): Editor {
   const banner = document.createElement("div");
   banner.className = "banner";
   banner.hidden = true;
@@ -86,6 +86,7 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
     setText,
     onConflict: showBanner,
     onError: (m) => opts.onError?.(m),
+    onSaved: () => opts.onSaved?.(),
   });
 
   let wantEditable = false; // what load/suspend/resume/unload asked for
