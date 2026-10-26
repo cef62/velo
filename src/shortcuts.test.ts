@@ -45,3 +45,12 @@ test("AltGr (reported as Ctrl+Alt) never matches on non-mac", () => {
   expect(matches(altGr, "Mod+Alt+KeyE", false)).toBe(false);
   expect(matches(ev("KeyE", { ctrlKey: true, altKey: true }), "Mod+Alt+KeyE", false)).toBe(true);
 });
+test("menu accelerators ⌘W/⌘H/⌘M are reserved on mac only", () => {
+  const m = resolve(undefined);
+  for (const b of ["Mod+KeyW", "Mod+KeyH", "Mod+KeyM"]) {
+    expect(validateBinding(m, "rename", b, true)).toEqual({ ok: false, reason: "reserved by the system" });
+    expect(validateBinding(m, "rename", b, false)).toEqual({ ok: true });
+  }
+  expect(resolve({ rename: "Mod+KeyW" }, true).rename).toBe("Mod+KeyR");
+  expect(resolve({ rename: "Mod+KeyW" }, false).rename).toBe("Mod+KeyW");
+});

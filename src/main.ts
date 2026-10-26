@@ -228,7 +228,7 @@ async function openSettings() {
   field("s-font").value = String(cur.font_size);
   field("s-sort").value = cur.sort;
   msg.textContent = "";
-  const draft = resolve(cur.shortcuts);
+  const draft = resolve(cur.shortcuts, isMac);
   let recording: Action | null = null;
   const table = $<HTMLTableElement>("s-keys");
   const render = (focus?: Action) => {
@@ -251,7 +251,7 @@ async function openSettings() {
     }
   };
   const assign = (a: Action, binding: string) => {
-    const v = validateBinding(draft, a, binding);
+    const v = validateBinding(draft, a, binding, isMac);
     const reason = v.ok ? fixedKeyRefusal(binding) : v.reason;
     if (reason) msg.textContent = reason;
     else { draft[a] = binding; msg.textContent = ""; }
@@ -299,7 +299,7 @@ async function openSettings() {
     }
     applyLook(next);
     list.setRowH(rowHeight());
-    keys = resolve(next.shortcuts);
+    keys = resolve(next.shortcuts, isMac);
     preview.refresh(); // watermark shows the binding
     sort = next.sort;
     syncSort();
@@ -525,7 +525,7 @@ const ACTIONS: Record<Exclude<Action, "toggle_window">, () => void> = {
   back: goBack,
   forward: goForward,
 };
-let keys = resolve(undefined); // refreshed from settings at startup and after save
+let keys = resolve(undefined, isMac); // refreshed from settings at startup and after save
 
 // One capture-phase handler: runs before CodeMirror's keymap and the webview defaults (so e.g. ⌘R works from the editor).
 window.addEventListener(
@@ -596,7 +596,7 @@ void (async () => {
   if (st) setIndexing(true, st[0], st[1]);
   applyLook(s);
   list.setRowH(rowHeight());
-  keys = resolve(s.shortcuts);
+  keys = resolve(s.shortcuts, isMac);
   sort = s.sort ?? "modified"; // before the first search, which pages with it
   syncSort();
   if (!s.notes_dir) $("setup").hidden = false;

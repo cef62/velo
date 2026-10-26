@@ -42,7 +42,7 @@ export function recorderStep(
   if (!recording || e.code === "Escape") return { recording: null };
   const b = isAltGraph(e, isMac) ? null : eventToBinding(e, isMac);
   if (!b) return { recording }; // bare modifier press
-  const v = validateBinding(draft, recording, b);
+  const v = validateBinding(draft, recording, b, isMac);
   const reason = v.ok ? fixedKeyRefusal(b) : v.reason;
   return reason ? { recording, msg: reason } : { recording: null, assign: b, msg: "" };
 }

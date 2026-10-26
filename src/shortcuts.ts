@@ -37,6 +37,7 @@ export const LABELS: Record<Action, string> = {
 type Ev = Pick<KeyboardEvent, "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">;
 const MODS = ["Mod", "Ctrl", "Alt", "Shift"] as const;
 const RESERVED = new Set(["Mod+KeyQ", "Mod+KeyC", "Mod+KeyV", "Mod+KeyX", "Mod+KeyZ", "Mod+Shift+KeyZ", "Mod+KeyA"]);
+const MAC_RESERVED = new Set(["Mod+KeyW", "Mod+KeyH", "Mod+KeyM"]); // macOS menu accelerators win over app bindings
 const MODIFIER_CODES = /^(Meta|Control|Alt|Shift|OS)(Left|Right)?$/;
 const NAMED = ("Space Comma Period Slash Backslash Semicolon Quote Backquote Minus Equal BracketLeft BracketRight " +
   "Enter Tab Backspace Delete Insert Home End PageUp PageDown ArrowUp ArrowDown ArrowLeft ArrowRight Escape").split(" ");
@@ -69,11 +70,11 @@ export function normalizeBinding(s: string): string | null {
 }
 
 /** Defaults overlaid with saved entries that parse; unknown keys dropped. */
-export function resolve(saved: Record<string, string> | undefined): Record<Action, string> {
+export function resolve(saved: Record<string, string> | undefined, isMac = false): Record<Action, string> {
   const out = { ...DEFAULTS };
   for (const a of Object.keys(DEFAULTS) as Action[]) {
     const n = saved?.[a] ? normalizeBinding(saved[a]) : null;
-    if (n && !basicProblem(n)) out[a] = n;
+    if (n && !basicProblem(n, isMac)) out[a] = n;
   }
   return out;
 }
@@ -108,18 +109,19 @@ export function formatBinding(binding: string, isMac: boolean): string {
   return ["Ctrl", "Alt", "Mod", "Shift"].filter((m) => parts.includes(m)).map((m) => glyph[m]).join("") + key;
 }
 
-function basicProblem(binding: string): string | null {
+function basicProblem(binding: string, isMac: boolean): string | null {
   const parts = binding.split("+");
   if (!isFKey(parts[parts.length - 1]) && !parts.some((p) => p === "Mod" || p === "Ctrl" || p === "Alt")) return "needs a modifier";
-  return RESERVED.has(binding) ? "reserved by the system" : null;
+  return RESERVED.has(binding) || (isMac && MAC_RESERVED.has(binding)) ? "reserved by the system" : null;
 }
 
 export function validateBinding(
   map: Record<Action, string>,
   action: Action,
   binding: string,
+  isMac = false,
 ): { ok: true } | { ok: false; reason: string } {
-  const problem = basicProblem(binding);
+  const problem = basicProblem(binding, isMac);
   if (problem) return { ok: false, reason: problem };
   const other = (Object.keys(map) as Action[]).find((a) => a !== action && map[a] === binding);
   return other ? { ok: false, reason: `already used by ${LABELS[other]}` } : { ok: true };
