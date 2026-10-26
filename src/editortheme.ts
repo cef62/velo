@@ -34,7 +34,11 @@ const writingTheme = EditorView.theme({
 });
 
 const darkMq = window.matchMedia?.("(prefers-color-scheme: dark)");
-const isDark = () => !!darkMq?.matches;
+// data-theme (Settings → Theme) overrides the OS; no attribute = follow the OS
+const isDark = () => {
+  const t = document.documentElement.dataset.theme;
+  return t ? t === "dark" : !!darkMq?.matches;
+};
 
 /** Editor setup for prose: no gutters or code-editor chrome, readable in light and dark. */
 export function writingSetup(): Extension[] {
@@ -42,7 +46,9 @@ export function writingSetup(): Extension[] {
   const followScheme = ViewPlugin.define((view) => {
     const onChange = () => view.dispatch({ effects: dark.reconfigure(EditorView.darkTheme.of(isDark())) });
     darkMq?.addEventListener("change", onChange);
-    return { destroy: () => darkMq?.removeEventListener("change", onChange) };
+    const themeAttr = new MutationObserver(onChange);
+    themeAttr.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return { destroy: () => (darkMq?.removeEventListener("change", onChange), themeAttr.disconnect()) };
   });
   return [
     highlightSpecialChars(),

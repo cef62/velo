@@ -1,5 +1,7 @@
 :root { --row-h: calc(var(--font-size, 14px) * 1.25 + 27px); color-scheme: light dark; --bg: #fff; --fg: #1d1d1f; --mute: #86868b; --line: #d8d8dc; --sel: #cfe3ff; --warn: #fff3c4; --accent: #2a6fdb; --missing: #c33; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-@media (prefers-color-scheme: dark) { :root { --bg: #1e1e20; --fg: #e8e8ea; --line: #3a3a3e; --sel: #26466f; --warn: #4a4120; --mute: #9a9aa0; --accent: #7ab0ff; --missing: #ff7b72; } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #1e1e20; --fg: #e8e8ea; --line: #3a3a3e; --sel: #26466f; --warn: #4a4120; --mute: #9a9aa0; --accent: #7ab0ff; --missing: #ff7b72; } }
+:root[data-theme="dark"] { color-scheme: dark; --bg: #1e1e20; --fg: #e8e8ea; --line: #3a3a3e; --sel: #26466f; --warn: #4a4120; --mute: #9a9aa0; --accent: #7ab0ff; --missing: #ff7b72; }
+:root[data-theme="light"] { color-scheme: light; }
 html, body { height: 100%; margin: 0; }
 body { font: var(--font-size, 14px) system-ui, sans-serif; background: var(--bg); color: var(--fg); }
 #app { display: flex; flex-direction: column; height: 100%; }

@@ -8,7 +8,7 @@ export function clampFont(raw: string, fallback: number): number {
   return raw.trim() === "" || !Number.isFinite(n) ? fallback : Math.min(32, Math.max(10, n));
 }
 
-export interface SettingsForm { layout: string; fontSize: string; sort: string; shortcuts: Record<Action, string> }
+export interface SettingsForm { layout: string; fontSize: string; sort: string; theme: string; shortcuts: Record<Action, string> }
 
 /** Form values -> Settings, keeping `cur` where input is blank or invalid. notes_dir is untouched. */
 export function toSettings(cur: Settings, f: SettingsForm): Settings {
@@ -18,6 +18,7 @@ export function toSettings(cur: Settings, f: SettingsForm): Settings {
     layout: f.layout === "horizontal" || f.layout === "vertical" ? f.layout : cur.layout,
     font_size: clampFont(f.fontSize, cur.font_size),
     sort: f.sort === "modified" || f.sort === "title" ? f.sort : cur.sort,
+    theme: f.theme === "system" || f.theme === "light" || f.theme === "dark" ? f.theme : cur.theme,
   };
 }
 
@@ -53,4 +54,7 @@ export function applyLook(s: Settings) {
   app.classList.remove("vertical", "horizontal");
   app.classList.add(layoutClass(s.layout));
   document.documentElement.style.setProperty("--font-size", `${s.font_size}px`);
+  // CSS picks dark/light from data-theme; no attribute = follow the OS
+  if (s.theme === "light" || s.theme === "dark") document.documentElement.dataset.theme = s.theme;
+  else delete document.documentElement.dataset.theme;
 }

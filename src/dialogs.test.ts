@@ -3,7 +3,7 @@ import { isLockedPath, passphraseDialogMode, passphraseError } from "./passphras
 import { DEFAULTS } from "./shortcuts";
 import { clampFont, fixedKeyRefusal, layoutClass, recorderStep, toSettings } from "./settingsform";
 
-const base = { notes_dir: "/n", layout: "vertical" as const, font_size: 14, sort: "modified" as const, editor_style: "rich" as const, shortcuts: { toggle_window: "Mod+KeyA", rename: "Mod+KeyR" } };
+const base = { notes_dir: "/n", layout: "vertical" as const, font_size: 14, sort: "modified" as const, editor_style: "rich" as const, theme: "system" as const, shortcuts: { toggle_window: "Mod+KeyA", rename: "Mod+KeyR" } };
 
 test("dialog wording follows identity file", () => {
   expect(passphraseDialogMode(true)).toEqual({ title: "Enter your velo passphrase", confirm: false });
@@ -30,9 +30,9 @@ test("font clamps to 10-32, junk falls back", () => {
 });
 
 test("form to settings", () => {
-  const f = { layout: "horizontal", fontSize: "40", sort: "title", shortcuts: { ...base.shortcuts, rename: "Mod+KeyB" } as never };
-  expect(toSettings(base, f)).toEqual({ ...base, shortcuts: f.shortcuts, layout: "horizontal", font_size: 32, sort: "title" });
-  expect(toSettings(base, { ...f, layout: "bogus", fontSize: "12", sort: "bogus" })).toEqual({ ...base, shortcuts: f.shortcuts, font_size: 12 });
+  const f = { layout: "horizontal", fontSize: "40", sort: "title", theme: "dark", shortcuts: { ...base.shortcuts, rename: "Mod+KeyB" } as never };
+  expect(toSettings(base, f)).toEqual({ ...base, shortcuts: f.shortcuts, layout: "horizontal", font_size: 32, sort: "title", theme: "dark" });
+  expect(toSettings(base, { ...f, layout: "bogus", fontSize: "12", sort: "bogus", theme: "bogus" })).toEqual({ ...base, shortcuts: f.shortcuts, font_size: 12 });
 });
 
 test("recorder refuses fixed keys", () => {

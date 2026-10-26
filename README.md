@@ -10,6 +10,7 @@ Inspired by nvALT and Notational Velocity; not affiliated with or endorsed by th
 - Plain files you own: a flat folder of `.md` / `.txt` notes, edited in a CodeMirror editor with autosave.
 - `[[wikilinks]]`: following a link to a missing note creates it; renaming a note rewrites links to it.
 - Markdown preview with clickable wikilinks and external links.
+- Theme: System (follows the OS), Light or Dark, in Settings.
 - Rich editing (default): markdown marks are hidden except on the line you are editing; ⌘/Ctrl-click opens links, wikilinks and tags; task checkboxes are clickable. Toggle Rich / Plain with the toolbar button or ⌘⇧R. The file text is never changed by the display.
 - Per-note encryption with [age](https://age-encryption.org); locked notes are never written to disk or to the index as plaintext.
 - Live reload of external edits; a concurrent edit produces a `(conflict ...)` copy instead of overwriting anything.

@@ -13,13 +13,15 @@ pub struct Settings {
     pub sort: String,
     /// "rich" | "plain": how the editor shows markdown marks
     pub editor_style: String,
+    /// "system" | "light" | "dark"
+    pub theme: String,
     /// action id -> binding ("Mod+Shift+KeyP"); missing ids use the UI defaults
     pub shortcuts: BTreeMap<String, String>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), shortcuts: BTreeMap::new() }
+        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), shortcuts: BTreeMap::new() }
     }
 }
 
@@ -122,7 +124,7 @@ mod tests {
         std::fs::write(&p, r#"{"notes_dir":"/n","hotkey":"CommandOrControl+Alt+KeyN","layout":"horizontal","font_size":16}"#).unwrap();
         let s = load(&p);
         assert_eq!(s.shortcuts.get("toggle_window").map(String::as_str), Some("Mod+Alt+KeyN"));
-        assert_eq!(s.sort, "modified"); assert_eq!(s.editor_style, "rich"); assert_eq!(s.layout, "horizontal"); assert_eq!(s.font_size, 16);
+        assert_eq!(s.sort, "modified"); assert_eq!(s.editor_style, "rich"); assert_eq!(s.theme, "system"); assert_eq!(s.layout, "horizontal"); assert_eq!(s.font_size, 16);
     }
     #[test] fn migrate_when_shortcuts_lack_toggle_and_keeps_existing_toggle() {
         let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");

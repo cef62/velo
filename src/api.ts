@@ -4,7 +4,7 @@ export type Hit = { path: string; title: string; snippet: string; mtime: number;
 export type NoteDoc = { path: string; title: string; text: string; hash: string; encrypted: boolean };
 export type SaveResult = { kind: "saved"; hash: string } | { kind: "conflict"; conflict_path: string; disk_hash: string };
 export type RenameResult = { path: string; rewritten: number };
-export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; shortcuts: Record<string, string> };
+export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; shortcuts: Record<string, string> };
 
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<void>("set_settings", { settings });

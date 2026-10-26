@@ -18,8 +18,14 @@ import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { LogicalPosition } from "@tauri-apps/api/dpi";
 import { isMenuKey, linkFor, menuModel, type MenuAction } from "./contextmenu";
 import { askPassphrase, isLockedPath } from "./passphrase";
-import { applyLook, fixedKeyRefusal, recorderStep, toSettings } from "./settingsform";
+import { applyLook as applyCss, fixedKeyRefusal, recorderStep, toSettings } from "./settingsform";
 import { DEFAULTS, LABELS, formatBinding, matches, resolve, validateBinding, type Action } from "./shortcuts";
+
+/** Layout, font and theme; the native window (title bar, menus, dialogs) follows the theme too. */
+function applyLook(s: api.Settings) {
+  applyCss(s);
+  void getCurrentWindow().setTheme(s.theme === "light" || s.theme === "dark" ? s.theme : null).catch((e) => console.error("setTheme failed", e));
+}
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const q = $<HTMLInputElement>("q");
@@ -296,6 +302,7 @@ async function openSettings() {
   field("s-layout").value = cur.layout;
   field("s-font").value = String(cur.font_size);
   field("s-sort").value = cur.sort;
+  field("s-theme").value = cur.theme ?? "system";
   msg.textContent = "";
   const draft = resolve(cur.shortcuts, isMac);
   let recording: Action | null = null;
@@ -354,7 +361,7 @@ async function openSettings() {
   (form.querySelector("[value=cancel]") as HTMLButtonElement).onclick = () => dlg.close();
   form.onsubmit = async (e) => {
     e.preventDefault();
-    const next = { ...toSettings(cur, { layout: field("s-layout").value, fontSize: field("s-font").value, sort: field("s-sort").value, shortcuts: draft }), notes_dir: dir };
+    const next = { ...toSettings(cur, { layout: field("s-layout").value, fontSize: field("s-font").value, sort: field("s-sort").value, theme: field("s-theme").value, shortcuts: draft }), notes_dir: dir };
     const save = form.querySelector("[type=submit]") as HTMLButtonElement;
     if (save.disabled) return; // a save is already in flight (Enter also submits)
     save.disabled = true;
