@@ -3,8 +3,15 @@ import type { Hit } from "./api";
 // Same rule as Rust text::fold: strip combining marks after NFD, lowercase.
 export const fold = (s: string): string => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
-export function enterAction(query: string, hits: Hit[]): { kind: "open"; path: string } | { kind: "create"; title: string } | null {
+/** Enter in search: open the highlighted row; Shift+Enter (`force`) creates a note titled as typed unless that exact title exists. */
+export function enterAction(
+  query: string,
+  hits: Hit[],
+  selected: Hit | undefined,
+  force = false,
+): { kind: "open"; path: string } | { kind: "create"; title: string } | null {
   const q = query.trim();
+  if (selected && !force) return { kind: "open", path: selected.path };
   if (!q) return null;
   const exact = hits.find((h) => fold(h.title) === fold(q));
   return exact ? { kind: "open", path: exact.path } : { kind: "create", title: q };

@@ -2,7 +2,7 @@
 // Mod = ⌘ on macOS, Ctrl elsewhere. Ctrl = physical Control (macOS only).
 export type Action =
   | "focus_search" | "next_note" | "prev_note" | "toggle_preview" | "rename" | "toggle_lock"
-  | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "toggle_window";
+  | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "delete_note" | "toggle_window";
 
 export const DEFAULTS: Record<Action, string> = {
   focus_search: "Mod+KeyL",
@@ -16,6 +16,7 @@ export const DEFAULTS: Record<Action, string> = {
   toggle_sort: "Mod+Shift+KeyS",
   back: "Mod+BracketLeft",
   forward: "Mod+BracketRight",
+  delete_note: "Mod+Backspace",
   toggle_window: "Mod+Shift+Space",
 };
 
@@ -31,6 +32,7 @@ export const LABELS: Record<Action, string> = {
   toggle_sort: "Toggle sort",
   back: "Back",
   forward: "Forward",
+  delete_note: "Move note to Trash",
   toggle_window: "Show / hide velo (global)",
 };
 
@@ -102,7 +104,7 @@ const KEY_GLYPHS: Record<string, string> = {
 export function formatBinding(binding: string, isMac: boolean): string {
   const parts = binding.split("+");
   const code = parts.pop()!;
-  const key = KEY_GLYPHS[code] ?? code.replace(/^(Key|Digit)/, "");
+  const key = isMac && code === "Backspace" ? "⌫" : (KEY_GLYPHS[code] ?? code.replace(/^(Key|Digit)/, ""));
   if (!isMac) return [...parts.map((m) => (m === "Mod" ? "Ctrl" : m)), key].join("+");
   // ⌃⌥⌘⇧ order, matching the app's existing hints (⌘⇧E, ⌥⌘E).
   const glyph: Record<string, string> = { Ctrl: "⌃", Alt: "⌥", Mod: "⌘", Shift: "⇧" };

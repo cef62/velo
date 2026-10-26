@@ -22,7 +22,7 @@ export function toSettings(cur: Settings, f: SettingsForm): Settings {
 }
 
 // Keys with fixed meanings in the UI; they can't be the key of a binding.
-const FIXED = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", "Tab", "Backspace"];
+const FIXED = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", "Tab"];
 
 /** Message if the binding's key is a fixed key, else null. */
 export function fixedKeyRefusal(binding: string): string | null {

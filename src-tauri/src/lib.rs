@@ -95,6 +95,7 @@ pub fn run() {
             commands::lock_note,
             commands::unlock_note,
             commands::lock_all,
+            commands::delete_note,
             commands::has_identity,
             commands::setup_passphrase,
             commands::identity_file_exists,

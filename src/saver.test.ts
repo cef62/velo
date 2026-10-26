@@ -195,3 +195,14 @@ test("while indexing (saves rejected) a dirty editor is not clean, so closing as
   expect(await shouldClose({ flush: () => c.flush(), ask, lastError: () => "Still indexing…" })).toBe(false);
   expect(ask).toHaveBeenCalledWith(expect.stringContaining("Still indexing…"));
 });
+
+test("discard detaches even while dirty and never saves the dropped edits", async () => {
+  const { c, d } = mk();
+  type(c, "edited");
+  c.discard();
+  expect(c.isDirty()).toBe(false);
+  expect(c.currentPath()).toBeNull();
+  expect(text).toBe("");
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(d.saveNote).not.toHaveBeenCalled();
+});

@@ -46,6 +46,15 @@ export class SaveController {
     return true;
   }
 
+  /** Detach unconditionally, dropping unsaved edits (the note is being deleted). */
+  discard() {
+    clearTimeout(this.timer);
+    this.dirty = false;
+    this.suspended = false;
+    this.cur = { path: null, baseHash: "" };
+    this.d.setText("");
+  }
+
   /** Refuses (returns false) while edits are unsaved: switching would drop them. */
   load(doc: NoteDoc): boolean {
     if (this.dirty) return false;

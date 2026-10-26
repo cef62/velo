@@ -240,6 +240,23 @@ impl Vault {
         Ok(s(&to))
     }
 
+    /// Move a note to the OS Trash and drop it from the index and the unlocked cache.
+    pub fn delete_note(&mut self, path: &str) -> anyhow::Result<()> {
+        self.delete_note_with(path, |p| trash::delete(p).map_err(|e| std::io::Error::other(e.to_string())))
+    }
+
+    /// `remove` does the actual file removal (Trash in the app, plain remove in tests).
+    pub fn delete_note_with(&mut self, path: &str, remove: impl FnOnce(&Path) -> std::io::Result<()>) -> anyhow::Result<()> {
+        let p = Path::new(path);
+        if p.parent() != Some(self.store.dir.as_path()) || parse_note_file(p).is_none() {
+            return Err(anyhow!("not a note in the notes folder"));
+        }
+        remove(p)?;
+        self.index.remove(path)?;
+        self.unlocked.remove(path);
+        Ok(())
+    }
+
     pub fn lock_all(&mut self) {
         self.unlocked.clear();
     }
@@ -387,5 +404,19 @@ mod tests {
         v.save_note(&d.path, "x", &d.hash, None).unwrap(); assert!(v.apply_fs_changes(&[d.path.clone().into()], None).is_empty());
         std::fs::write(&d.path, "external zebra").unwrap(); assert_eq!(v.apply_fs_changes(&[d.path.clone().into()], None), vec![d.path.clone()]);
         assert_eq!(v.search("zebra", Sort::Modified, 0).unwrap().hits.len(), 1);
+    }
+    #[test] fn delete_moves_file_out_and_drops_it_from_index() {
+        let mut v = open_empty(); let d = v.open_or_create("doomed", None).unwrap();
+        v.save_note(&d.path, "zebra", &d.hash, None).unwrap();
+        v.delete_note_with(&d.path, |p| std::fs::remove_file(p)).unwrap();
+        assert!(!Path::new(&d.path).exists());
+        assert!(v.search("zebra", Sort::Modified, 0).unwrap().hits.is_empty());
+        assert!(v.titles().unwrap().is_empty());
+    }
+    #[test] fn delete_refuses_paths_outside_the_notes_folder() {
+        let mut v = open_empty();
+        let outside = tempfile::tempdir().unwrap().keep().join("x.md"); std::fs::write(&outside, "keep").unwrap();
+        assert!(v.delete_note_with(&s(&outside), |p| std::fs::remove_file(p)).is_err());
+        assert!(outside.exists());
     }
 }

@@ -36,9 +36,10 @@ test("form to settings", () => {
 });
 
 test("recorder refuses fixed keys", () => {
-  for (const k of ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", "Tab", "Backspace"])
+  for (const k of ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", "Tab"])
     expect(fixedKeyRefusal(`Mod+${k}`)).toBeTruthy();
   expect(fixedKeyRefusal("Mod+KeyL")).toBeNull();
+  expect(fixedKeyRefusal("Mod+Backspace")).toBeNull(); // delete-note default; bare Backspace is refused as "needs a modifier"
 });
 
 const ev = (code: string, o = {}) => ({ code, metaKey: true, ctrlKey: false, altKey: false, shiftKey: false, ...o });

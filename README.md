@@ -26,12 +26,13 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | ⌘⇧P | Ctrl+Shift+P | Toggle Markdown preview |
 | ⌘⇧E | Ctrl+Shift+E | Lock / unlock current note |
 | ⌥⌘E | Ctrl+Alt+E | Lock all notes |
+| ⌘⌫ | Ctrl+Backspace | Move the current note to the Trash, after confirming (from search or the list; in the editor ⌘⌫ keeps its editing meaning) |
 | ⌘⇧S | Ctrl+Shift+S | Toggle sort (last modified / title) |
 | ⌘[ / ⌘] | Ctrl+[ / Ctrl+] | Back / forward through visited notes |
 | ⌘, | Ctrl+, | Settings |
 | ⌘⇧Space | Ctrl+Shift+Space | Show / hide velo (system-wide) |
 
-Fixed: Enter (in search) opens the selected match or creates a note titled with the query; ↑ / ↓ move the selection; Esc (in editor) returns to search.
+Fixed: Enter (in search) opens the highlighted note, or creates a note titled with the query when nothing matches; Shift+Enter creates a note titled exactly as typed (or opens that exact title if it exists); ↑ / ↓ move the selection; Esc (in editor) returns to search.
 
 ## Storage
 

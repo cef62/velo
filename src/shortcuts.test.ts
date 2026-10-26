@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { eventToBinding, formatBinding, isAltGraph, matches, normalizeBinding, resolve, validateBinding } from "./shortcuts";
+import { DEFAULTS, eventToBinding, formatBinding, isAltGraph, matches, normalizeBinding, resolve, validateBinding } from "./shortcuts";
 
 const ev = (code: string, m: Partial<Record<"metaKey" | "ctrlKey" | "altKey" | "shiftKey", boolean>> = {}) =>
   ({ code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...m });
@@ -53,4 +53,9 @@ test("menu accelerators ⌘W/⌘H/⌘M are reserved on mac only", () => {
   }
   expect(resolve({ rename: "Mod+KeyW" }, true).rename).toBe("Mod+KeyR");
   expect(resolve({ rename: "Mod+KeyW" }, false).rename).toBe("Mod+KeyW");
+});
+
+test("delete_note defaults to Mod+Backspace and formats as ⌘⌫", () => {
+  expect(DEFAULTS.delete_note).toBe("Mod+Backspace");
+  expect(formatBinding("Mod+Backspace", true)).toBe("⌘⌫");
 });

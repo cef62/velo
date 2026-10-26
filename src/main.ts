@@ -189,6 +189,45 @@ async function lockHandoff(path: string) {
   }
 }
 
+/** Move the open note (or the highlighted row when none is open) to the Trash after confirmation. */
+async function deleteNote() {
+  if (busy) {
+    errEl.textContent = BUSY_MSG;
+    return;
+  }
+  const open = editor.currentPath();
+  const path = open ?? results.get(sel)?.path;
+  if (!path) return;
+  const title = open ? titleEl.textContent : results.get(sel)?.title;
+  if (!(await ask(`Move “${title}” to the Trash?`, { title: "Delete note", kind: "warning", okLabel: "Move to Trash" }))) return;
+  busy = true;
+  let reopen = false;
+  try {
+    if (editor.currentPath() === path) {
+      // save first so a failed delete can't lose edits; then detach so autosave can't recreate the file
+      if (!(await editor.flush())) {
+        errEl.textContent = "Can't delete: unsaved changes couldn't be saved";
+        return;
+      }
+      editor.discard();
+      titleEl.textContent = "";
+      reopen = true;
+    }
+    await api.deleteNote(path);
+    reopen = false;
+    history.remove(path);
+    clearErr();
+  } catch (e) {
+    errEl.textContent = errText(e);
+  } finally {
+    busy = false;
+  }
+  if (reopen) await show(path); // delete failed after detaching: put the note back
+  await runSearch(false);
+  void refreshTitles();
+  focusSearch();
+}
+
 async function lockEverything() {
   if (busy) return;
   busy = true;
@@ -391,8 +430,8 @@ function settleAfterOpen(created: boolean, source: "enter" | "wikilink") {
   if (r.focusEditor) editor.focus();
 }
 
-async function enter() {
-  const a = enterAction(q.value, results.loaded);
+async function enter(force = false) {
+  const a = enterAction(q.value, results.loaded, results.get(sel), force);
   if (!a) return;
   try {
     if (a.kind === "open") {
@@ -478,13 +517,14 @@ q.addEventListener("input", () => void runSearch(true));
 q.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     e.preventDefault();
-    void enter();
+    void enter(e.shiftKey); // Shift+Enter: create a note titled as typed even when other notes match
   }
 });
 titleEl.addEventListener("dblclick", startRename);
 
 $("lock").onclick = () => void toggleLock();
 $("lockall").onclick = () => void lockEverything();
+$("trash").onclick = () => void deleteNote();
 $("gear").onclick = () => void openSettings();
 sortBtn.onclick = () => void toggleSort();
 
@@ -524,6 +564,7 @@ const ACTIONS: Record<Exclude<Action, "toggle_window">, () => void> = {
   toggle_sort: () => void toggleSort(),
   back: goBack,
   forward: goForward,
+  delete_note: () => void deleteNote(),
 };
 let keys = resolve(undefined, isMac); // refreshed from settings at startup and after save
 
@@ -541,6 +582,7 @@ window.addEventListener(
     }
     for (const [action, run] of Object.entries(ACTIONS)) {
       if (!matches(e, keys[action as Action], isMac)) continue;
+      if (action === "delete_note" && t.closest?.("#editor")) continue; // in the editor ⌘⌫ keeps its editing meaning
       e.preventDefault();
       e.stopPropagation();
       run();

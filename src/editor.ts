@@ -17,6 +17,8 @@ export interface Editor {
   setReadOnly(on: boolean): void;
   /** Detach from the (clean) open note and empty the editor; false if dirty. */
   unload(): boolean;
+  /** Detach even if dirty, dropping unsaved edits (note being deleted). */
+  discard(): void;
   isDirty(): boolean;
   currentPath(): string | null;
   onExternalChange(path: string): void;
@@ -114,6 +116,11 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
     setReadOnly(on) {
       readOnly = on;
       apply();
+    },
+    discard() {
+      ctrl.discard();
+      setEditable(false);
+      banner.hidden = true;
     },
     unload() {
       if (!ctrl.unload()) return false;

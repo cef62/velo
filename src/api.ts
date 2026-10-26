@@ -19,6 +19,7 @@ export const backlinkCount = (title: string) => invoke<number>("backlink_count",
 export const lockNote = (path: string) => invoke<string>("lock_note", { path });
 export const unlockNote = (path: string) => invoke<string>("unlock_note", { path });
 export const lockAll = () => invoke<void>("lock_all");
+export const deleteNote = (path: string) => invoke<void>("delete_note", { path });
 export const hasIdentity = () => invoke<boolean>("has_identity");
 export const setupPassphrase = (passphrase: string) => invoke<string | null>("setup_passphrase", { passphrase });
 export const identityFileExists = () => invoke<boolean>("identity_file_exists");

@@ -248,6 +248,11 @@ pub fn unlock_note(st: State<AppState>, path: String) -> Res<String> {
 }
 
 #[tauri::command]
+pub fn delete_note(st: State<AppState>, path: String) -> Res<()> {
+    with_vault(&st, |v, _| v.delete_note(&path))
+}
+
+#[tauri::command]
 pub fn lock_all(st: State<AppState>) -> Res<()> {
     with_vault(&st, |v, _| {
         v.lock_all();
