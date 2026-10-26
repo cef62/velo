@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { frontMatterRange, stripFrontMatter, wordCount } from "./frontmatter";
+import { frontMatterRange, stampChange, stripFrontMatter, wordCount } from "./frontmatter";
 
 describe("frontMatterRange", () => {
   it("none", () => {
@@ -32,5 +32,18 @@ describe("strip and count", () => {
   it("counts body words", () => {
     expect(wordCount("---\ncreated: x\n---\nhello big world")).toBe(3);
     expect(wordCount("")).toBe(0);
+  });
+});
+
+describe("stampChange", () => {
+  const B = "---\nmodified: 2\n---\n";
+  it("replaces an unchanged block, inserts when none was sent", () => {
+    expect(stampChange("---\nmodified: 1\n---\nbody", B, "---\nmodified: 1\n---\n")).toEqual({ from: 0, to: 20, insert: B });
+    expect(stampChange("body", B, null)).toEqual({ from: 0, to: 0, insert: B });
+  });
+  it("skips when the block changed meanwhile or already matches", () => {
+    expect(stampChange("---\nmodified: x\n---\nbody", B, "---\nmodified: 1\n---\n")).toBeNull();
+    expect(stampChange("---\na: 1\n---\nbody", B, null)).toBeNull(); // user typed a block during the save
+    expect(stampChange(B + "body", B, B)).toBeNull();
   });
 });

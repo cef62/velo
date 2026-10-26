@@ -1,6 +1,7 @@
 import MarkdownIt from "markdown-it";
 import footnote from "markdown-it-footnote";
 import { readTag } from "./tags";
+import { frontMatterRange } from "./frontmatter";
 
 // GitHub flavor: tables, ~~strike~~ and autolinks are built in; task lists and alerts are the rules below.
 const md = new MarkdownIt({ html: false, linkify: true }).use(footnote);
@@ -77,7 +78,9 @@ md.renderer.rules.alert_title = (tokens, i) => `<p class="markdown-alert-title">
 
 export function renderMarkdown(text: string, existsFn: (title: string) => boolean): string {
   exists = existsFn;
-  return md.render(text);
+  const fm = frontMatterRange(text);
+  // Blank lines in place of the front matter keep source line numbers (task checkboxes toggle by line).
+  return md.render(fm ? "\n".repeat(text.slice(0, fm.to).split("\n").length - 1) + text.slice(fm.to) : text);
 }
 
 /** The URL if it may be opened in the system browser (http/https only), else null. */

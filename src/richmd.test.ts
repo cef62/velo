@@ -54,3 +54,11 @@ test("block styling: quotes, code blocks, rules", () => {
   expect(lines).toEqual(["cm-rich-quote@1", "cm-rich-quote@2", "cm-rich-code@4", "cm-rich-code@5", "cm-rich-code@6", "cm-rich-hr@8"]);
   expect(hidden).toEqual(["> ", "> ", "---"]);
 });
+
+test("no rich decorations inside front matter", () => {
+  const doc = "---\ntitle: **x** [[Y]] #t\n---\n**b**";
+  const { hidden, marks } = decos(doc, doc.length);
+  expect(hidden).toEqual([]); // cursor on the body line shows its marks
+  expect(marks).toEqual([]);
+  expect(decos(doc, 0).hidden).toEqual(["**", "**"]); // only the body's
+});

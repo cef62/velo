@@ -334,3 +334,47 @@ test("listReset bumps on a fresh result set, not on refresh or paging", async ()
   await settle();
   expect(store.get().listReset).toBeGreaterThan(r);
 });
+
+test("external change snapshots the old text before reload", async () => {
+  const { c, api, editor } = setup();
+  await c.runSearch(true);
+  await settle(); // A open
+  editor.text = "old A";
+  await c.onNotesChanged([P("A")]);
+  expect(api.snapshotText).toHaveBeenCalledWith(P("A"), "old A");
+  expect(api.snapshotText.mock.invocationCallOrder[0]).toBeLessThan(editor.onExternalChange.mock.invocationCallOrder[0]);
+  // a dirty editor goes the conflict way: no snapshot of unsaved text; a snapshot failure still reloads
+  editor.dirty = true;
+  await c.onNotesChanged([P("A")]);
+  expect(api.snapshotText).toHaveBeenCalledTimes(1);
+  editor.dirty = false;
+  api.snapshotText.mockRejectedValueOnce("locked");
+  await c.onNotesChanged([P("A")]);
+  expect(editor.onExternalChange).toHaveBeenCalledTimes(3);
+});
+
+test("restore snapshots current text then replaces it as an edit", async () => {
+  const { c, api, editor } = setup();
+  await c.runSearch(true);
+  await settle();
+  editor.text = "now";
+  api.readRevision.mockResolvedValueOnce("then");
+  await c.restoreRevision("42");
+  expect(editor.flush).toHaveBeenCalled();
+  expect(api.readRevision).toHaveBeenCalledWith(P("A"), "42");
+  expect(api.snapshotText).toHaveBeenCalledWith(P("A"), "now");
+  expect(editor.text).toBe("then");
+  expect(editor.dirty).toBe(true);
+});
+
+test("toggle_front_matter persists", async () => {
+  const { c, api, store, editor } = setup();
+  await c.start();
+  expect(editor.showFrontMatter).toBe(false);
+  store.set({ keys: { ...store.get().keys, toggle_front_matter: "Mod+KeyJ" } });
+  expect(c.onKeyDown(key("KeyJ", { meta: true }))).toBe(true);
+  await settle();
+  expect(api.setSettings).toHaveBeenCalledWith(expect.objectContaining({ show_front_matter: true }));
+  expect(store.get().showFrontMatter).toBe(true);
+  expect(editor.showFrontMatter).toBe(true);
+});

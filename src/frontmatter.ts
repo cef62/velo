@@ -23,3 +23,14 @@ export function stripFrontMatter(text: string): string {
 export function wordCount(text: string): number {
   return stripFrontMatter(text).split(/\s+/).filter(Boolean).length;
 }
+
+/**
+ * The change that applies a save's stamped `block` to the editor's `current` text: it replaces the current block
+ * (or inserts at 0 when none was sent). null = skip: the user changed the block during the save, or nothing to do.
+ */
+export function stampChange(current: string, block: string, sentBlock: string | null): { from: 0; to: number; insert: string } | null {
+  const r = frontMatterRange(current);
+  const cur = r ? current.slice(0, r.to) : null;
+  if (cur !== sentBlock || cur === block) return null;
+  return { from: 0, to: r?.to ?? 0, insert: block };
+}

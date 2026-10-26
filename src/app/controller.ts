@@ -84,6 +84,7 @@ export class Controller {
       onSaved: () => this.scheduleTagRefresh(),
       onConflict: (p) => this.store.set({ conflict: p }),
       onSaving: (on) => this.store.set({ saving: on }),
+      onMeta: () => {}, // Task 6: info panel
     };
   }
 
@@ -103,6 +104,7 @@ export class Controller {
     this.editor = ed;
     const s = this.store.get();
     ed.setRich(s.editorStyle === "rich");
+    ed.setShowFrontMatter(s.showFrontMatter);
     ed.setReadOnly(s.indexing !== null);
   }
 
@@ -153,6 +155,7 @@ export class Controller {
 
   protected syncStyle() {
     this.editor?.setRich(this.store.get().editorStyle === "rich");
+    this.editor?.setShowFrontMatter(this.store.get().showFrontMatter);
   }
 
   async start() {
@@ -678,6 +681,31 @@ export class Controller {
     }
   }
 
+  async toggleFrontMatter() {
+    try {
+      const cur = await this.api.getSettings();
+      const next = !cur.show_front_matter;
+      await this.api.setSettings({ ...cur, show_front_matter: next });
+      this.store.set({ showFrontMatter: next });
+      this.syncStyle();
+    } catch (e) {
+      this.setErr(errText(e));
+    }
+  }
+
+  /** Replace the open note with revision `id` as a user edit, after snapshotting the current text. Task 6 adds the confirm. */
+  async restoreRevision(id: string) {
+    const path = this.editor.currentPath();
+    if (!path || !(await this.editor.flush())) return;
+    try {
+      const text = await this.api.readRevision(path, id);
+      await this.api.snapshotText(path, this.editor.getText()); // a failed snapshot aborts: the current text must stay recoverable
+      if (this.editor.currentPath() === path) this.editor.replaceText(text);
+    } catch (e) {
+      this.setErr(errText(e));
+    }
+  }
+
   async toggleSort() {
     try {
       const cur = await this.api.getSettings();
@@ -785,7 +813,7 @@ export class Controller {
 
   protected readonly actions: Record<Exclude<Action, "toggle_window">, () => void> = {
     toggle_info: () => {}, // wired in Task 5/6
-    toggle_front_matter: () => {},
+    toggle_front_matter: () => void this.toggleFrontMatter(),
     focus_search: () => this.focusSearch(),
     toggle_preview: () => this.togglePreview(),
     rename: () => this.startRename(),
@@ -833,7 +861,11 @@ export class Controller {
     void this.refreshTitles();
     void this.refreshTags();
     const open = this.editor.currentPath();
-    if (open && paths.includes(open)) this.editor.onExternalChange(open);
+    if (open && paths.includes(open)) {
+      // The reload replaces the editor text: keep the old one as a revision (a dirty editor conflicts instead).
+      if (!this.editor.isDirty()) await this.api.snapshotText(open, this.editor.getText()).catch((e) => console.warn("snapshot before reload failed:", e));
+      this.editor.onExternalChange(open);
+    }
   }
 
   onIndexProgress(done: number, total: number) {

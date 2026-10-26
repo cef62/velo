@@ -1,4 +1,5 @@
-import type { NoteDoc, SaveResult } from "./api";
+import type { NoteDoc, NoteMeta, SaveResult } from "./api";
+import { frontMatterRange } from "./frontmatter";
 
 export interface SaverDeps {
   saveNote(path: string, text: string, baseHash: string): Promise<SaveResult>;
@@ -12,6 +13,13 @@ export interface SaverDeps {
   onSaved?(): void;
   /** true while a saveNote request is in flight, false once it settled (also on failure). */
   onSaving?(on: boolean): void;
+  /**
+   * The save stamped the text: put `block` into the editor as a non-user change (never edit()), unless the editor's
+   * block is no longer `sentBlock` (the block of the text that was saved; null = it had none).
+   */
+  applyFrontMatter?(block: string, sentBlock: string | null): void;
+  /** Effective dates/tags/aliases from a successful save of the open note. */
+  onMeta?(meta: NoteMeta): void;
 }
 
 const RETRY_MAX_MS = 30000;
@@ -128,6 +136,11 @@ export class SaveController {
         this.d.onSaving?.(true);
         const r = await this.d.saveNote(target.path, text, target.baseHash).finally(() => this.d.onSaving?.(false));
         if (r.kind === "saved") {
+          if (target === this.cur) {
+            const sent = frontMatterRange(text);
+            if (r.front_matter != null) this.d.applyFrontMatter?.(r.front_matter, sent ? text.slice(0, sent.to) : null);
+            this.d.onMeta?.(r.meta);
+          }
           target.baseHash = r.hash;
           if (target === this.cur && v === this.version) this.dirty = false;
         } else if (target === this.cur) {

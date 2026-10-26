@@ -53,6 +53,8 @@ export function fakeApi(notes: Record<string, string> = {}) {
     hasIdentity: vi.fn(async () => true),
     setupPassphrase: vi.fn(async () => null),
     identityFileExists: vi.fn(async () => true),
+    snapshotText: vi.fn(async (_p: string, _t: string) => {}),
+    readRevision: vi.fn(async (_p: string, _id: string): Promise<string> => { throw "unset"; }),
   };
   return { api: api as unknown as Api & typeof api, notes };
 }
@@ -64,6 +66,7 @@ export class FakeEditor implements Editor {
   dirty = false;
   flushResult = true;
   rich = false;
+  showFrontMatter = false;
   readOnly = false;
   suspended = false;
   focused = 0;
@@ -99,6 +102,11 @@ export class FakeEditor implements Editor {
   focus() { this.focused++; }
   getText = () => this.text;
   setRich(on: boolean) { this.rich = on; }
+  setShowFrontMatter(on: boolean) { this.showFrontMatter = on; }
+  replaceText(text: string) {
+    this.text = text;
+    this.dirty = true;
+  }
   refreshLinks = vi.fn();
   toggleTask = vi.fn(() => false);
 }
