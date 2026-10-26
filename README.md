@@ -26,7 +26,7 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | ⌘⇧P | Ctrl+Shift+P | Toggle Markdown preview |
 | ⌘⇧E | Ctrl+Shift+E | Lock / unlock current note |
 | ⌥⌘E | Ctrl+Alt+E | Lock all notes |
-| ⌘⌫ | Ctrl+Backspace | Move the current note to the Trash, after confirming (from search or the list; in the editor ⌘⌫ keeps its editing meaning) |
+| ⌘⌫ | Ctrl+Backspace | Move the current note to the Trash, after confirming (from the list or an empty search box; in the editor and in a non-empty search box ⌘⌫ keeps its editing meaning) |
 | ⌘⇧S | Ctrl+Shift+S | Toggle sort (last modified / title) |
 | ⌘[ / ⌘] | Ctrl+[ / Ctrl+] | Back / forward through visited notes |
 | ⌘, | Ctrl+, | Settings |

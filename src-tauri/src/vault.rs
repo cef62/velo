@@ -52,6 +52,19 @@ fn parse(p: &Path) -> anyhow::Result<NoteFile> {
     parse_note_file(p).ok_or_else(|| anyhow!("not a note file: {}", p.display()))
 }
 
+/// macOS uses NSFileManager instead of the crate's Finder default, which drives Finder over AppleScript
+/// (Automation permission prompt; denying it would break every later delete).
+fn move_to_trash(p: &Path) -> std::io::Result<()> {
+    #[allow(unused_mut)]
+    let mut ctx = trash::TrashContext::default();
+    #[cfg(target_os = "macos")]
+    {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        ctx.set_delete_method(DeleteMethod::NsFileManager);
+    }
+    ctx.delete(p).map_err(|e| std::io::Error::other(e.to_string()))
+}
+
 impl Vault {
     pub fn open(dir: PathBuf, db_path: &Path, identity: Option<&str>) -> anyhow::Result<Vault> {
         Self::open_with_progress(dir, db_path, identity, &mut |_, _| {})
@@ -242,7 +255,7 @@ impl Vault {
 
     /// Move a note to the OS Trash and drop it from the index and the unlocked cache.
     pub fn delete_note(&mut self, path: &str) -> anyhow::Result<()> {
-        self.delete_note_with(path, |p| trash::delete(p).map_err(|e| std::io::Error::other(e.to_string())))
+        self.delete_note_with(path, move_to_trash)
     }
 
     /// `remove` does the actual file removal (Trash in the app, plain remove in tests).

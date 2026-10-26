@@ -42,7 +42,7 @@ const sortBtn = $<HTMLButtonElement>("sort");
 
 // Set while a lock/unlock hand-off is in flight: the open note's file is moving, so navigation is refused.
 let busy = false;
-const BUSY_MSG = "Busy locking/unlocking — try again in a moment";
+const BUSY_MSG = "Busy — try again in a moment";
 // One-shot notice (e.g. keychain unavailable) that survives the next errEl reset.
 let notice = "";
 const clearErr = () => {
@@ -203,6 +203,7 @@ async function deleteNote() {
   const path = open ?? results.get(sel)?.path;
   if (!path) return;
   const title = open ? titleEl.textContent : results.get(sel)?.title;
+  const row = results.indexOf(path);
   if (!(await ask(`Move “${title}” to the Trash?`, { title: "Delete note", kind: "warning", okLabel: "Move to Trash" }))) return;
   busy = true;
   let reopen = false;
@@ -228,6 +229,10 @@ async function deleteNote() {
   }
   if (reopen) await show(path); // delete failed after detaching: put the note back
   await runSearch(false);
+  if (!editor.currentPath() && row >= 0 && results.count) {
+    sel = Math.min(row, results.count - 1); // highlight the neighbour (not opened) so Enter keeps working
+    list.setSelected(sel);
+  }
   void refreshTitles();
   focusSearch();
 }
@@ -370,7 +375,13 @@ async function select(i: number, how: "explicit" | "auto" = "explicit") {
 }
 
 /** true = fresh first page (new query/folder/sort), selecting its first row; false = reload the loaded range in place. */
-async function runSearch(selectFirst: boolean) {
+let searching: Promise<void> = Promise.resolve(); // latest list reset, awaited by Enter so it never acts on stale rows
+function runSearch(selectFirst: boolean): Promise<void> {
+  const p = doSearch(selectFirst);
+  if (selectFirst) searching = p;
+  return p;
+}
+async function doSearch(selectFirst: boolean) {
   const seq = ++searchSeq;
   try {
     await (selectFirst ? results.reset() : results.refresh());
@@ -435,6 +446,7 @@ function settleAfterOpen(created: boolean, source: "enter" | "wikilink") {
 }
 
 async function enter(force = false) {
+  await searching;
   const a = enterAction(q.value, results.loaded, results.get(sel), force);
   if (!a) return;
   try {
@@ -586,7 +598,8 @@ window.addEventListener(
     }
     for (const [action, run] of Object.entries(ACTIONS)) {
       if (!matches(e, keys[action as Action], isMac)) continue;
-      if (action === "delete_note" && t.closest?.("#editor")) continue; // in the editor ⌘⌫ keeps its editing meaning
+      // Backspace combos keep their editing meaning in the editor and in a non-empty search box
+      if (keys[action as Action].endsWith("+Backspace") && (t.closest?.("#editor") || (t === q && q.value))) continue;
       e.preventDefault();
       e.stopPropagation();
       run();
