@@ -1,3 +1,5 @@
+import { errText } from "./errtext";
+
 export const isLockedPath = (p: string) => p.endsWith(".age");
 
 export const passphraseDialogMode = (identityFileExists: boolean) =>
@@ -39,7 +41,7 @@ export function askPassphrase(identityFileExists: boolean, attempt: (pw: string)
         await attempt(value);
         dlg.close("ok");
       } catch (err) {
-        msg.textContent = err === "wrong-passphrase" ? "Wrong passphrase" : String(err);
+        msg.textContent = err === "wrong-passphrase" ? "Wrong passphrase" : errText(err);
         pw.focus();
       }
       busy = false;
