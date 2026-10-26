@@ -165,6 +165,9 @@ export class Controller {
       sort: s.sort ?? "modified", // before the first search, which pages with it
       editorStyle: s.editor_style === "plain" ? "plain" : "rich",
       headerLabels: s.header_labels === true,
+      writeFrontMatter: s.write_front_matter !== false,
+      showFrontMatter: s.show_front_matter === true,
+      infoOpen: s.info_panel === true,
     });
     this.syncStyle();
     if (!s.notes_dir) this.store.set({ phase: "setup" });
@@ -710,7 +713,7 @@ export class Controller {
       return err === "not-found" ? "Folder not found" : String(err);
     }
     this.applyLook(next);
-    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, headerLabels: next.header_labels, settings: null });
+    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, headerLabels: next.header_labels, writeFrontMatter: next.write_front_matter, showFrontMatter: next.show_front_matter, infoOpen: next.info_panel, settings: null });
     this.preview?.refresh(); // watermark shows the binding
     this.syncStyle();
     if (next.notes_dir !== cur.notes_dir) {
@@ -781,6 +784,8 @@ export class Controller {
   }
 
   protected readonly actions: Record<Exclude<Action, "toggle_window">, () => void> = {
+    toggle_info: () => {}, // wired in Task 5/6
+    toggle_front_matter: () => {},
     focus_search: () => this.focusSearch(),
     toggle_preview: () => this.togglePreview(),
     rename: () => this.startRename(),

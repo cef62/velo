@@ -57,6 +57,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
     sort: cur.sort as string,
     fontSize: String(cur.font_size),
     headerLabels: cur.header_labels === true,
+    writeFrontMatter: cur.write_front_matter !== false,
     shortcuts: resolve(cur.shortcuts, isMac),
   }));
   const set = (p: Partial<typeof d>) => setD((x) => ({ ...x, ...p }));
@@ -159,6 +160,14 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
             <Checkbox.Root checked={d.headerLabels} onCheckedChange={(x) => set({ headerLabels: x.checked === true })} size="sm">
               <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
               <Checkbox.Label>Show labels on header buttons</Checkbox.Label>
+              <Checkbox.HiddenInput />
+            </Checkbox.Root>
+          </div>
+          <div className={frow}>
+            <span className={flab}>Notes</span>
+            <Checkbox.Root checked={d.writeFrontMatter} onCheckedChange={(x) => set({ writeFrontMatter: x.checked === true })} size="sm">
+              <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+              <Checkbox.Label>Add created/modified dates to notes (front matter)</Checkbox.Label>
               <Checkbox.HiddenInput />
             </Checkbox.Root>
           </div>

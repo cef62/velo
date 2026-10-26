@@ -188,4 +188,25 @@ mod tests {
             assert_eq!(stamp(&once, now, fb), once);
         }
     }
+
+    #[test]
+    fn stamp_edge_cases() {
+        let (now, fb) = (dt("2026-10-27T09:14:05+01:00"), dt("2020-01-01T00:00:00+01:00"));
+        let n = "2026-10-27T09:14:05+01:00";
+        // CRLF: rewritten and inserted lines keep CRLF
+        let t = "---\r\ncreated: c\r\nmodified: old\r\n---\r\nbody\r\n";
+        assert_eq!(stamp(t, now, fb), format!("---\r\ncreated: c\r\nmodified: {n}\r\n---\r\nbody\r\n"));
+        let out = stamp("---\r\na: 1\r\n---\r\nx", now, fb);
+        assert!(!out.replace("\r\n", "").contains('\n'), "{out:?}");
+        // multi-byte before and inside the block
+        let t = "---\ntitle: caffè ☕\nmodified: vecchio\n---\nÅ body ☕";
+        assert_eq!(stamp(t, now, fb), format!("---\ntitle: caffè ☕\nmodified: {n}\ncreated: 2020-01-01T00:00:00+01:00\n---\nÅ body ☕"));
+        assert_eq!(stamp("é☕", now, fb), format!("---\ncreated: 2020-01-01T00:00:00+01:00\nmodified: {n}\n---\né☕"));
+        // block-only, no trailing newline at EOF after closing ---
+        assert_eq!(stamp("---\ncreated: c\n---", now, fb), format!("---\ncreated: c\nmodified: {n}\n---"));
+        assert_eq!(stamp("---\n---", now, fb), format!("---\ncreated: 2020-01-01T00:00:00+01:00\nmodified: {n}\n---"));
+        // unterminated last line inside is impossible (closing ---), but no newline after closer + body-less
+        let once = stamp("---\nmodified: x\n---", now, fb);
+        assert_eq!(stamp(&once, now, fb), once);
+    }
 }

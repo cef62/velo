@@ -24,7 +24,7 @@ pub struct NoteDoc {
 }
 
 /// Dates are epoch ms; `*_src` is "frontmatter" or "file".
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 pub struct NoteMeta {
     pub created: i64,
     pub created_src: String,
@@ -60,6 +60,14 @@ fn stat(p: &Path) -> anyhow::Result<Meta> {
     let mtime = md.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as i64);
     let birth = md.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as i64);
     Ok(Meta { mtime, size: md.len(), birth })
+}
+
+/// From the plaintext in memory, so unlocked notes show their real front-matter dates.
+fn note_meta(text: &str, m: &Meta) -> NoteMeta {
+    let fm = frontmatter::parse(text);
+    let (created, cs, modified, ms) = effective_dates(fm.as_ref(), m);
+    let tags = all_tags(frontmatter::body(text), fm.as_ref()).into_iter().map(|(_, d)| d).collect();
+    NoteMeta { created, created_src: cs.into(), modified, modified_src: ms.into(), tags, aliases: fm.map(|f| f.aliases).unwrap_or_default() }
 }
 
 fn parse(p: &Path) -> anyhow::Result<NoteFile> {
@@ -154,29 +162,26 @@ impl Vault {
         } else {
             lossy(&bytes)
         };
-        // From the plaintext in memory, so unlocked notes show their real front-matter dates.
-        let fm = frontmatter::parse(&text);
-        let (created, cs, modified, ms) = effective_dates(fm.as_ref(), &stat(p)?);
-        let tags = all_tags(frontmatter::body(&text), fm.as_ref()).into_iter().map(|(_, d)| d).collect();
-        let aliases = fm.map(|f| f.aliases).unwrap_or_default();
-        let meta = NoteMeta { created, created_src: cs.into(), modified, modified_src: ms.into(), tags, aliases };
+        let meta = note_meta(&text, &stat(p)?);
         Ok(NoteDoc { path: path.into(), title: nf.title, text, hash: hash(&bytes), encrypted: nf.encrypted, meta })
     }
 
-    pub fn open_or_create(&mut self, title: &str, identity: Option<&str>) -> anyhow::Result<NoteDoc> {
+    pub fn open_or_create(&mut self, title: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<NoteDoc> {
         if let Some(path) = self.index.find_title(title)? {
             return self.open_note(&path, identity);
         }
         let p = note_path(&self.store.dir, title, false);
         if !p.exists() {
-            self.store.write_atomic(&p, b"")?;
+            let now = chrono::Local::now().fixed_offset();
+            let init = if write_fm { frontmatter::stamp("", now, now) } else { String::new() };
+            self.store.write_atomic(&p, init.as_bytes())?;
         }
         let body = lossy(&self.store.read(&p)?);
         self.reindex(&p, Some(&body))?;
         self.open_note(&s(&p), identity)
     }
 
-    pub fn save_note(&mut self, path: &str, text: &str, base_hash: &str, identity: Option<&str>) -> anyhow::Result<SaveResult> {
+    pub fn save_note(&mut self, path: &str, text: &str, base_hash: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<SaveResult> {
         let p = Path::new(path);
         let nf = parse(p)?;
         let encrypted = nf.encrypted;
@@ -184,12 +189,21 @@ impl Vault {
         if !encrypted && note_path(&self.store.dir, &nf.title, true).exists() {
             return Err(anyhow!("locked-sibling"));
         }
+        let orig = text;
+        let now = chrono::Local::now().fixed_offset();
+        let stamped = write_fm.then(|| {
+            // created fallback: the file's earliest time before this write (now if missing)
+            let ms = stat(p).map_or(now.timestamp_millis(), |m| effective_dates(None, &m).0);
+            let created = chrono::DateTime::from_timestamp_millis(ms).map_or(now, |d| d.with_timezone(&chrono::Local).fixed_offset());
+            frontmatter::stamp(text, now, created)
+        });
+        let text = stamped.as_deref().unwrap_or(text);
         let bytes = if encrypted {
             crypto::encrypt(identity.ok_or_else(|| anyhow!("locked"))?, text.as_bytes())?
         } else {
             text.as_bytes().to_vec()
         };
-        let res = self.store.save(p, &bytes, base_hash)?;
+        let mut res = self.store.save(p, &bytes, base_hash)?;
         let target = match &res {
             SaveResult::Saved { .. } => p.to_path_buf(),
             SaveResult::Conflict { conflict_path, .. } => PathBuf::from(conflict_path),
@@ -197,6 +211,10 @@ impl Vault {
         self.reindex(&target, (!encrypted).then_some(text))?;
         if encrypted {
             self.unlocked.insert(s(&target), text.to_string());
+        }
+        if let SaveResult::Saved { front_matter, meta, .. } = &mut res {
+            *meta = note_meta(text, &stat(&target)?);
+            *front_matter = stamped.as_deref().filter(|t| *t != orig).and_then(|t| frontmatter::parse(t).map(|f| t[..f.end].to_string()));
         }
         Ok(res)
     }
@@ -378,18 +396,18 @@ mod tests {
         assert_eq!(v.search("bin", Sort::Modified, 0, &[]).unwrap().hits.len(), 1); assert_eq!(std::fs::read(dir.join("bin.txt")).unwrap(), before);
     }
     #[test] fn open_or_create_dedupes_case_insensitive() {
-        let mut v = open_empty(); let a = v.open_or_create("Foo", None).unwrap();
-        let b = v.open_or_create("FOO", None).unwrap(); assert_eq!(a.path, b.path);
+        let mut v = open_empty(); let a = v.open_or_create("Foo", None, false).unwrap();
+        let b = v.open_or_create("FOO", None, false).unwrap(); assert_eq!(a.path, b.path);
     }
     #[test] fn save_after_external_delete_recreates() {
-        let mut v = open_empty(); let d = v.open_or_create("n", None).unwrap();
-        std::fs::remove_file(&d.path).unwrap(); assert!(matches!(v.save_note(&d.path, "kept", &d.hash, None).unwrap(), SaveResult::Saved { .. }));
+        let mut v = open_empty(); let d = v.open_or_create("n", None, false).unwrap();
+        std::fs::remove_file(&d.path).unwrap(); assert!(matches!(v.save_note(&d.path, "kept", &d.hash, None, false).unwrap(), SaveResult::Saved { .. }));
         assert_eq!(std::fs::read_to_string(&d.path).unwrap(), "kept");
     }
     #[test] fn lock_keeps_plaintext_off_disk_and_db() {
         let (dir, db) = setup(); let id = crypto::new_identity();
-        let mut v = Vault::open(dir.clone(), &db, None).unwrap(); let d = v.open_or_create("s", None).unwrap();
-        let _r = v.save_note(&d.path, "uniqueplain zqxjvkplmwqbyfh", &d.hash, None).unwrap(); let p = v.lock_note(&d.path, &id).unwrap();
+        let mut v = Vault::open(dir.clone(), &db, None).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
+        let _r = v.save_note(&d.path, "uniqueplain zqxjvkplmwqbyfh", &d.hash, None, false).unwrap(); let p = v.lock_note(&d.path, &id).unwrap();
         assert!(p.ends_with(".md.age")); assert!(!Path::new(&d.path).exists());
         assert!(!std::fs::read(&p).unwrap().windows(11).any(|w| w == b"uniqueplain"));
         drop(v);
@@ -406,8 +424,8 @@ mod tests {
     }
     #[test] fn locked_note_tags_stay_out_of_sqlite() {
         let (dir, db) = setup(); let id = crypto::new_identity();
-        let mut v = Vault::open(dir.clone(), &db, None).unwrap(); let d = v.open_or_create("s", None).unwrap();
-        let _r = v.save_note(&d.path, "#zqxjvkplmwqbyfh text", &d.hash, None).unwrap();
+        let mut v = Vault::open(dir.clone(), &db, None).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
+        let _r = v.save_note(&d.path, "#zqxjvkplmwqbyfh text", &d.hash, None, false).unwrap();
         assert_eq!(v.tags().unwrap().len(), 1); v.lock_note(&d.path, &id).unwrap();
         assert!(v.tags().unwrap().is_empty());
         drop(v);
@@ -423,9 +441,9 @@ mod tests {
     }
     #[test] fn save_to_plain_path_refused_when_locked_sibling_exists() {
         let (dir, db) = setup(); let id = crypto::new_identity();
-        let mut v = Vault::open(dir.clone(), &db, Some(&id)).unwrap(); let d = v.open_or_create("s", None).unwrap();
+        let mut v = Vault::open(dir.clone(), &db, Some(&id)).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
         v.lock_note(&d.path, &id).unwrap();
-        let e = v.save_note(&d.path, "stale zqxjvkplmwqbyfh", &d.hash, Some(&id)).err().unwrap();
+        let e = v.save_note(&d.path, "stale zqxjvkplmwqbyfh", &d.hash, Some(&id), false).err().unwrap();
         assert_eq!(e.to_string(), "locked-sibling");
         assert!(!Path::new(&d.path).exists());
         drop(v);
@@ -446,7 +464,7 @@ mod tests {
     }
     #[test] fn leading_dot_titles_stay_visible_and_indexed() {
         let mut v = open_empty();
-        let d = v.open_or_create(".foo", None).unwrap();
+        let d = v.open_or_create(".foo", None, false).unwrap();
         assert!(!Path::new(&d.path).file_name().unwrap().to_str().unwrap().starts_with('.'));
         assert_eq!(v.search("", Sort::Modified, 0, &[]).unwrap().hits.len(), 1);
         let r = v.rename_note(&d.path, ".bar", false).unwrap();
@@ -455,14 +473,14 @@ mod tests {
         assert!(v.open_note(&r.path, None).is_ok());
     }
     #[test] fn fs_changes_skip_self_writes() {
-        let mut v = open_empty(); let d = v.open_or_create("w", None).unwrap();
-        v.save_note(&d.path, "x", &d.hash, None).unwrap(); assert!(v.apply_fs_changes(&[d.path.clone().into()], None).is_empty());
+        let mut v = open_empty(); let d = v.open_or_create("w", None, false).unwrap();
+        v.save_note(&d.path, "x", &d.hash, None, false).unwrap(); assert!(v.apply_fs_changes(&[d.path.clone().into()], None).is_empty());
         std::fs::write(&d.path, "external zebra").unwrap(); assert_eq!(v.apply_fs_changes(&[d.path.clone().into()], None), vec![d.path.clone()]);
         assert_eq!(v.search("zebra", Sort::Modified, 0, &[]).unwrap().hits.len(), 1);
     }
     #[test] fn delete_moves_file_out_and_drops_it_from_index() {
-        let mut v = open_empty(); let d = v.open_or_create("doomed", None).unwrap();
-        v.save_note(&d.path, "zebra", &d.hash, None).unwrap();
+        let mut v = open_empty(); let d = v.open_or_create("doomed", None, false).unwrap();
+        v.save_note(&d.path, "zebra", &d.hash, None, false).unwrap();
         v.delete_note_with(&d.path, |p| std::fs::remove_file(p)).unwrap();
         assert!(!Path::new(&d.path).exists());
         assert!(v.search("zebra", Sort::Modified, 0, &[]).unwrap().hits.is_empty());
@@ -473,5 +491,55 @@ mod tests {
         let outside = tempfile::tempdir().unwrap().keep().join("x.md"); std::fs::write(&outside, "keep").unwrap();
         assert!(v.delete_note_with(&s(&outside), |p| std::fs::remove_file(p)).is_err());
         assert!(outside.exists());
+    }
+    fn fm_of(r: SaveResult) -> (Option<String>, String) { match r { SaveResult::Saved { front_matter, hash, .. } => (front_matter, hash), _ => panic!("conflict") } }
+    #[test] fn save_stamps_plain_note() {
+        let mut v = open_empty(); let d = v.open_or_create("n", None, false).unwrap();
+        let (fm, _) = fm_of(v.save_note(&d.path, "hello", &d.hash, None, true).unwrap());
+        let fm = fm.unwrap(); assert!(fm.starts_with("---\ncreated: ") && fm.ends_with("---\n"));
+        let disk = std::fs::read_to_string(&d.path).unwrap(); assert!(disk.starts_with(&fm) && disk.ends_with("hello"));
+        // created = earliest file time before the write
+        let md = std::fs::metadata(&d.path).unwrap(); let _ = md;
+        let c = frontmatter::parse(&disk).unwrap().created.unwrap();
+        assert!((c.timestamp() - chrono::Local::now().timestamp()).abs() < 5);
+    }
+    #[test] fn created_comes_from_file_time() {
+        let mut v = open_empty(); let d = v.open_or_create("n", None, false).unwrap();
+        let m = stat(Path::new(&d.path)).unwrap(); let want = effective_dates(None, &m).0 / 1000;
+        v.save_note(&d.path, "x", &d.hash, None, true).unwrap();
+        assert_eq!(frontmatter::parse(&std::fs::read_to_string(&d.path).unwrap()).unwrap().created.unwrap().timestamp(), want);
+    }
+    #[test] fn save_setting_off_writes_as_is() {
+        let mut v = open_empty(); let d = v.open_or_create("n", None, false).unwrap();
+        let (fm, _) = fm_of(v.save_note(&d.path, "hello", &d.hash, None, false).unwrap());
+        assert!(fm.is_none()); assert_eq!(std::fs::read_to_string(&d.path).unwrap(), "hello");
+    }
+    #[test] fn current_block_same_second_is_unchanged() {
+        let mut v = open_empty(); let d = v.open_or_create("n", None, false).unwrap();
+        let now = chrono::Local::now().fixed_offset();
+        // retry across a second boundary
+        for _ in 0..5 {
+            let t = frontmatter::stamp("body", now, now);
+            let cur = chrono::Local::now().fixed_offset();
+            if cur.timestamp() != now.timestamp() { continue; }
+            let (fm, _) = fm_of(v.save_note(&d.path, &t, &stat_hash(&d.path), None, true).unwrap());
+            assert!(fm.is_none()); return;
+        }
+    }
+    fn stat_hash(p: &str) -> String { hash(&std::fs::read(p).unwrap()) }
+    #[test] fn locked_note_encrypts_stamped_text() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = Vault::open(dir, &db, None).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
+        let p = v.lock_note(&d.path, &id).unwrap();
+        let h = stat_hash(&p);
+        v.save_note(&p, "secret", &h, Some(&id), true).unwrap();
+        let plain = String::from_utf8(crypto::decrypt(&id, &std::fs::read(&p).unwrap()).unwrap()).unwrap();
+        assert!(plain.starts_with("---\ncreated: ") && plain.ends_with("secret"));
+    }
+    #[test] fn new_note_gets_block() {
+        let mut v = open_empty();
+        let d = v.open_or_create("a", None, true).unwrap(); assert!(d.text.starts_with("---\ncreated: ") && d.text.ends_with("---\n"));
+        assert_eq!(d.meta.created_src, "frontmatter");
+        assert_eq!(v.open_or_create("b", None, false).unwrap().text, "");
     }
 }

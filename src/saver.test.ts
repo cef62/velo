@@ -7,7 +7,7 @@ const doc = { path: "a.md", title: "a", text: "base", hash: "h0", encrypted: fal
 let text = "";
 const mk = (over: Partial<ConstructorParameters<typeof SaveController>[0]> = {}) => {
   const d = {
-    saveNote: vi.fn(async () => ({ kind: "saved" as const, hash: "h1" })),
+    saveNote: vi.fn(async () => ({ kind: "saved" as const, hash: "h1", front_matter: null, meta: noMeta })),
     openNote: vi.fn(async () => ({ ...doc, text: "disk", hash: "hd" })),
     getText: () => text,
     setText: (t: string) => void (text = t),
@@ -61,7 +61,7 @@ test("conflict without late edit loads disk version", async () => {
 });
 
 test("save rejection: stays dirty, error surfaced, retries", async () => {
-  const saveNote = vi.fn().mockRejectedValueOnce("locked").mockResolvedValue({ kind: "saved", hash: "h1" });
+  const saveNote = vi.fn().mockRejectedValueOnce("locked").mockResolvedValue({ kind: "saved", hash: "h1", front_matter: null, meta: noMeta });
   const { c, d } = mk({ saveNote });
   type(c, "x");
   await vi.advanceTimersByTimeAsync(500);
@@ -234,7 +234,7 @@ test("onSaving true during save, false after (also on rejection)", async () => {
   const seen: boolean[] = [];
   let fail!: (e: unknown) => void;
   const saveNote = vi.fn()
-    .mockImplementationOnce(async () => { expect(seen).toEqual([true]); return { kind: "saved" as const, hash: "h1" }; })
+    .mockImplementationOnce(async () => { expect(seen).toEqual([true]); return { kind: "saved" as const, hash: "h1", front_matter: null, meta: noMeta }; })
     .mockImplementationOnce(() => new Promise((_, rej) => (fail = rej)));
   const { c } = mk({ saveNote, onSaving: (on: boolean) => void seen.push(on) });
   type(c, "x");

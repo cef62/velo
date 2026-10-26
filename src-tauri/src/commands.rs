@@ -224,12 +224,14 @@ pub fn open_note(st: State<AppState>, path: String) -> Res<NoteDoc> {
 
 #[tauri::command]
 pub fn open_or_create(st: State<AppState>, title: String) -> Res<NoteDoc> {
-    with_vault(&st, |v, id| v.open_or_create(&title, id))
+    let fm = st.settings.lock().unwrap().write_front_matter;
+    with_vault(&st, |v, id| v.open_or_create(&title, id, fm))
 }
 
 #[tauri::command]
 pub fn save_note(st: State<AppState>, path: String, text: String, base_hash: String) -> Res<SaveResult> {
-    with_vault(&st, |v, id| v.save_note(&path, &text, &base_hash, id))
+    let fm = st.settings.lock().unwrap().write_front_matter;
+    with_vault(&st, |v, id| v.save_note(&path, &text, &base_hash, id, fm))
 }
 
 #[tauri::command]

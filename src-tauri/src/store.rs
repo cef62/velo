@@ -20,7 +20,8 @@ pub fn hash(bytes: &[u8]) -> String {
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum SaveResult {
-    Saved { hash: String },
+    /// `front_matter` (the stamped block) and `meta` are filled in by the vault.
+    Saved { hash: String, front_matter: Option<String>, meta: crate::vault::NoteMeta },
     Conflict { conflict_path: String, disk_hash: String },
 }
 
@@ -91,9 +92,9 @@ impl Store {
                     disk_hash: hash(&disk),
                 })
             }
-            Ok(_) => Ok(SaveResult::Saved { hash: self.write_atomic(path, bytes)? }),
+            Ok(_) => Ok(SaveResult::Saved { hash: self.write_atomic(path, bytes)?, front_matter: None, meta: Default::default() }),
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                Ok(SaveResult::Saved { hash: self.write_atomic(path, bytes)? })
+                Ok(SaveResult::Saved { hash: self.write_atomic(path, bytes)?, front_matter: None, meta: Default::default() })
             }
             Err(e) => Err(e),
         }

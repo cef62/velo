@@ -19,11 +19,17 @@ pub struct Settings {
     pub header_labels: bool,
     /// action id -> binding ("Mod+Shift+KeyP"); missing ids use the UI defaults
     pub shortcuts: BTreeMap<String, String>,
+    /// stamp created/modified front matter on save and new notes
+    pub write_front_matter: bool,
+    /// show the front-matter block in the editor
+    pub show_front_matter: bool,
+    /// info panel open
+    pub info_panel: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), header_labels: false, shortcuts: BTreeMap::new() }
+        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), header_labels: false, shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false }
     }
 }
 
@@ -124,10 +130,11 @@ mod tests {
     #[test] fn settings_defaults_and_roundtrip() {
         let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");
         let s = load(&p); assert_eq!(s.toggle_window_binding(), "Mod+Shift+Space"); assert_eq!(s.layout, "vertical");
+        assert!(s.write_front_matter && !s.show_front_matter && !s.info_panel);
         std::fs::write(&p, "{not json").unwrap(); assert_eq!(load(&p).font_size, 14);
-        let mut s2 = s.clone(); s2.font_size = 18; s2.sort = "title".into(); s2.shortcuts.insert("rename".into(), "Mod+KeyR".into());
+        let mut s2 = s.clone(); s2.font_size = 18; s2.write_front_matter = false; s2.info_panel = true; s2.sort = "title".into(); s2.shortcuts.insert("rename".into(), "Mod+KeyR".into());
         save(&p, &s2).unwrap();
-        let back = load(&p); assert_eq!((back.font_size, back.sort.as_str()), (18, "title")); assert_eq!(back.shortcuts, s2.shortcuts);
+        let back = load(&p); assert_eq!((back.font_size, back.sort.as_str()), (18, "title")); assert_eq!(back.shortcuts, s2.shortcuts); assert!(!back.write_front_matter && back.info_panel);
     }
     #[test] fn v1_settings_migrate() {
         let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");

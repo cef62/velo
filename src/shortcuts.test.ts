@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { DEFAULTS, overrides, eventToBinding, formatBinding, isAltGraph, matches, normalizeBinding, resolve, validateBinding } from "./shortcuts";
+import { DEFAULTS, LABELS, overrides, eventToBinding, formatBinding, isAltGraph, matches, normalizeBinding, resolve, validateBinding } from "./shortcuts";
 
 const ev = (code: string, m: Partial<Record<"metaKey" | "ctrlKey" | "altKey" | "shiftKey", boolean>> = {}) =>
   ({ code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...m });
@@ -82,3 +82,5 @@ test("none clears a shortcut", () => {
   expect(overrides({ ...DEFAULTS, back: "none" })).toEqual({ back: "none" });
   expect(validateBinding({ ...DEFAULTS, forward: "none" }, "back", "none", true)).toEqual({ ok: true });
 });
+
+test("metadata shortcut defaults", () => { expect(DEFAULTS.toggle_info).toBe("Mod+KeyI"); expect(DEFAULTS.toggle_front_matter).toBe("none"); expect(LABELS.toggle_info).toBe("Note info"); });
