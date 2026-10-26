@@ -1,6 +1,6 @@
 // Test fakes for the controller: in-memory backend, editor, preview and UI port. Tests only.
 import { vi } from "vitest";
-import type { Hit, NoteDoc, Page, Settings } from "../api";
+import type { Hit, NoteDoc, Page, RenameResult, Settings, TagCount } from "../api";
 import type { Editor } from "../editor";
 import type { Preview } from "../preview";
 import type { Api } from "./controller";
@@ -35,7 +35,7 @@ export function fakeApi(notes: Record<string, string> = {}) {
       const all = Object.keys(notes).map(hit);
       return { hits: all.slice(offset, offset + PAGE), has_more: offset + PAGE < all.length, total: offset === 0 ? all.length : 0 };
     }),
-    listTags: vi.fn(async () => []),
+    listTags: vi.fn(async (): Promise<TagCount[]> => []),
     listTitles: vi.fn(async () => Object.keys(notes)),
     openNote: vi.fn(async (path: string) => docOf(path)),
     openOrCreate: vi.fn(async (title: string) => {
@@ -43,12 +43,12 @@ export function fakeApi(notes: Record<string, string> = {}) {
       return docOf(`/n/${title}.md`);
     }),
     saveNote: vi.fn(),
-    renameNote: vi.fn(),
+    renameNote: vi.fn(async (_p: string, _t: string, _r: boolean): Promise<RenameResult> => { throw "unset"; }),
     backlinkCount: vi.fn(async () => 0),
-    lockNote: vi.fn(),
-    unlockNote: vi.fn(),
+    lockNote: vi.fn(async (_p: string): Promise<string> => { throw "unset"; }),
+    unlockNote: vi.fn(async (_p: string): Promise<string> => { throw "unset"; }),
     lockAll: vi.fn(async () => {}),
-    deleteNote: vi.fn(async () => {}),
+    deleteNote: vi.fn(async (path: string) => void delete notes[path.slice(3, -3)]),
     hasIdentity: vi.fn(async () => true),
     setupPassphrase: vi.fn(async () => null),
     identityFileExists: vi.fn(async () => true),

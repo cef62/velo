@@ -1,4 +1,4 @@
-import type { TagCount } from "../api";
+import type { Settings, TagCount } from "../api";
 import { resolve, type Action } from "../shortcuts";
 
 /** Minimal observable state: React reads it through useSyncExternalStore, the controller writes it. */
@@ -54,6 +54,7 @@ export interface AppState {
   selectedTags: string[];
   tagPanelOpen: boolean;
   exactTitleMatch: boolean; // drives the ⇧↩ Create hint
+  settings: Settings | null; // non-null = the Settings dialog is open on these saved settings
 }
 
 export const initialState = (isMac: boolean): AppState => ({
@@ -86,4 +87,5 @@ export const initialState = (isMac: boolean): AppState => ({
   selectedTags: [],
   tagPanelOpen: false,
   exactTitleMatch: false,
+  settings: null,
 });

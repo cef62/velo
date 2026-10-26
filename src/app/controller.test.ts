@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { Page } from "../api";
-import { Controller } from "./controller";
+import { Controller, type KeyEventLike } from "./controller";
 import { FakeEditor, FakePreview, deferred, fakeApi, fakeUi, hit, settle } from "./fakes";
 import { createStore, initialState } from "./store";
 
@@ -142,4 +142,173 @@ test("editor callbacks: save errors set errFromSave, other errors clear it", asy
   o.onConflict(P("A (conflict)"));
   o.onSaving(true);
   expect(store.get()).toMatchObject({ conflict: P("A (conflict)"), saving: true });
+});
+
+test("lock hand-off busy refuses show", async () => {
+  const { c, api, store, editor } = setup();
+  await c.runSearch(true);
+  await settle(); // A open
+  const d = deferred<string>();
+  api.lockNote.mockImplementationOnce(() => d.promise);
+  const locking = c.toggleLock();
+  await settle();
+  expect(editor.suspended).toBe(true);
+  expect(await c.show(P("B"))).toBe(false);
+  expect(store.get().err).toBe("Busy — try again in a moment");
+  api.openNote.mockResolvedValueOnce({ path: "/n/A.age", title: "A", text: "a", hash: "h", encrypted: true });
+  d.resolve("/n/A.age");
+  await locking;
+  expect(editor.path).toBe("/n/A.age");
+  expect(editor.suspended).toBe(false);
+  expect(store.get()).toMatchObject({ openPath: "/n/A.age", encrypted: true, err: "" });
+  expect(api.saveNote).not.toHaveBeenCalled();
+  expect(c.busy).toBe(false);
+});
+
+test("lock asks for a passphrase with the note title when there is no identity", async () => {
+  const { c, api, calls } = setup();
+  await c.runSearch(true);
+  await settle();
+  api.hasIdentity.mockResolvedValue(false);
+  api.identityFileExists.mockResolvedValue(false);
+  await c.toggleLock(); // dialog answers false
+  expect(calls.find((x) => x[0] === "passphrase")?.[1]).toMatchObject({ mode: "create", context: "A" });
+  expect(api.lockNote).not.toHaveBeenCalled();
+});
+
+test("delete highlights neighbour without opening", async () => {
+  const { c, api, store } = setup();
+  await c.runSearch(true);
+  await settle();
+  await c.ensureRows(2);
+  await c.select(2); // C, the last row
+  api.openNote.mockClear();
+  await c.deleteNote();
+  expect(api.deleteNote).toHaveBeenCalledWith(P("C"));
+  expect(store.get()).toMatchObject({ openPath: null, title: "", sel: 1 });
+  await settle();
+  expect(api.openNote).not.toHaveBeenCalled();
+});
+
+test("delete flush failure aborts", async () => {
+  const { c, api, store, editor } = setup();
+  await c.runSearch(true);
+  await settle();
+  editor.flushResult = false;
+  await c.deleteNote();
+  expect(store.get().err).toBe("Can't delete: unsaved changes couldn't be saved");
+  expect(api.deleteNote).not.toHaveBeenCalled();
+  expect(editor.path).toBe(P("A"));
+});
+
+test("tag prune highlights row 0 without opening", async () => {
+  const { c, api, store } = setup();
+  store.set({ selectedTags: ["gone"] });
+  api.listTags.mockResolvedValueOnce([{ tag: "kept", count: 1 }] as never);
+  await c.refreshTags();
+  await settle();
+  expect(store.get()).toMatchObject({ selectedTags: [], tags: [{ tag: "kept", count: 1 }], sel: 0, openPath: null });
+  expect(api.openNote).not.toHaveBeenCalled();
+});
+
+test("opening a locked note with no key anywhere shows the copy-identity error and no dialog", async () => {
+  const { c, api, store, calls } = setup();
+  api.openNote.mockRejectedValueOnce("locked");
+  api.hasIdentity.mockResolvedValue(false);
+  api.identityFileExists.mockResolvedValue(false);
+  await c.show(P("A"));
+  expect(store.get().err).toBe(
+    "This note was locked with a velo key that isn't on this computer. Copy `.velo/identity.age` from the other computer into this notes folder.",
+  );
+  expect(calls.some((x) => x[0] === "passphrase")).toBe(false);
+});
+
+const key = (code: string, mods: { meta?: boolean; shift?: boolean } = {}, where: Partial<KeyEventLike> = {}): KeyEventLike => ({
+  key: code.replace(/^Key/, "").toLowerCase(),
+  code,
+  metaKey: !!mods.meta,
+  ctrlKey: false,
+  altKey: false,
+  shiftKey: !!mods.shift,
+  inEditor: false,
+  inSearchWithText: false,
+  inDialog: false,
+  inRename: false,
+  ...where,
+});
+
+test("onKeyDown: none binding never fires; Backspace combo skipped in editor; arrows ignored in editor; menu key opens context menu for sel", async () => {
+  const { c, store, calls, api } = setup();
+  await c.runSearch(true);
+  await settle();
+  store.set({ keys: { ...store.get().keys, focus_search: "none" } });
+  expect(c.onKeyDown(key("none"))).toBe(false); // an event whose binding string is "none" still doesn't fire it
+  expect(calls.some((x) => x[0] === "focusSearch")).toBe(false);
+  expect(c.onKeyDown(key("Backspace", { meta: true }, { inEditor: true }))).toBe(false);
+  expect(c.onKeyDown(key("Backspace", { meta: true }, { inSearchWithText: true }))).toBe(false);
+  expect(c.onKeyDown({ ...key("ArrowDown"), key: "ArrowDown", inEditor: true })).toBe(false);
+  expect(c.onKeyDown({ ...key("KeyL", { meta: true }), inDialog: true })).toBe(false);
+  expect(c.onKeyDown({ ...key("ContextMenu"), key: "ContextMenu" })).toBe(true);
+  await settle();
+  expect(calls.find((x) => x[0] === "popupMenu")).toBeTruthy();
+  expect(calls.some((x) => x[0] === "rowAnchor")).toBe(true);
+  expect(c.onKeyDown({ ...key("ArrowDown"), key: "ArrowDown" })).toBe(true);
+  await settle();
+  expect(store.get().openPath).toBe(P("B"));
+  expect(c.onKeyDown(key("KeyS", { meta: true, shift: true }))).toBe(true); // toggle_sort
+  await settle();
+  expect(api.setSettings).toHaveBeenCalledWith(expect.objectContaining({ sort: "title" }));
+});
+
+test("saveSettings maps not-found to Folder not found", async () => {
+  const { c, api } = setup();
+  const s = await api.getSettings();
+  api.setSettings.mockRejectedValueOnce("not-found");
+  expect(await c.saveSettings({ ...s, notes_dir: "/gone" })).toBe("Folder not found");
+  api.setSettings.mockRejectedValueOnce("hotkey taken");
+  expect(await c.saveSettings(s)).toBe("hotkey taken");
+});
+
+test("saveSettings applies look, keys and sort, and closes the dialog", async () => {
+  const { c, api, store, calls } = setup();
+  await c.openSettings();
+  const s = store.get().settings!;
+  expect(s.notes_dir).toBe("/n");
+  const next = { ...s, theme: "dark" as const, sort: "title" as const, shortcuts: { focus_search: "Mod+KeyP" } };
+  expect(await c.saveSettings(next)).toBe(null);
+  expect(api.setSettings).toHaveBeenCalledWith(next);
+  expect(store.get()).toMatchObject({ settings: null, theme: "dark", sort: "title" });
+  expect(store.get().keys.focus_search).toBe("Mod+KeyP");
+  expect(calls).toContainEqual(["setWindowTheme", "dark"]);
+});
+
+test("conflict clears on dismiss and when the open note changes; openConflict opens it", async () => {
+  const { c, store, notes } = setup();
+  await c.runSearch(true);
+  await settle();
+  notes["A (conflict)"] = "x";
+  c.editorOpts().onConflict(P("A (conflict)"));
+  c.dismissConflict();
+  expect(store.get().conflict).toBe(null);
+  c.editorOpts().onConflict(P("A (conflict)"));
+  await c.openConflict();
+  expect(store.get()).toMatchObject({ openPath: P("A (conflict)"), conflict: null });
+});
+
+test("rename commits through flush, backlinks confirm and reload", async () => {
+  const { c, api, store, calls } = setup();
+  await c.runSearch(true);
+  await settle();
+  c.startRename();
+  expect(store.get().renaming).toBe(true);
+  api.backlinkCount.mockResolvedValueOnce(2);
+  api.renameNote.mockResolvedValueOnce({ path: P("Z"), rewritten: 2 });
+  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false });
+  await c.commitRename("  Z ");
+  expect(calls).toContainEqual(["confirm", "Update 2 links to the new title?", { title: "Rename", kind: "info" }]);
+  expect(api.renameNote).toHaveBeenCalledWith(P("A"), "Z", true);
+  expect(store.get()).toMatchObject({ renaming: false, title: "Z", openPath: P("Z") });
+  c.startRename();
+  await c.commitRename(null);
+  expect(api.renameNote).toHaveBeenCalledTimes(1);
 });

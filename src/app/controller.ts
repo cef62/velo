@@ -1,5 +1,5 @@
 import type * as ApiModule from "../api";
-import type { Hit, NoteDoc, Settings } from "../api";
+import type { Hit, NoteDoc, Settings, TagCount } from "../api";
 // Types only: editor.ts loads editortheme.ts, which touches `window` at import time (tests run in node).
 import type { Editor, EditorOpts } from "../editor";
 import type { Preview } from "../preview";
@@ -11,14 +11,27 @@ import { latest } from "../latest";
 import { History } from "../history";
 import { errText } from "../errtext";
 import { enterAction, fold, moveSelection } from "../search";
-import { toggleTag } from "../tags";
-import { formatBinding, resolve } from "../shortcuts";
-import type { UiPort } from "./ports";
+import { pruneSelection, toggleTag } from "../tags";
+import { formatBinding, matches, resolve, type Action } from "../shortcuts";
+import { isMenuKey, linkFor, menuModel, type MenuAction } from "../contextmenu";
+import { isLockedPath } from "../passphrase";
+import type { MenuSpec, UiPort } from "./ports";
 import type { AppState, Store } from "./store";
 
 export type Api = typeof ApiModule;
 
 const BUSY_MSG = "Busy — try again in a moment";
+const NO_KEY_MSG =
+  "This note was locked with a velo key that isn't on this computer. Copy `.velo/identity.age` from the other computer into this notes folder.";
+
+/** What the window's capture-phase keydown handler passes in; the flags say where focus is. */
+export type KeyEventLike = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey"> & {
+  getModifierState?: (k: string) => boolean; // pass it through so AltGr never fires a Mod+Alt binding off-mac
+  inEditor: boolean;
+  inSearchWithText: boolean;
+  inDialog: boolean; // a dialog or the settings recorder owns the keys
+  inRename: boolean;
+};
 
 /** main.ts without the DOM: same sequencing and guards; state goes to the store, UI effects to the UiPort. */
 export class Controller {
@@ -193,6 +206,11 @@ export class Controller {
     this.store.set({ title: doc.title, openPath: doc.path, encrypted: doc.encrypted, conflict: null });
   }
 
+  /** The editor holds no note any more (deleted, or locked away by Lock all). */
+  protected closedDoc() {
+    this.store.set({ title: "", openPath: null, encrypted: false, conflict: null });
+  }
+
   /**
    * false = refused: unsaved edits could not be saved (error stays visible), nothing changed.
    * "missing" (only when `nav`, i.e. a history step, which does not record a visit) = the file is gone; no error shown.
@@ -214,20 +232,32 @@ export class Controller {
       this.history.loaded(doc.path, how);
     } catch (e) {
       if (how === "nav" && e === "not-found") return "missing";
-      if (e === "locked" && !retried && (await this.promptPassphrase(null))) return this.show(path, how, true);
+      if (e === "locked" && !retried) {
+        const ok = await this.promptPassphrase({ trigger: "open", context: null });
+        if (ok) return this.show(path, how, true);
+        if (ok === null) return how !== "nav"; // no key on this computer: keep the copy-identity error
+      }
       this.setErr(e === "locked" ? "Note is locked" : errText(e));
       if (how === "nav") return false; // history cursor must be restored
     }
     return true;
   }
 
-  /** Passphrase dialog; true once the identity is available. Wording depends on identity.age existing. */
-  protected async promptPassphrase(context: string | null): Promise<boolean> {
+  /**
+   * Passphrase dialog; true once the identity is available. Wording depends on identity.age existing.
+   * null = opening a locked note with no key anywhere: a new key couldn't decrypt it, so no dialog, just the copy-identity error.
+   * context: the note title when locking, for the create dialog's subtitle.
+   */
+  protected async promptPassphrase(req: { trigger: "open" | "lock"; context: string | null }): Promise<boolean | null> {
     try {
+      if (req.trigger === "open" && !(await this.api.hasIdentity()) && !(await this.api.identityFileExists())) {
+        this.setErr(NO_KEY_MSG);
+        return null;
+      }
       const exists = await this.api.identityFileExists();
       return await this.ui.passphrase({
         mode: exists ? "unlock" : "create",
-        context,
+        context: req.context,
         submit: async (pw) => {
           if ((await this.api.setupPassphrase(pw)) === "keychain-unavailable") {
             this.notice = "Keychain unavailable — you'll be asked for your passphrase each launch";
@@ -404,9 +434,417 @@ export class Controller {
     });
   }
 
-  // Tags arrive in Task 7; the call sites above are final.
-  protected scheduleTagRefresh() {}
-  protected async refreshTags(_inPlace = false) {}
-  protected showTags(_on: boolean) {}
-  protected setTags(_next: string[]) {}
+  /**
+   * Lock/unlock the open note. The editor is suspended (read-only, no saves) from after the flush until
+   * it is rebound to the new path, so no autosave/blur/watcher save can recreate the old path.
+   */
+  async toggleLock() {
+    if (this.busy) return;
+    const path = this.editor.currentPath();
+    if (!path) return;
+    this.busy = true;
+    try {
+      await this.lockHandoff(path);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  protected async lockHandoff(path: string) {
+    try {
+      if (!(await this.api.hasIdentity()) && !(await this.promptPassphrase({ trigger: "lock", context: this.store.get().title }))) return;
+      if (!(await this.editor.flush())) return; // error already visible
+    } catch (e) {
+      this.setErr(errText(e));
+      return;
+    }
+    if (this.editor.currentPath() !== path) return; // belt and braces: the open note changed during the awaits
+    this.editor.suspend();
+    let np: string;
+    try {
+      np = isLockedPath(path) ? await this.api.unlockNote(path) : await this.api.lockNote(path);
+    } catch (e) {
+      this.editor.resume(); // nothing moved: old path is still valid
+      this.setErr(e === "already-exists" ? "A note with that title already exists in the other form" : errText(e));
+      return;
+    }
+    try {
+      const doc = await this.api.openNote(np);
+      this.history.rename(path, np);
+      if (this.editor.rebind(path, doc)) {
+        this.editor.resume();
+        this.loadedDoc(doc);
+        this.clearErr();
+        this.history.loaded(np, "explicit");
+      }
+      await this.runSearch(false);
+      this.selectOpen();
+    } catch (e) {
+      // The file moved but could not be reopened: stay read-only (never resume on the old path).
+      this.setErr(`Note moved but could not be reopened (${e}); pick it from the list`);
+      void this.runSearch(false);
+    }
+  }
+
+  /** Move the open note (or the highlighted row when none is open) to the Trash after confirmation. */
+  async deleteNote() {
+    if (this.busy) {
+      this.setErr(BUSY_MSG);
+      return;
+    }
+    if (this.store.get().indexing) {
+      this.setErr(errText("indexing")); // the backend would refuse after we detached the editor
+      return;
+    }
+    const sel = this.store.get().sel;
+    const open = this.editor.currentPath();
+    const path = open ?? this.results.get(sel)?.path;
+    if (!path) return;
+    const title = open ? this.store.get().title : this.results.get(sel)?.title;
+    const row = this.results.indexOf(path);
+    if (!(await this.ui.confirm(`Move “${title}” to the Trash?`, { title: "Delete note", kind: "warning", okLabel: "Move to Trash" }))) return;
+    this.busy = true;
+    let reopen = false;
+    try {
+      if (this.editor.currentPath() === path) {
+        // save first so a failed delete can't lose edits; then detach so autosave can't recreate the file
+        if (!(await this.editor.flush())) {
+          this.setErr("Can't delete: unsaved changes couldn't be saved");
+          return;
+        }
+        this.editor.discard();
+        this.closedDoc();
+        reopen = true;
+      }
+      await this.api.deleteNote(path);
+      reopen = false;
+      this.history.remove(path);
+      this.clearErr();
+    } catch (e) {
+      this.setErr(errText(e));
+    } finally {
+      this.busy = false;
+    }
+    if (reopen) await this.show(path); // delete failed after detaching: put the note back
+    await this.runSearch(false);
+    if (!this.editor.currentPath() && row >= 0 && this.results.count) {
+      this.store.set({ sel: Math.min(row, this.results.count - 1) }); // highlight the neighbour (not opened) so Enter keeps working
+    }
+    void this.refreshTitles();
+    this.focusSearch();
+  }
+
+  async lockEverything() {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      const path = this.editor.currentPath();
+      if (!(await this.editor.flush())) return;
+      if (this.editor.currentPath() !== path) return;
+      this.editor.suspend();
+      try {
+        await this.api.lockAll();
+      } catch (e) {
+        this.editor.resume();
+        throw e;
+      }
+      if (path && isLockedPath(path)) {
+        this.editor.unload(); // drop the decrypted text from the editor and stop autosave re-caching it
+        this.closedDoc();
+      } else this.editor.resume();
+      await this.runSearch(false);
+      void this.refreshTags(); // a tag only a now-locked note had must leave the panel and filter
+    } catch (e) {
+      this.setErr(errText(e));
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  protected renameFrom: { path: string; old: string } | null = null;
+
+  /** Inline rename of the open note: the title bar shows an input while `renaming`. */
+  startRename() {
+    const path = this.editor.currentPath();
+    if (!path || this.renameFrom) return;
+    this.renameFrom = { path, old: this.store.get().title };
+    this.store.set({ renaming: true });
+  }
+
+  /** The rename input finished: `title` on Enter, null on Escape or blur. */
+  async commitRename(input: string | null) {
+    const from = this.renameFrom;
+    if (!from) return; // already finished (Enter then blur)
+    this.renameFrom = null;
+    this.store.set({ renaming: false });
+    const { path, old } = from;
+    const title = input?.trim() ?? "";
+    if (!title || title === old) return this.editor.focus();
+    try {
+      if (!(await this.editor.flush())) return this.editor.focus();
+      const n = await this.api.backlinkCount(old);
+      const rewrite = n > 0 && (await this.ui.confirm(`Update ${n} links to the new title?`, { title: "Rename", kind: "info" }));
+      const r = await this.api.renameNote(path, title, rewrite);
+      this.history.rename(path, r.path);
+      const doc = await this.api.openNote(r.path);
+      if (!this.editor.load(doc)) return;
+      this.loadedDoc(doc);
+      this.store.set({ title });
+      this.setErr("");
+      this.history.loaded(r.path, "explicit");
+      await this.runSearch(false);
+      void this.refreshTags();
+    } catch (e) {
+      this.setErr(e === "already-exists" ? "A note with that title exists" : errText(e));
+    }
+    this.editor.focus();
+  }
+
+  showTags(on: boolean) {
+    this.store.set({ tagPanelOpen: on });
+    if (on) void this.refreshTags(); // counts may have moved since the last refresh
+  }
+
+  /** Tag filter changed: fresh first page, keeping the open note selected if it is still listed. */
+  setTags(next: string[]) {
+    this.store.set({ selectedTags: next });
+    void this.runSearch(true, true);
+  }
+
+  toggleTagFilter(tag: string) {
+    this.setTags(toggleTag(this.store.get().selectedTags, tag));
+  }
+
+  protected readonly newTagsReq = latest();
+  protected tagTimer: ReturnType<typeof setTimeout> | undefined;
+  /** After an in-app save (self-writes are skipped by the watcher): coalesce typing bursts into one refresh. */
+  protected scheduleTagRefresh() {
+    clearTimeout(this.tagTimer);
+    this.tagTimer = setTimeout(() => void this.refreshTags(true), 300);
+  }
+
+  /** inPlace: when a filter is active, also reload the list so it reflects the new tag state. */
+  async refreshTags(inPlace = false) {
+    const fresh = this.newTagsReq();
+    let tags: TagCount[];
+    try {
+      tags = await this.api.listTags();
+    } catch (e) {
+      if (e !== "indexing") console.error("tag refresh failed", e);
+      return;
+    }
+    if (!fresh()) return; // a newer refresh superseded this response
+    const selected = this.store.get().selectedTags;
+    const kept = pruneSelection(selected, tags);
+    const pruned = kept.length !== selected.length;
+    this.store.set({ tags, selectedTags: kept });
+    if (pruned) void this.runSearch(true, "highlight");
+    else if (inPlace && kept.length) void this.runSearch(false);
+  }
+
+  togglePreview() {
+    this.preview.toggle();
+  }
+
+  setPreview(on: boolean) {
+    this.preview.setMode(on);
+  }
+
+  async toggleLayout() {
+    try {
+      const cur = await this.api.getSettings();
+      const next = { ...cur, layout: cur.layout === "horizontal" ? ("vertical" as const) : ("horizontal" as const) };
+      await this.api.setSettings(next);
+      this.applyLook(next);
+    } catch (e) {
+      this.setErr(errText(e));
+    }
+  }
+
+  async toggleStyle() {
+    try {
+      const cur = await this.api.getSettings();
+      const next = cur.editor_style === "plain" ? "rich" : "plain";
+      await this.api.setSettings({ ...cur, editor_style: next });
+      this.store.set({ editorStyle: next });
+      this.syncStyle();
+    } catch (e) {
+      this.setErr(errText(e));
+    }
+  }
+
+  async toggleSort() {
+    try {
+      const cur = await this.api.getSettings();
+      const next = cur.sort === "title" ? "modified" : "title";
+      await this.api.setSettings({ ...cur, sort: next });
+      this.store.set({ sort: next });
+      await this.resort();
+    } catch (e) {
+      this.setErr(errText(e));
+    }
+  }
+
+  /** Open the Settings dialog on the saved settings, once unsaved edits are saved. */
+  async openSettings() {
+    if (!(await this.editor.flush())) return;
+    try {
+      this.store.set({ settings: await this.api.getSettings() });
+    } catch (e) {
+      this.setErr(errText(e));
+    }
+  }
+
+  closeSettings() {
+    this.store.set({ settings: null });
+  }
+
+  /** Settings dialog Save: null = saved (dialog closed), else the message to show in the dialog. */
+  async saveSettings(next: Settings): Promise<string | null> {
+    const cur = this.store.get().settings ?? (await this.api.getSettings());
+    try {
+      await this.api.setSettings(next); // on hotkey registration failure this throws and the old hotkey stays
+    } catch (err) {
+      return err === "not-found" ? "Folder not found" : String(err);
+    }
+    this.applyLook(next);
+    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, settings: null });
+    this.preview?.refresh(); // watermark shows the binding
+    this.syncStyle();
+    if (next.notes_dir !== cur.notes_dir) {
+      this.store.set({ phase: "ready" });
+      await this.runSearch(true);
+      void this.refreshTitles();
+    } else if (next.sort !== cur.sort) await this.resort();
+    return null;
+  }
+
+  /** First-run chooser: pick the notes folder and load it. */
+  async chooseFolder() {
+    try {
+      const dir = await this.ui.chooseDirectory();
+      if (typeof dir !== "string") return;
+      await this.api.setSettings({ ...(await this.api.getSettings()), notes_dir: dir });
+      this.store.set({ phase: "ready" });
+      await this.runSearch(true);
+      void this.refreshTitles();
+    } catch (e) {
+      this.setErr(errText(e));
+    }
+  }
+
+  protected menuBusy = false; // re-entrancy guard: select awaiting or popup being built
+
+  /** Open row `i` through the normal path, then pop the native menu for it. No menu if the switch was refused. `atRow`: anchor at the row (keyboard) instead of the cursor. */
+  async openContextMenu(i: number, atRow = false) {
+    const h = this.results.get(i);
+    if (!h || this.menuBusy) return;
+    this.menuBusy = true;
+    try {
+      if (!(await this.select(i)) || this.editor.currentPath() !== h.path) return;
+      const open = () => this.editor.currentPath(); // actions use the note open when picked
+      const run: Record<MenuAction, () => void | Promise<void>> = {
+        open: () => this.settleAfterOpen(false, "enter"),
+        rename: () => this.startRename(),
+        toggle_lock: () => this.toggleLock(),
+        copy_link: () => { const p = open(); if (p) return this.ui.copyText(linkFor(this.store.get().title)); },
+        reveal: () => { const p = open(); if (p) return this.ui.reveal(p); },
+        delete_note: () => this.deleteNote(),
+      };
+      const { keys, isMac } = this.store.get();
+      const items: MenuSpec[] = menuModel({ encrypted: h.encrypted, platform: this.opts.platform, keys, isMac }).map((m) =>
+        m === "separator" ? m : { ...m, action: () => void Promise.resolve(run[m.id]()).catch((e) => this.setErr(errText(e))) },
+      );
+      await this.ui.popupMenu(items, atRow ? this.ui.rowAnchor(this.store.get().sel) : null);
+    } catch (e) {
+      this.setErr(errText(e));
+    } finally {
+      this.menuBusy = false;
+    }
+  }
+
+  /** Conflict banner link: open the conflict copy through the normal flush-then-load path. */
+  async openConflict() {
+    const p = this.store.get().conflict;
+    if (p) await this.show(p);
+  }
+
+  dismissConflict() {
+    this.store.set({ conflict: null });
+  }
+
+  /** Title-bar Retry after a save error. */
+  retrySave() {
+    void this.editor.flush();
+  }
+
+  protected readonly actions: Record<Exclude<Action, "toggle_window">, () => void> = {
+    focus_search: () => this.focusSearch(),
+    toggle_preview: () => this.togglePreview(),
+    rename: () => this.startRename(),
+    toggle_lock: () => void this.toggleLock(),
+    lock_all: () => void this.lockEverything(),
+    settings: () => void this.openSettings(),
+    toggle_sort: () => void this.toggleSort(),
+    back: () => void this.navigate("back"),
+    forward: () => void this.navigate("forward"),
+    delete_note: () => void this.deleteNote(),
+    toggle_tags: () => this.showTags(!this.store.get().tagPanelOpen),
+    toggle_rich: () => void this.toggleStyle(),
+    toggle_layout: () => void this.toggleLayout(),
+  };
+
+  /**
+   * The window's one capture-phase keydown handler: runs before CodeMirror's keymap and the webview defaults
+   * (so e.g. ⌘R works from the editor). true = handled: the caller preventDefaults and stops propagation.
+   */
+  onKeyDown(e: KeyEventLike): boolean {
+    if (e.inDialog || e.inRename) return false; // dialogs and the rename field own their keys
+    const { sel, keys } = this.store.get();
+    if (isMenuKey(e) && !e.inEditor && sel >= 0) {
+      void this.openContextMenu(sel, true);
+      return true;
+    }
+    const arrow = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+    if (arrow && !e.inEditor) {
+      void this.step(arrow);
+      return true;
+    }
+    for (const [action, run] of Object.entries(this.actions)) {
+      if (!matches(e, keys[action as Action], this.opts.isMac)) continue;
+      // Backspace combos keep their editing meaning in the editor and in a non-empty search box
+      if (keys[action as Action].endsWith("+Backspace") && (e.inEditor || e.inSearchWithText)) continue;
+      run();
+      return true;
+    }
+    return false;
+  }
+
+  /** Watcher: files changed on disk (self-writes excluded). */
+  async onNotesChanged(paths: string[]) {
+    await this.runSearch(false);
+    void this.refreshTitles();
+    void this.refreshTags();
+    const open = this.editor.currentPath();
+    if (open && paths.includes(open)) this.editor.onExternalChange(open);
+  }
+
+  onIndexProgress(done: number, total: number) {
+    this.setIndexing(true, done, total);
+  }
+
+  async onIndexDone() {
+    this.setIndexing(false);
+    this.store.set({ phase: "ready" });
+    // Also fires after a passphrase reopen: keep the open note selected instead of jumping to row 0.
+    await this.runSearch(this.editor.currentPath() === null);
+    void this.refreshTitles();
+    void this.refreshTags();
+  }
+
+  onIndexError(message: string) {
+    this.setIndexing(false);
+    this.setErr(message);
+    void this.runSearch(false); // no vault -> shows the setup screen
+  }
 }
