@@ -3,6 +3,7 @@ import { ask, open } from "@tauri-apps/plugin-dialog";
 import * as api from "./api";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { mountEditor } from "./editor";
+import type { RichOpts } from "./richmd";
 import { Results, mountList } from "./list";
 import { shouldClose } from "./close";
 import { latest } from "./latest";
@@ -67,7 +68,18 @@ const history = new History();
 
 let titles = new Set<string>(); // folded titles of all notes, for wikilink existence
 const newShow = latest();
+// Wikilinks, tags and links act the same in the preview and in rich edit.
+const links: RichOpts = {
+  exists: (t) => titles.has(fold(t)),
+  onWikilink: (t) => void openTitle(t, "wikilink"),
+  onTag: (t) => {
+    showTags(true);
+    if (!selectedTags.some((s) => fold(s) === fold(t))) setTags(toggleTag(selectedTags, t));
+  },
+  openExternal: (u) => void openUrl(u).catch((e) => (errEl.textContent = String(e))),
+};
 const editor = mountEditor($("editor"), {
+  rich: links,
   onEscape: focusSearch,
   onError: (m) => (errEl.textContent = m ? errText(m) : ""),
   onChange: () => preview.refresh(),
@@ -77,13 +89,7 @@ const editor = mountEditor($("editor"), {
 const preview = mountPreview($("preview"), {
   getText: () => editor.getText(),
   toggleLabel: () => formatBinding(keys.toggle_preview, isMac),
-  exists: (t) => titles.has(fold(t)),
-  onWikilink: (t) => void openTitle(t, "wikilink"),
-  onTag: (t) => {
-    showTags(true);
-    if (!selectedTags.some((s) => fold(s) === fold(t))) setTags(toggleTag(selectedTags, t));
-  },
-  openExternal: (u) => void openUrl(u).catch((e) => (errEl.textContent = String(e))),
+  ...links,
   onToggle: (on) => {
     $("app").classList.toggle("preview-on", on);
     $("preview-badge").hidden = !on;
@@ -95,6 +101,7 @@ async function refreshTitles() {
   try {
     titles = new Set((await api.listTitles()).map(fold));
     preview.refresh();
+    editor.refreshLinks();
   } catch (e) {
     console.error("title cache refresh failed", e);
   }
@@ -363,6 +370,7 @@ async function openSettings() {
     preview.refresh(); // watermark shows the binding
     sort = next.sort;
     syncSort();
+    syncStyle();
     dlg.close();
     if (next.notes_dir !== cur.notes_dir) {
       $("setup").hidden = true;
@@ -544,6 +552,28 @@ function syncSort() {
   sortBtn.title = `Toggle sort (${formatBinding(keys.toggle_sort, isMac)})`;
 }
 
+let editorStyle: api.Settings["editor_style"] = "rich"; // mirrors settings.editor_style
+const styleBtn = $<HTMLButtonElement>("style");
+
+function syncStyle() {
+  editor.setRich(editorStyle === "rich");
+  styleBtn.textContent = editorStyle === "rich" ? "Rich" : "Plain";
+  styleBtn.setAttribute("aria-pressed", String(editorStyle === "rich"));
+  styleBtn.title = `Rich / plain editing (${formatBinding(keys.toggle_rich, isMac)})`;
+}
+
+async function toggleStyle() {
+  try {
+    const cur = await api.getSettings();
+    const next = cur.editor_style === "plain" ? "rich" : "plain";
+    await api.setSettings({ ...cur, editor_style: next });
+    editorStyle = next;
+    syncStyle();
+  } catch (e) {
+    errEl.textContent = errText(e);
+  }
+}
+
 /** Sort changed: fresh first page from the top, keeping the open note selected if it is loaded. */
 async function resort() {
   const seq = ++searchSeq;
@@ -683,6 +713,7 @@ $("lockall").onclick = () => void lockEverything();
 $("trash").onclick = () => void deleteNote();
 $("gear").onclick = () => void openSettings();
 sortBtn.onclick = () => void toggleSort();
+styleBtn.onclick = () => void toggleStyle();
 tagBtn.onclick = () => showTags(tagPanel.hidden === true);
 filterLine.querySelector("button")!.onclick = () => setTags([]);
 
@@ -724,6 +755,7 @@ const ACTIONS: Record<Exclude<Action, "toggle_window">, () => void> = {
   forward: goForward,
   delete_note: () => void deleteNote(),
   toggle_tags: () => showTags(tagPanel.hidden === true),
+  toggle_rich: () => void toggleStyle(),
 };
 let keys = resolve(undefined, isMac); // refreshed from settings at startup and after save
 
@@ -808,6 +840,8 @@ void (async () => {
   keys = resolve(s.shortcuts, isMac);
   sort = s.sort ?? "modified"; // before the first search, which pages with it
   syncSort();
+  editorStyle = s.editor_style === "plain" ? "plain" : "rich";
+  syncStyle();
   if (!s.notes_dir) $("setup").hidden = false;
   else if (!st) {
     await runSearch(true);

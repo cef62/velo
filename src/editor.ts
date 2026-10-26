@@ -1,6 +1,7 @@
 import { Compartment } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { writingSetup } from "./editortheme";
+import { refreshRich, richMarkdown, type RichOpts } from "./richmd";
 import { SaveController } from "./saver";
 import { openNote, saveNote, type NoteDoc } from "./api";
 
@@ -25,11 +26,15 @@ export interface Editor {
   flush(): Promise<boolean>;
   focus(): void;
   getText(): string;
+  /** Rich edit (marks hidden off the cursor line) or plain markdown. */
+  setRich(on: boolean): void;
+  /** Re-check wikilink targets after the note titles changed. */
+  refreshLinks(): void;
 }
 
 const stem = (p: string) => (p.split(/[\\/]/).pop() ?? p).replace(/\.[^.]+$/, "");
 
-export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onError?: (msg: string | null) => void; onChange?: () => void; onEdit?: () => void; onSaved?: () => void } = {}): Editor {
+export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onError?: (msg: string | null) => void; onChange?: () => void; onEdit?: () => void; onSaved?: () => void; rich?: RichOpts } = {}): Editor {
   const banner = document.createElement("div");
   banner.className = "banner";
   banner.hidden = true;
@@ -40,11 +45,13 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
   let ctrl: SaveController;
   let loading = false;
   const editable = new Compartment(); // read-only until a note is loaded (no path to save to)
+  const rich = new Compartment();
 
   const view = new EditorView({
     parent: host,
     extensions: [
       writingSetup(),
+      rich.of([]),
       editable.of(EditorView.editable.of(false)),
       keymap.of([{ key: "Escape", run: () => (opts.onEscape?.(), true) }]),
       EditorView.updateListener.of((u) => {
@@ -132,6 +139,8 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
     flush: () => ctrl.flush(),
     focus: () => view.focus(),
     getText: () => view.state.doc.toString(),
+    setRich: (on) => view.dispatch({ effects: rich.reconfigure(on && opts.rich ? richMarkdown(opts.rich) : []) }),
+    refreshLinks: () => view.dispatch({ effects: refreshRich.of(null) }),
   };
   return ed;
 }

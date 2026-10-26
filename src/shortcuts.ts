@@ -2,7 +2,7 @@
 // Mod = ⌘ on macOS, Ctrl elsewhere. Ctrl = physical Control (macOS only).
 export type Action =
   | "focus_search" | "next_note" | "prev_note" | "toggle_preview" | "rename" | "toggle_lock"
-  | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "delete_note" | "toggle_tags" | "toggle_window";
+  | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "delete_note" | "toggle_tags" | "toggle_rich" | "toggle_window";
 
 export const DEFAULTS: Record<Action, string> = {
   focus_search: "Mod+KeyL",
@@ -18,6 +18,7 @@ export const DEFAULTS: Record<Action, string> = {
   forward: "Mod+BracketRight",
   delete_note: "Mod+Backspace",
   toggle_tags: "Mod+Shift+KeyT",
+  toggle_rich: "Mod+Shift+KeyR",
   toggle_window: "Mod+Shift+Space",
 };
 
@@ -35,6 +36,7 @@ export const LABELS: Record<Action, string> = {
   forward: "Forward",
   delete_note: "Move note to Trash",
   toggle_tags: "Show / hide tags",
+  toggle_rich: "Rich / plain editing",
   toggle_window: "Show / hide velo (global)",
 };
 

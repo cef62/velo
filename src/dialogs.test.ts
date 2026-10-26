@@ -3,7 +3,7 @@ import { isLockedPath, passphraseDialogMode, passphraseError } from "./passphras
 import { DEFAULTS } from "./shortcuts";
 import { clampFont, fixedKeyRefusal, layoutClass, recorderStep, toSettings } from "./settingsform";
 
-const base = { notes_dir: "/n", layout: "vertical" as const, font_size: 14, sort: "modified" as const, shortcuts: { toggle_window: "Mod+KeyA", rename: "Mod+KeyR" } };
+const base = { notes_dir: "/n", layout: "vertical" as const, font_size: 14, sort: "modified" as const, editor_style: "rich" as const, shortcuts: { toggle_window: "Mod+KeyA", rename: "Mod+KeyR" } };
 
 test("dialog wording follows identity file", () => {
   expect(passphraseDialogMode(true)).toEqual({ title: "Enter your velo passphrase", confirm: false });
