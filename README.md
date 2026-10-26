@@ -33,7 +33,7 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | ⌘, | Ctrl+, | Settings |
 | ⌘⇧T | Ctrl+Shift+T | Show / hide the tag panel |
 | ⌘⇧R | Ctrl+Shift+R | Rich / plain editing |
-| ⌘\\ | Ctrl+\\ | Vertical / horizontal layout |
+| ⌘⇧J | Ctrl+Shift+J | Vertical / horizontal layout |
 | ⌘⇧Space | Ctrl+Shift+Space | Show / hide velo (system-wide) |
 
 Right-click a note in the list (or press the Menu key / Shift+F10 on the highlighted row) for a menu: open, rename, lock/unlock, copy `[[link]]`, show in Finder/Explorer, move to Trash. It opens the note first, so no menu appears if the switch is refused.

@@ -19,7 +19,7 @@ export const DEFAULTS: Record<Action, string> = {
   delete_note: "Mod+Backspace",
   toggle_tags: "Mod+Shift+KeyT",
   toggle_rich: "Mod+Shift+KeyR",
-  toggle_layout: "Mod+Backslash",
+  toggle_layout: "Mod+Shift+KeyJ",
   toggle_window: "Mod+Shift+Space",
 };
 
