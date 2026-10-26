@@ -4,7 +4,7 @@ import { paneDivider } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { useStore } from "./useStore";
-import { registerSearchInput } from "./platform";
+import { Header } from "./Header";
 import { EditorHost } from "./EditorHost";
 import { PreviewHost } from "./PreviewHost";
 
@@ -22,18 +22,6 @@ const app = css({
     gridTemplateColumns: "minmax(200px, var(--list-w, 260px)) auto minmax(320px, 1fr)",
     gridTemplateRows: "auto minmax(0, 1fr)",
   },
-});
-const header = css({
-  display: "flex",
-  alignItems: "center",
-  gap: "1.5",
-  h: "header",
-  px: "3",
-  bg: "velo.chrome",
-  borderBottom: "1px solid",
-  borderColor: "velo.divider",
-  flex: "none",
-  "[data-layout=horizontal] &": { gridColumn: "1 / -1" },
 });
 const list = css({
   h: "var(--list-h, 30%)",
@@ -58,30 +46,6 @@ const titleBar = css({
   fontSize: "var(--velo-title-fs)",
   "& [data-err]": { color: "red.11", fontSize: "uiSm", fontWeight: "normal" },
 });
-
-// placeholder: replaced in Task 9
-function SearchPlaceholder({ controller, store }: { controller: Controller; store: Store<AppState> }) {
-  const query = useStore(store, (s) => s.query);
-  const indexing = useStore(store, (s) => s.indexing !== null);
-  return (
-    <input
-      ref={registerSearchInput}
-      aria-label="Search or create"
-      placeholder="Search or create…"
-      value={query}
-      disabled={indexing}
-      className={css({ flex: "1", h: "control", px: "2.5", border: "1px solid", borderColor: "velo.inputBorder", borderRadius: "l2", bg: "velo.canvas" })}
-      onChange={(e) => controller.setQuery(e.target.value)}
-      onFocus={() => controller.setListActive(true)}
-      onBlur={() => controller.setListActive(false)}
-      onKeyDown={(e) => {
-        if (e.key !== "Enter") return;
-        e.preventDefault();
-        void controller.enter(e.shiftKey);
-      }}
-    />
-  );
-}
 
 // placeholder: replaced in Task 10
 function ListPlaceholder({ controller, store }: { controller: Controller; store: Store<AppState> }) {
@@ -122,9 +86,7 @@ export function App({ controller, store }: { controller: Controller; store: Stor
 
   return (
     <div className={app} data-preview-on={s.previewOn || undefined}>
-      <header className={header}>
-        <SearchPlaceholder controller={controller} store={store} />
-      </header>
+      <Header controller={controller} store={store} />
       <div className={list}>
         <ListPlaceholder controller={controller} store={store} />
       </div>
