@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod crypto;
+pub mod frontmatter;
 pub mod index;
 pub mod names;
 pub mod settings;
