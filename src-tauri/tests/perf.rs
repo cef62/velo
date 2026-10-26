@@ -44,7 +44,7 @@ fn search_p95_under_50ms() {
                 };
                 for _ in 0..10 {
                     let t = Instant::now();
-                    idx.search_page(q, sort, off, 200, &[], &none).unwrap();
+                    idx.search_page(q, sort, off, 200, &[], &none).unwrap(); // offset 0 includes the total count
                     times.push(t.elapsed().as_secs_f64() * 1000.0);
                 }
             }

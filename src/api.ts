@@ -8,7 +8,7 @@ export type Settings = { notes_dir: string | null; layout: "vertical" | "horizon
 
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<void>("set_settings", { settings });
-export type Page = { hits: Hit[]; has_more: boolean };
+export type Page = { hits: Hit[]; has_more: boolean; total: number };
 export type TagCount = { tag: string; count: number };
 export const search = (query: string, sort: "modified" | "title", offset: number, tags: string[]) => invoke<Page>("search", { query, sort, offset, tags });
 export const listTags = () => invoke<TagCount[]>("list_tags");

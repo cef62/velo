@@ -25,6 +25,8 @@ pub enum Sort {
 pub struct Page {
     pub hits: Vec<Hit>,
     pub has_more: bool,
+    /// Notes the list shows across all pages; only computed for offset 0, else 0.
+    pub total: usize,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -183,6 +185,29 @@ impl Index {
             }
             (sql, args, long)
         };
+        // Group 2: unlocked encrypted bodies (memory only, not in FTS), after every SQL row.
+        let unlocked_hits = || -> Vec<(String, String, i64, Hit)> {
+            let mut g2 = vec![];
+            if !terms.is_empty() || !tags.is_empty() {
+            let wanted: Vec<&str> = tags.iter().map(String::as_str).collect();
+            for (path, plain) in unlocked {
+                let row = self.db.query_row("SELECT title, title_folded, mtime FROM notes WHERE path=?", [path], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+                });
+                let Ok((title, tf, mtime)) = row else { continue };
+                // Locked notes have no tags rows, so under a tag filter SQL never returned them.
+                if tags.is_empty() && terms.iter().all(|t| tf.contains(t)) {
+                    continue; // already a group 0 title hit
+                }
+                let pf = fold(plain);
+                let have: Vec<String> = if wanted.is_empty() { vec![] } else { extract_tags(plain).into_iter().map(|(f, _)| f).collect() }; // only needed under a tag filter
+                if wanted.iter().all(|w| have.iter().any(|h| h == w)) && terms.iter().all(|t| tf.contains(t) || pf.contains(t)) {
+                    g2.push((tf, path.clone(), mtime, Hit { path: path.clone(), title, snippet: plain.chars().take(120).collect(), mtime, encrypted: true }));
+                }
+            }
+        }
+            g2
+        };
         // Empty query orders straight off the notes_mtime / notes_title indexes.
         let page_sql = format!("SELECT * FROM ({union}) ORDER BY grp, {order} LIMIT {} OFFSET {offset}", limit + 1);
         let mut st = self.db.prepare(&page_sql)?;
@@ -201,46 +226,31 @@ impl Index {
         }
         if hits.len() > limit {
             hits.truncate(limit);
-            return Ok(Page { hits, has_more: true });
+            let total = if offset == 0 { self.sql_count(&union, &args)? + unlocked_hits().len() } else { 0 };
+            return Ok(Page { hits, has_more: true, total });
         }
 
-        // Group 2: unlocked encrypted bodies (memory only, not in FTS), after every SQL row.
-        let mut g2: Vec<(String, String, i64, Hit)> = vec![];
-        if !terms.is_empty() || !tags.is_empty() {
-            let wanted: Vec<&str> = tags.iter().map(String::as_str).collect();
-            for (path, plain) in unlocked {
-                let row = self.db.query_row("SELECT title, title_folded, mtime FROM notes WHERE path=?", [path], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
-                });
-                let Ok((title, tf, mtime)) = row else { continue };
-                // Locked notes have no tags rows, so under a tag filter SQL never returned them.
-                if tags.is_empty() && terms.iter().all(|t| tf.contains(t)) {
-                    continue; // already a group 0 title hit
-                }
-                let pf = fold(plain);
-                let have: Vec<String> = if wanted.is_empty() { vec![] } else { extract_tags(plain).into_iter().map(|(f, _)| f).collect() }; // only needed under a tag filter
-                if wanted.iter().all(|w| have.iter().any(|h| h == w)) && terms.iter().all(|t| tf.contains(t) || pf.contains(t)) {
-                    g2.push((tf, path.clone(), mtime, Hit { path: path.clone(), title, snippet: plain.chars().take(120).collect(), mtime, encrypted: true }));
-                }
-            }
-        }
+        let mut g2 = unlocked_hits();
+        let sql_hits = hits.len();
+        // Only offset 0 can be short of the full SQL set here, and then hits is all of it.
+        let total = if offset == 0 { sql_hits + g2.len() } else { 0 };
         if g2.is_empty() {
-            return Ok(Page { hits, has_more: false });
+            return Ok(Page { hits, has_more: false, total });
         }
         match sort {
             Sort::Modified => g2.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.1.cmp(&b.1))),
             Sort::Title => g2.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1))),
         }
-        let sql_total = if hits.is_empty() && offset > 0 {
-            self.db.query_row(&format!("SELECT COUNT(*) FROM ({union})"), params_from_iter(args.iter()), |r| r.get::<_, i64>(0))? as usize
-        } else {
-            offset + hits.len()
-        };
+        let sql_total = if hits.is_empty() && offset > 0 { self.sql_count(&union, &args)? } else { offset + hits.len() };
         let rest = g2.into_iter().skip(offset.saturating_sub(sql_total)).map(|g| g.3);
         hits.extend(rest.take(limit + 1 - hits.len()));
         let has_more = hits.len() > limit;
         hits.truncate(limit);
-        Ok(Page { hits, has_more })
+        Ok(Page { hits, has_more, total })
+    }
+
+    fn sql_count(&self, union: &str, args: &[String]) -> anyhow::Result<usize> {
+        Ok(self.db.query_row(&format!("SELECT COUNT(*) FROM ({union})"), params_from_iter(args.iter()), |r| r.get::<_, i64>(0))? as usize)
     }
 
     pub fn tags(&self) -> anyhow::Result<Vec<TagCount>> {
@@ -377,6 +387,27 @@ mod tests {
             assert_eq!(i.search_page(q, Sort::Title, 0, 10, &["sec".to_string()], &u).unwrap().hits.len(), 1, "{q}");
             assert!(i.search_page(q, Sort::Title, 0, 10, &["other".to_string()], &u).unwrap().hits.is_empty());
         }
+    }
+    #[test] fn total_counts_all_pages() {
+        let notes: Vec<(String, String, i64)> = (0..120).map(|n| (format!("n{n:03}.md"), "x".into(), n)).collect();
+        let i = idx_owned(&notes);
+        let pg = |off| i.search_page("", Sort::Title, off, 50, &[], &HashMap::new()).unwrap();
+        assert_eq!(pg(0).total, 120); assert_eq!(pg(50).total, 0); assert_eq!(pg(100).total, 0);
+        assert_eq!(i.search_page("", Sort::Title, 0, 200, &[], &HashMap::new()).unwrap().total, 120);
+    }
+    #[test] fn total_respects_tags_and_query() {
+        let i = idx(&[("plan a.md", "#t plan", 1), ("b.md", "my plan #t", 2), ("c.md", "my plan", 3), ("d.md", "#t", 4)]);
+        let tot = |q: &str, tags: &[&str], lim| i.search_page(q, Sort::Title, 0, lim, &tags.iter().map(|s| s.to_string()).collect::<Vec<_>>(), &HashMap::new()).unwrap().total;
+        // "plan a" matches title and body: counted once
+        for lim in [1, 10] { assert_eq!(tot("plan", &[], lim), 3); assert_eq!(tot("plan", &["t"], lim), 2); assert_eq!(tot("", &["t"], lim), 3); assert_eq!(tot("zzzz", &[], lim), 0); }
+    }
+    #[test] fn total_includes_unlocked_locked_notes() {
+        let mut i = idx(&[("secret a.md", "", 1), ("secret b.md", "", 2)]);
+        i.upsert("e.md.age", &NoteFile { title: "secret e".into(), encrypted: true }, &Meta { mtime: 99, size: 1 }, None).unwrap();
+        i.upsert("f.md.age", &NoteFile { title: "f".into(), encrypted: true }, &Meta { mtime: 98, size: 1 }, None).unwrap();
+        let u = HashMap::from([("e.md.age".to_string(), "my secret".to_string()), ("f.md.age".to_string(), "my secret".to_string())]);
+        for lim in [1, 2, 10] { assert_eq!(i.search_page("secret", Sort::Title, 0, lim, &[], &u).unwrap().total, 4, "{lim}"); }
+        assert_eq!(i.search_page("secret", Sort::Title, 0, 10, &[], &HashMap::new()).unwrap().total, 3);
     }
     #[test] fn schema_upgrade_reindexes() {
         let dir = tempfile::tempdir().unwrap(); let db = dir.path().join("i.db");
