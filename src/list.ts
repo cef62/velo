@@ -145,6 +145,7 @@ export function mountList(el: HTMLElement, o: { results: Results; onSelect(i: nu
   }
 
   el.addEventListener("scroll", () => paint(false), { passive: true });
+  if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => paint(false)).observe(el); // divider drag, window resize
   return {
     update: () => paint(true),
     setSelected(i) {

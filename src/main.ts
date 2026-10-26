@@ -4,6 +4,7 @@ import * as api from "./api";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { mountEditor } from "./editor";
 import type { RichOpts } from "./richmd";
+import { mountDivider } from "./divider";
 import { Results, mountList } from "./list";
 import { shouldClose } from "./close";
 import { latest } from "./latest";
@@ -44,6 +45,7 @@ function rowHeight(): number {
   return h || 44;
 }
 const results = new Results((offset) => api.search(q.value, sort, offset, selectedTags));
+const restoreDivider = mountDivider($("divider"), $("app"), $("list"));
 const list = mountList($("list"), { results, rowH: rowHeight(), onSelect: (i) => void select(i), onContextMenu: (i) => void openContextMenu(i) });
 const sortBtn = $<HTMLButtonElement>("sort");
 
@@ -365,6 +367,7 @@ async function openSettings() {
       save.disabled = false;
     }
     applyLook(next);
+    restoreDivider();
     list.setRowH(rowHeight());
     keys = resolve(next.shortcuts, isMac);
     preview.refresh(); // watermark shows the binding
@@ -836,6 +839,7 @@ void (async () => {
   const st = await api.indexStatus();
   if (st) setIndexing(true, st[0], st[1]);
   applyLook(s);
+  restoreDivider();
   list.setRowH(rowHeight());
   keys = resolve(s.shortcuts, isMac);
   sort = s.sort ?? "modified"; // before the first search, which pages with it

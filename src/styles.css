@@ -6,7 +6,9 @@ body { font: var(--font-size, 14px) system-ui, sans-serif; background: var(--bg)
 #top { display: flex; gap: 8px; padding: 8px; border-bottom: 1px solid var(--line); }
 #q { flex: 1; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: inherit; }
 #sort { font: inherit; border: 0; background: none; color: var(--mute); cursor: pointer; }
-#list { height: 30%; overflow-y: auto; border-bottom: 1px solid var(--line); }
+#list { height: var(--list-h, 30%); flex: none; overflow-y: auto; }
+#divider { flex: none; height: 5px; cursor: row-resize; background: linear-gradient(var(--line), var(--line)) center / 100% 1px no-repeat; touch-action: none; }
+#divider:hover, #divider:focus-visible { background: color-mix(in srgb, var(--accent) 35%, transparent); outline: none; }
 #list .spacer { position: relative; }
 #list .row, #list .loader { position: absolute; left: 0; right: 0; height: var(--row-h); box-sizing: border-box; overflow: hidden; padding: 4px 10px; cursor: default; display: grid; grid-template-columns: 1fr auto; align-content: center; }
 #list .loader { color: var(--mute); }
@@ -15,7 +17,8 @@ body { font: var(--font-size, 14px) system-ui, sans-serif; background: var(--bg)
 #list .s { grid-column: 1 / -1; color: var(--mute); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #panes { flex: 1; display: flex; min-height: 0; }
 #note { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
-#titlebar { padding: 4px 10px; font-weight: 600; display: flex; gap: 12px; }
+#titlebar { padding: 8px 14px; font-size: 1.3em; font-weight: 700; display: flex; align-items: baseline; gap: 12px; background: color-mix(in srgb, var(--fg) 6%, var(--bg)); border-bottom: 1px solid var(--line); }
+#status, #err { font-size: 12px; }
 #titlebar input { font: inherit; }
 #err { color: #c33; font-weight: normal; }
 #status { color: var(--mute); font-weight: normal; }
@@ -36,9 +39,10 @@ body { font: var(--font-size, 14px) system-ui, sans-serif; background: var(--bg)
 #setup[hidden], #preview[hidden], .banner[hidden] { display: none; }
 .cm-host .cm-editor { font-size: var(--font-size, 14px); }
 #toolbar { display: flex; gap: 4px; }
-.horizontal#app { display: grid; grid-template-columns: 260px 1fr; grid-template-rows: auto 1fr; }
+.horizontal#app { display: grid; grid-template-columns: var(--list-w, 260px) auto minmax(0, 1fr); grid-template-rows: auto 1fr; }
 .horizontal#app #head { grid-column: 1 / -1; }
-.horizontal#app #list { height: auto; border-bottom: 0; border-right: 1px solid var(--line); }
+.horizontal#app #list { height: auto; }
+.horizontal#app #divider { height: auto; width: 5px; cursor: col-resize; background-size: 1px 100%; }
 .horizontal#app #panes { min-width: 0; min-height: 0; }
 dialog { background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; min-width: 320px; }
 dialog form { display: flex; flex-direction: column; gap: 8px; }
