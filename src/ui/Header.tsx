@@ -49,7 +49,7 @@ export function Header({ controller, store }: { controller: Controller; store: S
       </Tooltip>
     );
   };
-  const icon = (text: string, action: Action | null, glyph: ReactNode, onClick: () => void, extra: { disabled?: boolean; pressed?: boolean } = {}) =>
+  const icon = (text: string, action: Action | null, glyph: ReactNode, onClick: () => void, extra: { disabled?: boolean; pressed?: boolean; controls?: string } = {}) =>
     tip(
       text,
       action,
@@ -59,6 +59,8 @@ export function Header({ controller, store }: { controller: Controller; store: S
         aria-label={text}
         disabled={extra.disabled}
         aria-pressed={extra.pressed}
+        aria-expanded={extra.controls ? extra.pressed : undefined}
+        aria-controls={extra.controls}
         className={pressed}
         onClick={onClick}
       >
@@ -85,7 +87,7 @@ export function Header({ controller, store }: { controller: Controller; store: S
   return (
     <header className={bar} data-tauri-drag-region={s.isMac || undefined} style={{ paddingLeft: s.isMac ? 80 : 14 }}>
       <SearchField controller={controller} store={store} />
-      {icon("Tags", "toggle_tags", <Hash />, () => controller.showTags(!s.tagPanelOpen), { pressed: s.tagPanelOpen })}
+      {icon("Tags", "toggle_tags", <Hash />, () => controller.showTags(!s.tagPanelOpen), { pressed: s.tagPanelOpen, controls: "tag-panel" })}
       {mode !== "folded" && (
         <>
           {seg("Sort", s.sort, () => void controller.toggleSort(), [
