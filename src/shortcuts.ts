@@ -1,13 +1,11 @@
 // Remappable shortcuts. Binding = "+"-joined modifiers (Mod, Ctrl, Alt, Shift, in that order) + one KeyboardEvent.code.
 // Mod = ⌘ on macOS, Ctrl elsewhere. Ctrl = physical Control (macOS only).
 export type Action =
-  | "focus_search" | "next_note" | "prev_note" | "toggle_preview" | "rename" | "toggle_lock"
+  | "focus_search" | "toggle_preview" | "rename" | "toggle_lock"
   | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "delete_note" | "toggle_tags" | "toggle_rich" | "toggle_layout" | "toggle_window";
 
 export const DEFAULTS: Record<Action, string> = {
   focus_search: "Mod+KeyL",
-  next_note: "Mod+Alt+KeyJ",
-  prev_note: "Mod+Alt+KeyK",
   toggle_preview: "Mod+Shift+KeyP",
   rename: "Mod+KeyR",
   toggle_lock: "Mod+Shift+KeyE",
@@ -25,8 +23,6 @@ export const DEFAULTS: Record<Action, string> = {
 
 export const LABELS: Record<Action, string> = {
   focus_search: "Focus search",
-  next_note: "Next note in list",
-  prev_note: "Previous note in list",
   toggle_preview: "Toggle preview",
   rename: "Rename note",
   toggle_lock: "Lock / unlock note",
@@ -83,8 +79,8 @@ export function overrides(bindings: Record<Action, string>): Partial<Record<Acti
   return Object.fromEntries((Object.keys(bindings) as Action[]).filter((a) => bindings[a] !== DEFAULTS[a]).map((a) => [a, bindings[a]]));
 }
 
-// Older versions saved every binding. Back/forward moved from ⌘[ / ⌘] to ⌘J / ⌘K and list stepping from ⌘J / ⌘K to ⌥⌘J / ⌥⌘K,
-// so in such a snapshot (recognised by all four old defaults) those old defaults are not choices.
+// Older versions saved every binding. Back/forward moved from ⌘[ / ⌘] to ⌘J / ⌘K, taking over list stepping
+// (next_note/prev_note, now arrows only), so in such a snapshot (recognised by all four old defaults) those old defaults are not choices.
 const OLD_DEFAULTS: Partial<Record<string, string>> = { next_note: "Mod+KeyJ", prev_note: "Mod+KeyK", back: "Mod+BracketLeft", forward: "Mod+BracketRight" };
 
 export function resolve(saved: Record<string, string> | undefined, isMac = false): Record<Action, string> {

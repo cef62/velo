@@ -25,10 +25,11 @@ test("validate", () => {
   expect(validateBinding(m, "back", "Mod+KeyJ")).toEqual({ ok: true }); // its own current binding
 });
 test("resolve drops unknown and invalid", () => expect(resolve({ bogus: "Mod+KeyB", back: "" }).back).toBe("Mod+KeyJ"));
-test("back / forward on ⌘J / ⌘K, list stepping on ⌥⌘J / ⌥⌘K; old full snapshots move to them, real choices stay", () => {
-  expect([DEFAULTS.back, DEFAULTS.forward, DEFAULTS.next_note, DEFAULTS.prev_note]).toEqual(["Mod+KeyJ", "Mod+KeyK", "Mod+Alt+KeyJ", "Mod+Alt+KeyK"]);
+test("back / forward on ⌘J / ⌘K; old full snapshots move to them, real choices stay", () => {
+  expect([DEFAULTS.back, DEFAULTS.forward]).toEqual(["Mod+KeyJ", "Mod+KeyK"]);
   const old = { next_note: "Mod+KeyJ", prev_note: "Mod+KeyK", back: "Mod+BracketLeft", forward: "Mod+BracketRight", rename: "Mod+KeyR" };
-  expect(resolve(old)).toMatchObject({ back: "Mod+KeyJ", forward: "Mod+KeyK", next_note: "Mod+Alt+KeyJ", prev_note: "Mod+Alt+KeyK" });
+  expect(resolve(old)).toMatchObject({ back: "Mod+KeyJ", forward: "Mod+KeyK" });
+  expect(resolve(old)).not.toHaveProperty("next_note");
   expect(resolve({ ...old, rename: "Mod+KeyB" }).rename).toBe("Mod+KeyB");
   expect(resolve({ back: "Mod+BracketLeft" }).back).toBe("Mod+BracketLeft"); // chosen after the change: kept
 });

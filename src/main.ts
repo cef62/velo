@@ -765,8 +765,6 @@ async function step(d: 1 | -1) {
 }
 const ACTIONS: Record<Exclude<Action, "toggle_window">, () => void> = {
   focus_search: focusSearch,
-  next_note: () => void step(1),
-  prev_note: () => void step(-1),
   toggle_preview: () => preview.toggle(),
   rename: startRename,
   toggle_lock: () => void toggleLock(),

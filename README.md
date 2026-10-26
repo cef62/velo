@@ -29,8 +29,7 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | ⌥⌘E | Ctrl+Alt+E | Lock all notes |
 | ⌘⌫ | Ctrl+Backspace | Move the current note to the Trash, after confirming (from the list or an empty search box; in the editor and in a non-empty search box ⌘⌫ keeps its editing meaning) |
 | ⌘⇧S | Ctrl+Shift+S | Toggle sort (last modified / title) |
-| ⌘J / ⌘K | Ctrl+J / Ctrl+K | Back / forward through visited notes (also from the editor) |
-| ⌥⌘J / ⌥⌘K | Ctrl+Alt+J / Ctrl+Alt+K | Next / previous note in the list (also from the editor; ↑/↓ in search) |
+| ⌘J / ⌘K | Ctrl+J / Ctrl+K | Back / forward through visited notes (also from the editor; ↑/↓ in search move in the list) |
 | ⌘, | Ctrl+, | Settings |
 | ⌘⇧T | Ctrl+Shift+T | Show / hide the tag panel |
 | ⌘⇧R | Ctrl+Shift+R | Rich / plain editing |
