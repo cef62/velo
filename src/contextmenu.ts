@@ -44,3 +44,7 @@ export function menuModel(o: {
 }
 
 export const linkFor = (title: string): string => `[[${title}]]`;
+
+/** ContextMenu key, or Shift+F10 with no other modifier. */
+export const isMenuKey = (e: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">): boolean =>
+  e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey);

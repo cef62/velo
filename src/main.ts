@@ -13,7 +13,8 @@ import { filterLabel, pruneSelection, toggleTag } from "./tags";
 import { afterOpen, mountPreview, shouldAutoEdit } from "./preview";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
-import { linkFor, menuModel, type MenuAction } from "./contextmenu";
+import { LogicalPosition } from "@tauri-apps/api/dpi";
+import { isMenuKey, linkFor, menuModel, type MenuAction } from "./contextmenu";
 import { askPassphrase, isLockedPath } from "./passphrase";
 import { applyLook, fixedKeyRefusal, recorderStep, toSettings } from "./settingsform";
 import { DEFAULTS, LABELS, formatBinding, matches, resolve, validateBinding, type Action } from "./shortcuts";
@@ -385,21 +386,29 @@ async function select(i: number, how: "explicit" | "auto" = "explicit") {
 
 const platform = isMac ? "mac" : /Windows/.test(navigator.userAgent) ? "windows" : "linux";
 
-/** Open row `i` through the normal path, then pop the native menu for it. No menu if the switch was refused. */
-async function openContextMenu(i: number) {
+let menuBusy = false; // re-entrancy guard: select awaiting or popup being built
+let lastMenu: { close(): Promise<void> }[] = []; // popup() resolves when shown, so free the previous menu's Rust-side resources on the next open
+
+/** Open row `i` through the normal path, then pop the native menu for it. No menu if the switch was refused. `atRow`: anchor at the row (keyboard) instead of the cursor. */
+async function openContextMenu(i: number, atRow = false) {
   const h = results.get(i);
-  if (!h) return;
-  await select(i);
-  if (editor.currentPath() !== h.path) return;
-  const run: Record<MenuAction, () => void | Promise<void>> = {
-    open: () => settleAfterOpen(false, "enter"),
-    rename: startRename,
-    toggle_lock: toggleLock,
-    copy_link: () => navigator.clipboard.writeText(linkFor(h.title)),
-    reveal: () => revealItemInDir(h.path),
-    delete_note: deleteNote,
-  };
+  if (!h || menuBusy) return;
+  menuBusy = true;
   try {
+    await select(i);
+    if (editor.currentPath() !== h.path) return;
+    const open = () => editor.currentPath(); // actions use the note open when picked
+    const run: Record<MenuAction, () => void | Promise<void>> = {
+      open: () => settleAfterOpen(false, "enter"),
+      rename: startRename,
+      toggle_lock: toggleLock,
+      copy_link: () => { const p = open(); if (p) return navigator.clipboard.writeText(linkFor(titleEl.textContent ?? "")); },
+      reveal: () => { const p = open(); if (p) return revealItemInDir(p); },
+      delete_note: deleteNote,
+    };
+    const old = lastMenu;
+    lastMenu = [];
+    for (const r of old) void r.close().catch(() => {});
     const items = await Promise.all(
       menuModel({ encrypted: h.encrypted, platform, keys, isMac }).map((m) =>
         m === "separator"
@@ -407,9 +416,14 @@ async function openContextMenu(i: number) {
           : MenuItem.new({ ...m, action: () => void Promise.resolve(run[m.id]()).catch((e) => (errEl.textContent = errText(e))) }),
       ),
     );
-    await (await Menu.new({ items })).popup();
+    const menu = await Menu.new({ items });
+    lastMenu = [...items, menu];
+    const r = atRow ? document.querySelector("#list .row.sel")?.getBoundingClientRect() : undefined;
+    await menu.popup(r ? new LogicalPosition(r.left + 16, r.bottom) : undefined);
   } catch (e) {
     errEl.textContent = errText(e);
+  } finally {
+    menuBusy = false;
   }
 }
 
@@ -694,9 +708,9 @@ window.addEventListener(
   (e) => {
     const t = e.target as HTMLElement;
     if (document.querySelector("dialog[open]") || t.closest?.("#title")) return; // dialogs and the rename field own their keys
-    if ((e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) && !t.closest?.("#editor") && sel >= 0) {
+    if (isMenuKey(e) && !t.closest?.("#editor") && sel >= 0) {
       e.preventDefault();
-      void openContextMenu(sel);
+      void openContextMenu(sel, true);
       return;
     }
     const arrow = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;

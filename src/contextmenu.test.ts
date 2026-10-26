@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { linkFor, menuModel, toAccelerator } from "./contextmenu";
+import { isMenuKey, linkFor, menuModel, toAccelerator } from "./contextmenu";
 import { resolve } from "./shortcuts";
 
 const keys = resolve(undefined, true);
@@ -30,3 +30,11 @@ test("accelerator conversion", () => {
 });
 
 test("link format", () => expect(linkFor("My Note")).toBe("[[My Note]]"));
+
+test("menu key: Shift+F10 needs exactly Shift", () => {
+  const k = { key: "F10", metaKey: false, ctrlKey: false, altKey: false, shiftKey: true };
+  expect(isMenuKey(k)).toBe(true);
+  expect(isMenuKey({ ...k, ctrlKey: true })).toBe(false);
+  expect(isMenuKey({ ...k, shiftKey: false })).toBe(false);
+  expect(isMenuKey({ ...k, key: "ContextMenu", shiftKey: false })).toBe(true);
+});
