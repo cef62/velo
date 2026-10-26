@@ -7,6 +7,7 @@ import { Results, mountList } from "./list";
 import { shouldClose } from "./close";
 import { latest } from "./latest";
 import { History } from "./history";
+import { errText } from "./errtext";
 import { enterAction, fold, moveSelection } from "./search";
 import { afterOpen, mountPreview, shouldAutoEdit } from "./preview";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -49,22 +50,13 @@ const clearErr = () => {
   notice = "";
 };
 
-let indexing = false;
-const STILL_INDEXING = "Still indexing…";
-/** Search field and editor are locked while the backend indexes; commands reject with "indexing" meanwhile. */
+/** Search field and editor are read-only while the backend indexes; commands reject with "indexing" meanwhile. */
 function setIndexing(on: boolean, done = 0, total = 0) {
-  if (on) {
-    statusEl.textContent = `Indexing… ${done.toLocaleString()} / ${total.toLocaleString()}`;
-    if (!indexing) editor.suspend();
-  } else {
-    statusEl.textContent = "";
-    if (indexing) editor.resume();
-  }
-  indexing = on;
+  statusEl.textContent = on ? `Indexing… ${done.toLocaleString()} / ${total.toLocaleString()}` : "";
+  // Not editor.suspend(): the saver stays live, so a flush still tries, fails with "indexing" and stays dirty (close asks).
+  editor.setReadOnly(on);
   q.disabled = on;
 }
-/** Error text for the UI; the "indexing" rejection is not an error. */
-const errText = (e: unknown) => (e === "indexing" ? STILL_INDEXING : e === "not-found" ? "Note no longer exists" : String(e));
 const history = new History();
 
 let titles = new Set<string>(); // folded titles of all notes, for wikilink existence

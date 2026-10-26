@@ -13,6 +13,8 @@ export interface Editor {
   /** Read-only and no saving until resume()/load(): for the lock hand-off. */
   suspend(): void;
   resume(): void;
+  /** Read-only override (indexing) on top of the editor's own state; saving is unaffected. */
+  setReadOnly(on: boolean): void;
   /** Detach from the (clean) open note and empty the editor; false if dirty. */
   unload(): boolean;
   isDirty(): boolean;
@@ -84,7 +86,10 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
     onError: (m) => opts.onError?.(m),
   });
 
-  const setEditable = (on: boolean) => view.dispatch({ effects: editable.reconfigure(EditorView.editable.of(on)) });
+  let wantEditable = false; // what load/suspend/resume/unload asked for
+  let readOnly = false; // indexing override, wins over wantEditable
+  const apply = () => view.dispatch({ effects: editable.reconfigure(EditorView.editable.of(wantEditable && !readOnly)) });
+  const setEditable = (on: boolean) => { wantEditable = on; apply(); };
 
   const ed: Editor = {
     load(doc) {
@@ -105,6 +110,10 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
     resume() {
       ctrl.resume();
       setEditable(!!ctrl.currentPath());
+    },
+    setReadOnly(on) {
+      readOnly = on;
+      apply();
     },
     unload() {
       if (!ctrl.unload()) return false;

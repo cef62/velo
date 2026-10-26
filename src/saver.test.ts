@@ -184,3 +184,14 @@ test("unload refuses while dirty", () => {
   expect(c.unload()).toBe(false);
   expect(c.currentPath()).toBe("a.md");
 });
+
+test("while indexing (saves rejected) a dirty editor is not clean, so closing asks", async () => {
+  const { shouldClose } = await import("./close");
+  const { c, d } = mk({ saveNote: vi.fn(async () => { throw "indexing"; }) });
+  type(c, "unsaved");
+  expect(await c.flush()).toBe(false);
+  expect(d.onError).toHaveBeenCalledWith("Save failed: indexing");
+  const ask = vi.fn(async () => false);
+  expect(await shouldClose({ flush: () => c.flush(), ask, lastError: () => "Still indexing…" })).toBe(false);
+  expect(ask).toHaveBeenCalledWith(expect.stringContaining("Still indexing…"));
+});
