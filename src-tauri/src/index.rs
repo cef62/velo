@@ -217,7 +217,7 @@ impl Index {
                     continue; // already a group 0 title hit
                 }
                 let pf = fold(plain);
-                let have: Vec<String> = extract_tags(plain).into_iter().map(|(f, _)| f).collect();
+                let have: Vec<String> = if wanted.is_empty() { vec![] } else { extract_tags(plain).into_iter().map(|(f, _)| f).collect() }; // only needed under a tag filter
                 if wanted.iter().all(|w| have.iter().any(|h| h == w)) && terms.iter().all(|t| tf.contains(t) || pf.contains(t)) {
                     g2.push((tf, path.clone(), mtime, Hit { path: path.clone(), title, snippet: plain.chars().take(120).collect(), mtime, encrypted: true }));
                 }
