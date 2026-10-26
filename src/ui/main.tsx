@@ -29,6 +29,8 @@ window.addEventListener(
   "keydown",
   (e) => {
     const t = e.target as HTMLElement;
+    // the focused divider keeps ↑/↓ (and ←/→): they resize instead of stepping the list
+    if (t.closest?.("[data-divider]") && e.key.startsWith("Arrow") && !(e.metaKey || e.ctrlKey || e.altKey)) return;
     const handled = controller.onKeyDown({
       key: e.key,
       code: e.code,
@@ -40,7 +42,7 @@ window.addEventListener(
       inEditor: !!t.closest?.("[data-editor-host]"),
       inSearchWithText: isSearchInput(t) && (t as HTMLInputElement).value !== "",
       inDialog: !!document.querySelector("dialog[open], [role=dialog][data-state=open], [role=alertdialog][data-state=open]"),
-      inRename: !!t.closest?.("[data-rename]"), // the title bar's rename field carries data-rename (Task 11)
+      inRename: !!t.closest?.("[data-rename]"),
     });
     if (handled) {
       e.preventDefault();

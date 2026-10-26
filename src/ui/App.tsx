@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import { css } from "styled-system/css";
-import { paneDivider } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { useStore } from "./useStore";
@@ -8,9 +7,16 @@ import { Header } from "./Header";
 import { EditorHost } from "./EditorHost";
 import { PreviewHost } from "./PreviewHost";
 import { NoteList } from "./NoteList";
+import { TitleBar } from "./TitleBar";
+import { ConflictBanner } from "./ConflictBanner";
+import { PreviewStrip } from "./PreviewStrip";
+import { Divider } from "./Divider";
+import { TagPanel } from "./TagPanel";
+import { FilterLine } from "./FilterLine";
+import { FirstRun } from "./FirstRun";
 
 // Layout per design README: vertical = header / list / divider / note; horizontal = header over [list | divider | note].
-// platform.applyLook writes data-layout on <html>; the divider sizes come from --list-h / --list-w (Task 11).
+// platform.applyLook writes data-layout on <html>; the divider sizes come from --list-h / --list-w .
 const app = css({
   h: "100vh",
   display: "flex",
@@ -25,24 +31,14 @@ const app = css({
   },
 });
 const note = css({ flex: "1", minH: "0", minW: "0", display: "flex", flexDirection: "column", position: "relative" });
-const titleBar = css({
-  display: "flex",
-  alignItems: "center",
-  gap: "3",
-  h: "titleBar",
-  px: "5",
-  flex: "none",
-  borderBottom: "1px solid",
-  borderColor: "velo.divider",
-  fontWeight: "650",
-  fontSize: "var(--velo-title-fs)",
-  "& [data-err]": { color: "red.11", fontSize: "uiSm", fontWeight: "normal" },
-});
+// Header, tag panel and filter line stack as one block; in the horizontal grid it spans both columns.
+const top = css({ flex: "none", minW: "0", "[data-layout=horizontal] &": { gridColumn: "1 / -1" } });
 
 export function App({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const s = useStore(store);
   // The hosts' layout effects (attachEditor/attachPreview) run before this effect, so start() sees them; once only under StrictMode.
   const started = useRef(false);
+  const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (started.current) return;
     started.current = true;
@@ -50,26 +46,22 @@ export function App({ controller, store }: { controller: Controller; store: Stor
   }, [controller]);
 
   return (
-    <div className={app} data-preview-on={s.previewOn || undefined}>
-      <Header controller={controller} store={store} />
+    <div ref={root} className={app} data-preview-on={s.previewOn || undefined}>
+      <div className={top}>
+        <Header controller={controller} store={store} />
+        <TagPanel controller={controller} store={store} />
+        <FilterLine controller={controller} store={store} />
+      </div>
       <NoteList controller={controller} store={store} />
-      <div className={paneDivider({ orientation: s.layout === "horizontal" ? "vertical" : "horizontal" })} role="separator" aria-label="Resize note list" />
+      <Divider store={store} app={root} />
       <section className={note}>
-        {/* placeholder: replaced in Task 11 */}
-        <div className={titleBar}>
-          <span>{s.title}</span>
-          {s.err && <span data-err="">{s.err}</span>}
-        </div>
+        <TitleBar controller={controller} store={store} />
+        <ConflictBanner controller={controller} store={store} />
+        <PreviewStrip store={store} />
         <EditorHost controller={controller} />
         <PreviewHost controller={controller} />
-        {/* placeholder: first-run screen replaced in Task 12; the editor stays mounted under it */}
-        {s.phase === "setup" && (
-          <div className={css({ position: "absolute", inset: "0", display: "grid", placeItems: "center", bg: "velo.chrome" })}>
-            <button type="button" onClick={() => void controller.chooseFolder()}>
-              Choose notes folder
-            </button>
-          </div>
-        )}
+        {/* the editor stays mounted under the first-run screen */}
+        <FirstRun controller={controller} store={store} />
       </section>
     </div>
   );

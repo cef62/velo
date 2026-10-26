@@ -6,7 +6,7 @@ export const kbd = defineRecipe({
     display: 'inline-flex',
     alignItems: 'center',
     fontWeight: 'medium',
-    fontFamily: 'code',
+    fontFamily: 'mono',
     flexShrink: '0',
     whiteSpace: 'nowrap',
     wordSpacing: '-0.5em',
