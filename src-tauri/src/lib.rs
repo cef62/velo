@@ -86,6 +86,7 @@ pub fn run() {
             commands::set_settings,
             commands::index_status,
             commands::search,
+            commands::list_tags,
             commands::list_titles,
             commands::open_note,
             commands::open_or_create,

@@ -1,5 +1,5 @@
 use crate::crypto;
-use crate::index::{Index, Meta, Page, Sort};
+use crate::index::{Index, Meta, Page, Sort, TagCount};
 
 const PAGE: usize = 200;
 use crate::names::{NoteFile, note_path, parse_note_file};
@@ -115,8 +115,13 @@ impl Vault {
         self.index.upsert(&s(path), &nf, &stat(path)?, body)
     }
 
-    pub fn search(&self, query: &str, sort: Sort, offset: usize) -> anyhow::Result<Page> {
-        self.index.search_page(query, sort, offset, PAGE, &self.unlocked)
+    pub fn search(&self, query: &str, sort: Sort, offset: usize, tags: &[String]) -> anyhow::Result<Page> {
+        self.index.search_page(query, sort, offset, PAGE, tags, &self.unlocked)
+    }
+
+    /// Tags of plain notes only: unlocked notes' tags stay in memory and out of this list.
+    pub fn tags(&self) -> anyhow::Result<Vec<TagCount>> {
+        self.index.tags()
     }
 
     pub fn titles(&self) -> anyhow::Result<Vec<String>> {
@@ -327,8 +332,8 @@ mod tests {
         let (dir, db) = setup();
         std::fs::write(dir.join("a.md"), "zebra").unwrap();
         let v = Vault::open(dir.clone(), &db, None).unwrap();
-        assert_eq!(v.search("zebra", Sort::Modified, 0).unwrap().hits.len(), 1); drop(v); std::fs::remove_file(&db).unwrap();
-        assert_eq!(Vault::open(dir, &db, None).unwrap().search("zebra", Sort::Modified, 0).unwrap().hits.len(), 1);
+        assert_eq!(v.search("zebra", Sort::Modified, 0, &[]).unwrap().hits.len(), 1); drop(v); std::fs::remove_file(&db).unwrap();
+        assert_eq!(Vault::open(dir, &db, None).unwrap().search("zebra", Sort::Modified, 0, &[]).unwrap().hits.len(), 1);
     }
     #[test] fn progress_reports_total_and_end() {
         let (dir, db) = setup();
@@ -350,7 +355,7 @@ mod tests {
         let (dir, db) = setup();
         std::fs::write(dir.join("bin.txt"), [0xff, 0xfe, b'o', b'k', b'a', b'y']).unwrap();
         let before = std::fs::read(dir.join("bin.txt")).unwrap(); let v = Vault::open(dir.clone(), &db, None).unwrap();
-        assert_eq!(v.search("bin", Sort::Modified, 0).unwrap().hits.len(), 1); assert_eq!(std::fs::read(dir.join("bin.txt")).unwrap(), before);
+        assert_eq!(v.search("bin", Sort::Modified, 0, &[]).unwrap().hits.len(), 1); assert_eq!(std::fs::read(dir.join("bin.txt")).unwrap(), before);
     }
     #[test] fn open_or_create_dedupes_case_insensitive() {
         let mut v = open_empty(); let a = v.open_or_create("Foo", None).unwrap();
@@ -375,9 +380,26 @@ mod tests {
                 let word = b"zqxjvkplmwqbyfh";
                 assert!(!word.windows(3).any(|g| b.windows(3).any(|w| w == g)), "trigram leak in {f}"); }
         }
-        let mut v = Vault::open(dir.clone(), &db, Some(&id)).unwrap(); assert_eq!(v.search("uniqueplain", Sort::Modified, 0).unwrap().hits.len(), 1);
-        v.lock_all(); assert!(v.search("uniqueplain", Sort::Modified, 0).unwrap().hits.is_empty());
+        let mut v = Vault::open(dir.clone(), &db, Some(&id)).unwrap(); assert_eq!(v.search("uniqueplain", Sort::Modified, 0, &[]).unwrap().hits.len(), 1);
+        v.lock_all(); assert!(v.search("uniqueplain", Sort::Modified, 0, &[]).unwrap().hits.is_empty());
         assert!(v.open_note(&p, None).is_err()); assert_eq!(v.open_note(&p, Some(&id)).unwrap().text, "uniqueplain zqxjvkplmwqbyfh");
+    }
+    #[test] fn locked_note_tags_stay_out_of_sqlite() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = Vault::open(dir.clone(), &db, None).unwrap(); let d = v.open_or_create("s", None).unwrap();
+        let _r = v.save_note(&d.path, "#zqxjvkplmwqbyfh text", &d.hash, None).unwrap();
+        assert_eq!(v.tags().unwrap().len(), 1); v.lock_note(&d.path, &id).unwrap();
+        assert!(v.tags().unwrap().is_empty());
+        drop(v);
+        for suffix in ["", "-wal", "-shm"] {
+            let f = format!("{}{suffix}", db.display());
+            if let Ok(b) = std::fs::read(&f) {
+                let word = b"zqxjvkplmwqbyfh";
+                assert!(!word.windows(3).any(|g| b.windows(3).any(|w| w == g)), "trigram leak in {f}"); }
+        }
+        let v = Vault::open(dir, &db, Some(&id)).unwrap();
+        assert!(v.tags().unwrap().is_empty());
+        assert_eq!(v.search("", Sort::Title, 0, &["zqxjvkplmwqbyfh".to_string()]).unwrap().hits.len(), 1);
     }
     #[test] fn save_to_plain_path_refused_when_locked_sibling_exists() {
         let (dir, db) = setup(); let id = crypto::new_identity();
@@ -406,24 +428,24 @@ mod tests {
         let mut v = open_empty();
         let d = v.open_or_create(".foo", None).unwrap();
         assert!(!Path::new(&d.path).file_name().unwrap().to_str().unwrap().starts_with('.'));
-        assert_eq!(v.search("", Sort::Modified, 0).unwrap().hits.len(), 1);
+        assert_eq!(v.search("", Sort::Modified, 0, &[]).unwrap().hits.len(), 1);
         let r = v.rename_note(&d.path, ".bar", false).unwrap();
         assert!(!Path::new(&r.path).file_name().unwrap().to_str().unwrap().starts_with('.'));
-        assert_eq!(v.search("", Sort::Modified, 0).unwrap().hits.len(), 1);
+        assert_eq!(v.search("", Sort::Modified, 0, &[]).unwrap().hits.len(), 1);
         assert!(v.open_note(&r.path, None).is_ok());
     }
     #[test] fn fs_changes_skip_self_writes() {
         let mut v = open_empty(); let d = v.open_or_create("w", None).unwrap();
         v.save_note(&d.path, "x", &d.hash, None).unwrap(); assert!(v.apply_fs_changes(&[d.path.clone().into()], None).is_empty());
         std::fs::write(&d.path, "external zebra").unwrap(); assert_eq!(v.apply_fs_changes(&[d.path.clone().into()], None), vec![d.path.clone()]);
-        assert_eq!(v.search("zebra", Sort::Modified, 0).unwrap().hits.len(), 1);
+        assert_eq!(v.search("zebra", Sort::Modified, 0, &[]).unwrap().hits.len(), 1);
     }
     #[test] fn delete_moves_file_out_and_drops_it_from_index() {
         let mut v = open_empty(); let d = v.open_or_create("doomed", None).unwrap();
         v.save_note(&d.path, "zebra", &d.hash, None).unwrap();
         v.delete_note_with(&d.path, |p| std::fs::remove_file(p)).unwrap();
         assert!(!Path::new(&d.path).exists());
-        assert!(v.search("zebra", Sort::Modified, 0).unwrap().hits.is_empty());
+        assert!(v.search("zebra", Sort::Modified, 0, &[]).unwrap().hits.is_empty());
         assert!(v.titles().unwrap().is_empty());
     }
     #[test] fn delete_refuses_paths_outside_the_notes_folder() {

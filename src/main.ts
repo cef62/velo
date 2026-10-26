@@ -36,7 +36,7 @@ function rowHeight(): number {
   probe.remove();
   return h || 44;
 }
-const results = new Results((offset) => api.search(q.value, sort, offset));
+const results = new Results((offset) => api.search(q.value, sort, offset, []));
 const list = mountList($("list"), { results, rowH: rowHeight(), onSelect: (i) => void select(i) });
 const sortBtn = $<HTMLButtonElement>("sort");
 

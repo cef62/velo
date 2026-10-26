@@ -9,7 +9,9 @@ export type Settings = { notes_dir: string | null; layout: "vertical" | "horizon
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<void>("set_settings", { settings });
 export type Page = { hits: Hit[]; has_more: boolean };
-export const search = (query: string, sort: "modified" | "title", offset: number) => invoke<Page>("search", { query, sort, offset });
+export type TagCount = { tag: string; count: number };
+export const search = (query: string, sort: "modified" | "title", offset: number, tags: string[]) => invoke<Page>("search", { query, sort, offset, tags });
+export const listTags = () => invoke<TagCount[]>("list_tags");
 export const listTitles = () => invoke<string[]>("list_titles");
 export const openNote = (path: string) => invoke<NoteDoc>("open_note", { path });
 export const openOrCreate = (title: string) => invoke<NoteDoc>("open_or_create", { title });

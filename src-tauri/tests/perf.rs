@@ -44,7 +44,7 @@ fn search_p95_under_50ms() {
                 };
                 for _ in 0..10 {
                     let t = Instant::now();
-                    idx.search_page(q, sort, off, 200, &none).unwrap();
+                    idx.search_page(q, sort, off, 200, &[], &none).unwrap();
                     times.push(t.elapsed().as_secs_f64() * 1000.0);
                 }
             }
@@ -53,5 +53,19 @@ fn search_p95_under_50ms() {
             println!("{n} notes {sort:?} {label}: p50 {p50:.2} ms, p95 {p95:.2} ms, max {:.2} ms", times[times.len() - 1]);
             assert!(p95 < 50.0, "{sort:?} {label} p95 {p95:.2} ms");
         }
+    }
+    // Tag filters: wide single tag on an empty query, and two tags with a text query.
+    for (sort, q, tags) in [(Sort::Title, "", vec!["work"]), (Sort::Modified, "garden", vec!["work", "ideas"]), (Sort::Title, "", vec!["work", "ideas"])] {
+        let tags: Vec<String> = tags.into_iter().map(String::from).collect();
+        let mut times = Vec::new();
+        for _ in 0..30 {
+            let t = Instant::now();
+            idx.search_page(q, sort, 0, 200, &tags, &none).unwrap();
+            times.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let p95 = times[times.len() * 95 / 100];
+        println!("{n} notes {sort:?} q={q:?} tags={tags:?}: p50 {:.2} ms, p95 {p95:.2} ms", times[times.len() / 2]);
+        assert!(p95 < 50.0, "tag filter {tags:?} p95 {p95:.2} ms");
     }
 }

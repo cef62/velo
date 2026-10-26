@@ -1,5 +1,5 @@
 use crate::names::NoteFile;
-use crate::text::{extract_links, fold};
+use crate::text::{extract_links, extract_tags, fold};
 use rusqlite::{Connection, params, params_from_iter};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -27,6 +27,12 @@ pub struct Page {
     pub has_more: bool,
 }
 
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct TagCount {
+    pub tag: String,
+    pub count: usize,
+}
+
 pub struct Meta {
     /// milliseconds
     pub mtime: i64,
@@ -42,6 +48,9 @@ CREATE TABLE IF NOT EXISTS notes(path TEXT PRIMARY KEY, title TEXT NOT NULL, tit
   mtime INTEGER NOT NULL, size INTEGER NOT NULL, encrypted INTEGER NOT NULL, preview TEXT NOT NULL);
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(path UNINDEXED, body, tokenize="trigram remove_diacritics 1");
 CREATE TABLE IF NOT EXISTS links(src TEXT NOT NULL, dst_folded TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS tags(path TEXT NOT NULL, tag_folded TEXT NOT NULL, tag_display TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS tags_tag ON tags(tag_folded);
+CREATE INDEX IF NOT EXISTS tags_path ON tags(path);
 CREATE INDEX IF NOT EXISTS notes_mtime ON notes(mtime);
 CREATE INDEX IF NOT EXISTS notes_title ON notes(title_folded);
 CREATE INDEX IF NOT EXISTS links_dst ON links(dst_folded);
@@ -83,6 +92,10 @@ impl Index {
         db.execute_batch(SCHEMA)?;
         // FTS5 deletes otherwise leave old segments (all trigrams) in notes_fts_data.
         db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1);")?;
+        // Older indexes lack tags: clear them so the vault's reconcile reindexes every note.
+        if db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? < 2 {
+            db.execute_batch("DELETE FROM notes_fts; DELETE FROM notes; DELETE FROM links; DELETE FROM tags; PRAGMA user_version=2;")?;
+        }
         Ok(Index { db })
     }
 
@@ -100,7 +113,7 @@ impl Index {
 
     pub fn upsert(&mut self, path: &str, nf: &NoteFile, meta: &Meta, body: Option<&str>) -> anyhow::Result<()> {
         let tx = self.db.transaction()?;
-        for sql in ["DELETE FROM notes_fts WHERE rowid=(SELECT rowid FROM notes WHERE path=?1)", "DELETE FROM notes WHERE path=?1", "DELETE FROM links WHERE src=?1"] {
+        for sql in ["DELETE FROM notes_fts WHERE rowid=(SELECT rowid FROM notes WHERE path=?1)", "DELETE FROM notes WHERE path=?1", "DELETE FROM links WHERE src=?1", "DELETE FROM tags WHERE path=?1"] {
             tx.execute(sql, [path])?;
         }
         let body = if nf.encrypted { None } else { body };
@@ -116,35 +129,41 @@ impl Index {
             for d in dsts {
                 tx.execute("INSERT INTO links(src,dst_folded) VALUES(?,?)", params![path, d])?;
             }
+            for (f, d) in extract_tags(b) {
+                tx.execute("INSERT INTO tags(path,tag_folded,tag_display) VALUES(?,?,?)", params![path, f, d])?;
+            }
         }
         Ok(tx.commit()?)
     }
 
     pub fn remove(&mut self, path: &str) -> anyhow::Result<()> {
         let tx = self.db.transaction()?;
-        for sql in ["DELETE FROM notes_fts WHERE rowid=(SELECT rowid FROM notes WHERE path=?1)", "DELETE FROM notes WHERE path=?1", "DELETE FROM links WHERE src=?1"] {
+        for sql in ["DELETE FROM notes_fts WHERE rowid=(SELECT rowid FROM notes WHERE path=?1)", "DELETE FROM notes WHERE path=?1", "DELETE FROM links WHERE src=?1", "DELETE FROM tags WHERE path=?1"] {
             tx.execute(sql, [path])?;
         }
         Ok(tx.commit()?)
     }
 
-    pub fn search_page(&self, query: &str, sort: Sort, offset: usize, limit: usize, unlocked: &HashMap<String, String>) -> anyhow::Result<Page> {
+    pub fn search_page(&self, query: &str, sort: Sort, offset: usize, limit: usize, tags: &[String], unlocked: &HashMap<String, String>) -> anyhow::Result<Page> {
         let folded = fold(query);
         let terms: Vec<&str> = folded.split_whitespace().collect();
         let order = match sort {
             Sort::Modified => "mtime DESC, path ASC",
             Sort::Title => "title_folded ASC, path ASC",
         };
+        let tags: Vec<String> = tags.iter().map(|t| fold(t)).collect();
+        let tag_cond = |p: &str| tags.iter().map(|_| format!(" AND EXISTS (SELECT 1 FROM tags t WHERE t.path = {p}path AND t.tag_folded = ?)")).collect::<String>();
         let cols = "path, title, preview, mtime, encrypted, title_folded, rowid";
         let esc: Vec<String> = terms.iter().map(|t| like_escape(t)).collect();
         let (union, args, long): (String, Vec<String>, Vec<usize>) = if terms.is_empty() {
-            (format!("SELECT {cols}, 0 AS grp FROM notes"), vec![], vec![])
+            (format!("SELECT {cols}, 0 AS grp FROM notes WHERE 1{}", tag_cond("notes.")), tags.clone(), vec![])
         } else {
             let cond = |p: &str, ts: &[usize]| ts.iter().map(|_| format!("{p}title_folded LIKE '%' || ? || '%' ESCAPE '\\'")).collect::<Vec<_>>().join(" AND ");
             let all: Vec<usize> = (0..terms.len()).collect();
             // Group 0: title matches.
-            let mut sql = format!("SELECT {cols}, 0 AS grp FROM notes WHERE {}", cond("", &all));
+            let mut sql = format!("SELECT {cols}, 0 AS grp FROM notes WHERE {}{}", cond("", &all), tag_cond("notes."));
             let mut args = esc.clone();
+            args.extend(tags.iter().cloned());
             let (long, short): (Vec<usize>, Vec<usize>) = all.iter().partition(|&&i| terms[i].chars().count() >= 3);
             if !long.is_empty() {
                 // Group 1: FTS matches that are not title matches.
@@ -152,12 +171,14 @@ impl Index {
                 let short_cond: String = short.iter().map(|&i| format!(" AND {}", cond("n.", &[i]))).collect();
                 sql += &format!(
                     " UNION ALL SELECT n.path, n.title, n.preview, n.mtime, n.encrypted, n.title_folded, n.rowid, 1 AS grp \
-                     FROM notes_fts JOIN notes n ON n.rowid = notes_fts.rowid WHERE notes_fts MATCH ?{short_cond} AND NOT ({})",
-                    cond("n.", &all)
+                     FROM notes_fts JOIN notes n ON n.rowid = notes_fts.rowid WHERE notes_fts MATCH ?{short_cond} AND NOT ({}){}",
+                    cond("n.", &all),
+                    tag_cond("n.")
                 );
                 args.push(m);
                 args.extend(short.iter().map(|&i| esc[i].clone()));
                 args.extend(esc.iter().cloned());
+                args.extend(tags.iter().cloned());
             }
             (sql, args, long)
         };
@@ -184,17 +205,20 @@ impl Index {
 
         // Group 2: unlocked encrypted bodies (memory only, not in FTS), after every SQL row.
         let mut g2: Vec<(String, String, i64, Hit)> = vec![];
-        if !terms.is_empty() {
+        if !terms.is_empty() || !tags.is_empty() {
+            let wanted: Vec<&str> = tags.iter().map(String::as_str).collect();
             for (path, plain) in unlocked {
                 let row = self.db.query_row("SELECT title, title_folded, mtime FROM notes WHERE path=?", [path], |r| {
                     Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
                 });
                 let Ok((title, tf, mtime)) = row else { continue };
-                if terms.iter().all(|t| tf.contains(t)) {
+                // Locked notes have no tags rows, so under a tag filter SQL never returned them.
+                if tags.is_empty() && terms.iter().all(|t| tf.contains(t)) {
                     continue; // already a group 0 title hit
                 }
                 let pf = fold(plain);
-                if terms.iter().all(|t| tf.contains(t) || pf.contains(t)) {
+                let have: Vec<String> = extract_tags(plain).into_iter().map(|(f, _)| f).collect();
+                if wanted.iter().all(|w| have.iter().any(|h| h == w)) && terms.iter().all(|t| tf.contains(t) || pf.contains(t)) {
                     g2.push((tf, path.clone(), mtime, Hit { path: path.clone(), title, snippet: plain.chars().take(120).collect(), mtime, encrypted: true }));
                 }
             }
@@ -216,6 +240,11 @@ impl Index {
         let has_more = hits.len() > limit;
         hits.truncate(limit);
         Ok(Page { hits, has_more })
+    }
+
+    pub fn tags(&self) -> anyhow::Result<Vec<TagCount>> {
+        let mut st = self.db.prepare("SELECT MIN(tag_display), COUNT(DISTINCT path) FROM tags GROUP BY tag_folded ORDER BY tag_folded")?;
+        Ok(st.query_map([], |r| Ok(TagCount { tag: r.get(0)?, count: r.get::<_, i64>(1)? as usize }))?.collect::<Result<_, _>>()?)
     }
 
     pub fn find_title(&self, title: &str) -> anyhow::Result<Option<String>> {
@@ -255,7 +284,7 @@ mod tests {
         idx(&v)
     }
     fn paths(i: &Index, q: &str, sort: Sort, off: usize, lim: usize, u: &HashMap<String, String>) -> Vec<String> {
-        i.search_page(q, sort, off, lim, u).unwrap().hits.into_iter().map(|h| h.path).collect()
+        i.search_page(q, sort, off, lim, &[], u).unwrap().hits.into_iter().map(|h| h.path).collect()
     }
 
     #[test] fn title_sort_orders_groups_az() {
@@ -267,7 +296,7 @@ mod tests {
         let i = idx_owned(&notes);
         for sort in [Sort::Modified, Sort::Title] {
             let mut all = vec![]; let mut off = 0;
-            loop { let pg = i.search_page("", sort, off, 200, &HashMap::new()).unwrap(); off += pg.hits.len(); all.extend(pg.hits.into_iter().map(|h| h.path)); if !pg.has_more { break } }
+            loop { let pg = i.search_page("", sort, off, 200, &[], &HashMap::new()).unwrap(); off += pg.hits.len(); all.extend(pg.hits.into_iter().map(|h| h.path)); if !pg.has_more { break } }
             assert_eq!(all.len(), 450); let set: HashSet<_> = all.iter().collect(); assert_eq!(set.len(), 450);
         }
     }
@@ -279,12 +308,12 @@ mod tests {
             let full = paths(&i, "cat", sort, 0, 50, &HashMap::new());
             assert_eq!(full.len(), 14);
             let mut got = vec![]; let mut off = 0;
-            loop { let pg = i.search_page("cat", sort, off, 3, &HashMap::new()).unwrap(); off += pg.hits.len(); got.extend(pg.hits.into_iter().map(|h| h.path)); if !pg.has_more { break } }
+            loop { let pg = i.search_page("cat", sort, off, 3, &[], &HashMap::new()).unwrap(); off += pg.hits.len(); got.extend(pg.hits.into_iter().map(|h| h.path)); if !pg.has_more { break } }
             assert_eq!(got, full);
         }
     }
     #[test] fn title_sort_is_fold_insensitive() { let i = idx(&[("Zeta.md", "", 3), ("éclair.md", "", 2), ("apple.md", "", 1)]);
-        let p: Vec<_> = i.search_page("", Sort::Title, 0, 10, &HashMap::new()).unwrap().hits.into_iter().map(|h| h.title).collect();
+        let p: Vec<_> = i.search_page("", Sort::Title, 0, 10, &[], &HashMap::new()).unwrap().hits.into_iter().map(|h| h.title).collect();
         assert_eq!(p, vec!["apple", "éclair", "Zeta"]); }
     #[test] fn unlocked_body_matches_appended_last() {
         let mut i = idx(&[("secret a.md", "", 1), ("secret b.md", "", 2)]);
@@ -292,34 +321,34 @@ mod tests {
         let u = HashMap::from([("e.md.age".to_string(), "my secret".to_string())]);
         for sort in [Sort::Modified, Sort::Title] {
             assert_eq!(paths(&i, "secret", sort, 0, 10, &u).last().unwrap(), "e.md.age");
-            let p0 = i.search_page("secret", sort, 0, 2, &u).unwrap();
+            let p0 = i.search_page("secret", sort, 0, 2, &[], &u).unwrap();
             assert_eq!(p0.hits.len(), 2); assert!(p0.has_more); assert!(p0.hits.iter().all(|h| h.path != "e.md.age"));
-            let p1 = i.search_page("secret", sort, 2, 2, &u).unwrap();
+            let p1 = i.search_page("secret", sort, 2, 2, &[], &u).unwrap();
             assert_eq!(p1.hits.iter().map(|h| h.path.as_str()).collect::<Vec<_>>(), vec!["e.md.age"]); assert!(!p1.has_more);
             assert_eq!(paths(&i, "secret", sort, 3, 2, &u), Vec::<String>::new());
         }
     }
     #[test] fn title_hits_before_body_hits_then_mtime() {
         let i = idx(&[("a.md", "nothing", 1), ("garden.md", "x", 2), ("b.md", "my garden plan", 3), ("garden2.md", "y", 4)]);
-        let p: Vec<_> = i.search_page("garden", Sort::Modified, 0, 10, &HashMap::new()).unwrap().hits.into_iter().map(|h| h.path).collect();
+        let p: Vec<_> = i.search_page("garden", Sort::Modified, 0, 10, &[], &HashMap::new()).unwrap().hits.into_iter().map(|h| h.path).collect();
         assert_eq!(p, vec!["garden2.md", "garden.md", "b.md"]);
     }
     #[test] fn substring_and_diacritics() { let i = idx(&[("Résumé.md", "", 1), ("x.md", "café crème", 2)]);
-        assert_eq!(i.search_page("sum", Sort::Modified, 0, 10, &HashMap::new()).unwrap().hits[0].path, "Résumé.md");
-        assert_eq!(i.search_page("cafe", Sort::Modified, 0, 10, &HashMap::new()).unwrap().hits[0].path, "x.md"); }
+        assert_eq!(i.search_page("sum", Sort::Modified, 0, 10, &[], &HashMap::new()).unwrap().hits[0].path, "Résumé.md");
+        assert_eq!(i.search_page("cafe", Sort::Modified, 0, 10, &[], &HashMap::new()).unwrap().hits[0].path, "x.md"); }
     #[test] fn short_query_titles_only() { let i = idx(&[("ab.md", "", 1), ("x.md", "ab ab ab", 2)]);
-        assert_eq!(i.search_page("ab", Sort::Modified, 0, 10, &HashMap::new()).unwrap().hits.len(), 1); }
+        assert_eq!(i.search_page("ab", Sort::Modified, 0, 10, &[], &HashMap::new()).unwrap().hits.len(), 1); }
     #[test] fn multi_word_all_terms() { let i = idx(&[("x.md", "red apple", 1), ("y.md", "red car", 2)]);
-        assert_eq!(i.search_page("apple red", Sort::Modified, 0, 10, &HashMap::new()).unwrap().hits.iter().map(|h| &h.path).collect::<Vec<_>>(), vec!["x.md"]); }
+        assert_eq!(i.search_page("apple red", Sort::Modified, 0, 10, &[], &HashMap::new()).unwrap().hits.iter().map(|h| &h.path).collect::<Vec<_>>(), vec!["x.md"]); }
     #[test] fn search_metacharacters_literal() { let i = idx(&[("100%.md", "a \"quoted\" NEAR (x) -y *z", 1)]);
-        for q in ["\"", "%", "_", "*", "-y", "NEAR", "(x)", "\"quoted\"", "100%"] { assert!(i.search_page(q, Sort::Modified, 0, 10, &HashMap::new()).is_ok(), "{q}"); }
-        assert_eq!(i.search_page("100%", Sort::Modified, 0, 10, &HashMap::new()).unwrap().hits.len(), 1);
-        assert_eq!(i.search_page("_", Sort::Modified, 0, 10, &HashMap::new()).unwrap().hits.len(), 0); }
+        for q in ["\"", "%", "_", "*", "-y", "NEAR", "(x)", "\"quoted\"", "100%"] { assert!(i.search_page(q, Sort::Modified, 0, 10, &[], &HashMap::new()).is_ok(), "{q}"); }
+        assert_eq!(i.search_page("100%", Sort::Modified, 0, 10, &[], &HashMap::new()).unwrap().hits.len(), 1);
+        assert_eq!(i.search_page("_", Sort::Modified, 0, 10, &[], &HashMap::new()).unwrap().hits.len(), 0); }
     #[test] fn encrypted_body_not_indexed_unless_unlocked() {
         let mut i = idx(&[]); i.upsert("s.md.age", &NoteFile { title: "s".into(), encrypted: true }, &Meta { mtime: 1, size: 1 }, None).unwrap();
-        assert!(i.search_page("secretword", Sort::Modified, 0, 10, &HashMap::new()).unwrap().hits.is_empty());
+        assert!(i.search_page("secretword", Sort::Modified, 0, 10, &[], &HashMap::new()).unwrap().hits.is_empty());
         let u = HashMap::from([("s.md.age".to_string(), "the secretword".to_string())]);
-        assert_eq!(i.search_page("secretword", Sort::Modified, 0, 10, &u).unwrap().hits[0].path, "s.md.age"); }
+        assert_eq!(i.search_page("secretword", Sort::Modified, 0, 10, &[], &u).unwrap().hits[0].path, "s.md.age"); }
     #[test] fn backlinks_and_find_title() { let i = idx(&[("a.md", "see [[Target Note]]", 1), ("Target Note.md", "", 2)]);
         assert_eq!(i.backlinks("target note").unwrap(), vec!["a.md"]);
         assert_eq!(i.find_title("TARGET NOTE").unwrap().as_deref(), Some("Target Note.md")); }
@@ -327,6 +356,41 @@ mod tests {
         i.upsert("s.md.age", &NoteFile { title: "s".into(), encrypted: true }, &Meta { mtime: 1, size: 1 }, None).unwrap();
         let mut t = i.titles().unwrap(); t.sort();
         assert_eq!(t, vec!["B c", "a", "s"]); }
+    #[test] fn tags_listed_with_counts_and_filter_is_and() {
+        let i = idx(&[("a.md", "#work #idea", 1), ("b.md", "#work", 2), ("c.md", "nothing", 3)]);
+        assert_eq!(i.tags().unwrap(), vec![TagCount { tag: "idea".into(), count: 1 }, TagCount { tag: "work".into(), count: 2 }]);
+        let p = |tags: &[&str]| i.search_page("", Sort::Title, 0, 10, &tags.iter().map(|s| s.to_string()).collect::<Vec<_>>(), &HashMap::new()).unwrap().hits.into_iter().map(|h| h.path).collect::<Vec<_>>();
+        assert_eq!(p(&["work"]), vec!["a.md", "b.md"]); assert_eq!(p(&["work", "IDEA"]), vec!["a.md"]); assert_eq!(p(&[]).len(), 3);
+    }
+    #[test] fn tag_filter_combines_with_query_groups() {
+        let i = idx(&[("t1 plan.md", "#t", 1), ("t2 plan.md", "no tag", 2), ("b1.md", "my plan #t", 3), ("b2.md", "my plan", 4), ("b3.md", "plan #T", 5)]);
+        let got: Vec<_> = i.search_page("plan", Sort::Title, 0, 10, &["t".to_string()], &HashMap::new()).unwrap().hits.into_iter().map(|h| h.path).collect();
+        assert_eq!(got, vec!["t1 plan.md", "b1.md", "b3.md"]);
+    }
+    #[test] fn unlocked_note_matches_tag_filter_in_memory() {
+        let mut i = idx(&[]);
+        i.upsert("e.md.age", &NoteFile { title: "e".into(), encrypted: true }, &Meta { mtime: 1, size: 1 }, None).unwrap();
+        let u = HashMap::from([("e.md.age".to_string(), "x #Sec".to_string())]);
+        assert!(i.tags().unwrap().is_empty());
+        for q in ["", "x"] {
+            assert_eq!(i.search_page(q, Sort::Title, 0, 10, &["sec".to_string()], &u).unwrap().hits.len(), 1, "{q}");
+            assert!(i.search_page(q, Sort::Title, 0, 10, &["other".to_string()], &u).unwrap().hits.is_empty());
+        }
+    }
+    #[test] fn schema_upgrade_reindexes() {
+        let dir = tempfile::tempdir().unwrap(); let db = dir.path().join("i.db");
+        let mut i = Index::open(&db).unwrap();
+        i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1 }, Some("#x")).unwrap(); drop(i);
+        Connection::open(&db).unwrap().execute_batch("PRAGMA user_version=1").unwrap();
+        let i = Index::open(&db).unwrap(); assert!(i.known().unwrap().is_empty()); assert!(i.tags().unwrap().is_empty());
+        assert_eq!(i.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+        let mut i = i; i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1 }, Some("#x")).unwrap(); drop(i);
+        assert_eq!(Index::open(&db).unwrap().known().unwrap().len(), 1);
+    }
     #[test] fn remove_clears_all_tables() { let mut i = idx(&[("a.md", "see [[B]] zebra", 1)]); i.remove("a.md").unwrap();
-        assert!(i.search_page("zebra", Sort::Modified, 0, 10, &HashMap::new()).unwrap().hits.is_empty()); assert!(i.backlinks("b").unwrap().is_empty()); }
+        assert!(i.search_page("zebra", Sort::Modified, 0, 10, &[], &HashMap::new()).unwrap().hits.is_empty()); assert!(i.backlinks("b").unwrap().is_empty()); }
+    #[test] fn upsert_replaces_and_remove_drops_tags() { let mut i = idx(&[("a.md", "#one", 1)]);
+        i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 2, size: 1 }, Some("#two")).unwrap();
+        assert_eq!(i.tags().unwrap()[0].tag, "two"); assert_eq!(i.tags().unwrap().len(), 1);
+        i.remove("a.md").unwrap(); assert!(i.tags().unwrap().is_empty()); }
 }
