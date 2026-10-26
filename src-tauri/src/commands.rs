@@ -31,6 +31,9 @@ fn err(e: anyhow::Error) -> String {
     if e.downcast_ref::<std::io::Error>().is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) {
         return "already-exists".into();
     }
+    if e.downcast_ref::<std::io::Error>().is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound) {
+        return "not-found".into(); // a note deleted behind the UI's back (history navigation)
+    }
     e.to_string() // "locked" passes through verbatim
 }
 
@@ -326,6 +329,12 @@ fn keychain_warning<E>(needs_set: bool, set: impl FnOnce() -> Result<(), E>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn err_maps_io_kinds() {
+        let io = |k| anyhow::Error::from(std::io::Error::from(k));
+        assert_eq!(err(io(std::io::ErrorKind::NotFound)), "not-found");
+        assert_eq!(err(io(std::io::ErrorKind::AlreadyExists)), "already-exists");
+        assert_eq!(err(anyhow::anyhow!("locked")), "locked");
+    }
     #[test] fn indexing_gate_cleared_on_error() {
         let gate = Mutex::new(None);
         let r: anyhow::Result<()> = gated(&gate, || {

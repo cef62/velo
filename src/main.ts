@@ -6,6 +6,7 @@ import { mountEditor } from "./editor";
 import { Results, mountList } from "./list";
 import { shouldClose } from "./close";
 import { latest } from "./latest";
+import { History } from "./history";
 import { enterAction, fold, moveSelection } from "./search";
 import { mountPreview } from "./preview";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -63,7 +64,8 @@ function setIndexing(on: boolean, done = 0, total = 0) {
   q.disabled = on;
 }
 /** Error text for the UI; the "indexing" rejection is not an error. */
-const errText = (e: unknown) => (e === "indexing" ? STILL_INDEXING : String(e));
+const errText = (e: unknown) => (e === "indexing" ? STILL_INDEXING : e === "not-found" ? "Note no longer exists" : String(e));
+const history = new History();
 
 let titles = new Set<string>(); // folded titles of all notes, for wikilink existence
 const newShow = latest();
@@ -94,8 +96,11 @@ function focusSearch() {
   q.select();
 }
 
-/** false = refused: unsaved edits could not be saved (error stays visible), nothing changed. */
-async function show(path: string, retried = false): Promise<boolean> {
+/**
+ * false = refused: unsaved edits could not be saved (error stays visible), nothing changed.
+ * "missing" (only when `nav`, i.e. a history step, which does not record a visit) = the file is gone; no error shown.
+ */
+async function show(path: string, retried = false, nav = false): Promise<boolean | "missing"> {
   if (busy) {
     errEl.textContent = BUSY_MSG;
     return false;
@@ -108,8 +113,10 @@ async function show(path: string, retried = false): Promise<boolean> {
     if (!editor.load(doc)) return false;
     titleEl.textContent = doc.title;
     clearErr();
+    if (!nav) history.visit(doc.path);
   } catch (e) {
-    if (e === "locked" && !retried && (await promptPassphrase())) return show(path, true);
+    if (nav && e === "not-found") return "missing";
+    if (e === "locked" && !retried && (await promptPassphrase())) return show(path, true, nav);
     errEl.textContent = e === "locked" ? "Note is locked" : errText(e);
   }
   return true;
@@ -166,10 +173,12 @@ async function lockHandoff(path: string) {
   }
   try {
     const doc = await api.openNote(np);
+    history.rename(path, np);
     if (editor.rebind(path, doc)) {
       editor.resume();
       titleEl.textContent = doc.title;
       clearErr();
+      history.visit(np);
     }
     await runSearch(false);
     selectOpen();
@@ -388,6 +397,7 @@ async function openTitle(title: string): Promise<boolean> {
     if (!editor.load(doc)) return false;
     titleEl.textContent = doc.title;
     errEl.textContent = "";
+    history.visit(doc.path);
     await runSearch(false);
     void refreshTitles();
     return true;
@@ -418,9 +428,11 @@ function startRename() {
       const n = await api.backlinkCount(old);
       const rewrite = n > 0 && (await ask(`Update ${n} links to the new title?`, { title: "Rename", kind: "info" }));
       const r = await api.renameNote(path, title, rewrite);
+      history.rename(path, r.path);
       if (!editor.load(await api.openNote(r.path))) return;
       titleEl.textContent = title;
       errEl.textContent = "";
+      history.visit(r.path);
       await runSearch(false);
     } catch (e) {
       errEl.textContent = e === "already-exists" ? "A note with that title exists" : errText(e);
@@ -449,8 +461,21 @@ $("lockall").onclick = () => void lockEverything();
 $("gear").onclick = () => void openSettings();
 sortBtn.onclick = () => void toggleSort();
 
-const goBack = () => {}; // Task 7
-const goForward = () => {}; // Task 7
+/** Step through history. Does not record a visit; a refused load puts the cursor back, a vanished file is dropped and skipped. */
+async function navigate(dir: "back" | "forward") {
+  const undo = dir === "back" ? "forward" : "back";
+  for (let tries = 0; tries < 1000; tries++) { // each miss removes an entry, so this ends well before the cap
+    const target = history[dir](() => true);
+    if (!target) return;
+    const r = await show(target, false, true);
+    if (r === true) return selectOpen();
+    history[undo](() => true);
+    if (r === false) return;
+    history.remove(target);
+  }
+}
+const goBack = () => void navigate("back");
+const goForward = () => void navigate("forward");
 
 async function step(d: 1 | -1) {
   try {
