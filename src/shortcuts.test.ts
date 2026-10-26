@@ -61,4 +61,5 @@ test("delete_note defaults to Mod+Backspace and formats as ⌘⌫", () => {
 });
 
 test("toggle_tags default", () => expect(DEFAULTS.toggle_tags).toBe("Mod+Shift+KeyT"));
+test("toggle_layout default", () => expect(DEFAULTS.toggle_layout).toBe("Mod+Backslash"));
 test("toggle_rich default", () => expect(DEFAULTS.toggle_rich).toBe("Mod+Shift+KeyR"));

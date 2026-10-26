@@ -45,7 +45,7 @@ function rowHeight(): number {
   return h || 44;
 }
 const results = new Results((offset) => api.search(q.value, sort, offset, selectedTags));
-const restoreDivider = mountDivider($("divider"), $("app"), $("list"));
+const restoreDivider = mountDivider($("divider"), $("app"), $("list"), $("titlebar"));
 const list = mountList($("list"), { results, rowH: rowHeight(), onSelect: (i) => void select(i), onContextMenu: (i) => void openContextMenu(i) });
 const sortBtn = $<HTMLButtonElement>("sort");
 
@@ -565,6 +565,18 @@ function syncStyle() {
   styleBtn.title = `Rich / plain editing (${formatBinding(keys.toggle_rich, isMac)})`;
 }
 
+async function toggleLayout() {
+  try {
+    const cur = await api.getSettings();
+    const next = { ...cur, layout: cur.layout === "horizontal" ? ("vertical" as const) : ("horizontal" as const) };
+    await api.setSettings(next);
+    applyLook(next);
+    restoreDivider();
+  } catch (e) {
+    errEl.textContent = errText(e);
+  }
+}
+
 async function toggleStyle() {
   try {
     const cur = await api.getSettings();
@@ -759,6 +771,7 @@ const ACTIONS: Record<Exclude<Action, "toggle_window">, () => void> = {
   delete_note: () => void deleteNote(),
   toggle_tags: () => showTags(tagPanel.hidden === true),
   toggle_rich: () => void toggleStyle(),
+  toggle_layout: () => void toggleLayout(),
 };
 let keys = resolve(undefined, isMac); // refreshed from settings at startup and after save
 

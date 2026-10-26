@@ -7,7 +7,7 @@ body { font: var(--font-size, 14px) system-ui, sans-serif; background: var(--bg)
 #q { flex: 1; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: inherit; }
 #sort { font: inherit; border: 0; background: none; color: var(--mute); cursor: pointer; }
 #list { height: var(--list-h, 30%); flex: none; overflow-y: auto; }
-#divider { flex: none; height: 5px; cursor: row-resize; background: linear-gradient(var(--line), var(--line)) center / 100% 1px no-repeat; touch-action: none; }
+#divider { flex: none; position: relative; z-index: 1; height: 9px; margin: -4px 0; /* 9px grab area over a 1px line */ cursor: row-resize; background: linear-gradient(var(--line), var(--line)) center / 100% 1px no-repeat; touch-action: none; }
 #divider:hover, #divider:focus-visible { background: color-mix(in srgb, var(--accent) 35%, transparent); outline: none; }
 #list .spacer { position: relative; }
 #list .row, #list .loader { position: absolute; left: 0; right: 0; height: var(--row-h); box-sizing: border-box; overflow: hidden; padding: 4px 10px; cursor: default; display: grid; grid-template-columns: 1fr auto; align-content: center; }
@@ -42,7 +42,9 @@ body { font: var(--font-size, 14px) system-ui, sans-serif; background: var(--bg)
 .horizontal#app { display: grid; grid-template-columns: var(--list-w, 260px) auto minmax(0, 1fr); grid-template-rows: auto 1fr; }
 .horizontal#app #head { grid-column: 1 / -1; }
 .horizontal#app #list { height: auto; }
-.horizontal#app #divider { height: auto; width: 5px; cursor: col-resize; background-size: 1px 100%; }
+.horizontal#app #divider { height: auto; width: 9px; margin: 0 -4px; cursor: col-resize; background-size: 1px 100%; }
+.vertical #titlebar { cursor: row-resize; }
+.vertical #title { cursor: text; }
 .horizontal#app #panes { min-width: 0; min-height: 0; }
 dialog { background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; min-width: 320px; }
 dialog form { display: flex; flex-direction: column; gap: 8px; }
