@@ -148,8 +148,13 @@ export function mountPreview(
     if (a.classList.contains("wikilink")) opts.onWikilink(a.dataset.title ?? "");
     else if (a.classList.contains("tag")) opts.onTag(a.dataset.tag ?? "");
     else {
-      const url = externalUrl(a.getAttribute("href") ?? "");
-      if (url) opts.openExternal(url);
+      const href = a.getAttribute("href") ?? "";
+      // in-note anchors (footnote [1] and its ↩ back-link) scroll the preview; never navigate the window
+      if (href.startsWith("#")) el.querySelector(`[id="${CSS.escape(decodeURIComponent(href.slice(1)))}"]`)?.scrollIntoView({ block: "center" });
+      else {
+        const url = externalUrl(href);
+        if (url) opts.openExternal(url);
+      }
     }
   });
   const toggle = () => {
