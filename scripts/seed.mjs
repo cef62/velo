@@ -25,6 +25,10 @@ for (let i = 0; i < count; i++) {
   const paras = Array.from({ length: 2 + Math.floor(rand() * 6) }, () => phrase(20 + Math.floor(rand() * 60)));
   if (i > 0 && rand() < 0.5) paras.push(`See [[${pick(titles.slice(0, i))}]].`);
   paras.push(`#${pick(tags)} #${pick(tags)}`);
-  writeFileSync(join(dir, `${title}.md`), `# ${title}\n\n${paras.join('\n\n')}\n`);
+  // Front matter on about half the notes (dates, tags, an alias) to exercise the parser and alias lookups.
+  const fm = rand() < 0.5
+    ? `---\ncreated: 2024-01-${String(1 + (i % 28)).padStart(2, '0')}T10:00:00+00:00\nmodified: 2025-${String(1 + (i % 12)).padStart(2, '0')}-15T12:30:00+00:00\ntags: [${pick(tags)}]\naliases: [${pick(words)} ${i}]\n---\n`
+    : '';
+  writeFileSync(join(dir, `${title}.md`), `${fm}# ${title}\n\n${paras.join('\n\n')}\n`);
 }
 console.log(`wrote ${count} notes to ${dir}`);

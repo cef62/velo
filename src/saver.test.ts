@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { SaveController } from "./saver";
 import { latest } from "./latest";
+import { noMeta } from "./app/fakes";
 
-const doc = { path: "a.md", title: "a", text: "base", hash: "h0", encrypted: false };
+const doc = { path: "a.md", title: "a", text: "base", hash: "h0", encrypted: false, meta: noMeta };
 let text = "";
 const mk = (over: Partial<ConstructorParameters<typeof SaveController>[0]> = {}) => {
   const d = {

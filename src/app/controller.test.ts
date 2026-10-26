@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { Page } from "../api";
 import { Controller, type KeyEventLike } from "./controller";
-import { FakeEditor, FakePreview, deferred, fakeApi, fakeUi, hit, settle } from "./fakes";
+import { FakeEditor, FakePreview, deferred, fakeApi, fakeUi, hit, noMeta, settle } from "./fakes";
 import { createStore, initialState } from "./store";
 
 function setup(notes: Record<string, string> = { A: "a", B: "b", C: "c" }) {
@@ -153,7 +153,7 @@ test("lock hand-off busy refuses show", async () => {
   expect(editor.suspended).toBe(true);
   expect(await c.show(P("B"))).toBe(false);
   expect(store.get().err).toBe("Busy — try again in a moment");
-  api.openNote.mockResolvedValueOnce({ path: "/n/A.age", title: "A", text: "a", hash: "h", encrypted: true });
+  api.openNote.mockResolvedValueOnce({ path: "/n/A.age", title: "A", text: "a", hash: "h", encrypted: true, meta: noMeta });
   d.resolve("/n/A.age");
   await locking;
   expect(editor.path).toBe("/n/A.age");
@@ -301,7 +301,7 @@ test("rename commits through flush, backlinks confirm and reload", async () => {
   expect(store.get().renaming).toBe(true);
   api.backlinkCount.mockResolvedValueOnce(2);
   api.renameNote.mockResolvedValueOnce({ path: P("Z"), rewritten: 2 });
-  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false });
+  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta });
   await c.commitRename("  Z ");
   expect(calls).toContainEqual(["confirm", "Update 2 links to the new title?", { title: "Rename", kind: "info" }]);
   expect(api.renameNote).toHaveBeenCalledWith(P("A"), "Z", true);

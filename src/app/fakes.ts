@@ -1,6 +1,6 @@
 // Test fakes for the controller: in-memory backend, editor, preview and UI port. Tests only.
 import { vi } from "vitest";
-import type { Hit, NoteDoc, Page, RenameResult, Settings, TagCount } from "../api";
+import type { Hit, NoteDoc, NoteMeta, Page, RenameResult, Settings, TagCount } from "../api";
 import type { Editor } from "../editor";
 import type { Preview } from "../preview";
 import type { Api } from "./controller";
@@ -17,6 +17,7 @@ export function deferred<T>() {
 export const settle = () => new Promise((r) => setTimeout(r, 0));
 
 export const PAGE = 2;
+export const noMeta: NoteMeta = { created: 0, created_src: "file", modified: 0, modified_src: "file", tags: [], aliases: [] };
 export const hit = (title: string): Hit => ({ path: `/n/${title}.md`, title, snippet: "", mtime: 0, encrypted: false });
 
 /** Backend over `notes` (title → text). search ignores the query and pages all notes in insertion order. */
@@ -24,7 +25,7 @@ export function fakeApi(notes: Record<string, string> = {}) {
   const docOf = (path: string): NoteDoc => {
     const title = path.slice(3, -3);
     if (!(title in notes)) throw "not-found";
-    return { path, title, text: notes[title], hash: "h", encrypted: false };
+    return { path, title, text: notes[title], hash: "h", encrypted: false, meta: noMeta };
   };
   const settings: Settings = { notes_dir: "/n", layout: "vertical", font_size: 14, sort: "modified", editor_style: "rich", theme: "system", header_labels: false, shortcuts: {} };
   const api = {

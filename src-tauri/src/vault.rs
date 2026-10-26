@@ -1,5 +1,6 @@
 use crate::crypto;
-use crate::index::{Index, Meta, Page, Sort, TagCount};
+use crate::frontmatter;
+use crate::index::{Index, Meta, Page, Sort, TagCount, all_tags, effective_dates};
 
 const PAGE: usize = 200;
 use crate::names::{NoteFile, note_path, parse_note_file};
@@ -19,6 +20,18 @@ pub struct NoteDoc {
     /// hash of the on-disk bytes (ciphertext for encrypted notes)
     pub hash: String,
     pub encrypted: bool,
+    pub meta: NoteMeta,
+}
+
+/// Dates are epoch ms; `*_src` is "frontmatter" or "file".
+#[derive(Serialize)]
+pub struct NoteMeta {
+    pub created: i64,
+    pub created_src: String,
+    pub modified: i64,
+    pub modified_src: String,
+    pub tags: Vec<String>,
+    pub aliases: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -45,7 +58,8 @@ fn lossy(b: &[u8]) -> String {
 fn stat(p: &Path) -> anyhow::Result<Meta> {
     let md = std::fs::metadata(p)?;
     let mtime = md.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as i64);
-    Ok(Meta { mtime, size: md.len() })
+    let birth = md.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as i64);
+    Ok(Meta { mtime, size: md.len(), birth })
 }
 
 fn parse(p: &Path) -> anyhow::Result<NoteFile> {
@@ -140,7 +154,13 @@ impl Vault {
         } else {
             lossy(&bytes)
         };
-        Ok(NoteDoc { path: path.into(), title: nf.title, text, hash: hash(&bytes), encrypted: nf.encrypted })
+        // From the plaintext in memory, so unlocked notes show their real front-matter dates.
+        let fm = frontmatter::parse(&text);
+        let (created, cs, modified, ms) = effective_dates(fm.as_ref(), &stat(p)?);
+        let tags = all_tags(frontmatter::body(&text), fm.as_ref()).into_iter().map(|(_, d)| d).collect();
+        let aliases = fm.map(|f| f.aliases).unwrap_or_default();
+        let meta = NoteMeta { created, created_src: cs.into(), modified, modified_src: ms.into(), tags, aliases };
+        Ok(NoteDoc { path: path.into(), title: nf.title, text, hash: hash(&bytes), encrypted: nf.encrypted, meta })
     }
 
     pub fn open_or_create(&mut self, title: &str, identity: Option<&str>) -> anyhow::Result<NoteDoc> {

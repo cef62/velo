@@ -49,7 +49,8 @@ impl Store {
                 .ok()
                 .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                 .map_or(0, |d| d.as_millis() as i64);
-            out.push((path, note, Meta { mtime, size: md.len() }));
+            let birth = md.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as i64);
+            out.push((path, note, Meta { mtime, size: md.len(), birth }));
         }
         Ok(out)
     }
