@@ -286,11 +286,16 @@ async function openSettings() {
   form.onsubmit = async (e) => {
     e.preventDefault();
     const next = { ...toSettings(cur, { layout: field("s-layout").value, fontSize: field("s-font").value, sort: field("s-sort").value, shortcuts: draft }), notes_dir: dir };
+    const save = form.querySelector("[type=submit]") as HTMLButtonElement;
+    if (save.disabled) return; // a save is already in flight (Enter also submits)
+    save.disabled = true;
     try {
       await api.setSettings(next); // on hotkey registration failure this throws and the old hotkey stays
     } catch (err) {
       msg.textContent = err === "not-found" ? "Folder not found" : String(err);
       return;
+    } finally {
+      save.disabled = false;
     }
     applyLook(next);
     list.setRowH(rowHeight());
