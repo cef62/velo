@@ -76,3 +76,22 @@ test("10k rows: paging and visible window stay bounded", async () => {
   expect(b).toBe(10_000);
   expect(b - a).toBeLessThan(40);
 });
+
+test("ensure started during a slow reset leaves rows contiguous", async () => {
+  const resolvers: Record<number, (p: Page) => void> = {};
+  const all = Array.from({ length: 1000 }, (_, i) => hit(i));
+  let first = true;
+  const r = new Results((offset) => {
+    if (first) { first = false; return Promise.resolve({ hits: all.slice(0, 600), has_more: true }); } // initial load of 600 rows
+    return new Promise<Page>((res) => (resolvers[offset] = res));
+  });
+  await r.reset();
+  const reset = r.reset(); // slow page 0
+  const ens = r.ensure(700); // starts with stale offset 600
+  resolvers[0]({ hits: all.slice(0, 200), has_more: true });
+  await reset;
+  resolvers[600]({ hits: all.slice(600, 800), has_more: true });
+  resolvers[200]?.({ hits: all.slice(200, 400), has_more: true });
+  await Promise.race([ens, new Promise((res) => setTimeout(res, 50))]);
+  for (let i = 0; i < r.count; i++) expect(r.get(i)?.path).toBe(`n${i}.md`);
+});

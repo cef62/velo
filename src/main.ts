@@ -315,16 +315,15 @@ async function select(i: number) {
 async function runSearch(selectFirst: boolean) {
   const seq = ++searchSeq;
   try {
-    const keep = results.get(sel)?.path;
     await (selectFirst ? results.reset() : results.refresh());
     if (seq !== searchSeq) return;
-    list.update();
     if (selectFirst) {
       list.toTop();
+      list.update();
       void select(results.count ? 0 : -1);
     } else {
-      sel = results.count ? Math.max(0, results.indexOf(keep ?? "")) : -1;
-      list.setSelected(sel);
+      list.update();
+      selectOpen();
     }
   } catch (e) {
     if (e === "no-folder") $("setup").hidden = false;
@@ -343,8 +342,8 @@ async function resort() {
   try {
     await results.reset();
     if (seq !== searchSeq) return;
-    list.update();
     list.toTop();
+    list.update();
     selectOpen();
   } catch (e) {
     if (e !== "indexing") console.error("search failed", e);

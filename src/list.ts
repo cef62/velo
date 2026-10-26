@@ -35,8 +35,9 @@ export class Results {
   async ensure(index: number): Promise<void> {
     while (index >= this.rows.length && this.more) {
       const gen = this.gen;
-      this.pending ??= this.fetch(this.rows.length).then((p) => {
-        if (gen !== this.gen) return;
+      const offset = this.rows.length;
+      this.pending ??= this.fetch(offset).then((p) => {
+        if (gen !== this.gen || offset !== this.rows.length) return; // stale, or rows moved under us (reset in flight)
         this.rows = this.rows.concat(p.hits);
         this.more = p.has_more && p.hits.length > 0;
       }).finally(() => { if (gen === this.gen) this.pending = null; });
