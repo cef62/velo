@@ -35,15 +35,23 @@ export interface Editor {
   toggleTask(line: number): boolean;
 }
 
-const stem = (p: string) => (p.split(/[\\/]/).pop() ?? p).replace(/\.[^.]+$/, "");
+export type EditorOpts = {
+  onEscape?: () => void;
+  onError?: (msg: string | null) => void;
+  onChange?: () => void;
+  onEdit?: () => void;
+  onSaved?: () => void;
+  /** A save conflicted: the edits went to a conflict copy at `conflictPath` (the UI shows the banner). */
+  onConflict?: (conflictPath: string) => void;
+  /** A save request is in flight (true) or finished (false). */
+  onSaving?: (on: boolean) => void;
+  rich?: RichOpts;
+};
 
-export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onError?: (msg: string | null) => void; onChange?: () => void; onEdit?: () => void; onSaved?: () => void; rich?: RichOpts } = {}): Editor {
-  const banner = document.createElement("div");
-  banner.className = "banner";
-  banner.hidden = true;
+export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
   const host = document.createElement("div");
   host.className = "cm-host";
-  el.append(banner, host);
+  el.append(host);
 
   let ctrl: SaveController;
   let loading = false;
@@ -73,25 +81,13 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
     loading = false;
   };
 
-  function showBanner(conflictPath: string) {
-    const a = document.createElement("a");
-    a.href = "#";
-    a.textContent = stem(conflictPath);
-    a.onclick = async (e) => {
-      e.preventDefault();
-      if (!(await ed.flush())) return;
-      if (ed.load(await openNote(conflictPath))) banner.hidden = true;
-    };
-    banner.replaceChildren("Your edits were saved to ", a);
-    banner.hidden = false;
-  }
-
   ctrl = new SaveController({
     saveNote,
     openNote,
     getText: () => view.state.doc.toString(),
     setText,
-    onConflict: showBanner,
+    onConflict: (p) => opts.onConflict?.(p),
+    onSaving: (on) => opts.onSaving?.(on),
     onError: (m) => opts.onError?.(m),
     onSaved: () => opts.onSaved?.(),
   });
@@ -104,13 +100,11 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
   const ed: Editor = {
     load(doc) {
       if (!ctrl.load(doc)) return false;
-      banner.hidden = true;
       setEditable(true);
       return true;
     },
     rebind(fromPath, doc) {
       if (!ctrl.rebind(fromPath, doc)) return false;
-      banner.hidden = true;
       return true;
     },
     suspend() {
@@ -128,12 +122,10 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
     discard() {
       ctrl.discard();
       setEditable(false);
-      banner.hidden = true;
     },
     unload() {
       if (!ctrl.unload()) return false;
       setEditable(false);
-      banner.hidden = true;
       return true;
     },
     isDirty: ctrl.isDirty,

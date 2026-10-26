@@ -228,3 +228,22 @@ test("onSaved fires after a conflict-copy save", async () => {
   await c.flush();
   expect(onSaved).toHaveBeenCalledTimes(1);
 });
+
+test("onSaving true during save, false after (also on rejection)", async () => {
+  const seen: boolean[] = [];
+  let fail!: (e: unknown) => void;
+  const saveNote = vi.fn()
+    .mockImplementationOnce(async () => { expect(seen).toEqual([true]); return { kind: "saved" as const, hash: "h1" }; })
+    .mockImplementationOnce(() => new Promise((_, rej) => (fail = rej)));
+  const { c } = mk({ saveNote, onSaving: (on: boolean) => void seen.push(on) });
+  type(c, "x");
+  await c.flush();
+  expect(seen).toEqual([true, false]);
+  type(c, "y");
+  const f = c.flush();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(seen).toEqual([true, false, true]);
+  fail("disk full");
+  expect(await f).toBe(false);
+  expect(seen).toEqual([true, false, true, false]);
+});

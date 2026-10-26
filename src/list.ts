@@ -11,12 +11,15 @@ export function visibleRange(scrollTop: number, viewport: number, rowH: number, 
 export class Results {
   private rows: Hit[] = [];
   private more = false;
+  private tot = 0; // match count, from the first page only
   private gen = 0;
   private pending: Promise<void> | null = null;
   constructor(private fetch: (offset: number) => Promise<Page>) {}
 
   get count() { return this.rows.length; }
   get hasMore() { return this.more; }
+  /** Total matches, as reported by the latest first page. */
+  get total() { return this.tot; }
   /** The rows loaded so far (do not mutate). */
   get loaded(): Hit[] { return this.rows; }
   get(i: number): Hit | undefined { return this.rows[i]; }
@@ -29,6 +32,7 @@ export class Results {
     if (gen !== this.gen) return;
     this.rows = p.hits;
     this.more = p.has_more;
+    this.tot = p.total;
   }
 
   /** Load pages until row `index` exists or the server has no more. */
@@ -53,14 +57,17 @@ export class Results {
     const want = this.rows.length;
     let rows: Hit[] = [];
     let more = true;
+    let tot = this.tot;
     do {
       const p = await this.fetch(rows.length);
       if (gen !== this.gen) return;
+      if (!rows.length) tot = p.total;
       rows = rows.concat(p.hits);
       more = p.has_more && p.hits.length > 0;
     } while (more && rows.length < want);
     this.rows = rows;
     this.more = more;
+    this.tot = tot;
   }
 }
 

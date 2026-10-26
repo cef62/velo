@@ -10,6 +10,8 @@ export interface SaverDeps {
   onError(msg: string | null): void;
   /** Called after a save landed on disk (also as a conflict copy), e.g. to refresh derived views like tags. */
   onSaved?(): void;
+  /** true while a saveNote request is in flight, false once it settled (also on failure). */
+  onSaving?(on: boolean): void;
 }
 
 const RETRY_MAX_MS = 30000;
@@ -123,7 +125,8 @@ export class SaveController {
     this.queue = this.queue.then(async () => {
       if (!target.path) return;
       try {
-        const r = await this.d.saveNote(target.path, text, target.baseHash);
+        this.d.onSaving?.(true);
+        const r = await this.d.saveNote(target.path, text, target.baseHash).finally(() => this.d.onSaving?.(false));
         if (r.kind === "saved") {
           target.baseHash = r.hash;
           if (target === this.cur && v === this.version) this.dirty = false;
