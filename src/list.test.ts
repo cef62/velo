@@ -56,10 +56,10 @@ test("refresh keeps window and finds the open note", async () => {
 
 test("stale reset ignored", async () => {
   let slow!: (p: Page) => void;
-  const r = new Results((offset) => (offset === 0 && !slow ? new Promise<Page>((res) => (slow = res)) : Promise.resolve({ hits: [hit(2)], has_more: false, total: 0 })));
+  const r = new Results((offset) => (offset === 0 && !slow ? new Promise<Page>((res) => (slow = res)) : Promise.resolve({ hits: [hit(2)], has_more: false, total: 1 })));
   const first = r.reset();
   await r.reset();
-  slow({ hits: [hit(1)], has_more: false, total: 0 });
+  slow({ hits: [hit(1)], has_more: false, total: 1 });
   await first;
   expect(r.get(0)?.path).toBe("n2.md");
   expect(r.count).toBe(1);
@@ -82,13 +82,13 @@ test("ensure started during a slow reset leaves rows contiguous", async () => {
   const all = Array.from({ length: 1000 }, (_, i) => hit(i));
   let first = true;
   const r = new Results((offset) => {
-    if (first) { first = false; return Promise.resolve({ hits: all.slice(0, 600), has_more: true, total: 0 }); } // initial load of 600 rows
+    if (first) { first = false; return Promise.resolve({ hits: all.slice(0, 600), has_more: true, total: 1000 }); } // initial load of 600 rows
     return new Promise<Page>((res) => (resolvers[offset] = res));
   });
   await r.reset();
   const reset = r.reset(); // slow page 0
   const ens = r.ensure(700); // starts with stale offset 600
-  resolvers[0]({ hits: all.slice(0, 200), has_more: true, total: 0 });
+  resolvers[0]({ hits: all.slice(0, 200), has_more: true, total: 1000 });
   await reset;
   resolvers[600]({ hits: all.slice(600, 800), has_more: true, total: 0 });
   resolvers[200]?.({ hits: all.slice(200, 400), has_more: true, total: 0 });
