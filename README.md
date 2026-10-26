@@ -33,6 +33,8 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | ⌘⇧T | Ctrl+Shift+T | Show / hide the tag panel |
 | ⌘⇧Space | Ctrl+Shift+Space | Show / hide velo (system-wide) |
 
+Right-click a note in the list (or press the Menu key / Shift+F10 on the highlighted row) for a menu: open, rename, lock/unlock, copy `[[link]]`, show in Finder/Explorer, move to Trash. It opens the note first, so no menu appears if the switch is refused.
+
 Fixed: Enter (in search) opens the highlighted note, or creates a note titled with the query when nothing matches; Shift+Enter creates a note titled exactly as typed (or opens that exact title if it exists); ↑ / ↓ move the selection; Esc (in editor) returns to search.
 
 ## Tags

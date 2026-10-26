@@ -11,7 +11,9 @@ import { errText } from "./errtext";
 import { enterAction, fold, moveSelection } from "./search";
 import { filterLabel, pruneSelection, toggleTag } from "./tags";
 import { afterOpen, mountPreview, shouldAutoEdit } from "./preview";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
+import { linkFor, menuModel, type MenuAction } from "./contextmenu";
 import { askPassphrase, isLockedPath } from "./passphrase";
 import { applyLook, fixedKeyRefusal, recorderStep, toSettings } from "./settingsform";
 import { DEFAULTS, LABELS, formatBinding, matches, resolve, validateBinding, type Action } from "./shortcuts";
@@ -40,7 +42,7 @@ function rowHeight(): number {
   return h || 44;
 }
 const results = new Results((offset) => api.search(q.value, sort, offset, selectedTags));
-const list = mountList($("list"), { results, rowH: rowHeight(), onSelect: (i) => void select(i) });
+const list = mountList($("list"), { results, rowH: rowHeight(), onSelect: (i) => void select(i), onContextMenu: (i) => void openContextMenu(i) });
 const sortBtn = $<HTMLButtonElement>("sort");
 
 // Set while a lock/unlock hand-off is in flight: the open note's file is moving, so navigation is refused.
@@ -381,6 +383,36 @@ async function select(i: number, how: "explicit" | "auto" = "explicit") {
   if (h && !(await show(h.path, how))) selectOpen(); // refused: snap back to the open note
 }
 
+const platform = isMac ? "mac" : /Windows/.test(navigator.userAgent) ? "windows" : "linux";
+
+/** Open row `i` through the normal path, then pop the native menu for it. No menu if the switch was refused. */
+async function openContextMenu(i: number) {
+  const h = results.get(i);
+  if (!h) return;
+  await select(i);
+  if (editor.currentPath() !== h.path) return;
+  const run: Record<MenuAction, () => void | Promise<void>> = {
+    open: () => settleAfterOpen(false, "enter"),
+    rename: startRename,
+    toggle_lock: toggleLock,
+    copy_link: () => navigator.clipboard.writeText(linkFor(h.title)),
+    reveal: () => revealItemInDir(h.path),
+    delete_note: deleteNote,
+  };
+  try {
+    const items = await Promise.all(
+      menuModel({ encrypted: h.encrypted, platform, keys, isMac }).map((m) =>
+        m === "separator"
+          ? PredefinedMenuItem.new({ item: "Separator" })
+          : MenuItem.new({ ...m, action: () => void Promise.resolve(run[m.id]()).catch((e) => (errEl.textContent = errText(e))) }),
+      ),
+    );
+    await (await Menu.new({ items })).popup();
+  } catch (e) {
+    errEl.textContent = errText(e);
+  }
+}
+
 /** true = fresh first page (new query/folder/sort), selecting its first row; false = reload the loaded range in place. */
 let searching: Promise<void> = Promise.resolve(); // latest list reset, awaited by Enter so it never acts on stale rows
 function runSearch(selectFirst: boolean, keepOpen = false): Promise<void> {
@@ -662,6 +694,11 @@ window.addEventListener(
   (e) => {
     const t = e.target as HTMLElement;
     if (document.querySelector("dialog[open]") || t.closest?.("#title")) return; // dialogs and the rename field own their keys
+    if ((e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) && !t.closest?.("#editor") && sel >= 0) {
+      e.preventDefault();
+      void openContextMenu(sel);
+      return;
+    }
     const arrow = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
     if (arrow && !t.closest?.("#editor")) {
       e.preventDefault();

@@ -85,7 +85,7 @@ export interface ListView {
 const LOAD_AHEAD = 50;
 
 /** Fixed-height virtualized list: only the visible window (+overscan) of rows exists in the DOM. */
-export function mountList(el: HTMLElement, o: { results: Results; onSelect(i: number): void; rowH: number }): ListView {
+export function mountList(el: HTMLElement, o: { results: Results; onSelect(i: number): void; onContextMenu?(i: number, x: number, y: number): void; rowH: number }): ListView {
   let { rowH } = o;
   let selected = -1;
   const rendered = new Map<number, HTMLElement>();
@@ -114,6 +114,7 @@ export function mountList(el: HTMLElement, o: { results: Results; onSelect(i: nu
     s.textContent = h.snippet;
     row.append(t, m, s);
     row.onclick = () => o.onSelect(i);
+    row.oncontextmenu = (e) => { e.preventDefault(); o.onContextMenu?.(i, e.clientX, e.clientY); };
     return row;
   }
 
