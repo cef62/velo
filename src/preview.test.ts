@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { emptyWatermark, externalUrl, renderMarkdown, shouldAutoEdit } from "./preview";
+import { emptyWatermark, externalUrl, afterOpen, renderMarkdown, shouldAutoEdit } from "./preview";
 
 test("wikilink existing", () => expect(renderMarkdown("see [[Foo Bar]]", () => true)).toContain('<a href="#" class="wikilink" data-title="Foo Bar">Foo Bar</a>'));
 test("wikilink missing", () => expect(renderMarkdown("[[Nope]]", () => false)).toContain('class="wikilink missing"'));
@@ -22,4 +22,12 @@ test("shouldAutoEdit", () => {
   expect(shouldAutoEdit({ created: false, body: " \n\t", previewOn: true })).toBe(true);
   expect(shouldAutoEdit({ created: false, body: "hi", previewOn: true })).toBe(false);
   expect(shouldAutoEdit({ created: false, body: "", previewOn: false })).toBe(false);
+});
+test("afterOpen", () => {
+  const base = { created: false, body: "hi", layout: "vertical" as const, previewOn: true };
+  expect(afterOpen({ ...base, source: "enter" })).toEqual({ leavePreview: true, focusEditor: true });
+  expect(afterOpen({ ...base, layout: "horizontal", source: "enter" })).toEqual({ leavePreview: false, focusEditor: true });
+  expect(afterOpen({ ...base, created: true, source: "wikilink" })).toEqual({ leavePreview: true, focusEditor: true });
+  expect(afterOpen({ ...base, source: "wikilink" })).toEqual({ leavePreview: false, focusEditor: false });
+  expect(afterOpen({ ...base, body: " ", source: "wikilink" })).toEqual({ leavePreview: true, focusEditor: true });
 });

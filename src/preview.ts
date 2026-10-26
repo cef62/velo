@@ -41,6 +41,14 @@ export const emptyWatermark = (toggleLabel: string) => "Empty note — press " +
 /** Preview must never hide a note the user needs to type in: new notes and empty notes open in edit mode. */
 export const shouldAutoEdit = (o: { created: boolean; body: string; previewOn: boolean }) => o.created || (o.previewOn && o.body.trim() === "");
 
+/** What to do once a note is open. Enter always wants the caret in the editor; a wikilink click only when it lands on a new/empty note. */
+export function afterOpen(o: { created: boolean; body: string; layout: "vertical" | "horizontal"; previewOn: boolean; source: "enter" | "wikilink" }) {
+  const auto = shouldAutoEdit(o);
+  if (o.source === "wikilink") return { leavePreview: auto, focusEditor: auto };
+  // vertical layout: preview replaces the editor (display:none), where focus() silently does nothing
+  return { leavePreview: auto || (o.previewOn && o.layout === "vertical"), focusEditor: true };
+}
+
 export interface Preview {
   toggle(): void;
   setMode(on: boolean): void;

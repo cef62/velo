@@ -8,7 +8,7 @@ import { shouldClose } from "./close";
 import { latest } from "./latest";
 import { History } from "./history";
 import { enterAction, fold, moveSelection } from "./search";
-import { mountPreview, shouldAutoEdit } from "./preview";
+import { afterOpen, mountPreview, shouldAutoEdit } from "./preview";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { askPassphrase, isLockedPath } from "./passphrase";
 import { applyLook, fixedKeyRefusal, recorderStep, toSettings } from "./settingsform";
@@ -79,7 +79,7 @@ const preview = mountPreview($("preview"), {
   getText: () => editor.getText(),
   toggleLabel: () => formatBinding(keys.toggle_preview, isMac),
   exists: (t) => titles.has(fold(t)),
-  onWikilink: (t) => void openTitle(t),
+  onWikilink: (t) => void openTitle(t, "wikilink"),
   openExternal: (u) => void openUrl(u).catch((e) => (errEl.textContent = String(e))),
   onToggle: (on) => {
     $("app").classList.toggle("preview-on", on);
@@ -381,23 +381,35 @@ async function toggleSort() {
   }
 }
 
+/** Leave preview / focus the editor as afterOpen decides, for the note that is now open. */
+function settleAfterOpen(created: boolean, source: "enter" | "wikilink") {
+  const r = afterOpen({
+    created,
+    body: editor.getText(),
+    layout: $("app").classList.contains("horizontal") ? "horizontal" : "vertical",
+    previewOn: preview.isOn(),
+    source,
+  });
+  if (r.leavePreview) preview.setMode(false);
+  if (r.focusEditor) editor.focus();
+}
+
 async function enter() {
   const a = enterAction(q.value, results.loaded);
   if (!a) return;
   try {
     if (a.kind === "open") {
-      if (!(await show(a.path))) return;
-    } else if (!(await openTitle(a.title))) return;
-    // In the vertical layout preview hides #note (display:none), where focus() silently does nothing.
-    preview.setMode(false);
-    editor.focus();
+      // show() reports true even when it swallowed an open error; only settle if the note really loaded
+      if (!(await show(a.path)) || editor.currentPath() !== a.path) return;
+      settleAfterOpen(false, "enter");
+    } else await openTitle(a.title, "enter");
   } catch (e) {
     errEl.textContent = errText(e);
   }
 }
 
 /** Open the note titled `title`, creating it if missing; same flush-then-load path as everywhere. */
-async function openTitle(title: string): Promise<boolean> {
+async function openTitle(title: string, source: "enter" | "wikilink"): Promise<boolean> {
   if (busy) {
     errEl.textContent = BUSY_MSG;
     return false;
@@ -411,13 +423,13 @@ async function openTitle(title: string): Promise<boolean> {
     if (!editor.load(doc)) return false;
     titleEl.textContent = doc.title;
     errEl.textContent = "";
-    if (shouldAutoEdit({ created, body: doc.text, previewOn: preview.isOn() })) preview.setMode(false);
     history.loaded(doc.path, "explicit");
     if (created) {
       q.value = doc.title; // list the new note, selected (resort keeps the open note selected)
       await resort();
     } else await runSearch(false);
     void refreshTitles();
+    if (editor.currentPath() === doc.path) settleAfterOpen(created, source);
     return true;
   } catch (e) {
     errEl.textContent = errText(e);
