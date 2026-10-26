@@ -34,13 +34,14 @@
     <div id="app">
       <header id="top">
         <input id="q" type="text" placeholder="Search or create…" autocomplete="off" spellcheck="false" />
+        <button id="sort" type="button"></button>
         <div id="toolbar">
           <button id="lock" type="button" title="Lock / unlock note (⌘⇧E)">🔒</button>
           <button id="lockall" type="button" title="Lock all notes (⌘⇧L)">Lock all</button>
           <button id="gear" type="button" title="Settings (⌘,)">⚙</button>
         </div>
       </header>
-      <ul id="list"></ul>
+      <div id="list"></div>
       <div id="panes">
         <section id="note">
           <div id="titlebar"><span id="title" title="Double-click or ⌘R to rename"></span><span id="status"></span><span id="err"></span></div>

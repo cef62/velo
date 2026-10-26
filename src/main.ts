@@ -1,9 +1,9 @@
 import { listen } from "@tauri-apps/api/event";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import * as api from "./api";
-import type { Hit } from "./api";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { mountEditor } from "./editor";
+import { Results, mountList } from "./list";
 import { shouldClose } from "./close";
 import { latest } from "./latest";
 import { enterAction, fold, moveSelection } from "./search";
@@ -15,17 +15,28 @@ import { DEFAULTS, LABELS, formatBinding, matches, resolve, validateBinding, typ
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const q = $<HTMLInputElement>("q");
-const list = $<HTMLUListElement>("list");
 const titleEl = $<HTMLSpanElement>("title");
 const errEl = $<HTMLSpanElement>("err");
 const statusEl = $<HTMLSpanElement>("status");
 
 const isMac = navigator.platform.startsWith("Mac");
 
-let hits: Hit[] = [];
 let sel = -1;
 let searchSeq = 0;
-let sort: api.Settings["sort"] = "modified"; // mirrors settings.sort (Task 6 owns toggling)
+let sort: api.Settings["sort"] = "modified"; // mirrors settings.sort; set from settings before the first search
+
+/** Row height in px: the CSS --row-h (scales with the font size), measured so CSS and JS cannot drift. */
+function rowHeight(): number {
+  const probe = document.createElement("div");
+  probe.style.cssText = "position:absolute;visibility:hidden;height:var(--row-h)";
+  document.body.append(probe);
+  const h = Math.round(probe.getBoundingClientRect().height);
+  probe.remove();
+  return h || 44;
+}
+const results = new Results((offset) => api.search(q.value, sort, offset));
+const list = mountList($("list"), { results, rowH: rowHeight(), onSelect: (i) => void select(i) });
+const sortBtn = $<HTMLButtonElement>("sort");
 
 // Set while a lock/unlock hand-off is in flight: the open note's file is moving, so navigation is refused.
 let busy = false;
@@ -81,37 +92,6 @@ async function refreshTitles() {
 function focusSearch() {
   q.focus();
   q.select();
-}
-
-function ago(ms: number): string {
-  const m = (Date.now() - ms) / 60000;
-  if (m < 1) return "now";
-  if (m < 60) return `${Math.floor(m)}m`;
-  if (m < 1440) return `${Math.floor(m / 60)}h`;
-  if (m < 43200) return `${Math.floor(m / 1440)}d`;
-  return `${Math.floor(m / 43200)}mo`;
-}
-
-function render() {
-  list.replaceChildren(
-    ...hits.map((h, i) => {
-      const li = document.createElement("li");
-      li.className = i === sel ? "sel" : "";
-      const t = document.createElement("span");
-      t.className = "t";
-      t.textContent = (h.encrypted ? "🔒 " : "") + h.title;
-      const m = document.createElement("span");
-      m.className = "m";
-      m.textContent = ago(h.mtime);
-      const s = document.createElement("div");
-      s.className = "s";
-      s.textContent = h.snippet;
-      li.append(t, m, s);
-      li.onclick = () => select(i);
-      return li;
-    }),
-  );
-  list.querySelector(".sel")?.scrollIntoView({ block: "nearest" });
 }
 
 /** false = refused: unsaved edits could not be saved (error stays visible), nothing changed. */
@@ -192,8 +172,7 @@ async function lockHandoff(path: string) {
       clearErr();
     }
     await runSearch(false);
-    sel = hits.findIndex((h) => h.path === editor.currentPath());
-    render();
+    selectOpen();
   } catch (e) {
     // The file moved but could not be reopened: stay read-only (never resume on the old path).
     errEl.textContent = `Note moved but could not be reopened (${e}); pick it from the list`;
@@ -305,39 +284,47 @@ async function openSettings() {
       return;
     }
     applyLook(next);
+    list.setRowH(rowHeight());
     keys = resolve(next.shortcuts);
     sort = next.sort;
+    syncSort();
     dlg.close();
     if (next.notes_dir !== cur.notes_dir) {
       $("setup").hidden = true;
       await runSearch(true);
       void refreshTitles();
-    }
+    } else if (next.sort !== cur.sort) await resort();
   };
   dlg.showModal();
 }
 
-async function select(i: number) {
-  sel = i;
-  render();
-  if (hits[i] && !(await show(hits[i].path))) {
-    sel = hits.findIndex((h) => h.path === editor.currentPath());
-    render();
-  }
+/** Select the open note's row (none if it is not loaded). */
+function selectOpen() {
+  sel = results.indexOf(editor.currentPath() ?? "");
+  list.setSelected(sel);
 }
 
+async function select(i: number) {
+  sel = i;
+  list.setSelected(i);
+  const h = results.get(i);
+  if (h && !(await show(h.path))) selectOpen(); // refused: snap back to the open note
+}
+
+/** true = fresh first page (new query/folder/sort), selecting its first row; false = reload the loaded range in place. */
 async function runSearch(selectFirst: boolean) {
   const seq = ++searchSeq;
   try {
-    const r = (await api.search(q.value, sort, 0)).hits;
+    const keep = results.get(sel)?.path;
+    await (selectFirst ? results.reset() : results.refresh());
     if (seq !== searchSeq) return;
-    const keep = hits[sel]?.path;
-    hits = r;
-    if (selectFirst) select(r.length ? 0 : -1);
-    else {
-      sel = Math.max(0, r.findIndex((h) => h.path === keep));
-      if (!r.length) sel = -1;
-      render();
+    list.update();
+    if (selectFirst) {
+      list.toTop();
+      void select(results.count ? 0 : -1);
+    } else {
+      sel = results.count ? Math.max(0, results.indexOf(keep ?? "")) : -1;
+      list.setSelected(sel);
     }
   } catch (e) {
     if (e === "no-folder") $("setup").hidden = false;
@@ -345,8 +332,40 @@ async function runSearch(selectFirst: boolean) {
   }
 }
 
+function syncSort() {
+  sortBtn.textContent = sort === "title" ? "A→Z" : "Recent";
+  sortBtn.title = `Toggle sort (${formatBinding(keys.toggle_sort, isMac)})`;
+}
+
+/** Sort changed: fresh first page from the top, keeping the open note selected if it is loaded. */
+async function resort() {
+  const seq = ++searchSeq;
+  try {
+    await results.reset();
+    if (seq !== searchSeq) return;
+    list.update();
+    list.toTop();
+    selectOpen();
+  } catch (e) {
+    if (e !== "indexing") console.error("search failed", e);
+  }
+}
+
+async function toggleSort() {
+  try {
+    const cur = await api.getSettings();
+    const next = cur.sort === "title" ? "modified" : "title";
+    await api.setSettings({ ...cur, sort: next });
+    sort = next;
+    syncSort();
+    await resort();
+  } catch (e) {
+    errEl.textContent = errText(e);
+  }
+}
+
 async function enter() {
-  const a = enterAction(q.value, hits);
+  const a = enterAction(q.value, results.loaded);
   if (!a) return;
   try {
     if (a.kind === "open") {
@@ -429,12 +448,20 @@ titleEl.addEventListener("dblclick", startRename);
 $("lock").onclick = () => void toggleLock();
 $("lockall").onclick = () => void lockEverything();
 $("gear").onclick = () => void openSettings();
+sortBtn.onclick = () => void toggleSort();
 
-const toggleSort = () => {}; // Task 6
 const goBack = () => {}; // Task 7
 const goForward = () => {}; // Task 7
 
-const step = (d: 1 | -1) => select(moveSelection(sel, d, hits.length));
+async function step(d: 1 | -1) {
+  try {
+    await results.ensure(sel + d); // may page in more rows past the loaded end
+  } catch (e) {
+    console.error("load more failed", e);
+  }
+  list.update();
+  await select(moveSelection(sel, d, results.count));
+}
 const ACTIONS: Record<Exclude<Action, "toggle_window">, () => void> = {
   focus_search: focusSearch,
   next_note: () => void step(1),
@@ -444,7 +471,7 @@ const ACTIONS: Record<Exclude<Action, "toggle_window">, () => void> = {
   toggle_lock: () => void toggleLock(),
   lock_all: () => void lockEverything(),
   settings: () => void openSettings(),
-  toggle_sort: toggleSort,
+  toggle_sort: () => void toggleSort(),
   back: goBack,
   forward: goForward,
 };
@@ -516,13 +543,15 @@ void (async () => {
   const s = await api.getSettings();
   const st = await api.indexStatus();
   if (st) setIndexing(true, st[0], st[1]);
+  applyLook(s);
+  list.setRowH(rowHeight());
+  keys = resolve(s.shortcuts);
+  sort = s.sort ?? "modified"; // before the first search, which pages with it
+  syncSort();
   if (!s.notes_dir) $("setup").hidden = false;
   else if (!st) {
     await runSearch(true);
     void refreshTitles();
   }
-  applyLook(s);
-  keys = resolve(s.shortcuts);
-  sort = s.sort ?? "modified";
   focusSearch();
 })();
