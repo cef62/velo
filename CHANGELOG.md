@@ -1,5 +1,16 @@
 # velo
 
+## 0.4.0
+
+### Minor Changes
+
+- 0bbea28: velo has a new look, built on Park UI with Inter and JetBrains Mono and refined light and dark themes. The tag panel and the filter line now show note counts, search matches are highlighted in the list, shortcuts can be cleared with ⌫ in Settings and conflicting shortcuts are shown instead of refused, and failed saves offer a Retry button. Passphrase dialogs are clearer: velo only asks when it needs to create or unlock your key, and opening a locked note on a computer without your key now explains how to copy `.velo/identity.age` instead of creating a new key.
+- 4498667: Settings has a new "Show labels on header buttons" option, the Sort and Rich/Plain switches show tooltips with their shortcuts, Esc in the search box clears the search, and on macOS the search field no longer crowds the window buttons.
+
+### Patch Changes
+
+- f61c23e: velo has a new app icon.
+
 ## 0.3.0
 
 ### Minor Changes
