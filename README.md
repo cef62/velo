@@ -100,3 +100,11 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`, which tests and builds 
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
+## Versioning
+
+Versions are managed with [Changesets](https://github.com/changesets/changesets). `package.json` is the version source.
+
+- Every user-visible change ships with a changeset in the same commit or PR: `pnpm changeset`, pick `patch` or `minor`, and write one past-tense sentence from the user's point of view.
+- `pnpm version-packages` applies pending changesets (bumps `package.json`, writes `CHANGELOG.md`) and mirrors the version into `src-tauri/tauri.conf.json`.
+- `pnpm release:tag` creates the `vX.Y.Z` git tag.

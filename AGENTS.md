@@ -53,3 +53,7 @@ Rules:
 
 Not lazy about: understanding the problem (read it fully and trace the real flow before picking a rung, a small diff you don't understand is just laziness dressed up as efficiency), input validation at trust boundaries, error handling that prevents data loss, security, accessibility, the calibration real hardware needs (the platform is never the spec ideal, a clock drifts, a sensor reads off), anything explicitly requested. Lazy code without its check is unfinished: non-trivial logic leaves ONE runnable check behind, the smallest thing that fails if the logic breaks (an assert-based demo/self-check or one small test file; no frameworks, no fixtures). Trivial one-liners need no test.
 <!-- ponytail-end -->
+
+## Versioning
+
+Every user-visible change ships with a changeset (`pnpm changeset`, file under `.changeset/`): `patch` or `minor`, one past-tense sentence from the user's point of view. `pnpm version-packages` bumps `package.json`, writes `CHANGELOG.md` and syncs `src-tauri/tauri.conf.json`.

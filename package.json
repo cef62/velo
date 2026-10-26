@@ -8,6 +8,9 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "changeset": "changeset",
+    "version-packages": "changeset version && node scripts/sync-version.mjs",
+    "release:tag": "changeset git-tag",
     "tauri": "tauri"
   },
   "pnpm": {
@@ -16,6 +19,7 @@
     ]
   },
   "devDependencies": {
+    "@changesets/cli": "3.0.3",
     "@tauri-apps/cli": "^2.12.4",
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^26.6.5",
