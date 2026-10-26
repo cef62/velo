@@ -15,7 +15,12 @@
         "label": "main",
         "title": "velo",
         "width": 1000,
-        "height": 700
+        "height": 700,
+        "minWidth": 600,
+        "minHeight": 400,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 16, "y": 24 }
       }
     ],
     "security": {

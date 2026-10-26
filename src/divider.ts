@@ -18,8 +18,7 @@ const cssVar = (horizontal: boolean) => (horizontal ? "--list-w" : "--list-h");
 
 /** `titlebar` also drags in the vertical layout: it is the band that reads as the divider there. `rowH`: keyboard step (the list row height). `signal` removes the listeners. */
 export function mountDivider(divider: HTMLElement, app: HTMLElement, list: HTMLElement, titlebar?: HTMLElement, rowH: () => number = () => 16, signal?: AbortSignal) {
-  // old UI: class on #app; React UI: data-layout on <html>
-  const horizontal = () => app.classList.contains("horizontal") || !!app.closest("[data-layout=horizontal]");
+  const horizontal = () => !!app.closest("[data-layout=horizontal]");
   const total = () => (horizontal() ? app.clientWidth : app.clientHeight - list.getBoundingClientRect().top + app.getBoundingClientRect().top);
   const set = (size: number, save: boolean) => {
     const h = horizontal(), v = clampSize(size, total());

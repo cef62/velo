@@ -13,7 +13,6 @@ export default defineConfig(() => ({
       "styled-system": fileURLToPath(new URL("./styled-system", import.meta.url)),
     },
   },
-  build: { rollupOptions: { input: { main: "index.html", app: "app.html" } } },
   clearScreen: false,
   server: {
     port: 1420,

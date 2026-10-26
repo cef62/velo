@@ -1,20 +1,21 @@
 # velo
 
-A fast, keyboard-first notes app for macOS, Windows and Linux, built with Tauri 2. One box searches and creates: type to filter your notes, press Enter to open the match or create a new note with that title.
+A fast, keyboard-first notes app for macOS, Windows and Linux, built with Tauri 2 and a React 19 UI (Park UI on Ark UI, styled with Panda CSS 1.12). One box searches and creates: type to filter your notes, press Enter to open the match or create a new note with that title.
 
 Inspired by nvALT and Notational Velocity; not affiliated with or endorsed by their authors.
 
 ## Features
 
-- Search-or-create box; results update on every keystroke (backend under 50 ms p95 at 10k notes, release build).
+- Search-or-create box; results update on every keystroke (backend under 50 ms p95 at 10k notes, release build), with matches highlighted in the list.
 - Plain files you own: a flat folder of `.md` / `.txt` notes, edited in a CodeMirror editor with autosave.
 - `[[wikilinks]]`: following a link to a missing note creates it; renaming a note rewrites links to it.
 - Markdown preview with clickable wikilinks and external links.
+- Note counts next to every tag and in the filter line; a Retry button when a save fails.
 - Theme: System (follows the OS), Light or Dark, in Settings.
 - Rich editing (default): markdown marks are hidden except on the line you are editing; ⌘/Ctrl-click opens links, wikilinks and tags; task checkboxes are clickable. Toggle Rich / Plain with the toolbar button or ⌘⇧R. The file text is never changed by the display.
 - Per-note encryption with [age](https://age-encryption.org); locked notes are never written to disk or to the index as plaintext.
 - Live reload of external edits; a concurrent edit produces a `(conflict ...)` copy instead of overwriting anything.
-- Global hotkey (default ⌘⇧Space / Ctrl+Shift+Space) to bring velo up; remappable in Settings.
+- Global hotkey (default ⌘⇧Space / Ctrl+Shift+Space) to bring velo up; remappable in Settings. Any shortcut can be cleared with ⌫ in Settings, and conflicting shortcuts are shown instead of refused.
 
 ## Keyboard shortcuts
 
@@ -43,6 +44,10 @@ Fixed: Enter (in search) opens the highlighted note, or creates a note titled wi
 ## Tags
 
 Write `#tag` anywhere in a note (at the start of a line, after a space, or after `(`; letters, digits, `_`, `-`, `/`; at least one letter; not in fenced code blocks; `# Heading` is not a tag). The `#` button next to search (or ⌘⇧T) shows every tag with its note count; click chips to filter the list to notes having all selected tags, combined with the search text. A "Filtered by" line stays visible while tags are selected. In the preview, click a `#tag` to filter by it. Locked notes are not listed in the tag panel.
+
+## How it's built
+
+Rust backend in `src-tauri` (Tauri 2); UI in `src` with React 19, Park UI v1 (Ark UI) and Panda CSS 1.12. Panda generates `styled-system/` (git-ignored) from `panda.config.ts`: `pnpm test` and `pnpm build` run `panda codegen` first; `pnpm install` runs it too (`pnpm codegen` to rerun).
 
 ## Storage
 
