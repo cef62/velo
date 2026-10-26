@@ -45,9 +45,9 @@ export default defineConfig({
       tokens: {
         colors: colors,
         fonts: {
-          ui: { value: 'Inter, system-ui, -apple-system, "Segoe UI", sans-serif' },
-          body: { value: 'Inter, system-ui, -apple-system, "Segoe UI", sans-serif' },
-          mono: { value: '"JetBrains Mono", ui-monospace, Menlo, Consolas, monospace' },
+          ui: { value: '"Inter Variable", Inter, system-ui, -apple-system, "Segoe UI", sans-serif' },
+          body: { value: '"Inter Variable", Inter, system-ui, -apple-system, "Segoe UI", sans-serif' },
+          mono: { value: '"JetBrains Mono Variable", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace' },
         },
         fontSizes: {
           ui: { value: '13px' }, // header chrome, does not scale with the user setting
