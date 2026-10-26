@@ -1,5 +1,5 @@
 import type { Settings } from "./api";
-import { eventToBinding, isAltGraph, overrides, validateBinding, type Action } from "./shortcuts";
+import { NONE, eventToBinding, isAltGraph, overrides, validateBinding, type Action } from "./shortcuts";
 
 export const layoutClass = (l: string): Settings["layout"] => (l === "horizontal" ? "horizontal" : "vertical");
 
@@ -43,6 +43,7 @@ export function recorderStep(
   if (!recording || e.code === "Escape") return { recording: null };
   const b = isAltGraph(e, isMac) ? null : eventToBinding(e, isMac);
   if (!b) return { recording }; // bare modifier press
+  if (b === "Backspace" || b === "Delete") return { recording: null, assign: NONE, msg: "" }; // clears the shortcut
   const v = validateBinding(draft, recording, b, isMac);
   const reason = v.ok ? fixedKeyRefusal(b) : v.reason;
   return reason ? { recording, msg: reason } : { recording: null, assign: b, msg: "" };

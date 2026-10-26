@@ -136,7 +136,7 @@ pub fn toggle_window(app: &AppHandle) {
 
 /// `binding` is in velo format ("Mod+Shift+Space").
 pub fn register_hotkey(app: &AppHandle, binding: &str) -> Result<(), String> {
-    let sc: Shortcut = settings::to_plugin_format(binding).parse().map_err(|e| format!("invalid hotkey: {e}"))?;
+    let Some(sc) = settings::parse_hotkey(binding)? else { return Ok(()) }; // "none": no global shortcut
     app.global_shortcut()
         .on_shortcut(sc, |app, _, ev| {
             if ev.state == ShortcutState::Pressed {
@@ -147,7 +147,7 @@ pub fn register_hotkey(app: &AppHandle, binding: &str) -> Result<(), String> {
 }
 
 fn unregister_hotkey(app: &AppHandle, binding: &str) {
-    if let Ok(sc) = settings::to_plugin_format(binding).parse::<Shortcut>() {
+    if let Ok(Some(sc)) = settings::parse_hotkey(binding) {
         app.global_shortcut().unregister(sc).ok();
     }
 }

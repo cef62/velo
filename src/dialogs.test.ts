@@ -71,3 +71,8 @@ test("recorder: ⌘W refused on mac, Ctrl+W allowed elsewhere", () => {
   expect(recorderStep("rename", ev("KeyW"), true, draft)).toEqual({ recording: "rename", msg: "reserved by the system" });
   expect(recorderStep("rename", ev("KeyW", { metaKey: false, ctrlKey: true }), false, draft)).toEqual({ recording: null, assign: "Mod+KeyW", msg: "" });
 });
+
+test("recorderStep: Backspace / Delete clears the shortcut", () => {
+  expect(recorderStep("back", ev("Backspace", { metaKey: false }), true, draft)).toEqual({ recording: null, assign: "none", msg: "" });
+  expect(recorderStep("back", ev("Delete", { metaKey: false }), true, draft)).toEqual({ recording: null, assign: "none", msg: "" });
+});

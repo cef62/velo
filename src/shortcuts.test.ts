@@ -74,3 +74,11 @@ test("delete_note defaults to Mod+Backspace and formats as ⌘⌫", () => {
 test("toggle_tags default", () => expect(DEFAULTS.toggle_tags).toBe("Mod+Shift+KeyT"));
 test("toggle_layout default", () => expect(DEFAULTS.toggle_layout).toBe("Mod+Shift+KeyJ"));
 test("toggle_rich default", () => expect(DEFAULTS.toggle_rich).toBe("Mod+Shift+KeyR"));
+
+test("none clears a shortcut", () => {
+  expect(resolve({ back: "none" }).back).toBe("none");
+  expect(matches(ev("KeyJ", { metaKey: true }), "none", true)).toBe(false);
+  expect(formatBinding("none", true)).toBe("—");
+  expect(overrides({ ...DEFAULTS, back: "none" })).toEqual({ back: "none" });
+  expect(validateBinding({ ...DEFAULTS, forward: "none" }, "back", "none", true)).toEqual({ ok: true });
+});

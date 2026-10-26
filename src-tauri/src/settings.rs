@@ -82,6 +82,14 @@ fn canonical_key(l: &str) -> Option<String> {
     l.strip_prefix('f').and_then(|n| n.parse::<u8>().ok()).filter(|n| (1..=12).contains(n)).map(|n| format!("F{n}"))
 }
 
+/// Parses a velo binding for registration; "none" (cleared) is Ok(None).
+pub fn parse_hotkey(binding: &str) -> Result<Option<tauri_plugin_global_shortcut::Shortcut>, String> {
+    if binding == "none" {
+        return Ok(None);
+    }
+    to_plugin_format(binding).parse().map(Some).map_err(|e| format!("invalid hotkey: {e}"))
+}
+
 /// True when both bindings parse to the same physical shortcut (spelling and modifier order ignored).
 pub fn same_shortcut(a: &str, b: &str) -> bool {
     let id = |k: &str| to_plugin_format(k).parse::<tauri_plugin_global_shortcut::Shortcut>().ok().map(|s| s.id());
@@ -133,6 +141,15 @@ mod tests {
         assert_eq!(s.toggle_window_binding(), "Mod+Alt+KeyN"); assert_eq!(s.shortcuts["rename"], "Mod+KeyR");
         std::fs::write(&p, r#"{"hotkey":"CmdOrCtrl+Alt+N","shortcuts":{"toggle_window":"Mod+KeyG"}}"#).unwrap();
         assert_eq!(load(&p).toggle_window_binding(), "Mod+KeyG");
+    }
+    #[test] fn none_binding() {
+        let dir = tempfile::tempdir().unwrap(); let p = dir.path().join("settings.json");
+        let mut s = Settings::default(); s.shortcuts.insert("toggle_window".into(), "none".into());
+        save(&p, &s).unwrap();
+        assert_eq!(load(&p).toggle_window_binding(), "none");
+        assert!(parse_hotkey("none").unwrap().is_none());
+        assert!(parse_hotkey("Mod+Shift+Space").unwrap().is_some());
+        assert!(parse_hotkey("bogus").is_err());
     }
     #[test] fn defaults() { let s = Settings::default(); assert_eq!(s.sort, "modified"); assert_eq!(s.toggle_window_binding(), "Mod+Shift+Space"); }
     #[test] fn from_plugin_format_matches_ui_normalization() {

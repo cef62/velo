@@ -4,6 +4,9 @@ export type Action =
   | "focus_search" | "toggle_preview" | "rename" | "toggle_lock"
   | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "delete_note" | "toggle_tags" | "toggle_rich" | "toggle_layout" | "toggle_window";
 
+/** Saved binding meaning "no shortcut". */
+export const NONE = "none";
+
 export const DEFAULTS: Record<Action, string> = {
   focus_search: "Mod+KeyL",
   toggle_preview: "Mod+Shift+KeyP",
@@ -88,6 +91,7 @@ export function resolve(saved: Record<string, string> | undefined, isMac = false
   const legacy = saved !== undefined && Object.entries(OLD_DEFAULTS).every(([a, b]) => saved[a] === b);
   for (const a of Object.keys(DEFAULTS) as Action[]) {
     const s = legacy && saved[a] === OLD_DEFAULTS[a] ? undefined : saved?.[a];
+    if (s === NONE) { out[a] = NONE; continue; }
     const n = s ? normalizeBinding(s) : null;
     if (n && !basicProblem(n, isMac)) out[a] = n;
   }
@@ -107,7 +111,7 @@ export const isAltGraph = (e: Ev & { getModifierState?: (k: string) => boolean }
   !isMac && !!e.getModifierState?.("AltGraph");
 
 export const matches = (e: Ev & { getModifierState?: (k: string) => boolean }, binding: string, isMac: boolean) =>
-  !isAltGraph(e, isMac) && eventToBinding(e, isMac) === binding;
+  binding !== NONE && !isAltGraph(e, isMac) && eventToBinding(e, isMac) === binding;
 
 const KEY_GLYPHS: Record<string, string> = {
   BracketLeft: "[", BracketRight: "]", Comma: ",", Period: ".", Slash: "/", Backslash: "\\", Semicolon: ";",
@@ -115,6 +119,7 @@ const KEY_GLYPHS: Record<string, string> = {
 };
 
 export function formatBinding(binding: string, isMac: boolean): string {
+  if (binding === NONE) return "—";
   const parts = binding.split("+");
   const code = parts.pop()!;
   const key = isMac && code === "Backspace" ? "⌫" : (KEY_GLYPHS[code] ?? code.replace(/^(Key|Digit)/, ""));
@@ -136,6 +141,7 @@ export function validateBinding(
   binding: string,
   isMac = false,
 ): { ok: true } | { ok: false; reason: string } {
+  if (binding === NONE) return { ok: true };
   const problem = basicProblem(binding, isMac);
   if (problem) return { ok: false, reason: problem };
   const other = (Object.keys(map) as Action[]).find((a) => a !== action && map[a] === binding);
