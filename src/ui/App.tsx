@@ -14,6 +14,8 @@ import { Divider } from "./Divider";
 import { TagPanel } from "./TagPanel";
 import { FilterLine } from "./FilterLine";
 import { FirstRun } from "./FirstRun";
+import { SettingsDialog } from "./SettingsDialog";
+import { PassphraseDialog } from "./PassphraseDialog";
 
 // Layout per design README: vertical = header / list / divider / note; horizontal = header over [list | divider | note].
 // platform.applyLook writes data-layout on <html>; the divider sizes come from --list-h / --list-w .
@@ -63,6 +65,8 @@ export function App({ controller, store }: { controller: Controller; store: Stor
         {/* the editor stays mounted under the first-run screen */}
         <FirstRun controller={controller} store={store} />
       </section>
+      <SettingsDialog controller={controller} store={store} />
+      <PassphraseDialog />
     </div>
   );
 }

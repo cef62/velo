@@ -45,7 +45,7 @@ export function recorderStep(
   if (!b) return { recording }; // bare modifier press
   if (b === "Backspace" || b === "Delete") return { recording: null, assign: NONE, msg: "" }; // clears the shortcut
   const v = validateBinding(draft, recording, b, isMac);
-  const reason = v.ok ? fixedKeyRefusal(b) : v.reason;
+  const reason = v.ok || v.reason.startsWith("already used") ? fixedKeyRefusal(b) : v.reason; // conflicts stay in the draft and block Save
   return reason ? { recording, msg: reason } : { recording: null, assign: b, msg: "" };
 }
 

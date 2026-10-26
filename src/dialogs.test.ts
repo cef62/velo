@@ -7,14 +7,18 @@ const base = { notes_dir: "/n", layout: "vertical" as const, font_size: 14, sort
 
 test("dialog wording follows identity file", () => {
   expect(passphraseDialogMode(true)).toEqual({ title: "Enter your velo passphrase", confirm: false });
-  expect(passphraseDialogMode(false)).toEqual({ title: "Create a passphrase (used to unlock on other computers)", confirm: true });
+  expect(passphraseDialogMode(false)).toEqual({ title: "Create your velo passphrase", confirm: true });
 });
 
 test("passphrase validation", () => {
   expect(passphraseError(false, "", "")).toBe("Passphrase required");
   expect(passphraseError(false, "a", "")).toBeNull();
-  expect(passphraseError(true, "a", "b")).toBe("Passphrases do not match");
+  expect(passphraseError(true, "a", "b")).toBe("Passphrases don't match");
   expect(passphraseError(true, "a", "a")).toBeNull();
+});
+
+test("recorder: a conflicting key is assigned (the draft may hold conflicts)", () => {
+  expect(recorderStep("back", ev("KeyK"), true, draft)).toEqual({ recording: null, assign: "Mod+KeyK", msg: "" });
 });
 
 test("locked path detection", () => {
