@@ -345,7 +345,8 @@ impl Vault {
     /// Not throttled. Locked notes get ciphertext; their identical-content check decrypts the newest snapshot.
     pub fn snapshot_text(&mut self, path: &str, text: &str, identity: Option<&str>) -> anyhow::Result<()> {
         let nf = parse(Path::new(path))?;
-        if !nf.encrypted {
+        // a stale pre-lock path still means a locked note: never write its text as plaintext
+        if !nf.encrypted && !note_path(&self.store.dir, &nf.title, true).exists() {
             self.revisions.snapshot_bytes(&nf.title, text.as_bytes(), false, now_ms(), false)?;
             return Ok(());
         }
@@ -630,5 +631,17 @@ mod tests {
         assert_eq!(v.list_revisions(&locked).unwrap().len(), 2);
         assert!(files(&vdir).iter().all(|f| f.ends_with(".md.age")));
         assert_eq!(v.snapshot_text(&locked, "x", None).err().unwrap().to_string(), "locked");
+    }
+    #[test] fn snapshot_text_stale_plain_path_of_locked_note_never_plain() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = Vault::open(dir.clone(), &db, Some(&id)).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
+        v.lock_note(&d.path, &id).unwrap();
+        let vdir = || std::fs::read_dir(db.parent().unwrap().join("revisions")).ok().and_then(|mut r| r.next()).map(|e| e.unwrap().path());
+        let names = || vdir().map(|d| std::fs::read_dir(d).unwrap().flatten().map(|f| f.file_name().to_string_lossy().into_owned()).collect::<Vec<_>>()).unwrap_or_default();
+        assert_eq!(v.snapshot_text(&d.path, "stalesecret", None).err().unwrap().to_string(), "locked");
+        assert!(names().is_empty());
+        v.snapshot_text(&d.path, "stalesecret", Some(&id)).unwrap();
+        assert_eq!(names().len(), 1);
+        assert!(names().iter().all(|f| f.ends_with(".md.age")));
     }
 }
