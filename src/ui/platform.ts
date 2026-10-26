@@ -23,6 +23,7 @@ let theme: AppState["theme"] = "system";
 const writeTheme = () => {
   document.documentElement.dataset.theme = theme === "system" ? (dark.matches ? "dark" : "light") : theme;
 };
+writeTheme(); // first frame follows the OS before settings load
 dark.addEventListener("change", writeTheme);
 
 let lastMenu: { close(): Promise<void> }[] = []; // popup() resolves when shown, so free the previous menu's Rust-side resources on the next open

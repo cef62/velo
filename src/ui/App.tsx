@@ -37,7 +37,7 @@ const note = css({ flex: "1", minH: "0", minW: "0", display: "flex", flexDirecti
 const top = css({ flex: "none", minW: "0", "[data-layout=horizontal] &": { gridColumn: "1 / -1" } });
 
 export function App({ controller, store }: { controller: Controller; store: Store<AppState> }) {
-  const s = useStore(store);
+  const previewOn = useStore(store, (s) => s.previewOn);
   // The hosts' layout effects (attachEditor/attachPreview) run before this effect, so start() sees them; once only under StrictMode.
   const started = useRef(false);
   const root = useRef<HTMLDivElement>(null);
@@ -48,7 +48,7 @@ export function App({ controller, store }: { controller: Controller; store: Stor
   }, [controller]);
 
   return (
-    <div ref={root} className={app} data-preview-on={s.previewOn || undefined}>
+    <div ref={root} className={app} data-preview-on={previewOn || undefined}>
       <div className={top}>
         <Header controller={controller} store={store} />
         <TagPanel controller={controller} store={store} />

@@ -41,7 +41,7 @@ window.addEventListener(
       getModifierState: (k) => e.getModifierState(k),
       inEditor: !!t.closest?.("[data-editor-host]"),
       inSearchWithText: isSearchInput(t) && (t as HTMLInputElement).value !== "",
-      inDialog: !!document.querySelector("dialog[open], [role=dialog][data-state=open], [role=alertdialog][data-state=open]"),
+      inDialog: !!t.closest?.("[role=menu]") || !!document.querySelector("dialog[open], [role=dialog][data-state=open], [role=alertdialog][data-state=open]"),
       inRename: !!t.closest?.("[data-rename]"),
     });
     if (handled) {

@@ -11,9 +11,14 @@ const row = css({ display: "flex", alignItems: "center", gap: "2", w: "100%", "&
 
 /** Folded header (< 720 px): the actions that no longer fit. Shortcuts keep working; they are only shown here. */
 export function OverflowMenu({ controller, store }: { controller: Controller; store: Store<AppState> }) {
-  const s = useStore(store);
-  const kbd = (a: Action) => (s.keys[a] === NONE ? null : <Kbd marginLeft="auto">{formatBinding(s.keys[a], s.isMac)}</Kbd>);
-  const noNote = s.openPath === null;
+  const keys = useStore(store, (s) => s.keys);
+  const isMac = useStore(store, (s) => s.isMac);
+  const openPath = useStore(store, (s) => s.openPath);
+  const sort = useStore(store, (s) => s.sort);
+  const editorStyle = useStore(store, (s) => s.editorStyle);
+  const encrypted = useStore(store, (s) => s.encrypted);
+  const kbd = (a: Action) => (keys[a] === NONE ? null : <Kbd marginLeft="auto">{formatBinding(keys[a], isMac)}</Kbd>);
+  const noNote = openPath === null;
   return (
     <Menu.Root positioning={{ placement: "bottom-end" }}>
       <Menu.Trigger asChild>
@@ -23,7 +28,7 @@ export function OverflowMenu({ controller, store }: { controller: Controller; st
       </Menu.Trigger>
       <Menu.Positioner>
         <Menu.Content minW="220px">
-          <Menu.RadioItemGroup value={s.sort} onValueChange={(d) => d.value !== s.sort && void controller.toggleSort()}>
+          <Menu.RadioItemGroup value={sort} onValueChange={(d) => d.value !== sort && void controller.toggleSort()}>
             <div className={label}>Sort</div>
             <Menu.RadioItem value="modified">
               <span className={row}><Menu.ItemIndicator />
@@ -35,7 +40,7 @@ export function OverflowMenu({ controller, store }: { controller: Controller; st
                 {kbd("toggle_sort")}</span>
             </Menu.RadioItem>
           </Menu.RadioItemGroup>
-          <Menu.RadioItemGroup value={s.editorStyle} onValueChange={(d) => d.value !== s.editorStyle && void controller.toggleStyle()}>
+          <Menu.RadioItemGroup value={editorStyle} onValueChange={(d) => d.value !== editorStyle && void controller.toggleStyle()}>
             <div className={label}>Edit style</div>
             <Menu.RadioItem value="rich">
               <span className={row}><Menu.ItemIndicator />
@@ -50,8 +55,8 @@ export function OverflowMenu({ controller, store }: { controller: Controller; st
           <Menu.Separator />
           <Menu.Item value="lock" disabled={noNote} onSelect={() => void controller.toggleLock()}>
             <span className={row}>
-              {s.encrypted ? <LockOpen size={16} /> : <Lock size={16} />}
-              {s.encrypted ? "Unlock note" : "Lock note"}
+              {encrypted ? <LockOpen size={16} /> : <Lock size={16} />}
+              {encrypted ? "Unlock note" : "Lock note"}
               {kbd("toggle_lock")}
             </span>
           </Menu.Item>

@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { isLockedPath, passphraseDialogMode, passphraseError } from "./passphrase";
 import { DEFAULTS } from "./shortcuts";
-import { clampFont, fixedKeyRefusal, layoutClass, recorderStep, toSettings } from "./settingsform";
+import { clampFont, fixedKeyRefusal, recorderStep, toSettings } from "./settingsform";
 
 const base = { notes_dir: "/n", layout: "vertical" as const, font_size: 14, sort: "modified" as const, editor_style: "rich" as const, theme: "system" as const, shortcuts: { toggle_window: "Mod+KeyA", rename: "Mod+KeyR" } };
 
@@ -64,11 +64,6 @@ test("recorder: modifier alone keeps recording; Escape cancels; idle ignores", (
   expect(recorderStep("rename", ev("MetaLeft"), true, draft)).toEqual({ recording: "rename" });
   expect(recorderStep("rename", ev("Escape"), true, draft)).toEqual({ recording: null });
   expect(recorderStep(null, ev("KeyB"), true, draft)).toEqual({ recording: null });
-});
-
-test("layout class", () => {
-  expect(layoutClass("horizontal")).toBe("horizontal");
-  expect(layoutClass("x")).toBe("vertical");
 });
 
 test("recorder: ⌘W refused on mac, Ctrl+W allowed elsewhere", () => {

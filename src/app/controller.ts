@@ -33,7 +33,7 @@ export type KeyEventLike = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctr
   inRename: boolean;
 };
 
-/** main.ts without the DOM: same sequencing and guards; state goes to the store, UI effects to the UiPort. */
+/** The app logic without the DOM: same sequencing and guards; state goes to the store, UI effects to the UiPort. */
 export class Controller {
   // Attached by the editor/preview hosts once mounted.
   protected editor!: Editor;

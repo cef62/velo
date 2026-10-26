@@ -1,8 +1,6 @@
 import type { Settings } from "./api";
 import { NONE, eventToBinding, isAltGraph, overrides, validateBinding, type Action } from "./shortcuts";
 
-export const layoutClass = (l: string): Settings["layout"] => (l === "horizontal" ? "horizontal" : "vertical");
-
 export function clampFont(raw: string, fallback: number): number {
   const n = Math.round(Number(raw));
   return raw.trim() === "" || !Number.isFinite(n) ? fallback : Math.min(32, Math.max(10, n));
@@ -47,15 +45,4 @@ export function recorderStep(
   const v = validateBinding(draft, recording, b, isMac);
   const reason = v.ok || v.reason.startsWith("already used") ? fixedKeyRefusal(b) : v.reason; // conflicts stay in the draft and block Save
   return reason ? { recording, msg: reason } : { recording: null, assign: b, msg: "" };
-}
-
-/** Apply layout class and font size live. */
-export function applyLook(s: Settings) {
-  const app = document.getElementById("app")!;
-  app.classList.remove("vertical", "horizontal");
-  app.classList.add(layoutClass(s.layout));
-  document.documentElement.style.setProperty("--font-size", `${s.font_size}px`);
-  // CSS picks dark/light from data-theme; no attribute = follow the OS
-  if (s.theme === "light" || s.theme === "dark") document.documentElement.dataset.theme = s.theme;
-  else delete document.documentElement.dataset.theme;
 }

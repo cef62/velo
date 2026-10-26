@@ -39,10 +39,17 @@ function useWidth() {
 }
 
 export function Header({ controller, store }: { controller: Controller; store: Store<AppState> }) {
-  const s = useStore(store);
+  const keys = useStore(store, (s) => s.keys);
+  const isMac = useStore(store, (s) => s.isMac);
+  const openPath = useStore(store, (s) => s.openPath);
+  const tagPanelOpen = useStore(store, (s) => s.tagPanelOpen);
+  const sort = useStore(store, (s) => s.sort);
+  const editorStyle = useStore(store, (s) => s.editorStyle);
+  const previewOn = useStore(store, (s) => s.previewOn);
+  const encrypted = useStore(store, (s) => s.encrypted);
   const mode = headerMode(useWidth());
   const tip = (text: string, action: Action | null, child: ReactElement) => {
-    const b = action && s.keys[action] !== NONE ? formatBinding(s.keys[action], s.isMac) : "";
+    const b = action && keys[action] !== NONE ? formatBinding(keys[action], isMac) : "";
     return (
       <Tooltip content={b ? `${text} (${b})` : text} openDelay={500}>
         {child}
@@ -67,13 +74,13 @@ export function Header({ controller, store }: { controller: Controller; store: S
         {glyph}
       </IconButton>,
     );
-  const noNote = s.openPath === null;
+  const noNote = openPath === null;
   const iconOnly = mode !== "full";
   const seg = <V extends string>(name: string, value: V, set: () => void, items: { value: V; text: string; glyph: ReactNode; action: Action }[]) => (
     <SegmentGroup.Root size="sm" value={value} onValueChange={(d) => d.value !== value && set()} aria-label={name}>
       <SegmentGroup.Indicator />
       {items.map((it) => (
-        <Tooltip key={it.value} content={`${it.text}${s.keys[it.action] === NONE ? "" : ` (${formatBinding(s.keys[it.action], s.isMac)})`}`} openDelay={500} disabled={!iconOnly}>
+        <Tooltip key={it.value} content={`${it.text}${keys[it.action] === NONE ? "" : ` (${formatBinding(keys[it.action], isMac)})`}`} openDelay={500} disabled={!iconOnly}>
           <SegmentGroup.Item value={it.value}>
             {it.glyph}
             {!iconOnly && <SegmentGroup.ItemText>{it.text}</SegmentGroup.ItemText>}
@@ -85,22 +92,22 @@ export function Header({ controller, store }: { controller: Controller; store: S
   );
 
   return (
-    <header className={bar} data-tauri-drag-region={s.isMac || undefined} style={{ paddingLeft: s.isMac ? 80 : 14 }}>
+    <header className={bar} data-tauri-drag-region={isMac || undefined} style={{ paddingLeft: isMac ? 80 : 14 }}>
       <SearchField controller={controller} store={store} />
-      {icon("Tags", "toggle_tags", <Hash />, () => controller.showTags(!s.tagPanelOpen), { pressed: s.tagPanelOpen, controls: "tag-panel" })}
+      {icon("Tags", "toggle_tags", <Hash />, () => controller.showTags(!tagPanelOpen), { pressed: tagPanelOpen, controls: "tag-panel" })}
       {mode !== "folded" && (
         <>
-          {seg("Sort", s.sort, () => void controller.toggleSort(), [
+          {seg("Sort", sort, () => void controller.toggleSort(), [
             { value: "modified", text: "Recent", glyph: <Clock size={14} />, action: "toggle_sort" },
             { value: "title", text: "A→Z", glyph: <ArrowDownAZ size={14} />, action: "toggle_sort" },
           ])}
-          {seg("Edit style", s.editorStyle, () => void controller.toggleStyle(), [
+          {seg("Edit style", editorStyle, () => void controller.toggleStyle(), [
             { value: "rich", text: "Rich", glyph: <Type size={14} />, action: "toggle_rich" },
             { value: "plain", text: "Plain", glyph: <Code size={14} />, action: "toggle_rich" },
           ])}
         </>
       )}
-      {s.previewOn
+      {previewOn
         ? tip(
             "Preview on",
             "toggle_preview",
@@ -114,7 +121,7 @@ export function Header({ controller, store }: { controller: Controller; store: S
         <OverflowMenu controller={controller} store={store} />
       ) : (
         <>
-          {icon(s.encrypted ? "Unlock note" : "Lock note", "toggle_lock", s.encrypted ? <LockOpen /> : <Lock />, () => void controller.toggleLock(), { disabled: noNote })}
+          {icon(encrypted ? "Unlock note" : "Lock note", "toggle_lock", encrypted ? <LockOpen /> : <Lock />, () => void controller.toggleLock(), { disabled: noNote })}
           {icon("Lock all", "lock_all", <FolderLock />, () => void controller.lockEverything())}
           {icon("Move to Trash", "delete_note", <Trash2 />, () => void controller.deleteNote(), { disabled: noNote })}
         </>

@@ -42,4 +42,3 @@ export const toggleTag = (sel: string[], tag: string): string[] =>
 export const pruneSelection = (sel: string[], available: TagCount[]): string[] =>
   sel.filter((s) => available.some((a) => fold(a.tag) === fold(s)));
 
-export const filterLabel = (sel: string[]): string => (sel.length ? "Filtered by " + sel.map((t) => "#" + t).join(" ") : "");

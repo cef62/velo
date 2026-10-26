@@ -4,6 +4,7 @@ import { tagChip } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { Button, Kbd } from "@/components/ui";
+import { fold } from "../search";
 import { formatBinding, NONE } from "../shortcuts";
 import { useStore } from "./useStore";
 
@@ -12,17 +13,22 @@ const line = css({ display: "flex", alignItems: "center", gap: "2.5", fontSize: 
 const chips = css({ display: "flex", flexWrap: "wrap", gap: "1.5" });
 
 export function TagPanel({ controller, store }: { controller: Controller; store: Store<AppState> }) {
-  const s = useStore(store);
+  const tagPanelOpen = useStore(store, (s) => s.tagPanelOpen);
+  const selectedTags = useStore(store, (s) => s.selectedTags);
+  const total = useStore(store, (s) => s.total);
+  const keys = useStore(store, (s) => s.keys);
+  const isMac = useStore(store, (s) => s.isMac);
+  const tags = useStore(store, (s) => s.tags);
   const group = useRef<HTMLDivElement>(null);
   const [cur, setCur] = useState(0); // roving tab stop: Tab enters the group once, arrows move inside
-  if (!s.tagPanelOpen) return null;
+  if (!tagPanelOpen) return null;
   const move = (to: number) => {
     const btns = group.current!.querySelectorAll<HTMLButtonElement>("button");
     const i = (to + btns.length) % btns.length;
     setCur(i);
     btns[i]?.focus();
   };
-  const close = formatBinding(s.keys.toggle_tags, s.isMac);
+  const close = formatBinding(keys.toggle_tags, isMac);
   return (
     <section
       id="tag-panel"
@@ -39,13 +45,13 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
       <div className={line}>
         <span className={css({ fontWeight: "600", color: "velo.fg" })}>Tags</span>
         <span className={css({ color: "velo.fgMuted" })}>
-          {s.selectedTags.length > 0 && `${s.selectedTags.length} selected · `}
-          {s.total} notes
+          {selectedTags.length > 0 && `${selectedTags.length} selected · `}
+          {total} notes
         </span>
-        <Button variant="plain" size="sm" marginLeft="auto" disabled={s.selectedTags.length === 0} onClick={() => controller.setTags([])}>
+        <Button variant="plain" size="sm" marginLeft="auto" disabled={selectedTags.length === 0} onClick={() => controller.setTags([])}>
           Clear
         </Button>
-        {s.keys.toggle_tags !== NONE && (
+        {keys.toggle_tags !== NONE && (
           <span className={css({ display: "inline-flex", alignItems: "center", gap: "1.5", color: "velo.fgMuted", whiteSpace: "nowrap" })}>
             <Kbd>{close}</Kbd> close
           </span>
@@ -64,11 +70,11 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
           e.preventDefault();
         }}
       >
-        {s.tags.map((t, i) => {
-          const on = s.selectedTags.includes(t.tag);
+        {tags.map((t, i) => {
+          const on = selectedTags.some((x) => fold(x) === fold(t.tag));
           const c = tagChip({ selected: on });
           return (
-            <button key={t.tag} type="button" className={c.root} aria-pressed={on} tabIndex={i === Math.min(cur, s.tags.length - 1) ? 0 : -1} onFocus={() => setCur(i)} onClick={() => controller.toggleTagFilter(t.tag)}>
+            <button key={t.tag} type="button" className={c.root} aria-pressed={on} tabIndex={i === Math.min(cur, tags.length - 1) ? 0 : -1} onFocus={() => setCur(i)} onClick={() => controller.toggleTagFilter(t.tag)}>
               #{t.tag} <span className={c.count}>{t.count}</span>
             </button>
           );

@@ -81,7 +81,8 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
             </Button>
           )}
         </>
-      ) : s.indexing ? (
+      ) : null}
+      {s.indexing ? (
         <span className={bar.status} role="status">
           <Spinner size="sm" />
           Indexing… {num(s.indexing.done)} / {num(s.indexing.total)}
@@ -89,7 +90,7 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
             <i className={css({ display: "block", h: "full", bg: "velo.accent" })} style={{ width: `${s.indexing.total ? Math.min(100, (100 * s.indexing.done) / s.indexing.total) : 0}%` }} />
           </span>
         </span>
-      ) : s.saving ? (
+      ) : !s.err && s.saving ? (
         <span className={bar.status} role="status">
           <Spinner size="sm" />
           Saving…
