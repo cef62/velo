@@ -584,13 +584,11 @@ mod tests {
     }
     #[test] fn second_save_with_returned_hash_is_saved() {
         let mut v = open_empty(); let d = v.open_or_create("n", None, false).unwrap();
-        let (_, h) = fm_of(v.save_note(&d.path, "one", &d.hash, None, true).unwrap());
+        let (_, mut cur) = fm_of(v.save_note(&d.path, "one", &d.hash, None, true).unwrap());
         for t in ["one", "onex"] {
-            let r = v.save_note(&d.path, t, &h, None, true).unwrap();
-            assert!(matches!(r, SaveResult::Saved { .. }));
-            let SaveResult::Saved { hash, .. } = r else { unreachable!() };
+            let SaveResult::Saved { hash, .. } = v.save_note(&d.path, t, &cur, None, true).unwrap() else { panic!("conflict") };
             assert_eq!(hash, stat_hash(&d.path));
-            let r = v.save_note(&d.path, t, &hash, None, true).unwrap(); assert!(matches!(r, SaveResult::Saved { .. }));
+            cur = hash;
         }
     }
     #[test] fn second_save_locked_is_saved() {
