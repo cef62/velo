@@ -23,14 +23,13 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | macOS | Windows/Linux | Action |
 | --- | --- | --- |
 | ⌘L | Ctrl+L | Focus the search box |
-| ⌘J / ⌘K | Ctrl+J / Ctrl+K | Next / previous note (also works from the editor) |
 | ⌘R | Ctrl+R | Rename current note (also: double-click the title) |
 | ⌘⇧P | Ctrl+Shift+P | Toggle Markdown preview |
 | ⌘⇧E | Ctrl+Shift+E | Lock / unlock current note |
 | ⌥⌘E | Ctrl+Alt+E | Lock all notes |
 | ⌘⌫ | Ctrl+Backspace | Move the current note to the Trash, after confirming (from the list or an empty search box; in the editor and in a non-empty search box ⌘⌫ keeps its editing meaning) |
 | ⌘⇧S | Ctrl+Shift+S | Toggle sort (last modified / title) |
-| ⌘[ / ⌘] | Ctrl+[ / Ctrl+] | Back / forward through visited notes |
+| ⌘K / ⌘J | Ctrl+K / Ctrl+J | Back / forward through visited notes (also from the editor; ↑/↓ move in the list) |
 | ⌘, | Ctrl+, | Settings |
 | ⌘⇧T | Ctrl+Shift+T | Show / hide the tag panel |
 | ⌘⇧R | Ctrl+Shift+R | Rich / plain editing |

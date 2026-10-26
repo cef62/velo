@@ -1,21 +1,19 @@
 // Remappable shortcuts. Binding = "+"-joined modifiers (Mod, Ctrl, Alt, Shift, in that order) + one KeyboardEvent.code.
 // Mod = ⌘ on macOS, Ctrl elsewhere. Ctrl = physical Control (macOS only).
 export type Action =
-  | "focus_search" | "next_note" | "prev_note" | "toggle_preview" | "rename" | "toggle_lock"
+  | "focus_search" | "toggle_preview" | "rename" | "toggle_lock"
   | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "delete_note" | "toggle_tags" | "toggle_rich" | "toggle_layout" | "toggle_window";
 
 export const DEFAULTS: Record<Action, string> = {
   focus_search: "Mod+KeyL",
-  next_note: "Mod+KeyJ",
-  prev_note: "Mod+KeyK",
   toggle_preview: "Mod+Shift+KeyP",
   rename: "Mod+KeyR",
   toggle_lock: "Mod+Shift+KeyE",
   lock_all: "Mod+Alt+KeyE",
   settings: "Mod+Comma",
   toggle_sort: "Mod+Shift+KeyS",
-  back: "Mod+BracketLeft",
-  forward: "Mod+BracketRight",
+  back: "Mod+KeyK",
+  forward: "Mod+KeyJ",
   delete_note: "Mod+Backspace",
   toggle_tags: "Mod+Shift+KeyT",
   toggle_rich: "Mod+Shift+KeyR",
@@ -25,8 +23,6 @@ export const DEFAULTS: Record<Action, string> = {
 
 export const LABELS: Record<Action, string> = {
   focus_search: "Focus search",
-  next_note: "Next note",
-  prev_note: "Previous note",
   toggle_preview: "Toggle preview",
   rename: "Rename note",
   toggle_lock: "Lock / unlock note",
@@ -78,10 +74,21 @@ export function normalizeBinding(s: string): string | null {
 }
 
 /** Defaults overlaid with saved entries that parse; unknown keys dropped. */
+/** Settings store only bindings that differ from DEFAULTS, so a changed default reaches everyone who kept it. */
+export function overrides(bindings: Record<Action, string>): Partial<Record<Action, string>> {
+  return Object.fromEntries((Object.keys(bindings) as Action[]).filter((a) => bindings[a] !== DEFAULTS[a]).map((a) => [a, bindings[a]]));
+}
+
+// Older versions saved every binding. Their back/forward defaults (⌘[ / ⌘]) moved to ⌘K / ⌘J when list stepping
+// (next_note/prev_note, on ⌘J / ⌘K) was dropped: a saved map with next_note is such a snapshot, so its old defaults are not choices.
+const OLD_DEFAULTS: Partial<Record<string, string>> = { back: "Mod+BracketLeft", forward: "Mod+BracketRight" };
+
 export function resolve(saved: Record<string, string> | undefined, isMac = false): Record<Action, string> {
   const out = { ...DEFAULTS };
+  const legacy = saved !== undefined && "next_note" in saved;
   for (const a of Object.keys(DEFAULTS) as Action[]) {
-    const n = saved?.[a] ? normalizeBinding(saved[a]) : null;
+    const s = legacy && saved[a] === OLD_DEFAULTS[a] ? undefined : saved?.[a];
+    const n = s ? normalizeBinding(s) : null;
     if (n && !basicProblem(n, isMac)) out[a] = n;
   }
   return out;

@@ -1,5 +1,5 @@
 import type { Settings } from "./api";
-import { eventToBinding, isAltGraph, validateBinding, type Action } from "./shortcuts";
+import { eventToBinding, isAltGraph, overrides, validateBinding, type Action } from "./shortcuts";
 
 export const layoutClass = (l: string): Settings["layout"] => (l === "horizontal" ? "horizontal" : "vertical");
 
@@ -14,7 +14,7 @@ export interface SettingsForm { layout: string; fontSize: string; sort: string; 
 export function toSettings(cur: Settings, f: SettingsForm): Settings {
   return {
     ...cur,
-    shortcuts: f.shortcuts,
+    shortcuts: overrides(f.shortcuts) as Record<string, string>,
     layout: f.layout === "horizontal" || f.layout === "vertical" ? f.layout : cur.layout,
     font_size: clampFont(f.fontSize, cur.font_size),
     sort: f.sort === "modified" || f.sort === "title" ? f.sort : cur.sort,

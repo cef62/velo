@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { DEFAULTS, eventToBinding, formatBinding, isAltGraph, matches, normalizeBinding, resolve, validateBinding } from "./shortcuts";
+import { DEFAULTS, overrides, eventToBinding, formatBinding, isAltGraph, matches, normalizeBinding, resolve, validateBinding } from "./shortcuts";
 
 const ev = (code: string, m: Partial<Record<"metaKey" | "ctrlKey" | "altKey" | "shiftKey", boolean>> = {}) =>
   ({ code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...m });
@@ -22,9 +22,19 @@ test("validate", () => {
   expect(validateBinding(m, "back", "Mod+KeyQ")).toEqual({ ok: false, reason: "reserved by the system" });
   expect(validateBinding(m, "back", "Mod+KeyL")).toEqual({ ok: false, reason: "already used by Focus search" });
   expect(validateBinding(m, "back", "F5")).toEqual({ ok: true });
-  expect(validateBinding(m, "back", "Mod+BracketLeft")).toEqual({ ok: true }); // its own current binding
+  expect(validateBinding(m, "back", "Mod+KeyK")).toEqual({ ok: true }); // its own current binding
 });
-test("resolve drops unknown and invalid", () => expect(resolve({ bogus: "Mod+KeyB", back: "" }).back).toBe("Mod+BracketLeft"));
+test("resolve drops unknown and invalid", () => expect(resolve({ bogus: "Mod+KeyB", back: "" }).back).toBe("Mod+KeyK"));
+test("back / forward on ⌘K / ⌘J; old full snapshots move to them, real choices stay", () => {
+  expect([DEFAULTS.back, DEFAULTS.forward]).toEqual(["Mod+KeyK", "Mod+KeyJ"]);
+  const old = { next_note: "Mod+KeyJ", prev_note: "Mod+KeyK", back: "Mod+BracketLeft", forward: "Mod+BracketRight", rename: "Mod+KeyR" };
+  expect(resolve(old)).toMatchObject({ back: "Mod+KeyK", forward: "Mod+KeyJ" });
+  expect(resolve({ ...old, back: "Mod+KeyB" }).back).toBe("Mod+KeyB");
+  expect(resolve({ back: "Mod+BracketLeft" }).back).toBe("Mod+BracketLeft"); // chosen after the change: kept
+});
+test("overrides keeps only non-default bindings", () => {
+  expect(overrides({ ...DEFAULTS, rename: "Mod+KeyB" })).toEqual({ rename: "Mod+KeyB" });
+});
 test("normalizeBinding maps legacy plugin format", () => {
   expect(normalizeBinding("CommandOrControl+Shift+Space")).toBe("Mod+Shift+Space");
   expect(normalizeBinding("cmd+alt+n")).toBe("Mod+Alt+KeyN");
