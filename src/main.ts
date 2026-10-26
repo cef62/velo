@@ -493,13 +493,12 @@ sortBtn.onclick = () => void toggleSort();
 
 /** Step through history. Does not record a visit; a refused load puts the cursor back, a vanished file is dropped and skipped. */
 async function navigate(dir: "back" | "forward") {
-  const undo = dir === "back" ? "forward" : "back";
   for (let tries = 0; tries < 1000; tries++) { // each miss removes an entry, so this ends well before the cap
     const target = history[dir](() => true);
     if (!target) return;
     const r = await show(target, "nav");
     if (r === true) return selectOpen();
-    history[undo](() => true);
+    history.undo();
     if (r === false) return;
     history.remove(target);
   }
