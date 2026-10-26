@@ -147,14 +147,15 @@ export function buildDecorations(state: EditorState, opts: Pick<RichOpts, "exist
 }
 
 const richTheme = EditorView.theme({
-  ".cm-rich-link, .cm-rich-wikilink": { color: "var(--accent)", textDecoration: "underline", textDecorationColor: "color-mix(in srgb, var(--accent) 45%, transparent)", textUnderlineOffset: "2px" },
-  ".cm-rich-missing, .cm-rich-missing *": { color: "var(--missing)", textDecorationStyle: "dashed" }, // * beats the inner link highlight
-  ".cm-rich-tag": { color: "var(--accent)", background: "color-mix(in srgb, var(--accent) 14%, transparent)", borderRadius: "4px", padding: "0 2px" },
-  ".cm-rich-bullet": { color: "var(--mute)" },
-  ".cm-rich-check": { margin: "0 4px 0 0", verticalAlign: "-2px", cursor: "pointer" },
-  ".cm-rich-quote": { borderLeft: "3px solid var(--line)", paddingLeft: "12px" },
-  ".cm-rich-code": { background: "color-mix(in srgb, var(--fg) 6%, transparent)" },
-  ".cm-rich-hr": { backgroundImage: "linear-gradient(var(--line), var(--line))", backgroundSize: "100% 1px", backgroundRepeat: "no-repeat", backgroundPosition: "center" },
+  ".cm-rich-link, .cm-rich-wikilink": { color: "var(--colors-velo-accent-text)", textDecoration: "underline", textDecorationColor: "var(--colors-velo-accent-line)", textUnderlineOffset: "3px" },
+  ".cm-rich-wikilink": { textDecoration: "none", borderBottom: "1px solid var(--colors-velo-accent-line)" },
+  ".cm-rich-missing, .cm-rich-missing *": { color: "var(--colors-velo-danger)", borderBottomStyle: "dashed", borderBottomColor: "var(--colors-velo-danger)" }, // * beats the inner link highlight
+  ".cm-rich-tag": { color: "var(--colors-velo-accent-text)", background: "var(--colors-velo-accent-subtle)", borderRadius: "4px", padding: "0.1em 0.45em", fontSize: "0.8em", fontWeight: "500" },
+  ".cm-rich-bullet": { color: "var(--colors-velo-fg-muted)" },
+  ".cm-rich-check": { width: "1em", height: "1em", margin: "0 0.4em 0 0", verticalAlign: "-0.15em", accentColor: "var(--colors-velo-accent)", cursor: "pointer" },
+  ".cm-rich-quote": { borderLeft: "3px solid var(--colors-velo-accent-halo)", paddingLeft: "1em", color: "var(--colors-velo-fg-muted)" },
+  ".cm-rich-code": { background: "var(--colors-velo-subtle)", padding: "0 1em", fontFamily: '"JetBrains Mono Variable", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace', fontSize: "0.84em" },
+  ".cm-rich-hr": { backgroundImage: "linear-gradient(var(--colors-velo-border), var(--colors-velo-border))", backgroundSize: "100% 1px", backgroundRepeat: "no-repeat", backgroundPosition: "center" },
 });
 
 export function richMarkdown(opts: RichOpts): Extension {

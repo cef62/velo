@@ -1,3 +1,5 @@
+import { editorGlobalCss } from './editor-css'
+
 export const globalCss = {
   extend: {
     '*': {
@@ -15,5 +17,6 @@ export const globalCss = {
       fontFamily: 'ui',
       fontSize: 'ui',
     },
+    ...editorGlobalCss,
   },
 }

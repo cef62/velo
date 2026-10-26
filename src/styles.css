@@ -33,8 +33,6 @@ body { font: var(--font-size, 14px) system-ui, sans-serif; background: var(--bg)
 #preview.empty { color: var(--mute); font-style: italic; }
 #preview-badge { font: inherit; font-size: 12px; border: 0; border-radius: 10px; padding: 2px 10px; background: #2a6fdb; color: #fff; cursor: pointer; }
 #preview-badge[hidden] { display: none; }
-#preview a { color: var(--accent); }
-#preview a.missing { color: var(--missing); }
 .horizontal #preview { border-left: 1px solid var(--line); }
 .vertical.preview-on #note { display: none; }
 #setup { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); z-index: 10; }
@@ -68,23 +66,3 @@ dialog #s-keys td:nth-child(2) button { min-width: 9em; }
 #tagpanel .chip[aria-pressed="true"] { background: #2a6fdb; border-color: #2a6fdb; color: #fff; }
 #tagpanel .chip .n { opacity: 0.7; }
 #filterline[hidden], #tagpanel[hidden] { display: none; }
-#preview a.tag { text-decoration: none; }
-#preview { line-height: 1.6; }
-#preview code { font-family: var(--mono); font-size: 0.92em; background: color-mix(in srgb, var(--fg) 7%, transparent); border-radius: 4px; padding: 0.1em 0.3em; }
-#preview pre { background: color-mix(in srgb, var(--fg) 6%, transparent); border-radius: 6px; padding: 10px 12px; overflow-x: auto; }
-#preview pre code { background: none; padding: 0; }
-#preview blockquote { margin: 0 0 1em; padding: 0 12px; border-left: 3px solid var(--line); color: var(--mute); }
-#preview table { border-collapse: collapse; margin: 0 0 1em; display: block; overflow-x: auto; }
-#preview th, #preview td { border: 1px solid var(--line); padding: 4px 10px; }
-#preview th { background: color-mix(in srgb, var(--fg) 5%, transparent); }
-#preview hr { border: 0; border-top: 1px solid var(--line); }
-#preview .task-list-item { list-style: none; }
-#preview .task-list-item input.task { margin: 0 6px 0 -1.4em; vertical-align: -1px; cursor: pointer; }
-#preview .markdown-alert { color: inherit; border-left-color: var(--alert); }
-#preview .markdown-alert-title { color: var(--alert); font-weight: 600; margin: 0.5em 0 0.25em; }
-#preview .markdown-alert-note { --alert: #2f81f7; }
-#preview .markdown-alert-tip { --alert: #3fb950; }
-#preview .markdown-alert-important { --alert: #a371f7; }
-#preview .markdown-alert-warning { --alert: #d29922; }
-#preview .markdown-alert-caution { --alert: #f85149; }
-#preview .footnotes { font-size: 0.9em; color: var(--mute); }

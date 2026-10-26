@@ -6,31 +6,34 @@ import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { tags as t } from "@lezer/highlight";
 
-// Colors are CSS variables from styles.css, so light/dark follow the OS like the rest of the app.
+// Colors are Panda's velo.* tokens (CSS variables, light/dark via data-theme), so the editor follows the app theme.
+const v = (name: string) => `var(--colors-velo-${name})`;
+const MONO = '"JetBrains Mono Variable", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace';
+
 export const writingHighlight = HighlightStyle.define([
-  { tag: t.heading1, fontSize: "1.6em", fontWeight: "700" },
-  { tag: t.heading2, fontSize: "1.35em", fontWeight: "700" },
-  { tag: t.heading3, fontSize: "1.15em", fontWeight: "700" },
-  { tag: [t.heading4, t.heading5, t.heading6], fontWeight: "700" },
+  { tag: t.heading1, fontSize: "1.6em", lineHeight: "1.25", fontWeight: "700", letterSpacing: "-0.015em" },
+  { tag: t.heading2, fontSize: "1.22em", fontWeight: "650", letterSpacing: "-0.01em" },
+  { tag: t.heading3, fontSize: "1.08em", fontWeight: "650" },
+  { tag: [t.heading4, t.heading5, t.heading6], fontWeight: "650" },
   { tag: t.strong, fontWeight: "700" },
   { tag: t.emphasis, fontStyle: "italic" },
   { tag: t.strikethrough, textDecoration: "line-through" },
-  { tag: [t.link, t.url], color: "var(--accent)" },
-  { tag: t.monospace, fontFamily: "var(--mono)", fontSize: "0.92em" },
-  { tag: t.quote, color: "var(--mute)", fontStyle: "italic" },
+  { tag: [t.link, t.url], color: v("accent-text") },
+  { tag: t.monospace, fontFamily: MONO, fontSize: "0.86em" },
+  { tag: t.quote, color: v("fg-muted") },
   // Markdown punctuation (#, **, >, -, [ ], ```), rules and link labels: present but quiet.
-  { tag: [t.processingInstruction, t.contentSeparator, t.labelName], color: "var(--mute)" },
+  { tag: [t.processingInstruction, t.contentSeparator, t.labelName, t.meta], color: v("mark"), fontWeight: "400", fontStyle: "normal" },
 ]);
 
 const writingTheme = EditorView.theme({
-  "&": { height: "100%", background: "var(--bg)", color: "var(--fg)" },
+  "&": { height: "100%", background: v("canvas"), color: v("fg"), fontSize: "var(--velo-editor-fs, 16px)" },
   "&.cm-focused": { outline: "none" },
-  ".cm-scroller": { fontFamily: "inherit", lineHeight: "1.6" },
-  ".cm-content": { maxWidth: "46em", margin: "0 auto", padding: "16px 24px", caretColor: "var(--fg)" },
-  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--fg)" },
-  "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionLayer .cm-selectionBackground": { background: "var(--sel)" },
-  ".cm-selectionMatch": { background: "color-mix(in srgb, var(--sel) 50%, transparent)" },
-  ".cm-panels": { background: "var(--bg)", color: "var(--fg)", borderColor: "var(--line)" },
+  ".cm-scroller": { fontFamily: '"Inter Variable", Inter, system-ui, -apple-system, "Segoe UI", sans-serif', lineHeight: "1.7" },
+  ".cm-content": { maxWidth: "46em", margin: "0 auto", padding: "28px 40px 40px", caretColor: v("accent") },
+  ".cm-cursor, .cm-dropCursor": { borderLeftColor: v("accent") },
+  ".cm-selectionBackground, &.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground": { background: v("selection-idle") },
+  ".cm-selectionMatch": { background: v("accent-halo") },
+  ".cm-panels": { background: v("chrome"), color: v("fg"), borderColor: v("divider") },
 });
 
 const darkMq = window.matchMedia?.("(prefers-color-scheme: dark)");

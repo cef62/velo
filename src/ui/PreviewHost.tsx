@@ -3,7 +3,7 @@ import { css } from "styled-system/css";
 import { mountPreview, type Preview } from "../preview";
 import type { Controller } from "../app/controller";
 
-const pane = css({ flex: "1", minH: "0", minW: "0", overflowY: "auto", px: "5", py: "3" });
+const pane = css({ flex: "1", minH: "0", minW: "0", overflowY: "auto" });
 
 /** mountPreview owns the aside's `hidden` attribute, so React never renders one; mounted once like the editor (it has no destroy). */
 export function PreviewHost({ controller }: { controller: Controller }) {
