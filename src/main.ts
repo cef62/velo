@@ -573,7 +573,8 @@ void listen<{ done: number; total: number }>("index-progress", (ev) => setIndexi
 void listen("index-done", async () => {
   setIndexing(false);
   $("setup").hidden = true;
-  await runSearch(true);
+  // Also fires after a passphrase reopen: keep the open note selected instead of jumping to row 0.
+  await runSearch(editor.currentPath() === null);
   void refreshTitles();
 });
 void listen<{ message: string }>("index-error", (ev) => {
