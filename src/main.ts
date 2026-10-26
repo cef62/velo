@@ -195,6 +195,10 @@ async function deleteNote() {
     errEl.textContent = BUSY_MSG;
     return;
   }
+  if (q.disabled) {
+    errEl.textContent = errText("indexing"); // the backend would refuse after we detached the editor
+    return;
+  }
   const open = editor.currentPath();
   const path = open ?? results.get(sel)?.path;
   if (!path) return;
