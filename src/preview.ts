@@ -36,8 +36,15 @@ export function externalUrl(href: string): string | null {
   }
 }
 
+export const emptyWatermark = (toggleLabel: string) => "Empty note — press " + toggleLabel + " to edit";
+
+/** Preview must never hide a note the user needs to type in: new notes and empty notes open in edit mode. */
+export const shouldAutoEdit = (o: { created: boolean; body: string; previewOn: boolean }) => o.created || (o.previewOn && o.body.trim() === "");
+
 export interface Preview {
   toggle(): void;
+  setMode(on: boolean): void;
+  isOn(): boolean;
   /** Re-render, debounced 150 ms (editor change or title cache change). */
   refresh(): void;
 }
@@ -47,6 +54,8 @@ export function mountPreview(
   el: HTMLElement,
   opts: {
     getText: () => string;
+    /** Current shortcut label for the empty-note watermark. */
+    toggleLabel: () => string;
     exists: (title: string) => boolean;
     onWikilink: (title: string) => void;
     openExternal: (url: string) => void;
@@ -55,7 +64,11 @@ export function mountPreview(
 ): Preview {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const draw = () => {
-    if (!el.hidden) el.innerHTML = renderMarkdown(opts.getText(), opts.exists);
+    if (el.hidden) return;
+    const text = opts.getText();
+    el.classList.toggle("empty", text.trim() === "");
+    if (text.trim() === "") el.textContent = emptyWatermark(opts.toggleLabel());
+    else el.innerHTML = renderMarkdown(text, opts.exists);
   };
   el.addEventListener("click", (e) => {
     const a = (e.target as HTMLElement).closest?.("a");
@@ -67,12 +80,15 @@ export function mountPreview(
       if (url) opts.openExternal(url);
     }
   });
+  const toggle = () => {
+    el.hidden = !el.hidden;
+    opts.onToggle?.(!el.hidden);
+    draw();
+  };
   return {
-    toggle() {
-      el.hidden = !el.hidden;
-      opts.onToggle?.(!el.hidden);
-      draw();
-    },
+    toggle,
+    setMode: (on) => on === el.hidden && toggle(),
+    isOn: () => !el.hidden,
     refresh() {
       clearTimeout(timer);
       timer = setTimeout(draw, 150);

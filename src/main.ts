@@ -8,7 +8,7 @@ import { shouldClose } from "./close";
 import { latest } from "./latest";
 import { History } from "./history";
 import { enterAction, fold, moveSelection } from "./search";
-import { mountPreview } from "./preview";
+import { mountPreview, shouldAutoEdit } from "./preview";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { askPassphrase, isLockedPath } from "./passphrase";
 import { applyLook, fixedKeyRefusal, recorderStep, toSettings } from "./settingsform";
@@ -77,11 +77,16 @@ const editor = mountEditor($("editor"), {
 });
 const preview = mountPreview($("preview"), {
   getText: () => editor.getText(),
+  toggleLabel: () => formatBinding(keys.toggle_preview, isMac),
   exists: (t) => titles.has(fold(t)),
   onWikilink: (t) => void openTitle(t),
   openExternal: (u) => void openUrl(u).catch((e) => (errEl.textContent = String(e))),
-  onToggle: (on) => $("app").classList.toggle("preview-on", on),
+  onToggle: (on) => {
+    $("app").classList.toggle("preview-on", on);
+    $("preview-badge").hidden = !on;
+  },
 });
+$("preview-badge").onclick = () => preview.setMode(false);
 
 async function refreshTitles() {
   try {
@@ -114,6 +119,7 @@ async function show(path: string, how: "explicit" | "auto" | "nav" = "explicit",
     if (!editor.load(doc)) return false;
     titleEl.textContent = doc.title;
     clearErr();
+    if (shouldAutoEdit({ created: false, body: doc.text, previewOn: preview.isOn() })) preview.setMode(false);
     history.loaded(doc.path, how);
   } catch (e) {
     if (how === "nav" && e === "not-found") return "missing";
@@ -297,6 +303,7 @@ async function openSettings() {
     applyLook(next);
     list.setRowH(rowHeight());
     keys = resolve(next.shortcuts);
+    preview.refresh(); // watermark shows the binding
     sort = next.sort;
     syncSort();
     dlg.close();
@@ -381,6 +388,8 @@ async function enter() {
     if (a.kind === "open") {
       if (!(await show(a.path))) return;
     } else if (!(await openTitle(a.title))) return;
+    // In the vertical layout preview hides #note (display:none), where focus() silently does nothing.
+    preview.setMode(false);
     editor.focus();
   } catch (e) {
     errEl.textContent = errText(e);
@@ -395,12 +404,19 @@ async function openTitle(title: string): Promise<boolean> {
   }
   try {
     if (!(await editor.flush())) return false;
+    // The title cache is the "existed before" signal (open_or_create returns a plain NoteDoc). A stale cache only
+    // mislabels an empty/external note, which the empty-body rule below still opens in edit mode.
+    const created = !titles.has(fold(title));
     const doc = await api.openOrCreate(title);
     if (!editor.load(doc)) return false;
     titleEl.textContent = doc.title;
     errEl.textContent = "";
+    if (shouldAutoEdit({ created, body: doc.text, previewOn: preview.isOn() })) preview.setMode(false);
     history.loaded(doc.path, "explicit");
-    await runSearch(false);
+    if (created) {
+      q.value = doc.title; // list the new note, selected (resort keeps the open note selected)
+      await resort();
+    } else await runSearch(false);
     void refreshTitles();
     return true;
   } catch (e) {
