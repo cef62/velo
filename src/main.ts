@@ -73,6 +73,7 @@ const editor = mountEditor($("editor"), {
   onEscape: focusSearch,
   onError: (m) => (errEl.textContent = m ? errText(m) : ""),
   onChange: () => preview.refresh(),
+  onEdit: () => history.edited(editor.currentPath()),
 });
 const preview = mountPreview($("preview"), {
   getText: () => editor.getText(),
@@ -100,7 +101,7 @@ function focusSearch() {
  * false = refused: unsaved edits could not be saved (error stays visible), nothing changed.
  * "missing" (only when `nav`, i.e. a history step, which does not record a visit) = the file is gone; no error shown.
  */
-async function show(path: string, retried = false, nav = false): Promise<boolean | "missing"> {
+async function show(path: string, how: "explicit" | "auto" | "nav" = "explicit", retried = false): Promise<boolean | "missing"> {
   if (busy) {
     errEl.textContent = BUSY_MSG;
     return false;
@@ -113,11 +114,12 @@ async function show(path: string, retried = false, nav = false): Promise<boolean
     if (!editor.load(doc)) return false;
     titleEl.textContent = doc.title;
     clearErr();
-    if (!nav) history.visit(doc.path);
+    history.loaded(doc.path, how);
   } catch (e) {
-    if (nav && e === "not-found") return "missing";
-    if (e === "locked" && !retried && (await promptPassphrase())) return show(path, true, nav);
+    if (how === "nav" && e === "not-found") return "missing";
+    if (e === "locked" && !retried && (await promptPassphrase())) return show(path, how, true);
     errEl.textContent = e === "locked" ? "Note is locked" : errText(e);
+    if (how === "nav") return false; // history cursor must be restored
   }
   return true;
 }
@@ -178,7 +180,7 @@ async function lockHandoff(path: string) {
       editor.resume();
       titleEl.textContent = doc.title;
       clearErr();
-      history.visit(np);
+      history.loaded(np, "explicit");
     }
     await runSearch(false);
     selectOpen();
@@ -289,7 +291,7 @@ async function openSettings() {
     try {
       await api.setSettings(next); // on hotkey registration failure this throws and the old hotkey stays
     } catch (err) {
-      msg.textContent = String(err);
+      msg.textContent = err === "not-found" ? "Folder not found" : String(err);
       return;
     }
     applyLook(next);
@@ -313,11 +315,11 @@ function selectOpen() {
   list.setSelected(sel);
 }
 
-async function select(i: number) {
+async function select(i: number, how: "explicit" | "auto" = "explicit") {
   sel = i;
   list.setSelected(i);
   const h = results.get(i);
-  if (h && !(await show(h.path))) selectOpen(); // refused: snap back to the open note
+  if (h && !(await show(h.path, how))) selectOpen(); // refused: snap back to the open note
 }
 
 /** true = fresh first page (new query/folder/sort), selecting its first row; false = reload the loaded range in place. */
@@ -329,7 +331,7 @@ async function runSearch(selectFirst: boolean) {
     if (selectFirst) {
       list.toTop();
       list.update();
-      void select(results.count ? 0 : -1);
+      void select(results.count ? 0 : -1, "auto");
     } else {
       list.update();
       selectOpen();
@@ -397,7 +399,7 @@ async function openTitle(title: string): Promise<boolean> {
     if (!editor.load(doc)) return false;
     titleEl.textContent = doc.title;
     errEl.textContent = "";
-    history.visit(doc.path);
+    history.loaded(doc.path, "explicit");
     await runSearch(false);
     void refreshTitles();
     return true;
@@ -432,7 +434,7 @@ function startRename() {
       if (!editor.load(await api.openNote(r.path))) return;
       titleEl.textContent = title;
       errEl.textContent = "";
-      history.visit(r.path);
+      history.loaded(r.path, "explicit");
       await runSearch(false);
     } catch (e) {
       errEl.textContent = e === "already-exists" ? "A note with that title exists" : errText(e);
@@ -467,7 +469,7 @@ async function navigate(dir: "back" | "forward") {
   for (let tries = 0; tries < 1000; tries++) { // each miss removes an entry, so this ends well before the cap
     const target = history[dir](() => true);
     if (!target) return;
-    const r = await show(target, false, true);
+    const r = await show(target, "nav");
     if (r === true) return selectOpen();
     history[undo](() => true);
     if (r === false) return;

@@ -26,7 +26,7 @@ export interface Editor {
 
 const stem = (p: string) => (p.split(/[\\/]/).pop() ?? p).replace(/\.[^.]+$/, "");
 
-export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onError?: (msg: string | null) => void; onChange?: () => void } = {}): Editor {
+export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onError?: (msg: string | null) => void; onChange?: () => void; onEdit?: () => void } = {}): Editor {
   const banner = document.createElement("div");
   banner.className = "banner";
   banner.hidden = true;
@@ -50,6 +50,7 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
         if (!u.docChanged) return;
         opts.onChange?.(); // also fires on load so the preview follows note switches
         if (loading) return;
+        opts.onEdit?.(); // user edits only (not loads)
         ctrl.edit();
       }),
     ],

@@ -2,6 +2,7 @@
 export class History {
   private e: string[] = [];
   private i = -1;
+  private pending: string | null = null; // auto-shown note, recorded on its first edit
 
   get canBack() { return this.i > 0; }
   get canForward() { return this.i < this.e.length - 1; }
@@ -31,7 +32,20 @@ export class History {
     return this.e[this.i];
   }
 
+  /** A note was loaded. Explicit opens record a visit; auto-shown ones (search typing, startup) wait for an edit. */
+  loaded(path: string, how: "explicit" | "auto" | "nav") {
+    if (how === "explicit") this.visit(path);
+    this.pending = how === "auto" ? path : null;
+  }
+
+  /** The user edited the open note: record it if it was only auto-shown. */
+  edited(path: string | null) {
+    if (path && path === this.pending) this.visit(path);
+    this.pending = null;
+  }
+
   rename(oldPath: string, newPath: string) {
+    if (this.pending === oldPath) this.pending = newPath;
     this.e = this.e.map((p) => (p === oldPath ? newPath : p));
   }
 
