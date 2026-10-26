@@ -30,9 +30,14 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | ⌘⇧S | Ctrl+Shift+S | Toggle sort (last modified / title) |
 | ⌘[ / ⌘] | Ctrl+[ / Ctrl+] | Back / forward through visited notes |
 | ⌘, | Ctrl+, | Settings |
+| ⌘⇧T | Ctrl+Shift+T | Show / hide the tag panel |
 | ⌘⇧Space | Ctrl+Shift+Space | Show / hide velo (system-wide) |
 
 Fixed: Enter (in search) opens the highlighted note, or creates a note titled with the query when nothing matches; Shift+Enter creates a note titled exactly as typed (or opens that exact title if it exists); ↑ / ↓ move the selection; Esc (in editor) returns to search.
+
+## Tags
+
+Write `#tag` anywhere in a note (at the start of a line, after a space, or after `(`; letters, digits, `_`, `-`, `/`; at least one letter; not in fenced code blocks; `# Heading` is not a tag). The `#` button next to search (or ⌘⇧T) shows every tag with its note count; click chips to filter the list to notes having all selected tags, combined with the search text. A "Filtered by" line stays visible while tags are selected. In the preview, click a `#tag` to filter by it. Locked notes are not listed in the tag panel.
 
 ## Storage
 

@@ -31,3 +31,11 @@ test("afterOpen", () => {
   expect(afterOpen({ ...base, source: "wikilink" })).toEqual({ leavePreview: false, focusEditor: false });
   expect(afterOpen({ ...base, body: " ", source: "wikilink" })).toEqual({ leavePreview: true, focusEditor: true });
 });
+test("preview renders tag chips, not in code or headings", () => {
+  const out = renderMarkdown("# Head\n\n#work and `#code` C#\n\n```\n#fence\n```", () => true);
+  expect(out).toContain('class="tag" data-tag="work"');
+  expect(out).not.toContain('data-tag="code"');
+  expect(out).not.toContain('data-tag="fence"');
+  expect(out).not.toContain('data-tag="Head"');
+});
+test("tag chip escapes", () => expect(renderMarkdown('#a"b', () => true)).not.toContain('data-tag="a"b"'));

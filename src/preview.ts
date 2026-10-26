@@ -1,4 +1,5 @@
 import MarkdownIt from "markdown-it";
+import { readTag } from "./tags";
 
 const md = new MarkdownIt({ html: false, linkify: true });
 const esc = md.utils.escapeHtml;
@@ -20,6 +21,16 @@ md.renderer.rules.wikilink = (tokens, i) => {
   const t = tokens[i].content;
   return `<a href="#" class="wikilink${exists(t) ? "" : " missing"}" data-title="${esc(t)}">${esc(t)}</a>`;
 };
+
+// Code spans/fences are separate tokens, so tags inside them never reach this rule (Rust, which indexes, skips fences only).
+md.inline.ruler.before("link", "tag", (state, silent) => {
+  const tag = readTag(state.src, state.pos);
+  if (!tag) return false;
+  if (!silent) state.push("tag", "", 0).content = tag;
+  state.pos += 1 + tag.length;
+  return true;
+});
+md.renderer.rules.tag = (tokens, i) => `<a href="#" class="tag" data-tag="${esc(tokens[i].content)}">#${esc(tokens[i].content)}</a>`;
 
 export function renderMarkdown(text: string, existsFn: (title: string) => boolean): string {
   exists = existsFn;
@@ -66,6 +77,7 @@ export function mountPreview(
     toggleLabel: () => string;
     exists: (title: string) => boolean;
     onWikilink: (title: string) => void;
+    onTag: (tag: string) => void;
     openExternal: (url: string) => void;
     onToggle?: (visible: boolean) => void;
   },
@@ -83,6 +95,7 @@ export function mountPreview(
     if (!a) return;
     e.preventDefault(); // never navigate the app window
     if (a.classList.contains("wikilink")) opts.onWikilink(a.dataset.title ?? "");
+    else if (a.classList.contains("tag")) opts.onTag(a.dataset.tag ?? "");
     else {
       const url = externalUrl(a.getAttribute("href") ?? "");
       if (url) opts.openExternal(url);

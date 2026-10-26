@@ -9,6 +9,7 @@ import { latest } from "./latest";
 import { History } from "./history";
 import { errText } from "./errtext";
 import { enterAction, fold, moveSelection } from "./search";
+import { filterLabel, pruneSelection, toggleTag } from "./tags";
 import { afterOpen, mountPreview, shouldAutoEdit } from "./preview";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { askPassphrase, isLockedPath } from "./passphrase";
@@ -25,6 +26,8 @@ const isMac = navigator.platform.startsWith("Mac");
 
 let sel = -1;
 let searchSeq = 0;
+let selectedTags: string[] = []; // session-only tag filter (AND), display spellings
+let allTags: api.TagCount[] = [];
 let sort: api.Settings["sort"] = "modified"; // mirrors settings.sort; set from settings before the first search
 
 /** Row height in px: the CSS --row-h (scales with the font size), measured so CSS and JS cannot drift. */
@@ -36,7 +39,7 @@ function rowHeight(): number {
   probe.remove();
   return h || 44;
 }
-const results = new Results((offset) => api.search(q.value, sort, offset, []));
+const results = new Results((offset) => api.search(q.value, sort, offset, selectedTags));
 const list = mountList($("list"), { results, rowH: rowHeight(), onSelect: (i) => void select(i) });
 const sortBtn = $<HTMLButtonElement>("sort");
 
@@ -72,6 +75,10 @@ const preview = mountPreview($("preview"), {
   toggleLabel: () => formatBinding(keys.toggle_preview, isMac),
   exists: (t) => titles.has(fold(t)),
   onWikilink: (t) => void openTitle(t, "wikilink"),
+  onTag: (t) => {
+    showTags(true);
+    if (!selectedTags.some((s) => fold(s) === fold(t))) setTags(toggleTag(selectedTags, t));
+  },
   openExternal: (u) => void openUrl(u).catch((e) => (errEl.textContent = String(e))),
   onToggle: (on) => {
     $("app").classList.toggle("preview-on", on);
@@ -376,12 +383,13 @@ async function select(i: number, how: "explicit" | "auto" = "explicit") {
 
 /** true = fresh first page (new query/folder/sort), selecting its first row; false = reload the loaded range in place. */
 let searching: Promise<void> = Promise.resolve(); // latest list reset, awaited by Enter so it never acts on stale rows
-function runSearch(selectFirst: boolean): Promise<void> {
-  const p = doSearch(selectFirst);
+function runSearch(selectFirst: boolean, keepOpen = false): Promise<void> {
+  const p = doSearch(selectFirst, keepOpen);
   if (selectFirst) searching = p;
   return p;
 }
-async function doSearch(selectFirst: boolean) {
+/** keepOpen: after a reset, stay on the open note when it is in the new first page instead of opening row 0. */
+async function doSearch(selectFirst: boolean, keepOpen: boolean) {
   const seq = ++searchSeq;
   try {
     await (selectFirst ? results.reset() : results.refresh());
@@ -389,7 +397,8 @@ async function doSearch(selectFirst: boolean) {
     if (selectFirst) {
       list.toTop();
       list.update();
-      void select(results.count ? 0 : -1, "auto");
+      if (keepOpen && results.indexOf(editor.currentPath() ?? "") >= 0) selectOpen();
+      else void select(results.count ? 0 : -1, "auto");
     } else {
       list.update();
       selectOpen();
@@ -398,6 +407,66 @@ async function doSearch(selectFirst: boolean) {
     if (e === "no-folder") $("setup").hidden = false;
     else if (e !== "indexing") console.error("search failed", e);
   }
+}
+
+const tagPanel = $("tagpanel");
+const tagBtn = $<HTMLButtonElement>("tagbtn");
+const filterLine = $("filterline");
+const isSelected = (t: string) => selectedTags.some((s) => fold(s) === fold(t));
+
+function renderTags() {
+  tagPanel.replaceChildren(
+    ...allTags.map(({ tag, count }) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "chip";
+      b.setAttribute("aria-pressed", String(isSelected(tag)));
+      b.append(`#${tag} `);
+      const n = document.createElement("span");
+      n.className = "n";
+      n.textContent = String(count);
+      b.append(n);
+      b.onclick = () => setTags(toggleTag(selectedTags, tag));
+      return b;
+    }),
+  );
+  if (selectedTags.length) {
+    const c = document.createElement("button");
+    c.type = "button";
+    c.className = "clear";
+    c.textContent = "Clear";
+    c.onclick = () => setTags([]);
+    tagPanel.append(c);
+  }
+  filterLine.hidden = !selectedTags.length;
+  filterLine.firstElementChild!.textContent = filterLabel(selectedTags);
+}
+
+function showTags(on: boolean) {
+  tagPanel.hidden = !on;
+  tagBtn.setAttribute("aria-pressed", String(on));
+  tagBtn.setAttribute("aria-label", on ? "Hide tags" : "Show tags");
+}
+
+/** Tag filter changed: fresh first page, keeping the open note selected if it is still listed. */
+function setTags(next: string[]) {
+  selectedTags = next;
+  renderTags();
+  void runSearch(true, true);
+}
+
+async function refreshTags() {
+  try {
+    allTags = await api.listTags();
+  } catch (e) {
+    if (e !== "indexing") console.error("tag refresh failed", e);
+    return;
+  }
+  const kept = pruneSelection(selectedTags, allTags);
+  const pruned = kept.length !== selectedTags.length;
+  selectedTags = kept;
+  renderTags();
+  if (pruned) void runSearch(true, true);
 }
 
 function syncSort() {
@@ -543,6 +612,8 @@ $("lockall").onclick = () => void lockEverything();
 $("trash").onclick = () => void deleteNote();
 $("gear").onclick = () => void openSettings();
 sortBtn.onclick = () => void toggleSort();
+tagBtn.onclick = () => showTags(tagPanel.hidden === true);
+filterLine.querySelector("button")!.onclick = () => setTags([]);
 
 /** Step through history. Does not record a visit; a refused load puts the cursor back, a vanished file is dropped and skipped. */
 async function navigate(dir: "back" | "forward") {
@@ -581,6 +652,7 @@ const ACTIONS: Record<Exclude<Action, "toggle_window">, () => void> = {
   back: goBack,
   forward: goForward,
   delete_note: () => void deleteNote(),
+  toggle_tags: () => showTags(tagPanel.hidden === true),
 };
 let keys = resolve(undefined, isMac); // refreshed from settings at startup and after save
 
@@ -621,6 +693,7 @@ $("choose").onclick = async () => {
 void listen<{ paths: string[] }>("notes-changed", async (ev) => {
   await runSearch(false);
   void refreshTitles();
+  void refreshTags();
   const open = editor.currentPath();
   if (open && ev.payload.paths.includes(open)) editor.onExternalChange(open);
 });
@@ -632,6 +705,7 @@ void listen("index-done", async () => {
   // Also fires after a passphrase reopen: keep the open note selected instead of jumping to row 0.
   await runSearch(editor.currentPath() === null);
   void refreshTitles();
+  void refreshTags();
 });
 void listen<{ message: string }>("index-error", (ev) => {
   setIndexing(false);
@@ -662,6 +736,7 @@ void (async () => {
   else if (!st) {
     await runSearch(true);
     void refreshTitles();
+    void refreshTags();
   }
   focusSearch();
 })();
