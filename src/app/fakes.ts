@@ -114,6 +114,8 @@ export class FakePreview implements Preview {
 export function fakeUi() {
   const calls: [string, ...unknown[]][] = [];
   const answers = { confirm: true, passphrase: false, directory: null as string | null };
+  // popupMenu contract: each open closes the previous menu first, so at most one stays open.
+  const menus: { items: unknown[]; closed: boolean }[] = [];
   const rec = <A extends unknown[], R>(name: string, ret: (...a: A) => R) => (...a: A) => (calls.push([name, ...a]), ret(...a));
   const ui: UiPort = {
     focusSearch: rec("focusSearch", () => {}),
@@ -123,10 +125,13 @@ export function fakeUi() {
     openUrl: rec("openUrl", async () => {}),
     reveal: rec("reveal", async () => {}),
     copyText: rec("copyText", async () => {}),
-    popupMenu: rec("popupMenu", async () => {}),
+    popupMenu: rec("popupMenu", async (items) => {
+      for (const m of menus) m.closed = true;
+      menus.push({ items, closed: false });
+    }),
     rowAnchor: rec("rowAnchor", () => null),
     setWindowTheme: rec("setWindowTheme", () => {}),
     applyLook: rec("applyLook", () => {}),
   };
-  return { ui, calls, answers };
+  return { ui, calls, answers, menus };
 }

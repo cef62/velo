@@ -13,7 +13,11 @@ export interface UiPort {
   openUrl(url: string): Promise<void>;
   reveal(path: string): Promise<void>;
   copyText(t: string): Promise<void>;
-  popupMenu(items: MenuSpec[], anchor: { x: number; y: number } | null): Promise<void>; // native menu
+  /**
+   * Native menu. Resolves once the menu is shown (not when it closes), so the implementation must close the
+   * previous menu and its items (freeing their Rust-side resources) before building the next one, swallowing close errors.
+   */
+  popupMenu(items: MenuSpec[], anchor: { x: number; y: number } | null): Promise<void>;
   rowAnchor(i: number): { x: number; y: number } | null; // keyboard menu anchor (bottom-left of row + 16px)
   setWindowTheme(t: "light" | "dark" | null): void;
   applyLook(s: { theme: AppState["theme"]; fontSize: number; layout: AppState["layout"] }): void; // data-theme, font scale, layout

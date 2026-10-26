@@ -6,13 +6,13 @@ import { createStore, initialState } from "./store";
 
 function setup(notes: Record<string, string> = { A: "a", B: "b", C: "c" }) {
   const { api } = fakeApi(notes);
-  const { ui, calls } = fakeUi();
+  const { ui, calls, menus } = fakeUi();
   const store = createStore(initialState(true));
   const c = new Controller(store, api, ui, { isMac: true, platform: "mac" });
   const editor = new FakeEditor();
   c.attachEditor(editor);
   c.attachPreview(new FakePreview());
-  return { c, api, ui, calls, store, editor, notes };
+  return { c, api, ui, calls, store, editor, notes, menus };
 }
 const P = (t: string) => `/n/${t}.md`;
 
@@ -311,4 +311,16 @@ test("rename commits through flush, backlinks confirm and reload", async () => {
   c.startRename();
   await c.commitRename(null);
   expect(api.renameNote).toHaveBeenCalledTimes(1);
+});
+
+test("context menu: one popup per open (menuBusy), previous menu closed on the next open", async () => {
+  const { c, menus } = setup();
+  await c.runSearch(true);
+  await settle();
+  await Promise.all([c.openContextMenu(1), c.openContextMenu(1)]); // second call refused while the first is in flight
+  expect(menus.length).toBe(1);
+  await c.openContextMenu(0);
+  expect(menus.length).toBe(2);
+  expect(menus.filter((m) => !m.closed).length).toBe(1);
+  expect(menus[0].closed).toBe(true);
 });
