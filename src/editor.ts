@@ -1,7 +1,6 @@
 import { Compartment } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
-import { basicSetup } from "codemirror";
-import { markdown } from "@codemirror/lang-markdown";
+import { writingSetup } from "./editortheme";
 import { SaveController } from "./saver";
 import { openNote, saveNote, type NoteDoc } from "./api";
 
@@ -45,9 +44,7 @@ export function mountEditor(el: HTMLElement, opts: { onEscape?: () => void; onEr
   const view = new EditorView({
     parent: host,
     extensions: [
-      basicSetup,
-      markdown(),
-      EditorView.lineWrapping,
+      writingSetup(),
       editable.of(EditorView.editable.of(false)),
       keymap.of([{ key: "Escape", run: () => (opts.onEscape?.(), true) }]),
       EditorView.updateListener.of((u) => {
