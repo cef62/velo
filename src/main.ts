@@ -10,8 +10,8 @@ import { enterAction, fold, moveSelection } from "./search";
 import { mountPreview } from "./preview";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { askPassphrase, isLockedPath } from "./passphrase";
-import { applyLook, fixedKeyRefusal, toSettings } from "./settingsform";
-import { DEFAULTS, LABELS, eventToBinding, formatBinding, isAltGraph, matches, resolve, validateBinding, type Action } from "./shortcuts";
+import { applyLook, fixedKeyRefusal, recorderStep, toSettings } from "./settingsform";
+import { DEFAULTS, LABELS, formatBinding, matches, resolve, validateBinding, type Action } from "./shortcuts";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const q = $<HTMLInputElement>("q");
@@ -243,7 +243,7 @@ async function openSettings() {
   const draft = resolve(cur.shortcuts);
   let recording: Action | null = null;
   const table = $<HTMLTableElement>("s-keys");
-  const render = () => {
+  const render = (focus?: Action) => {
     table.replaceChildren();
     for (const a of Object.keys(DEFAULTS) as Action[]) {
       const tr = table.insertRow();
@@ -251,8 +251,9 @@ async function openSettings() {
       const rec = document.createElement("button");
       rec.type = "button";
       rec.textContent = recording === a ? "Press keys…" : formatBinding(draft[a], isMac);
-      rec.onclick = () => { recording = a; msg.textContent = ""; render(); };
+      rec.onclick = () => { msg.textContent = ""; setRecording(a); };
       tr.insertCell().append(rec);
+      if (a === focus) rec.focus(); // render() destroys the clicked button; keep focus on the row
       const reset = document.createElement("button");
       reset.type = "button";
       reset.textContent = "Reset";
@@ -266,20 +267,28 @@ async function openSettings() {
     const reason = v.ok ? fixedKeyRefusal(binding) : v.reason;
     if (reason) msg.textContent = reason;
     else { draft[a] = binding; msg.textContent = ""; }
-    recording = null;
-    render();
+    setRecording(null, a);
   };
-  // Capture phase, registered on the dialog: owns every key while recording so menu/webview defaults (⌘W, ⌘,) don't act.
-  dlg.onkeydown = (e) => {
-    if (!recording) return;
+  // While recording, a window-level capture listener owns every key (focus may be on body after a re-render),
+  // so menu/webview defaults (⌘W, ⌘,) don't act. Removed whenever recording ends.
+  const onKey = (e: KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.key === "Escape") { recording = null; render(); return; }
-    const b = isAltGraph(e, isMac) ? null : eventToBinding(e, isMac);
-    if (b) assign(recording, b);
+    const step = recorderStep(recording, e, isMac, draft);
+    if (step.msg !== undefined) msg.textContent = step.msg;
+    if (step.assign) draft[recording!] = step.assign;
+    const done = recording!;
+    if (step.recording === null) setRecording(null, done);
   };
+  const setRecording = (a: Action | null, focus?: Action) => {
+    window.removeEventListener("keydown", onKey, true);
+    recording = a;
+    if (a) window.addEventListener("keydown", onKey, true);
+    render(a ?? focus);
+  };
+  dlg.onclose = () => setRecording(null);
   dlg.oncancel = (e) => { if (recording) e.preventDefault(); };
-  $("s-reset-all").onclick = () => { Object.assign(draft, DEFAULTS); recording = null; msg.textContent = ""; render(); };
+  $("s-reset-all").onclick = () => { Object.assign(draft, DEFAULTS); msg.textContent = ""; setRecording(null); };
   render();
   $("s-choose").onclick = async () => {
     const d = await open({ directory: true });

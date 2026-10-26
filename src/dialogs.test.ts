@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { isLockedPath, passphraseDialogMode, passphraseError } from "./passphrase";
-import { clampFont, fixedKeyRefusal, layoutClass, toSettings } from "./settingsform";
+import { DEFAULTS } from "./shortcuts";
+import { clampFont, fixedKeyRefusal, layoutClass, recorderStep, toSettings } from "./settingsform";
 
 const base = { notes_dir: "/n", layout: "vertical" as const, font_size: 14, sort: "modified" as const, shortcuts: { toggle_window: "Mod+KeyA", rename: "Mod+KeyR" } };
 
@@ -38,6 +39,26 @@ test("recorder refuses fixed keys", () => {
   for (const k of ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", "Tab", "Backspace"])
     expect(fixedKeyRefusal(`Mod+${k}`)).toBeTruthy();
   expect(fixedKeyRefusal("Mod+KeyL")).toBeNull();
+});
+
+const ev = (code: string, o = {}) => ({ code, metaKey: true, ctrlKey: false, altKey: false, shiftKey: false, ...o });
+const draft = { ...DEFAULTS };
+
+test("recorder: valid key records and ends", () => {
+  expect(recorderStep("rename", ev("KeyB"), true, draft)).toEqual({ recording: null, assign: "Mod+KeyB", msg: "" });
+});
+
+test("recorder: fixed key refused, stays recording", () => {
+  const s = recorderStep("rename", ev("Enter"), true, draft);
+  expect(s.recording).toBe("rename");
+  expect(s.msg).toBeTruthy();
+  expect(s.assign).toBeUndefined();
+});
+
+test("recorder: modifier alone keeps recording; Escape cancels; idle ignores", () => {
+  expect(recorderStep("rename", ev("MetaLeft"), true, draft)).toEqual({ recording: "rename" });
+  expect(recorderStep("rename", ev("Escape"), true, draft)).toEqual({ recording: null });
+  expect(recorderStep(null, ev("KeyB"), true, draft)).toEqual({ recording: null });
 });
 
 test("layout class", () => {

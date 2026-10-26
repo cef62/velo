@@ -1,5 +1,5 @@
 import type { Settings } from "./api";
-import type { Action } from "./shortcuts";
+import { eventToBinding, isAltGraph, validateBinding, type Action } from "./shortcuts";
 
 export const layoutClass = (l: string): Settings["layout"] => (l === "horizontal" ? "horizontal" : "vertical");
 
@@ -28,6 +28,23 @@ const FIXED = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Esca
 export function fixedKeyRefusal(binding: string): string | null {
   const key = binding.split("+").pop()!;
   return FIXED.includes(key) ? `${key} has a fixed meaning and can't be remapped` : null;
+}
+
+export interface RecorderStep { recording: Action | null; assign?: string; msg?: string }
+
+/** Recorder state machine: next state for one keydown. `recording: null` = recording ended; keys while idle are ignored. */
+export function recorderStep(
+  recording: Action | null,
+  e: Parameters<typeof eventToBinding>[0] & { getModifierState?: (k: string) => boolean },
+  isMac: boolean,
+  draft: Record<Action, string>,
+): RecorderStep {
+  if (!recording || e.code === "Escape") return { recording: null };
+  const b = isAltGraph(e, isMac) ? null : eventToBinding(e, isMac);
+  if (!b) return { recording }; // bare modifier press
+  const v = validateBinding(draft, recording, b);
+  const reason = v.ok ? fixedKeyRefusal(b) : v.reason;
+  return reason ? { recording, msg: reason } : { recording: null, assign: b, msg: "" };
 }
 
 /** Apply layout class and font size live. */
