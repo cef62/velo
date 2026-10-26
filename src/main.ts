@@ -10,8 +10,8 @@ import { enterAction, fold, moveSelection } from "./search";
 import { mountPreview } from "./preview";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { askPassphrase, isLockedPath } from "./passphrase";
-import { applyLook, toSettings } from "./settingsform";
-import { matches, resolve, type Action } from "./shortcuts";
+import { applyLook, fixedKeyRefusal, toSettings } from "./settingsform";
+import { DEFAULTS, LABELS, eventToBinding, formatBinding, isAltGraph, matches, resolve, validateBinding, type Action } from "./shortcuts";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const q = $<HTMLInputElement>("q");
@@ -236,10 +236,51 @@ async function openSettings() {
   let dir = cur.notes_dir;
   const field = (id: string) => $<HTMLInputElement>(id);
   $("s-dir").textContent = dir ?? "(none)";
-  field("s-hotkey").value = cur.shortcuts.toggle_window ?? "Mod+Shift+Space";
   field("s-layout").value = cur.layout;
   field("s-font").value = String(cur.font_size);
+  field("s-sort").value = cur.sort;
   msg.textContent = "";
+  const draft = resolve(cur.shortcuts);
+  let recording: Action | null = null;
+  const table = $<HTMLTableElement>("s-keys");
+  const render = () => {
+    table.replaceChildren();
+    for (const a of Object.keys(DEFAULTS) as Action[]) {
+      const tr = table.insertRow();
+      tr.insertCell().textContent = LABELS[a];
+      const rec = document.createElement("button");
+      rec.type = "button";
+      rec.textContent = recording === a ? "Press keys…" : formatBinding(draft[a], isMac);
+      rec.onclick = () => { recording = a; msg.textContent = ""; render(); };
+      tr.insertCell().append(rec);
+      const reset = document.createElement("button");
+      reset.type = "button";
+      reset.textContent = "Reset";
+      reset.disabled = draft[a] === DEFAULTS[a];
+      reset.onclick = () => assign(a, DEFAULTS[a]);
+      tr.insertCell().append(reset);
+    }
+  };
+  const assign = (a: Action, binding: string) => {
+    const v = validateBinding(draft, a, binding);
+    const reason = v.ok ? fixedKeyRefusal(binding) : v.reason;
+    if (reason) msg.textContent = reason;
+    else { draft[a] = binding; msg.textContent = ""; }
+    recording = null;
+    render();
+  };
+  // Capture phase, registered on the dialog: owns every key while recording so menu/webview defaults (⌘W, ⌘,) don't act.
+  dlg.onkeydown = (e) => {
+    if (!recording) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === "Escape") { recording = null; render(); return; }
+    const b = isAltGraph(e, isMac) ? null : eventToBinding(e, isMac);
+    if (b) assign(recording, b);
+  };
+  dlg.oncancel = (e) => { if (recording) e.preventDefault(); };
+  $("s-reset-all").onclick = () => { Object.assign(draft, DEFAULTS); recording = null; msg.textContent = ""; render(); };
+  render();
   $("s-choose").onclick = async () => {
     const d = await open({ directory: true });
     if (typeof d === "string") $("s-dir").textContent = dir = d;
@@ -247,7 +288,7 @@ async function openSettings() {
   (form.querySelector("[value=cancel]") as HTMLButtonElement).onclick = () => dlg.close();
   form.onsubmit = async (e) => {
     e.preventDefault();
-    const next = { ...toSettings(cur, { hotkey: field("s-hotkey").value, layout: field("s-layout").value, fontSize: field("s-font").value }), notes_dir: dir };
+    const next = { ...toSettings(cur, { layout: field("s-layout").value, fontSize: field("s-font").value, sort: field("s-sort").value, shortcuts: draft }), notes_dir: dir };
     try {
       await api.setSettings(next); // on hotkey registration failure this throws and the old hotkey stays
     } catch (err) {
@@ -256,7 +297,7 @@ async function openSettings() {
     }
     applyLook(next);
     keys = resolve(next.shortcuts);
-    sort = next.sort ?? "modified";
+    sort = next.sort;
     dlg.close();
     if (next.notes_dir !== cur.notes_dir) {
       $("setup").hidden = true;

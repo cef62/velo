@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { isLockedPath, passphraseDialogMode, passphraseError } from "./passphrase";
-import { clampFont, layoutClass, toSettings } from "./settingsform";
+import { clampFont, fixedKeyRefusal, layoutClass, toSettings } from "./settingsform";
 
 const base = { notes_dir: "/n", layout: "vertical" as const, font_size: 14, sort: "modified" as const, shortcuts: { toggle_window: "Mod+KeyA", rename: "Mod+KeyR" } };
 
@@ -29,8 +29,15 @@ test("font clamps to 10-32, junk falls back", () => {
 });
 
 test("form to settings", () => {
-  expect(toSettings(base, { hotkey: " Mod+KeyB ", layout: "horizontal", fontSize: "40" })).toEqual({ ...base, shortcuts: { ...base.shortcuts, toggle_window: "Mod+KeyB" }, layout: "horizontal", font_size: 32 });
-  expect(toSettings(base, { hotkey: "", layout: "bogus", fontSize: "12" })).toEqual({ ...base, font_size: 12 });
+  const f = { layout: "horizontal", fontSize: "40", sort: "title", shortcuts: { ...base.shortcuts, rename: "Mod+KeyB" } as never };
+  expect(toSettings(base, f)).toEqual({ ...base, shortcuts: f.shortcuts, layout: "horizontal", font_size: 32, sort: "title" });
+  expect(toSettings(base, { ...f, layout: "bogus", fontSize: "12", sort: "bogus" })).toEqual({ ...base, shortcuts: f.shortcuts, font_size: 12 });
+});
+
+test("recorder refuses fixed keys", () => {
+  for (const k of ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", "Tab", "Backspace"])
+    expect(fixedKeyRefusal(`Mod+${k}`)).toBeTruthy();
+  expect(fixedKeyRefusal("Mod+KeyL")).toBeNull();
 });
 
 test("layout class", () => {

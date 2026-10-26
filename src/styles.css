@@ -42,3 +42,6 @@ dialog label { display: flex; gap: 8px; align-items: center; justify-content: sp
 dialog input[hidden] { display: none; }
 dialog .msg { color: #c33; min-height: 1.2em; }
 dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
+dialog #s-keys { border-collapse: collapse; }
+dialog #s-keys td { padding: 2px 4px; }
+dialog #s-keys td:nth-child(2) button { min-width: 9em; }

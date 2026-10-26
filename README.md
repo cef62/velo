@@ -12,25 +12,26 @@ Inspired by nvALT and Notational Velocity; not affiliated with or endorsed by th
 - Markdown preview with clickable wikilinks and external links.
 - Per-note encryption with [age](https://age-encryption.org); locked notes are never written to disk or to the index as plaintext.
 - Live reload of external edits; a concurrent edit produces a `(conflict ...)` copy instead of overwriting anything.
-- Global hotkey (default `CommandOrControl+Shift+Space`) to bring velo up; configurable in settings.
+- Global hotkey (default ⌘⇧Space / Ctrl+Shift+Space) to bring velo up; remappable in Settings.
 
 ## Keyboard shortcuts
 
-`Mod` is ⌘ on macOS and Ctrl on Windows/Linux.
+All shortcuts below are remappable in Settings (click a shortcut, press the new keys; Esc cancels). Enter in search, Esc in the editor, ↑/↓ in search and the list, the Edit menu and ⌘Q are fixed. `Mod` is ⌘ on macOS and Ctrl on Windows/Linux.
 
-| Keys | Action |
-| --- | --- |
-| Enter (in search) | Open the top/selected match, or create a note titled with the query |
-| ↑ / ↓ | Move selection in the results list |
-| Mod+J / Mod+K | Move selection down / up (also works from the editor) |
-| Mod+L | Focus the search box |
-| Esc (in editor) | Back to the search box |
-| Mod+R | Rename current note (also: double-click the title) |
-| Mod+Shift+P | Toggle Markdown preview |
-| Mod+Shift+E | Lock / unlock current note |
-| Mod+Shift+L | Lock all notes |
-| Mod+, | Settings |
-| Cmd/Ctrl+Shift+Space | Global hotkey (system-wide, configurable) |
+| macOS | Windows/Linux | Action |
+| --- | --- | --- |
+| ⌘L | Ctrl+L | Focus the search box |
+| ⌘J / ⌘K | Ctrl+J / Ctrl+K | Next / previous note (also works from the editor) |
+| ⌘R | Ctrl+R | Rename current note (also: double-click the title) |
+| ⌘⇧P | Ctrl+Shift+P | Toggle Markdown preview |
+| ⌘⇧E | Ctrl+Shift+E | Lock / unlock current note |
+| ⌥⌘E | Ctrl+Alt+E | Lock all notes |
+| ⌘⇧S | Ctrl+Shift+S | Toggle sort (last modified / title) |
+| ⌘[ / ⌘] | Ctrl+[ / Ctrl+] | Back / forward through visited notes |
+| ⌘, | Ctrl+, | Settings |
+| ⌘⇧Space | Ctrl+Shift+Space | Show / hide velo (system-wide) |
+
+Fixed: Enter (in search) opens the selected match or creates a note titled with the query; ↑ / ↓ move the selection; Esc (in editor) returns to search.
 
 ## Storage
 
