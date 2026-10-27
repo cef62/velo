@@ -157,7 +157,7 @@
 - Produces (commands, all `#[tauri::command(async)]`):
   - `tasks(query, tags, show_done) -> TaskView`
   - `toggle_task(path, line, expected)`
-  - `capture_task(text) -> String` (resolves the target from settings, see Task 8)
+  - `capture_task(text) -> String`. Until Task 8 adds the settings, it targets the note `Inbox`; Task 8 switches it to `capture_title(settings, today)`.
   - `set_badge(count: u32)`: `WebviewWindow::set_badge_count(if count == 0 { None } else { Some(count as i64) })`, macOS only; on other platforms it does nothing.
 - Produces (TS, `src/api.ts`):
   - `tasks(query: string, tags: string[], showDone: boolean): Promise<TaskView>`
@@ -227,6 +227,7 @@
     - `toggleShowDone()`
   - New action `toggle_tasks` (default `Mod+Shift+KeyX`, label "Notes / Tasks").
   - A midnight timer in `main.tsx` (`setTimeout` to the next local midnight, then re-armed) calls `controller.loadTasks()`.
+  - The Notes | Tasks switch in `Header.tsx` shows `due_count` next to "Tasks" when > 0. This is the only count on Windows and Linux.
 
 - [ ] **Step 1: Write failing controller tests:**
   - `tick on the open note goes through the editor`: `editor.path === item.path` → `editor.toggleTask(item.line)` is called and `api.toggleTask` isn't.
