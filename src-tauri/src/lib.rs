@@ -65,7 +65,7 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)?;
             let settings_path = config_dir.join("settings.json");
             let settings = settings::load(&settings_path);
-            let (dir, hotkey) = (settings.notes_dir.clone(), settings.toggle_window_binding());
+            let (dir, globals) = (settings.notes_dir.clone(), settings.global_bindings());
             app.manage(commands::AppState {
                 settings: Mutex::new(settings),
                 vault: Mutex::new(None),
@@ -75,6 +75,7 @@ pub fn run() {
                 indexing: Mutex::new(dir.is_some().then_some((0, 0))),
                 open_gen: Default::default(),
                 locked: Default::default(),
+                capture_was_hidden: Default::default(),
                 settings_path,
                 data_dir,
             });
@@ -87,8 +88,10 @@ pub fn run() {
                     }
                 });
             }
-            if let Err(e) = commands::register_hotkey(&h, &hotkey) {
-                eprintln!("velo: hotkey not registered: {e}");
+            for (action, binding) in globals {
+                if let Err(e) = commands::register_global(&h, action, &binding) {
+                    eprintln!("velo: {action:?} hotkey not registered: {e}");
+                }
             }
             app.manage(Mutex::new(update::UpdateState::default()));
             update::spawn_checker(h.clone());

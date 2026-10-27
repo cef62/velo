@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { DEFAULTS, LABELS, overrides, eventToBinding, formatBinding, isAltGraph, matches, normalizeBinding, resolve, validateBinding } from "./shortcuts";
+import { DEFAULTS, GLOBAL_ACTIONS, LABELS, overrides, eventToBinding, formatBinding, isAltGraph, matches, normalizeBinding, resolve, validateBinding } from "./shortcuts";
 
 const ev = (code: string, m: Partial<Record<"metaKey" | "ctrlKey" | "altKey" | "shiftKey", boolean>> = {}) =>
   ({ code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...m });
@@ -84,3 +84,10 @@ test("none clears a shortcut", () => {
 });
 
 test("metadata shortcut defaults", () => { expect(DEFAULTS.toggle_info).toBe("Mod+KeyI"); expect(DEFAULTS.toggle_front_matter).toBe("none"); expect(LABELS.toggle_info).toBe("Note info"); });
+test("capture is a global action with a non-conflicting default", () => {
+  expect(GLOBAL_ACTIONS).toEqual(["toggle_window", "capture"]);
+  expect(LABELS.capture).toBe("Quick capture (global)");
+  expect(DEFAULTS.capture).toBe("Mod+Shift+Alt+KeyN");
+  expect(validateBinding(DEFAULTS, "capture", DEFAULTS.capture)).toEqual({ ok: true });
+  expect(Object.values(DEFAULTS).filter((b) => b === DEFAULTS.capture)).toHaveLength(1);
+});

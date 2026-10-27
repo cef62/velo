@@ -13,7 +13,7 @@ import { errText } from "../errtext";
 import { enterAction, fold, moveSelection } from "../search";
 import { extractTags, pruneSelection, toggleTag } from "../tags";
 import { stripFrontMatter, wordCount } from "../frontmatter";
-import { formatBinding, matches, resolve, type Action } from "../shortcuts";
+import { formatBinding, matches, resolve, type Action, type GLOBAL_ACTIONS } from "../shortcuts";
 import { isMenuKey, linkFor, menuModel, type MenuAction } from "../contextmenu";
 import { isLockedPath } from "../passphrase";
 import type { MenuSpec, UiPort } from "./ports";
@@ -1067,7 +1067,7 @@ export class Controller {
     void this.editor.flush();
   }
 
-  protected readonly actions: Record<Exclude<Action, "toggle_window">, () => void> = {
+  protected readonly actions: Record<Exclude<Action, (typeof GLOBAL_ACTIONS)[number]>, () => void> = {
     toggle_info: () => void this.toggleInfo(),
     toggle_front_matter: () => void this.toggleFrontMatter(),
     focus_search: () => this.focusSearch(),

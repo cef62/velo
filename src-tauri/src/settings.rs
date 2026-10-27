@@ -36,10 +36,20 @@ impl Default for Settings {
 }
 
 const DEFAULT_TOGGLE: &str = "Mod+Shift+Space";
+const DEFAULT_CAPTURE: &str = "Mod+Shift+Alt+KeyN";
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GlobalAction { ToggleWindow, Capture }
 
 impl Settings {
     pub fn toggle_window_binding(&self) -> String {
         self.shortcuts.get("toggle_window").cloned().unwrap_or_else(|| DEFAULT_TOGGLE.into())
+    }
+
+    /// Every global shortcut with its binding ("none" = unset).
+    pub fn global_bindings(&self) -> Vec<(GlobalAction, String)> {
+        let get = |id: &str, d: &str| self.shortcuts.get(id).cloned().unwrap_or_else(|| d.into());
+        vec![(GlobalAction::ToggleWindow, get("toggle_window", DEFAULT_TOGGLE)), (GlobalAction::Capture, get("capture", DEFAULT_CAPTURE))]
     }
 }
 
@@ -186,5 +196,12 @@ mod tests {
         for b in ["Mod+Shift+Space", "Mod+Alt+KeyE", "Mod+BracketLeft", "Ctrl+F5"] {
             assert!(to_plugin_format(b).parse::<tauri_plugin_global_shortcut::Shortcut>().is_ok(), "{b}");
         }
+    }
+
+    #[test] fn global_bindings_defaults_and_overrides() {
+        let mut s = Settings::default();
+        assert_eq!(s.global_bindings(), vec![(GlobalAction::ToggleWindow, "Mod+Shift+Space".to_string()), (GlobalAction::Capture, "Mod+Shift+Alt+KeyN".to_string())]);
+        s.shortcuts.insert("capture".into(), "Mod+KeyG".into()); s.shortcuts.insert("toggle_window".into(), "none".into());
+        assert_eq!(s.global_bindings(), vec![(GlobalAction::ToggleWindow, "none".to_string()), (GlobalAction::Capture, "Mod+KeyG".to_string())]);
     }
 }

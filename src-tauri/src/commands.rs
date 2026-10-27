@@ -1,7 +1,7 @@
 use crate::crypto;
 use crate::index::{Page, Sort, TagCount};
 use crate::revisions::RevisionInfo;
-use crate::settings::{self, Settings};
+use crate::settings::{self, GlobalAction, Settings};
 use crate::store::{self, SaveResult};
 use crate::tasks::TaskView;
 use crate::vault::{NoteDoc, RenameResult, Vault};
@@ -24,6 +24,8 @@ pub struct AppState {
     pub open_gen: AtomicU64,
     /// set by Lock all: the keychain identity is not reloaded until the passphrase is entered again
     pub locked: AtomicBool,
+    /// set by `capture_requested`: velo was hidden (or unfocused) when the capture shortcut fired
+    pub capture_was_hidden: AtomicBool,
     pub settings_path: PathBuf,
     pub data_dir: PathBuf,
 }
@@ -156,13 +158,29 @@ pub fn toggle_window(app: &AppHandle) {
     }
 }
 
+/// Remembers whether velo was hidden (for Task 8's capture_done), then shows it like `toggle_window` and tells the UI.
+pub fn capture_requested(app: &AppHandle) {
+    let Some(w) = app.get_webview_window("main") else { return };
+    let hidden = !(w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false));
+    app.state::<AppState>().capture_was_hidden.store(hidden, Ordering::SeqCst);
+    #[cfg(target_os = "macos")]
+    app.show().ok();
+    w.show().ok();
+    w.unminimize().ok();
+    w.set_focus().ok();
+    app.emit("capture", ()).ok();
+}
+
 /// `binding` is in velo format ("Mod+Shift+Space").
-pub fn register_hotkey(app: &AppHandle, binding: &str) -> Result<(), String> {
+pub fn register_global(app: &AppHandle, action: GlobalAction, binding: &str) -> Result<(), String> {
     let Some(sc) = settings::parse_hotkey(binding)? else { return Ok(()) }; // "none": no global shortcut
     app.global_shortcut()
-        .on_shortcut(sc, |app, _, ev| {
+        .on_shortcut(sc, move |app, _, ev| {
             if ev.state == ShortcutState::Pressed {
-                toggle_window(app);
+                match action {
+                    GlobalAction::ToggleWindow => toggle_window(app),
+                    GlobalAction::Capture => capture_requested(app),
+                }
             }
         })
         .map_err(|e| e.to_string())
@@ -174,6 +192,14 @@ fn unregister_hotkey(app: &AppHandle, binding: &str) {
     }
 }
 
+/// (action, old, new) for each global binding that really changed (re-registering the same keys would fail).
+fn changed_globals(old: &Settings, new: &Settings) -> Vec<(GlobalAction, String, String)> {
+    old.global_bindings().into_iter().zip(new.global_bindings())
+        .filter(|((_, o), (_, n))| o != n && !settings::same_shortcut(o, n))
+        .map(|((a, o), (_, n))| (a, o, n))
+        .collect()
+}
+
 #[tauri::command]
 pub fn get_settings(st: State<AppState>) -> Settings {
     st.settings.lock().unwrap().clone()
@@ -182,10 +208,13 @@ pub fn get_settings(st: State<AppState>) -> Settings {
 #[tauri::command(async)]
 pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings) -> Res<()> {
     let old = st.settings.lock().unwrap().clone();
-    let (old_key, new_key) = (old.toggle_window_binding(), settings.toggle_window_binding());
-    let hotkey_changed = old_key != new_key && !settings::same_shortcut(&old_key, &new_key); // re-registering the same keys would fail
-    if hotkey_changed {
-        register_hotkey(&app, &new_key)?; // on failure the old hotkey stays registered
+    let changed = changed_globals(&old, &settings);
+    for (i, (action, _, new_key)) in changed.iter().enumerate() {
+        if let Err(e) = register_global(&app, *action, new_key) {
+            // on failure the old hotkeys stay registered: undo the new ones registered so far
+            changed[..i].iter().for_each(|(_, _, k)| unregister_hotkey(&app, k));
+            return Err(e);
+        }
     }
     let (no_vault, indexing) = (st.vault.lock().unwrap().is_none(), st.indexing.lock().unwrap().is_some());
     if needs_reopen(&old.notes_dir, &settings.notes_dir, no_vault, indexing) {
@@ -200,15 +229,11 @@ pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings)
             }
         };
         if let Err(e) = opened {
-            if hotkey_changed {
-                unregister_hotkey(&app, &new_key);
-            }
+            changed.iter().for_each(|(_, _, k)| unregister_hotkey(&app, k));
             return Err(e);
         }
     }
-    if hotkey_changed {
-        unregister_hotkey(&app, &old_key);
-    }
+    changed.iter().for_each(|(_, k, _)| unregister_hotkey(&app, k));
     settings::save(&st.settings_path, &settings).map_err(err)?;
     *st.settings.lock().unwrap() = settings;
     Ok(())
@@ -472,5 +497,17 @@ mod tests {
         assert_eq!(got, id); assert_eq!(crypto::unwrap_identity(&bytes.unwrap(), "pw2").unwrap(), id);
         let (fresh, bytes) = resolve_identity(None, None, "pw3").unwrap();
         assert_eq!(crypto::unwrap_identity(&bytes.unwrap(), "pw3").unwrap(), fresh);
+    }
+}
+
+#[cfg(test)]
+mod global_tests {
+    use super::*;
+    #[test] fn changed_globals_lists_only_real_changes() {
+        let (a, mut b) = (Settings::default(), Settings::default());
+        assert!(changed_globals(&a, &b).is_empty());
+        b.shortcuts.insert("capture".into(), "Mod+KeyG".into());
+        b.shortcuts.insert("toggle_window".into(), "Mod+Shift+Space".into()); // same as default: unchanged
+        assert_eq!(changed_globals(&a, &b), vec![(GlobalAction::Capture, "Mod+Shift+Alt+KeyN".to_string(), "Mod+KeyG".to_string())]);
     }
 }

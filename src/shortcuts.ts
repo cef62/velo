@@ -2,7 +2,10 @@
 // Mod = ⌘ on macOS, Ctrl elsewhere. Ctrl = physical Control (macOS only).
 export type Action =
   | "focus_search" | "toggle_preview" | "rename" | "toggle_lock"
-  | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "delete_note" | "toggle_tags" | "toggle_rich" | "toggle_layout" | "toggle_window" | "toggle_info" | "toggle_front_matter" | "toggle_tasks";
+  | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "delete_note" | "toggle_tags" | "toggle_rich" | "toggle_layout" | "toggle_window" | "toggle_info" | "toggle_front_matter" | "toggle_tasks" | "capture";
+
+/** Handled by the OS-level shortcut in the backend, never by the in-app key handler. */
+export const GLOBAL_ACTIONS = ["toggle_window", "capture"] as const;
 
 /** Saved binding meaning "no shortcut". */
 export const NONE = "none";
@@ -25,6 +28,7 @@ export const DEFAULTS: Record<Action, string> = {
   toggle_info: "Mod+KeyI",
   toggle_front_matter: NONE,
   toggle_tasks: "Mod+Shift+KeyX",
+  capture: "Mod+Shift+Alt+KeyN",
 };
 
 export const LABELS: Record<Action, string> = {
@@ -45,6 +49,7 @@ export const LABELS: Record<Action, string> = {
   toggle_info: "Note info",
   toggle_front_matter: "Show / hide front matter",
   toggle_tasks: "Notes / Tasks",
+  capture: "Quick capture (global)",
 };
 
 type Ev = Pick<KeyboardEvent, "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">;
