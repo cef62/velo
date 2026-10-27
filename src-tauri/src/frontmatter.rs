@@ -127,30 +127,38 @@ fn tag_key(s: &str) -> String {
 /// Adds/removes tags (matched with `fold`, a leading `#` ignored) by editing only the `tags:` key; the form the note
 /// uses stays (flow or block list). A new key is a flow list `tags: [a, b]`; with no block at all one is created only
 /// if `create_block`. `None` when nothing changes.
-pub fn set_tags(text: &str, add: &[String], remove: &[String], create_block: bool) -> Option<String> {
+pub fn set_tags(text: &str, add: &[String], remove: &[String], create_block: bool) -> Result<Option<String>, String> {
     let rm: Vec<String> = remove.iter().map(|t| tag_key(t)).collect();
     let mut adds: Vec<&str> = vec![];
     for t in add.iter().map(|t| t.trim().trim_start_matches('#')).filter(|t| !t.is_empty()) {
         if !adds.iter().any(|a| tag_key(a) == tag_key(t)) { adds.push(t); }
     }
     let Some((close, _)) = block(text) else {
-        if adds.is_empty() || !create_block { return None; }
-        return Some(format!("---\ntags: [{}]\n---\n{text}", adds.join(", ")));
+        if adds.is_empty() || !create_block { return Ok(None); }
+        return Ok(Some(format!("---\ntags: [{}]\n---\n{text}", adds.join(", "))));
     };
     let first = text.find('\n').map_or(0, |i| i + 1);
     let nl = if text[..first].ends_with("\r\n") { "\r\n" } else { "\n" };
     let rows: Vec<&str> = text[first..close].split_inclusive('\n').collect();
     let strip = |r: &str| r.trim_end_matches(['\n', '\r']).to_string();
     let Some(k) = rows.iter().position(|r| r.starts_with("tags:")) else {
-        if adds.is_empty() { return None; }
-        return Some(format!("{}tags: [{}]{nl}{}", &text[..close], adds.join(", "), &text[close..]));
+        if adds.is_empty() { return Ok(None); }
+        return Ok(Some(format!("{}tags: [{}]{nl}{}", &text[..close], adds.join(", "), &text[close..])));
     };
     let v = strip(rows[k]).trim_start_matches("tags:").trim().to_string();
-    let (mut items, end, flow): (Vec<&str>, usize, bool) = if v.starts_with('[') && v.ends_with(']') {
+    let unsupported = || Err("unsupported tags: layout".to_string());
+    let (mut items, end, flow): (Vec<&str>, usize, bool) = if v.starts_with('[') {
+        // only a single-line list with nothing after `]`
+        if !v.ends_with(']') || v[1..v.len() - 1].contains(['[', ']', '#']) { return unsupported(); }
         (v[1..v.len() - 1].split(',').map(str::trim).filter(|s| !s.is_empty()).collect(), k + 1, true)
+    } else if v == "~" || v == "null" {
+        (vec![], k + 1, true) // YAML null: an empty list
     } else if !v.is_empty() {
+        let quoted = v.len() > 1 && ['"', '\''].iter().any(|q| v.starts_with(*q) && v.ends_with(*q));
+        if !quoted && v.contains(['[', ']', '{', '}', ',', '#', '|', '>', '&', '*', '!', '%', '@', '\'', '"', ':']) { return unsupported(); }
         (vec![v.as_str()], k + 1, true)
     } else {
+        if rows.get(k + 1).is_some_and(|l| l.starts_with([' ', '\t']) && !l.trim_start().starts_with('-')) { return unsupported(); }
         let n = rows[k + 1..].iter().take_while(|l| l.trim_start().starts_with('-') && l.starts_with([' ', '-'])).count();
         (rows[k + 1..k + 1 + n].iter().map(|l| l.trim().trim_start_matches('-').trim()).collect(), k + 1 + n, false)
     };
@@ -160,7 +168,7 @@ pub fn set_tags(text: &str, add: &[String], remove: &[String], create_block: boo
     let mut it = keep.iter();
     items.retain(|_| *it.next().unwrap());
     let fresh: Vec<&str> = adds.into_iter().filter(|a| !items.iter().any(|i| tag_key(i) == tag_key(a))).collect();
-    if items.len() == before && fresh.is_empty() { return None; }
+    if items.len() == before && fresh.is_empty() { return Ok(None); }
     let eol = if rows[k].ends_with("\r\n") { "\r\n" } else if rows[k].ends_with('\n') { "\n" } else { nl };
     let mut out = String::new();
     if flow || (items.is_empty() && fresh.is_empty()) {
@@ -175,7 +183,7 @@ pub fn set_tags(text: &str, add: &[String], remove: &[String], create_block: boo
     }
     let first_end = first + rows[..k].iter().map(|r| r.len()).sum::<usize>();
     let rest = first + rows[..end].iter().map(|r| r.len()).sum::<usize>();
-    Some(format!("{}{out}{}", &text[..first_end], &text[rest..]))
+    Ok(Some(format!("{}{out}{}", &text[..first_end], &text[rest..])))
 }
 
 #[cfg(test)]
@@ -275,19 +283,29 @@ mod tests {
     #[test]
     fn set_tags_flow_and_block_lists_preserve_bytes() {
         let flow = "---\ncreated: x\ntags: [a, B]\nother: 1\n---\nbody";
-        assert_eq!(set_tags(flow, &["c".into()], &["b".into()], true).unwrap(), "---\ncreated: x\ntags: [a, c]\nother: 1\n---\nbody");
-        assert_eq!(set_tags(flow, &["A".into()], &[], true), None);
-        assert_eq!(set_tags(flow, &[], &["zz".into()], true), None);
+        assert_eq!(set_tags(flow, &["c".into()], &["b".into()], true).unwrap().unwrap(), "---\ncreated: x\ntags: [a, c]\nother: 1\n---\nbody");
+        assert_eq!(set_tags(flow, &["A".into()], &[], true), Ok(None));
+        assert_eq!(set_tags(flow, &[], &["zz".into()], true), Ok(None));
         let block = "---\r\ntags:\r\n  - a\r\n  - \"b\"\r\nother: 1\r\n---\r\nbody";
-        assert_eq!(set_tags(block, &["c".into()], &["A".into()], true).unwrap(), "---\r\ntags:\r\n  - \"b\"\r\n  - c\r\nother: 1\r\n---\r\nbody");
-        assert_eq!(set_tags(block, &[], &["a".into(), "b".into()], true).unwrap(), "---\r\ntags: []\r\nother: 1\r\n---\r\nbody");
-        assert_eq!(set_tags("---\ntags: solo\n---\n", &["x".into()], &[], true).unwrap(), "---\ntags: [solo, x]\n---\n");
+        assert_eq!(set_tags(block, &["c".into()], &["A".into()], true).unwrap().unwrap(), "---\r\ntags:\r\n  - \"b\"\r\n  - c\r\nother: 1\r\n---\r\nbody");
+        assert_eq!(set_tags(block, &[], &["a".into(), "b".into()], true).unwrap().unwrap(), "---\r\ntags: []\r\nother: 1\r\n---\r\nbody");
+        assert_eq!(set_tags("---\ntags: solo\n---\n", &["x".into()], &[], true).unwrap().unwrap(), "---\ntags: [solo, x]\n---\n");
     }
 
     #[test]
     fn set_tags_creates_block_when_allowed() {
-        assert_eq!(set_tags("body", &["a".into(), "b".into()], &[], true).unwrap(), "---\ntags: [a, b]\n---\nbody");
-        assert_eq!(set_tags("body", &["a".into()], &[], false), None);
-        assert_eq!(set_tags("---\ncreated: x\n---\nbody", &["a".into()], &[], false).unwrap(), "---\ncreated: x\ntags: [a]\n---\nbody");
+        assert_eq!(set_tags("body", &["a".into(), "b".into()], &[], true).unwrap().unwrap(), "---\ntags: [a, b]\n---\nbody");
+        assert_eq!(set_tags("body", &["a".into()], &[], false), Ok(None));
+        assert_eq!(set_tags("---\ncreated: x\n---\nbody", &["a".into()], &[], false).unwrap().unwrap(), "---\ncreated: x\ntags: [a]\n---\nbody");
+    }
+
+    #[test]
+    fn set_tags_refuses_unrecognised_layouts() {
+        for t in ["tags: [a, b] # note", "tags: [a,\n  b]", "tags: a # c", "tags: {a: 1}", "tags:\n  k: v"] {
+            let text = format!("---\n{t}\n---\nbody");
+            assert_eq!(set_tags(&text, &["x".into()], &["a".into()], true), Err("unsupported tags: layout".into()), "{t}");
+        }
+        assert_eq!(set_tags("---\ntags: ~\n---\n", &["x".into()], &[], true).unwrap().unwrap(), "---\ntags: [x]\n---\n");
+        assert_eq!(set_tags("---\ntags: null\n---\n", &[], &["x".into()], true), Ok(None));
     }
 }

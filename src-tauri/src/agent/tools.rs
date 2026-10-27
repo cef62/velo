@@ -177,7 +177,7 @@ const BULK_MAX: usize = 200;
 
 fn bulk_tags(ops: &mut dyn NoteOps, add: bool, a: &Value, summary: &str) -> Result<Value, String> {
     use crate::{frontmatter, index, text};
-    let titles = strings(a, "titles");
+    let Some(titles) = a.get("titles").and_then(Value::as_array) else { return Err("titles is required".into()) };
     if titles.len() > BULK_MAX {
         return Err(format!("too many notes: {} (at most {BULK_MAX} per call). Nothing was changed.", titles.len()));
     }
@@ -202,24 +202,35 @@ fn bulk_tags(ops: &mut dyn NoteOps, add: bool, a: &Value, summary: &str) -> Resu
             if missing.is_empty() {
                 None
             } else if wfm {
-                frontmatter::set_tags(&doc.text, &missing, &[], true)
+                frontmatter::set_tags(&doc.text, &missing, &[], true)?
             } else {
                 let sep = if doc.text.is_empty() || doc.text.ends_with('\n') { "" } else { "\n" };
                 Some(format!("{}{sep}{}\n", doc.text, missing.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")))
             }
         } else {
-            let mut cur = frontmatter::set_tags(&doc.text, &[], &tags, false).unwrap_or_else(|| doc.text.clone());
+            let mut cur = frontmatter::set_tags(&doc.text, &[], &tags, false)?.unwrap_or_else(|| doc.text.clone());
             let start = frontmatter::parse(&cur).map_or(0, |f| f.end);
             let mut body = cur.split_off(start);
             for t in &tags { body = text::remove_inline_tag(&body, &text::fold(t)).0; }
             cur.push_str(&body);
             Some(cur).filter(|c| *c != doc.text)
         };
-        let Some(new) = new else { return Ok(false) };
-        ops.write(&path, &new, &doc.hash, summary).map_err(err)?;
-        Ok(true)
+        let mut changed = false;
+        if let Some(new) = &new {
+            ops.write(&path, new, &doc.hash, summary).map_err(err)?;
+            changed = true;
+        }
+        if !add {
+            // A tag the index still sees (e.g. only in a link target) could not be removed: write what went, then fail.
+            let now = new.as_deref().unwrap_or(&doc.text);
+            let left = index::all_tags(frontmatter::body(now), frontmatter::parse(now).as_ref());
+            if tags.iter().any(|t| left.iter().any(|(f, _)| *f == text::fold(t))) {
+                return Err("tag only appears in code or a link".into());
+            }
+        }
+        Ok(changed)
     };
-    let results: Vec<Value> = titles.iter().map(|t| match one(ops, t) {
+    let results: Vec<Value> = titles.iter().filter_map(Value::as_str).map(|t| match one(ops, t) {
         Ok(c) => json!({"title": t, "status": if c { "changed" } else { "unchanged" }}),
         Err(e) => json!({"title": t, "status": "failed", "reason": e}),
     }).collect();
@@ -407,6 +418,18 @@ mod tests {
         assert_eq!((rs[1]["status"].as_str(), rs[1]["reason"].as_str()), (Some("failed"), Some("not found")));
         assert_eq!((rs[2]["status"].as_str(), rs[2]["reason"].as_str()), (Some("failed"), Some("not found")));
         assert!(read(&dir, "a.md").contains("tags: [t]"));
+    }
+
+    #[test] fn remove_tags_reports_surviving_tag_and_bad_layout() {
+        let (mut ops, dir) = vault(&[("a.md", "[x](#t) #t"), ("b.md", "---\ntags: [t] # c\n---\nx"), ("c.md", "[x](#t)")]);
+        let r = call(&mut ops, "remove_tags", json!({"titles": ["a", "b", "c"], "tags": ["t"], "summary": "s"})).unwrap();
+        let rs = r["results"].as_array().unwrap();
+        assert_eq!(rs[0]["reason"], "tag only appears in code or a link");
+        assert_eq!(rs[1]["reason"], "unsupported tags: layout");
+        assert_eq!(rs[2]["status"], "failed");
+        assert!(read(&dir, "a.md").ends_with("\n[x](#t)"), "partial removal written");
+        assert_eq!(read(&dir, "b.md"), "---\ntags: [t] # c\n---\nx");
+        assert_eq!(call(&mut ops, "add_tags", json!({"tags": ["t"], "summary": "s"})), Err("titles is required".to_string()));
     }
 
     #[test] fn bulk_over_200_rejected() {
