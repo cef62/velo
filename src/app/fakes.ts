@@ -117,6 +117,11 @@ export class FakeEditor implements Editor {
   }
   refreshLinks = vi.fn();
   toggleTask = vi.fn(() => false);
+  appended: string[] = [];
+  appendLine(text: string) {
+    this.appended.push(text);
+    return this.path !== null && !this.suspended;
+  }
 }
 
 export class FakePreview implements Preview {

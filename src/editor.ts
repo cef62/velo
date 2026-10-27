@@ -2,7 +2,7 @@ import { Annotation, Compartment, Transaction } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { writingSetup } from "./editortheme";
 import { refreshRich, richMarkdown, type RichOpts } from "./richmd";
-import { TASK_ITEM } from "./preview";
+import { dueInputRule, localToday, toggleTaskLine } from "./tasks";
 import { SaveController } from "./saver";
 import { frontMatterHide, replaceAll, undoHistory } from "./fmhide";
 import { stampChange } from "./frontmatter";
@@ -37,8 +37,10 @@ export interface Editor {
   replaceText(text: string): void;
   /** Re-check wikilink targets after the note titles changed. */
   refreshLinks(): void;
-  /** Flip "[ ]" / "[x]" of the task item on this 0-based line (from the preview); false if not editable or not a task. */
+  /** Flip the box of the task item on this 0-based line (from the preview), stamping/removing its done date; false if not editable or not a task. */
   toggleTask(line: number): boolean;
+  /** Append `text` as a new last line (user edit); false if not editable. */
+  appendLine(text: string): boolean;
 }
 
 export type EditorOpts = {
@@ -76,6 +78,7 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     extensions: [
       writingSetup(),
       undo.extension,
+      dueInputRule,
       rich.of([]),
       fmHide.of(frontMatterHide(true)),
       editable.of(EditorView.editable.of(false)),
@@ -170,10 +173,16 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       const doc = view.state.doc;
       if (!view.state.facet(EditorView.editable) || line < 0 || line >= doc.lines) return false; // no note, indexing, lock hand-off
       const l = doc.line(line + 1);
-      const m = TASK_ITEM.exec(l.text);
-      if (!m) return false;
-      const pos = l.from + m[1].length;
-      view.dispatch({ changes: { from: pos, to: pos + 1, insert: m[2] === " " ? "x" : " " } });
+      const t = toggleTaskLine(l.text, localToday());
+      if (t === null) return false;
+      view.dispatch({ changes: { from: l.from, to: l.to, insert: t } });
+      return true;
+    },
+    appendLine(text) {
+      if (!view.state.facet(EditorView.editable)) return false;
+      const doc = view.state.doc;
+      const sep = doc.length === 0 || doc.sliceString(doc.length - 1) === "\n" ? "" : "\n";
+      view.dispatch({ changes: { from: doc.length, insert: sep + text }, selection: { anchor: doc.length + sep.length + text.length } });
       return true;
     },
   };
