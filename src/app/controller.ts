@@ -235,7 +235,18 @@ export class Controller {
   protected captureQuery = ""; // the search text before capture mode, restored when it ends empty
   protected captureSession = 0; // bumped when capture mode ends: a late submit result belongs to an old session
   protected capturePending = false; // a submit is in flight: another Enter would append the task twice
-  protected keptCapture = false; // the query is capture text kept after a blur, not yet edited: never overwrite it
+  protected keptCapture = false;
+  protected captureAppended: { path: string; text: string } | null = null; // in the editor, its save failed: a retry only re-saves
+  // One writer per note across awaits: a backend write waits for note loads in flight (the load decides the editor's
+  // note), and a load waits for backend writes in flight (else its reply holds pre-write text and hash).
+  protected readonly pendingLoads = new Set<Promise<unknown>>();
+  protected readonly pendingWrites = new Set<Promise<unknown>>();
+  protected track<T>(set: Set<Promise<unknown>>, p: Promise<T>): Promise<T> {
+    set.add(p);
+    const done = () => set.delete(p);
+    p.then(done, done);
+    return p;
+  } // the query is capture text kept after a blur, not yet edited: never overwrite it
 
   /** The capture shortcut: the search field becomes "→ <target>", empty (text already typed in capture mode stays). */
   async startCapture() {
@@ -266,18 +277,24 @@ export class Controller {
     try {
       // re-read: a capture spanning midnight must target today's daily note, not the one shown at start
       const { title: target, path } = await this.api.captureTargetTitle().catch(() => ({ title: this.store.get().capture?.target ?? "Inbox", path: null }));
+      while (this.pendingLoads.size) await Promise.allSettled([...this.pendingLoads]); // the writer depends on which note ends up open
       if (!live()) return;
       this.store.set((s) => ({ capture: { ...s.capture!, target } }));
       const { openPath, title, indexing } = this.store.get();
       // the path the backend would write (an alias resolves to its note); no note yet: compare titles
       if (openPath && this.editor.currentPath() === openPath && (path ? path === openPath : fold(title) === fold(target))) {
         // not editable: read-only while indexing (the gate) or suspended mid lock hand-off
-        if (!this.editor.appendLine("- [ ] " + t)) return this.failCapture(indexing ? errText("indexing") : `${target} can't be edited right now`);
-        void this.editor.flush();
-        return this.endCapture(true, text);
+        const a = this.captureAppended;
+        if (!(a && a.path === openPath && a.text === t)) {
+          if (!this.editor.appendLine("- [ ] " + t)) return this.failCapture(indexing ? errText("indexing") : `${target} can't be edited right now`);
+          this.captureAppended = { path: openPath, text: t };
+        }
+        if (!(await this.editor.flush())) return live() ? this.failCapture(`${target} wasn't saved — Enter retries the save`) : undefined;
+        this.captureAppended = null;
+        return live() ? this.endCapture(true, text) : undefined;
       }
       try {
-        await this.api.captureTask(t);
+        await this.track(this.pendingWrites, this.api.captureTask(t));
       } catch (e) {
         if (e === "empty") return live() && this.endCapture(true);
         if (e === "conflict") {
@@ -319,6 +336,7 @@ export class Controller {
     const keep = q !== captured && q.trim() !== "";
     this.captureSession++;
     this.keptCapture = keep;
+    this.captureAppended = null;
     this.store.set({ capture: null, ...(keep ? {} : { query: this.captureQuery }) });
     // the kept text lists like a search, but never opens a hit: focus went to the open note (or a note just opened)
     if (keep && this.store.get().paneMode === "tasks") this.filterChanged(false);
@@ -406,7 +424,8 @@ export class Controller {
     const current = this.newShow();
     try {
       if (!(await this.editor.flush())) return false;
-      const doc = await this.api.openNote(path);
+      while (this.pendingWrites.size) await Promise.allSettled([...this.pendingWrites]);
+      const doc = await this.track(this.pendingLoads, this.api.openNote(path));
       if (!current()) return true;
       if (!this.editor.load(doc)) return false;
       this.loadedDoc(doc);
@@ -569,7 +588,8 @@ export class Controller {
       // The title cache is the "existed before" signal (open_or_create returns a plain NoteDoc). A stale cache only
       // mislabels an empty/external note, which the empty-body rule below still opens in edit mode.
       const created = !this.titles.has(fold(title));
-      const doc = await this.api.openOrCreate(title);
+      while (this.pendingWrites.size) await Promise.allSettled([...this.pendingWrites]);
+      const doc = await this.track(this.pendingLoads, this.api.openOrCreate(title));
       if (!current()) return true;
       if (!this.editor.load(doc)) return false;
       this.loadedDoc(doc);
@@ -742,13 +762,16 @@ export class Controller {
         this.editor.resume();
         throw e;
       }
+      // decrypted task text must not come back: drop the rows, the undo payload and any tasks reply in flight
+      clearTimeout(this.undoTimer);
+      this.store.set({ taskView: null, tickUndo: null });
+      void this.loadTasks(); // a new request: older replies are stale
       if (path && isLockedPath(path)) {
         this.editor.unload(); // drop the decrypted text from the editor and stop autosave re-caching it
         this.closedDoc();
       } else this.editor.resume();
       await this.runSearch(false);
       void this.refreshTags(); // a tag only a now-locked note had must leave the panel and filter
-      void this.loadTasks(); // and its decrypted tasks the view, the due count and the badge
     } catch (e) {
       this.setErr(errText(e));
     } finally {
@@ -893,6 +916,7 @@ export class Controller {
    * any other through the backend's line-checked toggle. null = nothing changed; else where the backend put the line.
    */
   protected async flipTask(path: string, line: number, expected: string, retried = false): Promise<"editor" | { line: number; line_text: string } | null> {
+    while (this.pendingLoads.size) await Promise.allSettled([...this.pendingLoads]); // the writer depends on which note ends up open
     if (this.busy) {
       this.setErr(BUSY_MSG);
       return null;
@@ -906,7 +930,7 @@ export class Controller {
     }
     let r;
     try {
-      r = await this.api.toggleTask(path, line, expected);
+      r = await this.track(this.pendingWrites, this.api.toggleTask(path, line, expected));
     } catch (e) {
       if (e === "task-moved") return this.taskMoved();
       if (e === "locked" && !retried) {

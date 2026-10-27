@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import type { Page, TaskItem } from "../api";
+import type { Page, TaskItem, TaskView } from "../api";
 import { Controller, type KeyEventLike } from "./controller";
 import { FakeEditor, FakePreview, deferred, fakeApi, fakeUi, hit, noMeta, settle } from "./fakes";
 import { createStore, initialState } from "./store";
@@ -1057,4 +1057,106 @@ test("a pruned tag filter never changes the open note, in Notes or Tasks mode", 
     expect(store.get().openPath).toBe(P("X"));
     expect(api.openNote).toHaveBeenCalledTimes(1);
   }
+});
+
+/** Holds api.openNote's next reply until the returned gate opens. */
+function holdOpen(api: ReturnType<typeof setup>["api"]) {
+  const gate = deferred<void>();
+  const real = api.openNote.getMockImplementation()!;
+  api.openNote.mockImplementationOnce(async (p: string) => {
+    await gate.promise;
+    return real(p);
+  });
+  return gate;
+}
+const taskOf = (path: string, line_text: string, line = 0): TaskItem => ({ path, title: "", line, text: line_text.slice(6), due: null, done: false, done_on: null, line_text });
+
+test("a tick while its note is loading waits for the load and goes through the editor", async () => {
+  const { c, api, editor } = setup({ A: "- [ ] x", B: "b" });
+  const gate = holdOpen(api);
+  const shown = c.show(P("A"));
+  await settle();
+  editor.toggleTask.mockReturnValue(true);
+  const ticked = c.tickTask(taskOf(P("A"), "- [ ] x"));
+  await settle();
+  expect(api.toggleTask).not.toHaveBeenCalled();
+  gate.resolve();
+  await shown;
+  await ticked;
+  expect(api.toggleTask).not.toHaveBeenCalled(); // a backend write would leave the editor on pre-write text and hash
+  expect(editor.toggleTask).toHaveBeenCalledWith(0);
+});
+
+test("a capture while the target note is loading waits and appends through the editor", async () => {
+  const { c, api, editor, store } = setup({ Inbox: "", B: "b" });
+  await c.startCapture();
+  c.setQuery("buy");
+  const gate = holdOpen(api);
+  const shown = c.show(P("Inbox"));
+  await settle();
+  const sent = c.submitCapture("buy");
+  await settle();
+  gate.resolve();
+  await shown;
+  await sent;
+  expect(api.captureTask).not.toHaveBeenCalled();
+  expect(editor.appended).toEqual(["- [ ] buy"]);
+  expect(store.get().capture).toBeNull();
+});
+
+test("opening a note waits for a backend write to it in flight", async () => {
+  const { c, api } = setup({ A: "- [ ] x", B: "b" });
+  await c.show(P("B"));
+  const w = deferred<{ line: number; line_text: string }>();
+  api.toggleTask.mockImplementationOnce(() => w.promise);
+  const ticked = c.tickTask(taskOf(P("A"), "- [ ] x"));
+  await settle();
+  const shown = c.show(P("A"));
+  await settle();
+  expect(api.openNote).not.toHaveBeenCalledWith(P("A")); // its reply would hold pre-write text and hash
+  w.resolve({ line: 0, line_text: "- [x] x" });
+  await ticked;
+  await shown;
+  expect(api.openNote).toHaveBeenCalledWith(P("A"));
+});
+
+test("capture into the open note: a failed save keeps capture mode, a retry re-saves without appending twice", async () => {
+  const { c, api, editor, store } = setup({ Inbox: "", B: "b" });
+  await c.show(P("Inbox"));
+  await c.startCapture();
+  c.setQuery("buy");
+  editor.flushResult = false;
+  await c.submitCapture("buy");
+  expect(store.get().capture?.err).toMatch(/wasn't saved/);
+  expect(store.get().query).toBe("buy");
+  expect(api.captureDone).not.toHaveBeenCalled();
+  editor.flushResult = true;
+  await c.submitCapture("buy");
+  expect(editor.appended).toEqual(["- [ ] buy"]);
+  expect(store.get().capture).toBeNull();
+  expect(api.captureDone).toHaveBeenCalledTimes(1);
+});
+
+test("Lock all drops the undo payload and a tasks reply that was in flight", async () => {
+  const { c, api, store } = setup({ A: "a", B: "b" });
+  await c.show(P("B"));
+  await c.tickTask(taskOf(P("A"), "- [ ] secret"));
+  expect(store.get().tickUndo).not.toBeNull();
+  const stale = deferred<TaskView>();
+  api.tasks.mockImplementationOnce(() => stale.promise);
+  c.setPaneMode("tasks"); // this reply still holds the decrypted rows
+  await settle();
+  const search = deferred<Page>();
+  api.search.mockImplementationOnce(() => search.promise); // Lock all's list refresh is still pending
+  const locked = c.lockEverything();
+  await settle();
+  stale.resolve({ overdue: [], today: [], upcoming: [], no_date: [taskOf(P("A"), "- [ ] secret")], done: [], due_count: 1 });
+  await settle();
+  expect(store.get().tickUndo).toBeNull();
+  expect(store.get().taskView?.no_date ?? []).toEqual([]);
+  search.resolve({ hits: [hit("A"), hit("B")], has_more: false, total: 2 });
+  await locked;
+  await settle();
+  expect(store.get().taskView?.no_date).toEqual([]);
+  expect(store.get().dueCount).toBe(0);
 });

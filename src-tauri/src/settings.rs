@@ -50,9 +50,14 @@ impl Settings {
         self.shortcuts.get("toggle_window").cloned().unwrap_or_else(|| DEFAULT_TOGGLE.into())
     }
 
-    /// Every global shortcut with its binding ("none" = unset).
+    /// Every global shortcut with its binding ("none" = unset). Same rule as the UI's `resolve()`: an action left
+    /// on its default yields to any saved binding of another action on that key (a default added by an upgrade).
     pub fn global_bindings(&self) -> Vec<(GlobalAction, String)> {
-        let get = |id: &str, d: &str| self.shortcuts.get(id).cloned().unwrap_or_else(|| d.into());
+        let get = |id: &str, d: &str| match self.shortcuts.get(id) {
+            Some(k) => k.clone(),
+            None if self.shortcuts.values().any(|k| same_shortcut(k, d)) => "none".into(),
+            None => d.into(),
+        };
         vec![(GlobalAction::ToggleWindow, get("toggle_window", DEFAULT_TOGGLE)), (GlobalAction::Capture, get("capture", DEFAULT_CAPTURE))]
     }
 }
@@ -230,5 +235,15 @@ mod tests {
         assert_eq!(s.global_bindings(), vec![(GlobalAction::ToggleWindow, "Mod+Shift+Space".to_string()), (GlobalAction::Capture, "Mod+Shift+Alt+KeyN".to_string())]);
         s.shortcuts.insert("capture".into(), "Mod+KeyG".into()); s.shortcuts.insert("toggle_window".into(), "none".into());
         assert_eq!(s.global_bindings(), vec![(GlobalAction::ToggleWindow, "none".to_string()), (GlobalAction::Capture, "Mod+KeyG".to_string())]);
+    }
+    #[test] fn global_default_yields_to_a_saved_binding_on_its_key() {
+        let mut s = Settings::default();
+        s.shortcuts.insert("rename".into(), "Mod+Alt+Shift+KeyN".into()); // saved before capture existed
+        assert_eq!(s.global_bindings()[1], (GlobalAction::Capture, "none".to_string()));
+        s.shortcuts.insert("capture".into(), "Mod+Shift+Alt+KeyN".into()); // explicitly chosen: kept
+        assert_eq!(s.global_bindings()[1], (GlobalAction::Capture, "Mod+Shift+Alt+KeyN".to_string()));
+        let mut t = Settings::default();
+        t.shortcuts.insert("capture".into(), "Mod+Shift+Space".into()); // capture saved on toggle_window's default
+        assert_eq!(t.global_bindings()[0], (GlobalAction::ToggleWindow, "none".to_string()));
     }
 }
