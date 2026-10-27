@@ -317,10 +317,20 @@ pub fn capture_task(st: State<'_, AppState>, text: String) -> Res<String> {
     with_vault(&st, |v, id| v.capture_task(&title, &text, id, fm))
 }
 
+#[derive(serde::Serialize)]
+pub struct CaptureTarget {
+    title: String,
+    /// The existing note capture_task would write to (an alias resolves to its note); None if it would create one.
+    path: Option<String>,
+}
+
 /// The note quick capture appends to (the field hint and the frontend's "is it open?" check).
-#[tauri::command]
-pub fn capture_target_title(st: State<'_, AppState>) -> String {
-    settings::capture_title(&st.settings.lock().unwrap(), &crate::tasks::local_today())
+#[tauri::command(async)]
+pub fn capture_target_title(st: State<'_, AppState>) -> CaptureTarget {
+    let title = settings::capture_title(&st.settings.lock().unwrap(), &crate::tasks::local_today());
+    // best effort: no folder or indexing leaves path None and the frontend compares titles
+    let path = with_vault(&st, |v, _| v.find_note(&title)).ok().flatten();
+    CaptureTarget { title, path }
 }
 
 /// Capture finished or cancelled: if the shortcut showed velo, hide it again so the previous app is back in front.

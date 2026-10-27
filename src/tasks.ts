@@ -1,3 +1,4 @@
+import type { Text } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { TASK_ITEM } from "./preview";
 
@@ -33,6 +34,13 @@ export function toggleTaskLine(line: string, today: string): string | null {
   const done = m[2] !== " ";
   const rest = strip(body.slice(m[0].length), "✅ ");
   return `${m[1]}${done ? " " : "x"}]${rest}${done ? "" : ` ✅ ${today}`}${cr}`;
+}
+
+/** The whole-line change that toggles the task on the line holding `pos`, or null. One path for every editor checkbox. */
+export function toggleTaskAt(doc: Text, pos: number, today: string): { from: number; to: number; insert: string } | null {
+  const l = doc.lineAt(pos);
+  const t = toggleTaskLine(l.text, today);
+  return t === null ? null : { from: l.from, to: l.to, insert: t };
 }
 
 export function localToday(): string {

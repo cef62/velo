@@ -111,7 +111,7 @@ export function TaskList({ controller, store }: { controller: Controller; store:
         </Checkbox.Root>
         {undo && (
           <span role="status" className={css({ ml: "auto", display: "inline-flex", alignItems: "center", gap: "1" })}>
-            Ticked ·
+            {undo.unticked ? "Unticked" : "Ticked"} ·
             <Button variant="plain" size="xs" onClick={() => void controller.undoTick()}>
               Undo
             </Button>

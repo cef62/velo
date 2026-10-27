@@ -2,7 +2,7 @@ import { Annotation, Compartment, Transaction } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { writingSetup } from "./editortheme";
 import { refreshRich, richMarkdown, type RichOpts } from "./richmd";
-import { dueInputRule, localToday, toggleTaskLine } from "./tasks";
+import { dueInputRule, localToday, toggleTaskAt } from "./tasks";
 import { SaveController } from "./saver";
 import { frontMatterHide, replaceAll, undoHistory } from "./fmhide";
 import { stampChange } from "./frontmatter";
@@ -174,10 +174,9 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     toggleTask(line) {
       const doc = view.state.doc;
       if (!view.state.facet(EditorView.editable) || line < 0 || line >= doc.lines) return false; // no note, indexing, lock hand-off
-      const l = doc.line(line + 1);
-      const t = toggleTaskLine(l.text, localToday());
-      if (t === null) return false;
-      view.dispatch({ changes: { from: l.from, to: l.to, insert: t } });
+      const change = toggleTaskAt(doc, doc.line(line + 1).from, localToday());
+      if (!change) return false;
+      view.dispatch({ changes: change });
       return true;
     },
     appendLine(text) {

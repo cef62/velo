@@ -68,9 +68,15 @@ const armMidnight = () => {
   setTimeout(() => {
     void controller.loadTasks();
     armMidnight();
+// timers stall while the Mac sleeps: catch a missed midnight when the window comes back
+document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && controller.refreshIfNewDay());
+window.addEventListener("focus", () => controller.refreshIfNewDay());
   }, next.getTime() - now.getTime() + 1000); // +1 s: never fire a hair before midnight
 };
 armMidnight();
+// timers stall while the Mac sleeps: catch a missed midnight when the window comes back
+document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && controller.refreshIfNewDay());
+window.addEventListener("focus", () => controller.refreshIfNewDay());
 
 window.addEventListener("blur", () => controller.onBlur());
 void getCurrentWindow().onCloseRequested(async (e) => {

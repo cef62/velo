@@ -21,6 +21,7 @@ export function SearchField({ controller, store }: { controller: Controller; sto
   const keys = useStore(store, (s) => s.keys);
   const isMac = useStore(store, (s) => s.isMac);
   const capture = useStore(store, (s) => s.capture);
+  const tasksMode = useStore(store, (s) => s.paneMode === "tasks");
   const hintsEl = useRef<HTMLSpanElement>(null);
   const [hintW, setHintW] = useState(0); // typed text must never run under the hints
   useLayoutEffect(() => {
@@ -31,7 +32,8 @@ export function SearchField({ controller, store }: { controller: Controller; sto
     setHintW(el.offsetWidth);
     return () => ro.disconnect();
   });
-  const hint = capture ? [] : searchHint({ query, sel, exactTitleMatch, keys, isMac });
+  // Tasks mode: Enter opens a task, so the Create hints don't apply
+  const hint = capture || tasksMode ? [] : searchHint({ query, sel, exactTitleMatch, keys, isMac });
   const Icon = capture ? SquareCheck : Search;
   return (
     <div className={wrap}>

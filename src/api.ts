@@ -24,7 +24,8 @@ export const tasks = (query: string, tags: string[], showDone: boolean) => invok
 /** Resolves to the toggled task's line and raw text as saved (front-matter stamping may shift it): what undo sends. */
 export const toggleTask = (path: string, line: number, expected: string) => invoke<{ line: number; line_text: string }>("toggle_task", { path, line, expected });
 export const captureTask = (text: string) => invoke<string>("capture_task", { text });
-export const captureTargetTitle = () => invoke<string>("capture_target_title");
+/** The capture note's title and, if it exists, the path capture_task writes to (an alias resolves to its note). */
+export const captureTargetTitle = () => invoke<{ title: string; path: string | null }>("capture_target_title");
 /** Capture finished or cancelled: hides velo again if the capture shortcut showed it. */
 export const captureDone = () => invoke<void>("capture_done");
 export const setBadge = (count: number) => invoke<void>("set_badge", { count });

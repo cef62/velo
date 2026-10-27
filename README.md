@@ -54,10 +54,10 @@ Write `#tag` anywhere in a note (at the start of a line, after a space, or after
 Any markdown task line is a task: `- [ ] buy milk` (also `*`, `+`, numbered lists and quotes; not inside fenced code blocks).
 
 - Add a due date with `📅 2026-10-30`. Typing `due:` and a space in the editor turns into `📅 ` as a typing aid; you type the date. velo never writes a due date itself.
-- Ticking a task through velo (the checkbox in the editor or the Tasks view) appends `✅ YYYY-MM-DD` (local date); unticking removes it. Typing `x` by hand adds no date.
-- The Tasks view (⌘⇧X, or the toggle by the search box) lists open tasks from every note, grouped Overdue, Today, Upcoming and No date. Search filters it. "Show done" adds tasks ticked in the last 7 days. Ticking in the Tasks view shows a "Ticked · Undo" toast for 5 seconds. Click a task to jump to its line.
+- Ticking a task through velo (the checkbox in the editor, in the preview or in the Tasks view) appends `✅ YYYY-MM-DD` (local date); unticking removes it. Typing `x` by hand adds no date.
+- The Tasks view (⌘⇧X, or the toggle by the search box) lists open tasks from every note, grouped Overdue, Today, Upcoming and No date. Search and the tag filter apply to it. "Show done" adds tasks ticked in the last 7 days. Ticking or unticking in the Tasks view shows a "Ticked · Undo" (or "Unticked · Undo") toast for 5 seconds. Click a task to jump to its line; Enter in the search field opens the first task listed.
 - The Dock icon shows the count of overdue and due-today tasks on macOS; other platforms show the count inside the app.
-- Quick capture (⌥⇧⌘N, system-wide) opens a one-line box and appends `- [ ] text` to your Inbox note, or to today's daily note. Choose in Settings, General. The Inbox note is called `Inbox` unless you rename it there.
+- Quick capture (⌥⇧⌘N, system-wide) shows velo with the search field in capture mode (`→ Inbox`); type the task, press Enter, and velo appends `- [ ] text` to your Inbox note, or to today's daily note. Choose in Settings, General. The Inbox note is called `Inbox` unless you rename it there.
 - The daily note (⌘⇧D) opens or creates a note titled with today's date, `YYYY-MM-DD`.
 
 ## Dates and front matter

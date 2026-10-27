@@ -637,7 +637,7 @@ test("tick on a closed note calls the backend and offers undo", async () => {
   api.toggleTask.mockResolvedValueOnce({ line: 7, line_text: ticked }); // the save stamped front matter above it
   await c.tickTask(task("B", 2, "- [ ] buy"));
   expect(api.toggleTask).toHaveBeenCalledWith(P("B"), 2, "- [ ] buy");
-  expect(store.get().tickUndo).toEqual({ path: P("B"), line: 7, lineText: ticked });
+  expect(store.get().tickUndo).toEqual({ path: P("B"), line: 7, lineText: ticked, unticked: false });
   await c.undoTick();
   expect(api.toggleTask).toHaveBeenLastCalledWith(P("B"), 7, ticked);
   expect(store.get().tickUndo).toBeNull();
@@ -813,7 +813,7 @@ test("a blur during an in-flight capture: success does not hide velo", async () 
 test("submit re-reads the target: a capture across midnight never writes yesterday's open daily note", async () => {
   const { c, api, editor } = setup({ "2026-10-26": "", B: "b" });
   await c.show(P("2026-10-26"));
-  api.captureTargetTitle.mockResolvedValueOnce("2026-10-26").mockResolvedValueOnce("2026-10-27");
+  api.captureTargetTitle.mockResolvedValueOnce({ title: "2026-10-26", path: P("2026-10-26") }).mockResolvedValueOnce({ title: "2026-10-27", path: null });
   await c.startCapture();
   await c.submitCapture("buy milk");
   expect(editor.appended).toEqual([]);
@@ -850,4 +850,68 @@ test("checklist append skips an existing note the title cache did not know", asy
   const { c, editor } = setup({ B: "has text" });
   await c.openTitle("B", "enter", true); // titles cache is empty: looks created
   expect(editor.appended).toEqual([]);
+});
+
+test("unticking a done task offers 'Unticked' undo", async () => {
+  const { c, store } = setup();
+  await c.tickTask({ ...task("B", 2, "- [x] buy ✅ 2026-10-20"), done: true });
+  expect(store.get().tickUndo?.unticked).toBe(true);
+});
+
+test("Enter in Tasks mode opens the first visible task, never creates a note", async () => {
+  const { c, api, store, editor } = setup({ A: "x\n- [ ] a", B: "- [ ] b" });
+  api.tasks.mockResolvedValue({ ...view(1), today: [task("B", 0, "- [ ] b")], no_date: [task("A", 1, "- [ ] a")] });
+  c.setPaneMode("tasks");
+  c.setQuery("zzz");
+  await settle();
+  await c.enter();
+  await c.enter(true, true);
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+  expect(store.get().openPath).toBe(P("B"));
+  expect(editor.revealed).toEqual([0, 0]);
+});
+
+test("Enter in Tasks mode with no tasks does nothing", async () => {
+  const { c, api, editor } = setup();
+  c.setPaneMode("tasks");
+  c.setQuery("zzz");
+  await settle();
+  await c.enter(true);
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+  expect(editor.revealed).toEqual([]);
+});
+
+test("refreshIfNewDay reloads tasks only after the day changed", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(new Date(2026, 9, 27, 23, 0));
+    const { c, api } = setup();
+    await c.loadTasks();
+    const n = api.tasks.mock.calls.length;
+    c.refreshIfNewDay();
+    expect(api.tasks.mock.calls.length).toBe(n);
+    vi.setSystemTime(new Date(2026, 9, 28, 7, 0)); // woke from sleep past midnight
+    c.refreshIfNewDay();
+    expect(api.tasks.mock.calls.length).toBe(n + 1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("capture without a notes folder says so", async () => {
+  const { c, api, store } = setup();
+  api.captureTask.mockRejectedValueOnce("no-folder");
+  await c.startCapture();
+  await c.submitCapture("buy milk");
+  expect(store.get().capture?.err).toBe("No notes folder");
+});
+
+test("capture whose target is an alias of the open note appends through the editor", async () => {
+  const { c, api, editor } = setup({ Todo: "---\naliases: [Inbox]\n---\n", B: "b" });
+  await c.show(P("Todo"));
+  api.captureTargetTitle.mockResolvedValue({ title: "Inbox", path: P("Todo") });
+  await c.startCapture();
+  await c.submitCapture("buy milk");
+  expect(api.captureTask).not.toHaveBeenCalled();
+  expect(editor.appended).toEqual(["- [ ] buy milk"]);
 });

@@ -210,8 +210,13 @@ impl Vault {
         Ok(NoteDoc { path: path.into(), title: nf.title, text, hash: hash(&bytes), encrypted: nf.encrypted, meta })
     }
 
+    /// The existing note `title` names (title or alias, case-folded): the one open_or_create and capture_task use.
+    pub fn find_note(&self, title: &str) -> anyhow::Result<Option<String>> {
+        self.index.find_title(title)
+    }
+
     pub fn open_or_create(&mut self, title: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<NoteDoc> {
-        if let Some(path) = self.index.find_title(title)? {
+        if let Some(path) = self.find_note(title)? {
             return self.open_note(&path, identity);
         }
         let p = note_path(&self.store.dir, title, false);
@@ -820,6 +825,14 @@ mod tests {
         std::fs::write(&p, "no newline").unwrap();
         v.capture_task("Inbox", "three", None, false).unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "no newline\n- [ ] three\n");
+    }
+    #[test] fn capture_target_resolves_an_alias_like_capture() {
+        let mut v = open_empty();
+        let p = note_with(&mut v, "Todo", "---\naliases: [Inbox]\n---\n");
+        v.reindex(Path::new(&p), Some("---\naliases: [Inbox]\n---\n")).unwrap();
+        assert_eq!(v.find_note("inbox").unwrap().as_deref(), Some(p.as_str()));
+        assert_eq!(v.capture_task("Inbox", "x", None, false).unwrap(), p);
+        assert_eq!(v.find_note("Nope").unwrap(), None);
     }
     #[test] fn capture_to_locked_without_key_fails_locked() {
         let (dir, db) = setup(); let id = crypto::new_identity();

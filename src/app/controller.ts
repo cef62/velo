@@ -231,7 +231,7 @@ export class Controller {
   async startCapture() {
     let target = "Inbox";
     try {
-      target = await this.api.captureTargetTitle();
+      target = (await this.api.captureTargetTitle()).title;
     } catch (e) {
       console.error("capture target failed", e);
     }
@@ -255,11 +255,12 @@ export class Controller {
     this.capturePending = true;
     try {
       // re-read: a capture spanning midnight must target today's daily note, not the one shown at start
-      const target = await this.api.captureTargetTitle().catch(() => this.store.get().capture?.target ?? "Inbox");
+      const { title: target, path } = await this.api.captureTargetTitle().catch(() => ({ title: this.store.get().capture?.target ?? "Inbox", path: null }));
       if (!live()) return;
       this.store.set((s) => ({ capture: { ...s.capture!, target } }));
       const { openPath, title, indexing } = this.store.get();
-      if (openPath && this.editor.currentPath() === openPath && fold(title) === fold(target)) {
+      // the path the backend would write (an alias resolves to its note); no note yet: compare titles
+      if (openPath && this.editor.currentPath() === openPath && (path ? path === openPath : fold(title) === fold(target))) {
         // not editable: read-only while indexing (the gate) or suspended mid lock hand-off
         if (!this.editor.appendLine("- [ ] " + t)) return this.failCapture(indexing ? errText("indexing") : `${target} can't be edited right now`);
         void this.editor.flush();
@@ -522,6 +523,13 @@ export class Controller {
   }
 
   async enter(force = false, checklist = false) {
+    if (this.store.get().paneMode === "tasks") {
+      // the field filters tasks here: Enter opens the first one shown, never creates a note
+      const v = this.store.get().taskView;
+      const first = v && [...v.overdue, ...v.today, ...v.upcoming, ...v.no_date, ...v.done][0];
+      if (first) await this.openTask(first);
+      return;
+    }
     await this.searching;
     const a = enterAction(this.store.get().query, this.results.loaded, this.results.get(this.store.get().sel), force);
     if (!a) return;
@@ -821,8 +829,10 @@ export class Controller {
   }
 
   protected readonly newTasksReq = latest();
+  protected tasksDay = ""; // localToday() at the last load: groups and the due count depend on it
   /** Tasks for the view (filtered like the list) and the due count / Dock badge (unfiltered). */
   async loadTasks() {
+    this.tasksDay = localToday();
     const { query, selectedTags, showDone } = this.store.get();
     const fresh = this.newTasksReq();
     try {
@@ -837,13 +847,18 @@ export class Controller {
     }
   }
 
+  /** The window came back (a sleeping Mac never fires the midnight timer): reload if "today" moved since the last load. */
+  refreshIfNewDay() {
+    if (localToday() !== this.tasksDay) void this.loadTasks();
+  }
+
   protected undoTimer: ReturnType<typeof setTimeout> | undefined;
   /** Tick from the Tasks view; a backend tick offers undo for 5 s. */
   async tickTask(item: TaskItem) {
     const r = await this.flipTask(item.path, item.line, item.line_text);
     if (!r || r === "editor") return; // through the editor, ⌘Z undoes it
     clearTimeout(this.undoTimer);
-    this.store.set({ tickUndo: { path: item.path, line: r.line, lineText: r.line_text } });
+    this.store.set({ tickUndo: { path: item.path, line: r.line, lineText: r.line_text, unticked: item.done } });
     this.undoTimer = setTimeout(() => this.store.set({ tickUndo: null }), UNDO_MS);
   }
 
