@@ -1,8 +1,9 @@
-import { expect, test } from "vitest";
-import type { Page } from "../api";
+import { expect, test, vi } from "vitest";
+import type { Page, TaskItem } from "../api";
 import { Controller, type KeyEventLike } from "./controller";
 import { FakeEditor, FakePreview, deferred, fakeApi, fakeUi, hit, noMeta, settle } from "./fakes";
 import { createStore, initialState } from "./store";
+import { localToday, toggleTaskLine } from "../tasks";
 
 function setup(notes: Record<string, string> = { A: "a", B: "b", C: "c" }) {
   const { api } = fakeApi(notes);
@@ -608,4 +609,109 @@ test("restore asks for confirmation and does nothing when declined", async () =>
   expect(String(calls.find((x) => x[0] === "confirm")?.[1])).toMatch(/^Replace the note with this version from .+\? The current text is kept as a revision\.$/);
   expect(api.readRevision).not.toHaveBeenCalled();
   expect(editor.text).toBe("now");
+});
+
+const task = (title: string, line: number, line_text: string): TaskItem => ({ path: P(title), title, line, text: line_text.replace(/^- \[.\] /, ""), due: null, done: false, done_on: null, line_text });
+const view = (due_count: number) => ({ overdue: [], today: [], upcoming: [], no_date: [], done: [], due_count });
+
+test("tick on the open note goes through the editor", async () => {
+  const { c, api, editor } = setup({ A: "x\n- [ ] buy" });
+  await c.show(P("A"));
+  await c.tickTask(task("A", 1, "- [ ] buy"));
+  expect(editor.toggleTask).toHaveBeenCalledWith(1);
+  expect(api.toggleTask).not.toHaveBeenCalled();
+});
+
+test("tick on the open note refuses a line the editor no longer has", async () => {
+  const { c, api, editor, store } = setup({ A: "x\n- [ ] milk" });
+  await c.show(P("A"));
+  await c.tickTask(task("A", 1, "- [ ] buy"));
+  expect(editor.toggleTask).not.toHaveBeenCalled();
+  expect(api.tasks).toHaveBeenCalled();
+  expect(store.get().err).toBe("This task changed — refreshed");
+});
+
+test("tick on a closed note calls the backend and offers undo", async () => {
+  const { c, api, store } = setup();
+  await c.tickTask(task("B", 2, "- [ ] buy"));
+  expect(api.toggleTask).toHaveBeenCalledWith(P("B"), 2, "- [ ] buy");
+  const ticked = toggleTaskLine("- [ ] buy", localToday())!;
+  expect(store.get().tickUndo).toEqual({ path: P("B"), line: 2, lineText: ticked });
+  await c.undoTick();
+  expect(api.toggleTask).toHaveBeenLastCalledWith(P("B"), 2, ticked);
+  expect(store.get().tickUndo).toBeNull();
+});
+
+test("task-moved refreshes and says so", async () => {
+  const { c, api, store } = setup();
+  api.toggleTask.mockRejectedValueOnce("task-moved");
+  await c.tickTask(task("B", 2, "- [ ] buy"));
+  expect(api.tasks).toHaveBeenCalled();
+  expect(store.get().err).toBe("This task changed — refreshed");
+  expect(store.get().tickUndo).toBeNull();
+});
+
+test("loadTasks sets the badge", async () => {
+  const { c, api, store } = setup();
+  api.tasks.mockResolvedValue(view(3));
+  await c.loadTasks();
+  expect(api.setBadge).toHaveBeenCalledWith(3);
+  expect(store.get().taskView?.due_count).toBe(3);
+  expect(store.get().dueCount).toBe(3);
+});
+
+test("the badge ignores the search filter", async () => {
+  const { c, api, store } = setup();
+  api.tasks.mockImplementation(async (q) => view(q ? 1 : 4));
+  c.setPaneMode("tasks");
+  c.setQuery("x");
+  await settle();
+  expect(store.get().taskView?.due_count).toBe(1);
+  expect(api.setBadge).toHaveBeenLastCalledWith(4);
+  expect(store.get().dueCount).toBe(4);
+});
+
+test("search and tags are shared between modes", async () => {
+  const { c, api } = setup();
+  c.setPaneMode("tasks");
+  c.setQuery("x");
+  await settle();
+  expect(api.tasks).toHaveBeenCalledWith("x", [], false);
+  c.setTags(["work"]);
+  await settle();
+  expect(api.tasks).toHaveBeenCalledWith("x", ["work"], false);
+  await c.toggleShowDone();
+  expect(api.tasks).toHaveBeenCalledWith("x", ["work"], true);
+});
+
+test("undo toast expires", async () => {
+  vi.useFakeTimers();
+  try {
+    const { c, store } = setup();
+    await c.tickTask(task("B", 2, "- [ ] buy"));
+    expect(store.get().tickUndo).not.toBeNull();
+    vi.advanceTimersByTime(4999);
+    expect(store.get().tickUndo).not.toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(store.get().tickUndo).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("openTask shows the note and reveals the line", async () => {
+  const { c, editor, store } = setup({ A: "x\n- [ ] buy" });
+  await c.openTask(task("A", 1, "- [ ] buy"));
+  expect(store.get().openPath).toBe(P("A"));
+  expect(editor.revealed).toEqual([1]);
+});
+
+test("toggle_tasks switches the pane and notes-changed refreshes tasks", async () => {
+  const { c, api, store } = setup();
+  c.onKeyDown({ key: "x", code: "KeyX", metaKey: true, ctrlKey: false, altKey: false, shiftKey: true, inEditor: false, inSearchWithText: false, inDialog: false, inRename: false });
+  expect(store.get().paneMode).toBe("tasks");
+  await settle();
+  expect(api.tasks).toHaveBeenCalledTimes(1);
+  await c.onNotesChanged([]);
+  expect(api.tasks).toHaveBeenCalledTimes(2);
 });

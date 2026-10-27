@@ -1,10 +1,10 @@
-import { ArrowDownAZ, Clock, Code, Eye, FolderLock, Hash, Lock, LockOpen, Settings, Trash2, Type } from "lucide-react";
+import { ArrowDownAZ, Clock, Code, Eye, FileText, FolderLock, Hash, ListChecks, Lock, LockOpen, Settings, Trash2, Type } from "lucide-react";
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { css } from "styled-system/css";
 import { previewPill } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
-import { Button, IconButton, SegmentGroup, Tooltip } from "@/components/ui";
+import { Badge, Button, IconButton, SegmentGroup, Tooltip } from "@/components/ui";
 import { formatBinding, NONE, type Action } from "../shortcuts";
 import { headerMode } from "./breakpoints";
 import { OverflowMenu } from "./OverflowMenu";
@@ -51,6 +51,8 @@ export function Header({ controller, store }: { controller: Controller; store: S
   const previewOn = useStore(store, (s) => s.previewOn);
   const encrypted = useStore(store, (s) => s.encrypted);
   const headerLabels = useStore(store, (s) => s.headerLabels);
+  const paneMode = useStore(store, (s) => s.paneMode);
+  const dueCount = useStore(store, (s) => s.dueCount);
   const mode = headerMode(useWidth());
   const tip = (text: string, action: Action | null, child: ReactElement) => {
     const b = action && keys[action] !== NONE ? formatBinding(keys[action], isMac) : "";
@@ -88,13 +90,14 @@ export function Header({ controller, store }: { controller: Controller; store: S
   };
   const noNote = openPath === null;
   const iconOnly = mode !== "full";
-  const seg = <V extends string>(name: string, value: V, set: () => void, items: { value: V; text: string; tip: string; glyph: ReactNode; action: Action }[]) => (
+  const seg = <V extends string>(name: string, value: V, set: () => void, items: { value: V; text: string; tip: string; glyph: ReactNode; action: Action; count?: number }[]) => (
     <SegmentGroup.Root size="sm" value={value} onValueChange={(d) => d.value !== value && set()} aria-label={name}>
       <SegmentGroup.Indicator />
       {items.map((it) => (
         <SegmentGroup.Item key={it.value} value={it.value} className={segHover}>
           {it.glyph}
           {!iconOnly && <SegmentGroup.ItemText>{it.text}</SegmentGroup.ItemText>}
+          {!!it.count && <Badge size="sm" variant="solid" colorPalette="red" aria-label={`${it.count} due`}>{it.count}</Badge>}
           <SegmentGroup.ItemHiddenInput aria-label={it.text} />
           {/* the trigger is an overlay: Tooltip.Trigger would overwrite the Item's data-state=checked, which the indicator and styles read */}
           <Tooltip content={`${it.tip}${keys[it.action] === NONE ? "" : ` (${formatBinding(keys[it.action], isMac)})`}`} openDelay={500}>
@@ -107,6 +110,10 @@ export function Header({ controller, store }: { controller: Controller; store: S
 
   return (
     <header className={bar} data-tauri-drag-region={isMac || undefined} style={{ paddingLeft: isMac ? 96 : 14 }}>
+      {seg("Left pane", paneMode, () => controller.setPaneMode(paneMode === "tasks" ? "notes" : "tasks"), [
+        { value: "notes", text: "Notes", tip: "Notes", glyph: <FileText size={14} />, action: "toggle_tasks" },
+        { value: "tasks", text: "Tasks", tip: "Tasks", glyph: <ListChecks size={14} />, action: "toggle_tasks", count: dueCount },
+      ])}
       <SearchField controller={controller} store={store} />
       {icon("Tags", "toggle_tags", <Hash />, () => controller.showTags(!tagPanelOpen), { pressed: tagPanelOpen, controls: "tag-panel", label: "Tags" })}
       {mode !== "folded" && (

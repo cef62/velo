@@ -2,7 +2,7 @@
 // Mod = ⌘ on macOS, Ctrl elsewhere. Ctrl = physical Control (macOS only).
 export type Action =
   | "focus_search" | "toggle_preview" | "rename" | "toggle_lock"
-  | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "delete_note" | "toggle_tags" | "toggle_rich" | "toggle_layout" | "toggle_window" | "toggle_info" | "toggle_front_matter";
+  | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "delete_note" | "toggle_tags" | "toggle_rich" | "toggle_layout" | "toggle_window" | "toggle_info" | "toggle_front_matter" | "toggle_tasks";
 
 /** Saved binding meaning "no shortcut". */
 export const NONE = "none";
@@ -24,6 +24,7 @@ export const DEFAULTS: Record<Action, string> = {
   toggle_window: "Mod+Shift+Space",
   toggle_info: "Mod+KeyI",
   toggle_front_matter: NONE,
+  toggle_tasks: "Mod+Shift+KeyX",
 };
 
 export const LABELS: Record<Action, string> = {
@@ -43,6 +44,7 @@ export const LABELS: Record<Action, string> = {
   toggle_window: "Show / hide velo (global)",
   toggle_info: "Note info",
   toggle_front_matter: "Show / hide front matter",
+  toggle_tasks: "Notes / Tasks",
 };
 
 type Ev = Pick<KeyboardEvent, "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">;

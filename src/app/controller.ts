@@ -1,5 +1,5 @@
 import type * as ApiModule from "../api";
-import type { Hit, NoteDoc, Settings, TagCount } from "../api";
+import type { Hit, NoteDoc, Settings, TagCount, TaskItem } from "../api";
 // Types only: editor.ts loads editortheme.ts, which touches `window` at import time (tests run in node).
 import type { Editor, EditorOpts } from "../editor";
 import type { Preview } from "../preview";
@@ -16,6 +16,7 @@ import { stripFrontMatter, wordCount } from "../frontmatter";
 import { formatBinding, matches, resolve, type Action } from "../shortcuts";
 import { isMenuKey, linkFor, menuModel, type MenuAction } from "../contextmenu";
 import { isLockedPath } from "../passphrase";
+import { localToday, toggleTaskLine } from "../tasks";
 import type { MenuSpec, UiPort } from "./ports";
 import { noInfo, type AppState, type Store } from "./store";
 
@@ -23,6 +24,8 @@ export type Api = typeof ApiModule;
 
 const BUSY_MSG = "Busy — try again in a moment";
 const UPDATE_BUSY = "An update check or install is already running"; // update.rs BUSY
+const TASK_MOVED = "This task changed — refreshed";
+const UNDO_MS = 5000;
 const NO_KEY_MSG =
   "This note was locked with a velo key that isn't on this computer. Copy `.velo/identity.age` from the other computer into this notes folder.";
 
@@ -188,6 +191,7 @@ export class Controller {
         await this.runSearch(true);
         void this.refreshTitles();
         void this.refreshTags();
+        void this.loadTasks();
       }
     }
     this.focusSearch();
@@ -215,6 +219,7 @@ export class Controller {
   setQuery(q: string) {
     this.store.set({ query: q });
     void this.runSearch(true);
+    if (this.store.get().paneMode === "tasks") void this.loadTasks();
   }
 
   /** The note is now in the editor: title, path and lock state follow it; the conflict banner belongs to the previous note. */
@@ -695,6 +700,7 @@ export class Controller {
   setTags(next: string[]) {
     this.store.set({ selectedTags: next });
     void this.runSearch(true, true);
+    if (this.store.get().paneMode === "tasks") void this.loadTasks();
   }
 
   toggleTagFilter(tag: string) {
@@ -706,7 +712,101 @@ export class Controller {
   /** After an in-app save (self-writes are skipped by the watcher): coalesce typing bursts into one refresh. */
   protected scheduleTagRefresh() {
     clearTimeout(this.tagTimer);
-    this.tagTimer = setTimeout(() => void this.refreshTags(true), 300);
+    this.tagTimer = setTimeout(() => {
+      void this.refreshTags(true);
+      void this.loadTasks();
+    }, 300);
+  }
+
+  setPaneMode(m: "notes" | "tasks") {
+    this.store.set({ paneMode: m });
+    if (m === "tasks") void this.loadTasks();
+  }
+
+  async toggleShowDone() {
+    this.store.set((s) => ({ showDone: !s.showDone }));
+    await this.loadTasks();
+  }
+
+  protected readonly newTasksReq = latest();
+  /** Tasks for the view (filtered like the list) and the due count / Dock badge (unfiltered). */
+  async loadTasks() {
+    const { query, selectedTags, showDone } = this.store.get();
+    const fresh = this.newTasksReq();
+    try {
+      const v = await this.api.tasks(query, selectedTags, showDone);
+      // the badge must not change while typing a search: count from an unfiltered view
+      const due = query.trim() || selectedTags.length ? (await this.api.tasks("", [], false)).due_count : v.due_count;
+      if (!fresh()) return;
+      this.store.set({ taskView: v, dueCount: due });
+      await this.api.setBadge(due);
+    } catch (e) {
+      if (e !== "indexing") console.error("tasks refresh failed", e);
+    }
+  }
+
+  protected undoTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Tick from the Tasks view; a backend tick offers undo for 5 s. */
+  async tickTask(item: TaskItem) {
+    if (!(await this.flipTask(item.path, item.line, item.line_text))) return;
+    if (this.editor.currentPath() === item.path) return; // went through the editor: ⌘Z undoes it
+    clearTimeout(this.undoTimer);
+    this.store.set({ tickUndo: { path: item.path, line: item.line, lineText: toggleTaskLine(item.line_text, localToday()) ?? item.line_text } });
+    this.undoTimer = setTimeout(() => this.store.set({ tickUndo: null }), UNDO_MS);
+  }
+
+  async undoTick() {
+    const u = this.store.get().tickUndo;
+    if (!u) return;
+    clearTimeout(this.undoTimer);
+    this.store.set({ tickUndo: null });
+    await this.flipTask(u.path, u.line, u.lineText);
+  }
+
+  /**
+   * One writer per note: the open note flips through the editor (a backend write would stale its base hash),
+   * any other through the backend's line-checked toggle. false = nothing changed.
+   */
+  protected async flipTask(path: string, line: number, expected: string, retried = false): Promise<boolean> {
+    if (this.busy) {
+      this.setErr(BUSY_MSG);
+      return false;
+    }
+    if (this.editor.currentPath() === path) {
+      const cur = this.editor.getText().split("\n")[line]?.replace(/\r$/, "");
+      if (cur !== expected) return this.taskMoved();
+      if (!this.editor.toggleTask(line)) return false;
+      void this.editor.flush(); // its onSaved refreshes the view
+      return true;
+    }
+    try {
+      await this.api.toggleTask(path, line, expected);
+    } catch (e) {
+      if (e === "task-moved") return this.taskMoved();
+      if (e === "locked" && !retried) {
+        const ok = await this.promptPassphrase({ trigger: "open", context: null });
+        if (ok) return this.flipTask(path, line, expected, true);
+        if (ok === null) return false; // no key on this computer: keep the copy-identity error
+      }
+      this.setErr(e === "locked" ? "Note is locked" : errText(e));
+      return false;
+    }
+    void this.loadTasks();
+    return true;
+  }
+
+  protected taskMoved(): false {
+    this.setErr(TASK_MOVED);
+    void this.loadTasks();
+    return false;
+  }
+
+  /** Open the task's note (same flush-then-load path) with the caret on its line. */
+  async openTask(item: TaskItem) {
+    if (!(await this.show(item.path)) || this.editor.currentPath() !== item.path) return;
+    this.preview.setMode(false);
+    this.editor.revealLine(item.line);
+    this.editor.focus();
   }
 
   /** inPlace: when a filter is active, also reload the list so it reflects the new tag state. */
@@ -983,6 +1083,7 @@ export class Controller {
     toggle_tags: () => this.showTags(!this.store.get().tagPanelOpen),
     toggle_rich: () => void this.toggleStyle(),
     toggle_layout: () => void this.toggleLayout(),
+    toggle_tasks: () => this.setPaneMode(this.store.get().paneMode === "tasks" ? "notes" : "tasks"),
   };
 
   /**
@@ -991,13 +1092,14 @@ export class Controller {
    */
   onKeyDown(e: KeyEventLike): boolean {
     if (e.inDialog || e.inRename) return false; // dialogs and the rename field own their keys
-    const { sel, keys } = this.store.get();
-    if (isMenuKey(e) && !e.inEditor && sel >= 0) {
+    const { sel, keys, paneMode } = this.store.get();
+    const notes = paneMode === "notes"; // the note list's keys do nothing while the pane lists tasks
+    if (notes && isMenuKey(e) && !e.inEditor && sel >= 0) {
       void this.openContextMenu(sel, true);
       return true;
     }
     const arrow = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
-    if (arrow && !e.inEditor) {
+    if (notes && arrow && !e.inEditor) {
       void this.step(arrow);
       return true;
     }
@@ -1016,6 +1118,7 @@ export class Controller {
     await this.runSearch(false);
     void this.refreshTitles();
     void this.refreshTags();
+    void this.loadTasks();
     const open = this.editor.currentPath();
     if (open && paths.includes(open)) {
       // The reload replaces the editor text: keep the old one as a revision (a dirty editor conflicts instead).
@@ -1035,6 +1138,7 @@ export class Controller {
     await this.runSearch(this.editor.currentPath() === null);
     void this.refreshTitles();
     void this.refreshTags();
+    void this.loadTasks();
   }
 
   onIndexError(message: string) {

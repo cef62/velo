@@ -1,4 +1,4 @@
-import type { NoteMeta, RevisionInfo, Settings, TagCount } from "../api";
+import type { NoteMeta, RevisionInfo, Settings, TagCount, TaskView } from "../api";
 import { resolve, type Action } from "../shortcuts";
 
 /** Minimal observable state: React reads it through useSyncExternalStore, the controller writes it. */
@@ -73,6 +73,11 @@ export interface AppState {
   exactTitleMatch: boolean; // drives the ⇧↩ Create hint
   settings: Settings | null; // non-null = the Settings dialog is open on these saved settings
   update: { version: string; status: "available" | "current" | "installing" } | null; // the update banner
+  paneMode: "notes" | "tasks"; // what the left pane lists
+  taskView: TaskView | null; // filtered by query/selectedTags like the notes list
+  dueCount: number; // overdue + today, unfiltered: the Tasks switch count and the Dock badge
+  showDone: boolean;
+  tickUndo: { path: string; line: number; lineText: string } | null; // "Ticked · Undo" after a backend tick
 }
 
 export const initialState = (isMac: boolean): AppState => ({
@@ -113,4 +118,9 @@ export const initialState = (isMac: boolean): AppState => ({
   exactTitleMatch: false,
   settings: null,
   update: null,
+  paneMode: "notes",
+  taskView: null,
+  dueCount: 0,
+  showDone: false,
+  tickUndo: null,
 });

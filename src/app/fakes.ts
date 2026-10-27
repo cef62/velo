@@ -117,6 +117,8 @@ export class FakeEditor implements Editor {
   }
   refreshLinks = vi.fn();
   toggleTask = vi.fn(() => false);
+  revealed: number[] = [];
+  revealLine(line: number) { this.revealed.push(line); }
   appended: string[] = [];
   appendLine(text: string) {
     this.appended.push(text);

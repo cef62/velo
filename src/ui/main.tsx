@@ -60,6 +60,17 @@ void listen<{ message: string }>("index-error", (ev) => controller.onIndexError(
 void listen<{ version: string }>("update-available", (ev) => controller.onUpdateAvailable(ev.payload.version));
 void listen("check-updates", () => void controller.checkUpdates());
 
+// "today" rolls over at local midnight: refresh the Tasks groups and the due count/badge then.
+const armMidnight = () => {
+  const now = new Date();
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  setTimeout(() => {
+    void controller.loadTasks();
+    armMidnight();
+  }, next.getTime() - now.getTime() + 1000); // +1 s: never fire a hair before midnight
+};
+armMidnight();
+
 window.addEventListener("blur", () => controller.onBlur());
 void getCurrentWindow().onCloseRequested(async (e) => {
   if (!(await controller.requestClose())) e.preventDefault();
