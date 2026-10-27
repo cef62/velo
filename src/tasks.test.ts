@@ -21,4 +21,7 @@ test("due: input rule", () => {
   expect(before.slice(0, r.from) + r.insert).toBe("- [ ] call 📅 ");
   expect(dueRule("call due", " ")).toBeNull();
   expect(dueRule(before, "x")).toBeNull();
+  expect(dueRule("overdue:", " ")).toBeNull();
+  expect(dueRule("x due:", " ")).toEqual({ from: 2, insert: "📅 " });
+  expect(dueRule("due:", " ")).toEqual({ from: 0, insert: "📅 " });
 });
