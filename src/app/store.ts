@@ -78,6 +78,7 @@ export interface AppState {
   dueCount: number; // overdue + today, unfiltered: the Tasks switch count and the Dock badge
   showDone: boolean;
   tickUndo: { path: string; line: number; lineText: string } | null; // "Ticked · Undo" after a backend tick
+  capture: { target: string; err: string } | null; // the search field is in quick-capture mode
 }
 
 export const initialState = (isMac: boolean): AppState => ({
@@ -123,4 +124,5 @@ export const initialState = (isMac: boolean): AppState => ({
   dueCount: 0,
   showDone: false,
   tickUndo: null,
+  capture: null,
 });

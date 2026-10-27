@@ -8,7 +8,7 @@ export type SaveResult = { kind: "saved"; hash: string; front_matter: string | n
 export type TaskItem = { path: string; title: string; line: number; text: string; due: string | null; done: boolean; done_on: string | null; line_text: string };
 export type TaskView = { overdue: TaskItem[]; today: TaskItem[]; upcoming: TaskItem[]; no_date: TaskItem[]; done: TaskItem[]; due_count: number };
 export type RenameResult = { path: string; rewritten: number };
-export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; header_labels: boolean; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean };
+export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; header_labels: boolean; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean; capture_target: "inbox" | "daily"; inbox_title: string };
 
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<void>("set_settings", { settings });
@@ -24,6 +24,9 @@ export const tasks = (query: string, tags: string[], showDone: boolean) => invok
 /** Resolves to the toggled task's line and raw text as saved (front-matter stamping may shift it): what undo sends. */
 export const toggleTask = (path: string, line: number, expected: string) => invoke<{ line: number; line_text: string }>("toggle_task", { path, line, expected });
 export const captureTask = (text: string) => invoke<string>("capture_task", { text });
+export const captureTargetTitle = () => invoke<string>("capture_target_title");
+/** Capture finished or cancelled: hides velo again if the capture shortcut showed it. */
+export const captureDone = () => invoke<void>("capture_done");
 export const setBadge = (count: number) => invoke<void>("set_badge", { count });
 export const renameNote = (path: string, newTitle: string, rewriteLinks: boolean) => invoke<RenameResult>("rename_note", { path, newTitle, rewriteLinks });
 export const backlinkCount = (title: string) => invoke<number>("backlink_count", { title });

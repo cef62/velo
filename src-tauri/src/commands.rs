@@ -313,8 +313,28 @@ pub fn toggle_task(st: State<'_, AppState>, path: String, line: usize, expected:
 
 #[tauri::command(async)]
 pub fn capture_task(st: State<'_, AppState>, text: String) -> Res<String> {
-    let fm = st.settings.lock().unwrap().write_front_matter;
-    with_vault(&st, |v, id| v.capture_task("Inbox", &text, id, fm))
+    let (fm, title) = { let s = st.settings.lock().unwrap(); (s.write_front_matter, settings::capture_title(&s, &crate::tasks::local_today())) };
+    with_vault(&st, |v, id| v.capture_task(&title, &text, id, fm))
+}
+
+/// The note quick capture appends to (the field hint and the frontend's "is it open?" check).
+#[tauri::command]
+pub fn capture_target_title(st: State<'_, AppState>) -> String {
+    settings::capture_title(&st.settings.lock().unwrap(), &crate::tasks::local_today())
+}
+
+/// Capture finished or cancelled: if the shortcut showed velo, hide it again so the previous app is back in front.
+#[tauri::command]
+pub fn capture_done(app: AppHandle, st: State<'_, AppState>) {
+    if !st.capture_was_hidden.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    app.hide().ok();
+    #[cfg(not(target_os = "macos"))]
+    if let Some(w) = app.get_webview_window("main") {
+        w.hide().ok();
+    }
 }
 
 /// Dock badge: macOS only, a no-op elsewhere.

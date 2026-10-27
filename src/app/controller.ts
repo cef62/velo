@@ -216,9 +216,78 @@ export class Controller {
 
   /** The search text changed: fresh first page. */
   setQuery(q: string) {
+    if (this.store.get().capture) return this.store.set((s) => ({ query: q, capture: { ...s.capture!, err: "" } })); // capture text, not a search
     this.store.set({ query: q });
     void this.runSearch(true);
     if (this.store.get().paneMode === "tasks") void this.loadTasks();
+  }
+
+  protected captureQuery = ""; // the search text before capture mode, restored when it ends empty
+
+  /** The capture shortcut: the search field becomes "→ <target>", empty (text already typed in capture mode stays). */
+  async startCapture() {
+    let target = "Inbox";
+    try {
+      target = await this.api.captureTargetTitle();
+    } catch (e) {
+      console.error("capture target failed", e);
+    }
+    const s = this.store.get();
+    if (!s.capture) this.captureQuery = s.query;
+    this.store.set({ capture: { target, err: "" }, query: s.capture ? s.query : "" });
+    this.focusSearch();
+  }
+
+  /**
+   * Enter in capture mode. The open target note gets the line through the editor (one writer, ⌘Z undoes it),
+   * any other through the backend. On error the text stays in the field with the message under it.
+   */
+  async submitCapture(text: string) {
+    const cap = this.store.get().capture;
+    if (!cap) return;
+    const t = text.trim();
+    if (!t) return this.endCapture(true);
+    const fail = (msg: string) => this.store.set({ capture: { ...cap, err: msg } });
+    if (this.busy) return fail(BUSY_MSG);
+    const { openPath, title, indexing } = this.store.get();
+    if (openPath && this.editor.currentPath() === openPath && fold(title) === fold(cap.target)) {
+      // not editable: read-only while indexing (the gate) or suspended mid lock hand-off
+      if (!this.editor.appendLine("- [ ] " + t)) return fail(indexing ? errText("indexing") : `${cap.target} can't be edited right now`);
+      void this.editor.flush();
+      return this.endCapture(true, true);
+    }
+    try {
+      await this.api.captureTask(t);
+    } catch (e) {
+      if (e === "empty") return this.endCapture(true);
+      if (e === "conflict") {
+        // the line is in the conflict copy: re-sending would add it twice
+        this.endCapture(true, true);
+        return this.setErr(`Saved to a conflict copy — check ${cap.target}`);
+      }
+      return fail(e === "locked" ? `${cap.target} is locked` : errText(e));
+    }
+    this.endCapture(true, true);
+    void this.loadTasks(); // a backend write: the watcher skips it
+  }
+
+  /** Esc in capture mode. */
+  cancelCapture() {
+    this.endCapture(true);
+  }
+
+  /** Focus left the field: leave capture mode, velo stays shown. */
+  blurCapture() {
+    if (this.store.get().capture) this.endCapture(false);
+  }
+
+  /** Typed text is never dropped: uncaptured text stays as a search; otherwise the earlier search comes back. */
+  protected endCapture(hide: boolean, captured = false) {
+    const keep = !captured && this.store.get().query.trim() !== "";
+    this.store.set({ capture: null, ...(keep ? {} : { query: this.captureQuery }) });
+    if (keep) void this.runSearch(true); // as if typed into the search field
+    else if (captured) void this.runSearch(false); // the target's row moved; the list is otherwise unchanged
+    if (hide) void this.api.captureDone().catch((e) => console.error("capture done failed", e));
   }
 
   /** The note is now in the editor: title, path and lock state follow it; the conflict banner belongs to the previous note. */

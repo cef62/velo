@@ -716,3 +716,65 @@ test("toggle_tasks switches the pane and notes-changed refreshes tasks", async (
   await c.onNotesChanged([]);
   expect(api.tasks).toHaveBeenCalledTimes(2);
 });
+
+test("capture into the open Inbox appends through the editor", async () => {
+  const { c, api, editor, store } = setup({ Inbox: "- [ ] old", B: "b" });
+  await c.show(P("Inbox"));
+  editor.dirty = true; // unsaved typing in the note: the editor stays the one writer
+  await c.startCapture();
+  expect(store.get().capture).toEqual({ target: "Inbox", err: "" });
+  c.setQuery("buy milk");
+  await c.submitCapture("buy milk");
+  expect(api.captureTask).not.toHaveBeenCalled();
+  expect(editor.appended).toEqual(["- [ ] buy milk"]);
+  expect(api.captureDone).toHaveBeenCalled();
+  expect(store.get().capture).toBeNull();
+});
+
+test("capture into a closed note calls the backend", async () => {
+  const { c, api, editor, store } = setup();
+  await c.show(P("A"));
+  await c.startCapture();
+  await c.submitCapture("buy milk");
+  expect(api.captureTask).toHaveBeenCalledWith("buy milk");
+  expect(editor.appended).toEqual([]);
+  expect(api.captureDone).toHaveBeenCalled();
+  expect(store.get().capture).toBeNull();
+});
+
+test("capture error keeps the text", async () => {
+  const { c, api, store } = setup();
+  api.captureTask.mockRejectedValueOnce("locked");
+  await c.startCapture();
+  c.setQuery("buy milk");
+  await c.submitCapture("buy milk");
+  expect(store.get().capture?.err).toBe("Inbox is locked");
+  expect(store.get().query).toBe("buy milk");
+  expect(api.captureDone).not.toHaveBeenCalled();
+});
+
+test("Esc and empty Enter leave capture mode and call captureDone", async () => {
+  const { c, api, store } = setup();
+  await c.startCapture();
+  c.cancelCapture();
+  expect(store.get().capture).toBeNull();
+  expect(api.captureDone).toHaveBeenCalledTimes(1);
+  await c.startCapture();
+  await c.submitCapture("  ");
+  expect(store.get().capture).toBeNull();
+  expect(api.captureDone).toHaveBeenCalledTimes(2);
+  expect(api.captureTask).not.toHaveBeenCalled();
+});
+
+test("capture mode does not search while typing; blur keeps the text as the query", async () => {
+  const { c, api, store } = setup();
+  await c.startCapture();
+  const n = api.search.mock.calls.length;
+  c.setQuery("buy");
+  expect(api.search.mock.calls.length).toBe(n);
+  c.blurCapture();
+  expect(store.get().capture).toBeNull();
+  expect(store.get().query).toBe("buy");
+  expect(api.search.mock.calls.length).toBe(n + 1);
+  expect(api.captureDone).not.toHaveBeenCalled();
+});

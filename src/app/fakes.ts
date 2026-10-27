@@ -27,7 +27,7 @@ export function fakeApi(notes: Record<string, string> = {}) {
     if (!(title in notes)) throw "not-found";
     return { path, title, text: notes[title], hash: "h", encrypted: false, meta: noMeta };
   };
-  const settings: Settings = { notes_dir: "/n", layout: "vertical", font_size: 14, sort: "modified", editor_style: "rich", theme: "system", header_labels: false, shortcuts: {}, write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true };
+  const settings: Settings = { notes_dir: "/n", layout: "vertical", font_size: 14, sort: "modified", editor_style: "rich", theme: "system", header_labels: false, shortcuts: {}, write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox", inbox_title: "Inbox" };
   const api = {
     getSettings: vi.fn(async () => ({ ...settings })),
     setSettings: vi.fn(async (_s: Settings) => {}),
@@ -47,6 +47,8 @@ export function fakeApi(notes: Record<string, string> = {}) {
     tasks: vi.fn(async (_q: string, _t: string[], _d: boolean): Promise<TaskView> => ({ overdue: [], today: [], upcoming: [], no_date: [], done: [], due_count: 0 })),
     toggleTask: vi.fn(async (_p: string, line: number, line_text: string) => ({ line, line_text })),
     captureTask: vi.fn(async (_t: string) => "/n/Inbox.md"),
+    captureTargetTitle: vi.fn(async () => "Inbox"),
+    captureDone: vi.fn(async () => {}),
     setBadge: vi.fn(async (_c: number) => {}),
     renameNote: vi.fn(async (_p: string, _t: string, _r: boolean): Promise<RenameResult> => { throw "unset"; }),
     backlinkCount: vi.fn(async () => 0),

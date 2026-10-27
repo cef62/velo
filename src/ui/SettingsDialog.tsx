@@ -59,6 +59,8 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
     headerLabels: cur.header_labels === true,
     writeFrontMatter: cur.write_front_matter !== false,
     autoUpdateCheck: cur.auto_update_check !== false,
+    captureTarget: cur.capture_target === "daily" ? "daily" : "inbox",
+    inboxTitle: cur.inbox_title ?? "Inbox",
     shortcuts: resolve(cur.shortcuts, isMac),
   }));
   const set = (p: Partial<typeof d>) => setD((x) => ({ ...x, ...p }));
@@ -172,6 +174,14 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
               <Checkbox.Label>Add created/modified dates to notes (front matter)</Checkbox.Label>
               <Checkbox.HiddenInput />
             </Checkbox.Root>
+          </div>
+          <div className={frow}>
+            <span className={flab}>Quick capture goes to</span>
+            <div>{seg("Quick capture goes to", d.captureTarget, [["inbox", "Inbox"], ["daily", "Today's daily note"]], (v) => set({ captureTarget: v }))}</div>
+          </div>
+          <div className={frow}>
+            <label className={flab} htmlFor="set-inbox">Inbox note</label>
+            <Input id="set-inbox" value={d.inboxTitle} placeholder="Inbox" onChange={(e) => set({ inboxTitle: e.target.value })} spellCheck={false} autoComplete="off" className={css({ w: "200px" })} />
           </div>
           <div className={frow}>
             <span className={flab}>Updates</span>

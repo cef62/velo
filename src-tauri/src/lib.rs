@@ -110,6 +110,8 @@ pub fn run() {
             commands::tasks,
             commands::toggle_task,
             commands::capture_task,
+            commands::capture_target_title,
+            commands::capture_done,
             commands::set_badge,
             commands::rename_note,
             commands::backlink_count,

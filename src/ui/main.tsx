@@ -54,6 +54,7 @@ window.addEventListener(
 
 void listen<{ paths: string[] }>("notes-changed", (ev) => void controller.onNotesChanged(ev.payload.paths));
 void listen("focus-search", () => controller.focusSearch());
+void listen("capture", () => void controller.startCapture());
 void listen<{ done: number; total: number }>("index-progress", (ev) => controller.onIndexProgress(ev.payload.done, ev.payload.total));
 void listen("index-done", () => void controller.onIndexDone());
 void listen<{ message: string }>("index-error", (ev) => controller.onIndexError(ev.payload.message));

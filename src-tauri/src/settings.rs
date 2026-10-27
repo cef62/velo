@@ -27,11 +27,15 @@ pub struct Settings {
     pub info_panel: bool,
     /// check GitHub for a new release daily (release builds only)
     pub auto_update_check: bool,
+    /// quick capture target: "inbox" | "daily"
+    pub capture_target: String,
+    /// the Inbox note's title; empty/invalid falls back to "Inbox"
+    pub inbox_title: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), header_labels: false, shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true }
+        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), header_labels: false, shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into() }
     }
 }
 
@@ -51,6 +55,16 @@ impl Settings {
         let get = |id: &str, d: &str| self.shortcuts.get(id).cloned().unwrap_or_else(|| d.into());
         vec![(GlobalAction::ToggleWindow, get("toggle_window", DEFAULT_TOGGLE)), (GlobalAction::Capture, get("capture", DEFAULT_CAPTURE))]
     }
+}
+
+/// The quick-capture target note title: today's daily note or the Inbox, through the file-name rules.
+pub fn capture_title(s: &Settings, today: &str) -> String {
+    if s.capture_target == "daily" {
+        return today.into();
+    }
+    let t = crate::names::title_to_stem(&s.inbox_title);
+    // title_to_stem says "Untitled" for a title with nothing usable left (empty, "...")
+    if t == "Untitled" && s.inbox_title.trim() != "Untitled" { "Inbox".into() } else { t }
 }
 
 /// "Mod+Shift+Space" -> "CommandOrControl+Shift+Space" (global-shortcut plugin syntax).
@@ -196,6 +210,19 @@ mod tests {
         for b in ["Mod+Shift+Space", "Mod+Alt+KeyE", "Mod+BracketLeft", "Ctrl+F5"] {
             assert!(to_plugin_format(b).parse::<tauri_plugin_global_shortcut::Shortcut>().is_ok(), "{b}");
         }
+    }
+
+    #[test] fn capture_title_inbox_daily_and_fallback() {
+        let mut s = Settings::default();
+        assert_eq!(s.capture_target, "inbox");
+        s.inbox_title = "".into(); assert_eq!(capture_title(&s, "2026-10-27"), "Inbox");
+        s.inbox_title = "  ".into(); assert_eq!(capture_title(&s, "2026-10-27"), "Inbox");
+        s.inbox_title = "...".into(); assert_eq!(capture_title(&s, "2026-10-27"), "Inbox");
+        s.inbox_title = "Untitled".into(); assert_eq!(capture_title(&s, "2026-10-27"), "Untitled");
+        s.inbox_title = "Todo".into(); assert_eq!(capture_title(&s, "2026-10-27"), "Todo");
+        s.inbox_title = "a/b".into(); assert_eq!(capture_title(&s, "2026-10-27"), "a-b");
+        s.capture_target = "daily".into(); assert_eq!(capture_title(&s, "2026-10-27"), "2026-10-27");
+        assert_eq!(Settings::default().inbox_title, "Inbox");
     }
 
     #[test] fn global_bindings_defaults_and_overrides() {
