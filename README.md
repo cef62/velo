@@ -133,7 +133,7 @@ cd src-tauri && cargo test --release --test perf -- --ignored --nocapture
 
 Pushing a `v*` tag runs `.github/workflows/build-release.yml`, which tests and builds all platforms into a GitHub release.
 
-Release builds also produce updater artifacts (`.sig` files and `latest.json`) signed with a minisign key stored in the repository secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; the matching public key lives in `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`. `pnpm tauri build` refuses to run without the private key; `pnpm build:app` reads it and its password from `~/.tauri/velo.key` and `~/.tauri/velo.password`. Forks need their own keypair (`pnpm tauri signer generate`). Never lose or commit the private key: installed apps only accept updates signed with it.
+Release builds also produce updater artifacts (`.sig` files and `latest.json`) signed with a minisign key stored in the repository secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; the matching public key lives in `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`. `pnpm tauri build` refuses to run without the private key; `pnpm build:app` (macOS/Linux shell) reads it and its password from `~/.tauri/velo.key` and `~/.tauri/velo.password`. Forks need their own keypair (`pnpm tauri signer generate`). Never lose or commit the private key: installed apps only accept updates signed with it.
 
 ## License
 

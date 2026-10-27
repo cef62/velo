@@ -374,6 +374,21 @@ test("Lock and Lock all during an update install say busy instead of doing nothi
   expect(store.get().err).toBe("Busy — try again in a moment");
 });
 
+test("a note reply arriving during the update install doesn't unfreeze the editor", async () => {
+  const { c, api, store, editor } = setup();
+  const d = deferred<ReturnType<typeof api.openNote> extends Promise<infer T> ? T : never>();
+  api.openNote.mockImplementationOnce(() => d.promise);
+  api.installUpdate.mockImplementationOnce(() => new Promise(() => {}));
+  const auto = c.show(P("A"), "auto");
+  c.onUpdateAvailable("0.6.1");
+  void c.installUpdate();
+  await settle();
+  d.resolve({ path: P("A"), title: "A", text: "a", hash: "h", encrypted: false, meta: noMeta });
+  await auto;
+  expect(editor.suspended).toBe(true);
+  expect(store.get().openPath).toBeNull();
+});
+
 const key = (code: string, mods: { meta?: boolean; shift?: boolean } = {}, where: Partial<KeyEventLike> = {}): KeyEventLike => ({
   key: code.replace(/^Key/, "").toLowerCase(),
   code,

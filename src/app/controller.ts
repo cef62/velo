@@ -936,6 +936,7 @@ export class Controller {
     this.busy = this.installing = true;
     try {
       if (!(await this.editor.flush())) return; // the save error stays visible; nothing is lost
+      this.newShow(); // a note reply still on its way must not load (load ends the suspension)
       this.editor.suspend(); // the relaunch skips the close flow: no edit may start now
       this.store.set({ update: { ...u, status: "installing" } });
       await this.api.installUpdate();
