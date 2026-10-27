@@ -559,7 +559,7 @@ export class Controller {
         await this.resort();
       } else await this.runSearch(false);
       void this.refreshTitles();
-      if (created && checklist && this.editor.currentPath() === doc.path) this.editor.appendLine("- [ ] "); // after the stamped front matter, caret at the end
+      if (created && checklist && this.editor.currentPath() === doc.path && stripFrontMatter(this.editor.getText()).trim() === "") this.editor.appendLine("- [ ] "); // after the stamped front matter, caret at the end
       if (this.editor.currentPath() === doc.path) this.settleAfterOpen(created, source);
       return true;
     } catch (e) {

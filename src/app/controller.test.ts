@@ -845,3 +845,9 @@ test("alt-enter on an existing title just opens it", async () => {
   expect(store.get().openPath).toBe(P("B"));
   expect(editor.appended).toEqual([]);
 });
+
+test("checklist append skips an existing note the title cache did not know", async () => {
+  const { c, editor } = setup({ B: "has text" });
+  await c.openTitle("B", "enter", true); // titles cache is empty: looks created
+  expect(editor.appended).toEqual([]);
+});
