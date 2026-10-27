@@ -6,13 +6,13 @@ import { createStore, initialState } from "./store";
 
 function setup(notes: Record<string, string> = { A: "a", B: "b", C: "c" }) {
   const { api } = fakeApi(notes);
-  const { ui, calls, menus } = fakeUi();
+  const { ui, calls, menus, answers } = fakeUi();
   const store = createStore(initialState(true));
   const c = new Controller(store, api, ui, { isMac: true, platform: "mac" });
   const editor = new FakeEditor();
   c.attachEditor(editor);
   c.attachPreview(new FakePreview());
-  return { c, api, ui, calls, store, editor, notes, menus };
+  return { c, api, ui, calls, store, editor, notes, menus, answers };
 }
 const P = (t: string) => `/n/${t}.md`;
 
@@ -398,4 +398,46 @@ test("restore snapshots keys typed during the revision read, and refuses while b
   await c.restoreRevision("42");
   expect(store.get().err).toBe("Busy — try again in a moment");
   expect(api.readRevision).toHaveBeenCalledTimes(1);
+});
+
+test("info loads only while open", async () => {
+  const { c, api, store } = setup();
+  await c.runSearch(true);
+  await settle();
+  expect(api.listRevisions).not.toHaveBeenCalled();
+  expect(api.backlinkCount).not.toHaveBeenCalled();
+  api.listRevisions.mockResolvedValue([{ id: "1", ts: 5, size: 1 }]);
+  api.backlinkCount.mockResolvedValue(3);
+  await c.toggleInfo();
+  await settle();
+  expect(api.setSettings).toHaveBeenCalledWith(expect.objectContaining({ info_panel: true }));
+  expect(store.get().info.backlinks).toBe(3);
+  expect(store.get().info.revisions).toEqual([{ id: "1", ts: 5, size: 1 }]);
+});
+
+test("meta updates after save", async () => {
+  const { c, store, editor } = setup({ A: "one two three" });
+  store.set({ infoOpen: true });
+  await c.runSearch(true);
+  await settle();
+  expect(store.get().info.words).toBe(3);
+  editor.text = "---\nx: 1\n---\nfour words in #tag";
+  c.editorOpts().onMeta({ ...noMeta, modified: 9, modified_src: "frontmatter", tags: ["fm"] });
+  await settle();
+  expect(store.get().info.meta?.modified).toBe(9);
+  expect(store.get().info.words).toBe(4);
+  expect(store.get().info.tags).toEqual(["fm", "tag"]);
+});
+
+test("restore asks for confirmation and does nothing when declined", async () => {
+  const { c, api, editor, calls, answers } = setup();
+  await c.runSearch(true);
+  await settle();
+  editor.text = "now";
+  answers.confirm = false;
+  await c.restoreRevision("42");
+  expect(calls.find((x) => x[0] === "confirm")?.[2]).toEqual({ title: "Restore revision", okLabel: "Restore" });
+  expect(String(calls.find((x) => x[0] === "confirm")?.[1])).toMatch(/^Replace the note with this version from .+\? The current text is kept as a revision\.$/);
+  expect(api.readRevision).not.toHaveBeenCalled();
+  expect(editor.text).toBe("now");
 });

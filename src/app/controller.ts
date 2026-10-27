@@ -11,12 +11,13 @@ import { latest } from "../latest";
 import { History } from "../history";
 import { errText } from "../errtext";
 import { enterAction, fold, moveSelection } from "../search";
-import { pruneSelection, toggleTag } from "../tags";
+import { extractTags, pruneSelection, toggleTag } from "../tags";
+import { stripFrontMatter, wordCount } from "../frontmatter";
 import { formatBinding, matches, resolve, type Action } from "../shortcuts";
 import { isMenuKey, linkFor, menuModel, type MenuAction } from "../contextmenu";
 import { isLockedPath } from "../passphrase";
 import type { MenuSpec, UiPort } from "./ports";
-import type { AppState, Store } from "./store";
+import { noInfo, type AppState, type Store } from "./store";
 
 export type Api = typeof ApiModule;
 
@@ -84,7 +85,11 @@ export class Controller {
       onSaved: () => this.scheduleTagRefresh(),
       onConflict: (p) => this.store.set({ conflict: p }),
       onSaving: (on) => this.store.set({ saving: on }),
-      onMeta: () => {}, // Task 6: info panel
+      onMeta: (m) => {
+        this.store.set((s) => ({ info: { ...s.info, meta: m } }));
+        this.textInfo();
+        void this.loadInfo();
+      },
     };
   }
 
@@ -211,12 +216,61 @@ export class Controller {
 
   /** The note is now in the editor: title, path and lock state follow it; the conflict banner belongs to the previous note. */
   protected loadedDoc(doc: NoteDoc) {
-    this.store.set({ title: doc.title, openPath: doc.path, encrypted: doc.encrypted, conflict: null });
+    this.store.set({ title: doc.title, openPath: doc.path, encrypted: doc.encrypted, conflict: null, info: { ...noInfo, meta: doc.meta } });
+    this.textInfo();
+    void this.loadInfo();
+  }
+
+  /** Word count and merged tags from the editor text (on load and save, not per keystroke). */
+  protected textInfo() {
+    const text = this.editor.getText();
+    this.store.set((s) => {
+      const seen = new Set<string>();
+      const tags = [...(s.info.meta?.tags ?? []), ...extractTags(stripFrontMatter(text))].filter((t) => !seen.has(fold(t)) && seen.add(fold(t)));
+      return { info: { ...s.info, words: wordCount(text), tags } };
+    });
+  }
+
+  protected readonly infoReq = latest();
+  /** Backlinks and revisions for the open note; no backend calls while the panel is closed. */
+  async loadInfo() {
+    const { infoOpen, openPath, title } = this.store.get();
+    if (!infoOpen || !openPath) return;
+    const fresh = this.infoReq();
+    try {
+      const [backlinks, revisions] = await Promise.all([this.api.backlinkCount(title), this.api.listRevisions(openPath)]);
+      if (fresh() && this.store.get().openPath === openPath) this.store.set((s) => ({ info: { ...s.info, backlinks, revisions } }));
+    } catch (e) {
+      if (e !== "locked") console.error("info load failed", e);
+    }
+  }
+
+  async toggleInfo() {
+    try {
+      const cur = await this.api.getSettings();
+      const next = !cur.info_panel;
+      await this.api.setSettings({ ...cur, info_panel: next });
+      this.store.set({ infoOpen: next });
+      void this.loadInfo();
+    } catch (e) {
+      this.setErr(errText(e));
+    }
+  }
+
+  async selectRevision(id: string) {
+    const path = this.store.get().openPath;
+    if (!path) return;
+    try {
+      const text = await this.api.readRevision(path, id);
+      if (this.store.get().openPath === path) this.store.set((s) => ({ info: { ...s.info, preview: { id, text } } }));
+    } catch (e) {
+      this.setErr(errText(e));
+    }
   }
 
   /** The editor holds no note any more (deleted, or locked away by Lock all). */
   protected closedDoc() {
-    this.store.set({ title: "", openPath: null, encrypted: false, conflict: null });
+    this.store.set({ title: "", openPath: null, encrypted: false, conflict: null, info: noInfo });
   }
 
   /**
@@ -693,12 +747,16 @@ export class Controller {
     }
   }
 
-  /** Replace the open note with revision `id` as a user edit, after snapshotting the current text. Task 6 adds the confirm. */
+  /** Replace the open note with revision `id` as a user edit, after confirming and snapshotting the current text. */
   async restoreRevision(id: string) {
     if (this.busy) return this.setErr(BUSY_MSG); // lock hand-off: the editor is suspended, the file is moving
     const path = this.editor.currentPath();
     if (!path || !(await this.editor.flush())) return;
     try {
+      const ts = this.store.get().info.revisions?.find((r) => r.id === id)?.ts;
+      const when = ts === undefined ? "earlier" : new Date(ts).toLocaleString();
+      if (!(await this.ui.confirm(`Replace the note with this version from ${when}? The current text is kept as a revision.`, { title: "Restore revision", okLabel: "Restore" }))) return;
+      if (this.busy) return this.setErr(BUSY_MSG);
       const text = await this.api.readRevision(path, id);
       // Snapshot what the editor holds right before the replace; again if keys were typed meanwhile.
       // A failed snapshot aborts: the current text must stay recoverable.
@@ -708,7 +766,11 @@ export class Controller {
         await this.api.snapshotText(path, cur);
       } while (this.editor.getText() !== cur);
       if (this.busy) return this.setErr(BUSY_MSG);
-      if (this.editor.currentPath() === path) this.editor.replaceText(text);
+      if (this.editor.currentPath() === path) {
+        this.editor.replaceText(text);
+        this.store.set((s) => ({ info: { ...s.info, preview: null } }));
+        void this.loadInfo(); // the snapshot above is a new revision
+      }
     } catch (e) {
       this.setErr(errText(e));
     }
@@ -820,7 +882,7 @@ export class Controller {
   }
 
   protected readonly actions: Record<Exclude<Action, "toggle_window">, () => void> = {
-    toggle_info: () => {}, // wired in Task 5/6
+    toggle_info: () => void this.toggleInfo(),
     toggle_front_matter: () => void this.toggleFrontMatter(),
     focus_search: () => this.focusSearch(),
     toggle_preview: () => this.togglePreview(),

@@ -1,6 +1,6 @@
 // Test fakes for the controller: in-memory backend, editor, preview and UI port. Tests only.
 import { vi } from "vitest";
-import type { Hit, NoteDoc, NoteMeta, Page, RenameResult, Settings, TagCount } from "../api";
+import type { Hit, NoteDoc, NoteMeta, Page, RenameResult, RevisionInfo, Settings, TagCount } from "../api";
 import type { Editor } from "../editor";
 import type { Preview } from "../preview";
 import type { Api } from "./controller";
@@ -54,6 +54,7 @@ export function fakeApi(notes: Record<string, string> = {}) {
     setupPassphrase: vi.fn(async () => null),
     identityFileExists: vi.fn(async () => true),
     snapshotText: vi.fn(async (_p: string, _t: string) => {}),
+    listRevisions: vi.fn(async (_p: string): Promise<RevisionInfo[]> => []),
     readRevision: vi.fn(async (_p: string, _id: string): Promise<string> => { throw "unset"; }),
   };
   return { api: api as unknown as Api & typeof api, notes };
