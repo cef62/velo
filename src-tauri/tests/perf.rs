@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 use velo_lib::index::{Index, Meta, Sort};
 use velo_lib::names::parse_note_file;
+use velo_lib::tasks::group_tasks;
 
 const QUERIES: [&str; 24] = [
     "a", "x", "xy", "al", "zu", "alp", "cha", "the", "golf", "tango", "résumé", "resume", "kubernetes",
@@ -68,4 +69,16 @@ fn search_p95_under_50ms() {
         println!("{n} notes {sort:?} q={q:?} tags={tags:?}: p50 {:.2} ms, p95 {p95:.2} ms", times[times.len() / 2]);
         assert!(p95 < 50.0, "tag filter {tags:?} p95 {p95:.2} ms");
     }
+    // Tasks view: read every row, then group, as Vault::tasks does.
+    let mut times = Vec::new();
+    for _ in 0..30 {
+        let t = Instant::now();
+        let v = group_tasks(idx.task_rows(&[]).unwrap(), "", true, "2026-10-27");
+        times.push(t.elapsed().as_secs_f64() * 1000.0);
+        assert!(v.no_date.len() + v.upcoming.len() + v.today.len() + v.overdue.len() > 0);
+    }
+    times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let p95 = times[times.len() * 95 / 100];
+    println!("{n} notes tasks view: p50 {:.2} ms, p95 {p95:.2} ms", times[times.len() / 2]);
+    assert!(p95 < 50.0, "tasks view p95 {p95:.2} ms");
 }

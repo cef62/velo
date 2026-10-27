@@ -8,6 +8,7 @@ spikes/tauri/
 spikes/wails/
 .superpowers/
 fixtures/
+!tests/fixtures/
 src-tauri/target/
 src-tauri/gen/
 

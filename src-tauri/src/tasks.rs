@@ -1,5 +1,8 @@
 //! Task-line parsing and toggling. The line rule mirrors `TASK_ITEM` in src/preview.ts.
 use crate::frontmatter;
+use crate::index::TaskRow;
+use crate::text::fold;
+use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TaskLine {
@@ -87,6 +90,59 @@ pub fn toggle_line(line: &str, today: &str) -> Option<String> {
     Some(format!("{}{mark}]{rest}{stamp}{cr}", &body[..b]))
 }
 
+#[derive(Serialize, Debug, Clone)]
+pub struct TaskItem {
+    pub path: String,
+    pub title: String,
+    pub line: usize,
+    pub text: String,
+    pub due: Option<String>,
+    pub done: bool,
+    pub done_on: Option<String>,
+    /// Raw line: the `expected` for a tick.
+    pub line_text: String,
+}
+
+#[derive(Serialize, Debug, Default)]
+pub struct TaskView {
+    pub overdue: Vec<TaskItem>,
+    pub today: Vec<TaskItem>,
+    pub upcoming: Vec<TaskItem>,
+    pub no_date: Vec<TaskItem>,
+    pub done: Vec<TaskItem>,
+    pub due_count: usize,
+}
+
+/// Buckets open tasks by due date vs `today` (YYYY-MM-DD); `done` holds ticks from the last 7 days when `show_done`.
+pub fn group_tasks(rows: Vec<TaskRow>, query: &str, show_done: bool, today: &str) -> TaskView {
+    let q = fold(query);
+    let q = q.trim();
+    let cutoff = chrono::NaiveDate::parse_from_str(today, "%Y-%m-%d").ok().map(|d| (d - chrono::Days::new(7)).to_string());
+    let mut rows: Vec<TaskRow> = rows.into_iter().filter(|r| q.is_empty() || fold(&r.text).contains(q) || fold(&r.title).contains(q)).collect();
+    // Undated after dated; ties: newest note, then position.
+    rows.sort_by(|a, b| (a.due.is_none(), &a.due, std::cmp::Reverse(a.modified), &a.path, a.line).cmp(&(b.due.is_none(), &b.due, std::cmp::Reverse(b.modified), &b.path, b.line)));
+    let mut v = TaskView::default();
+    for r in rows {
+        let item = |r: TaskRow| TaskItem { path: r.path, title: r.title, line: r.line, text: r.text, due: r.due, done: r.done, done_on: r.done_on, line_text: r.line_text };
+        let bucket = if r.done {
+            match (&r.done_on, &cutoff) {
+                (Some(d), Some(c)) if show_done && d >= c => &mut v.done,
+                _ => continue,
+            }
+        } else {
+            match r.due.as_deref() {
+                Some(d) if d < today => &mut v.overdue,
+                Some(d) if d == today => &mut v.today,
+                Some(_) => &mut v.upcoming,
+                None => &mut v.no_date,
+            }
+        };
+        bucket.push(item(r));
+    }
+    v.due_count = v.overdue.len() + v.today.len();
+    v
+}
+
 pub fn local_today() -> String {
     chrono::Local::now().format("%Y-%m-%d").to_string()
 }
@@ -112,6 +168,40 @@ mod tests {
         assert_eq!(t[0].line_text, "- [ ] a 📅 2026-11-01");
         assert_eq!((t[1].line, t[1].text.as_str(), t[1].done, t[1].done_on.as_deref()), (7, "b", true, Some("2026-10-20")));
         assert_eq!(t[1].line_text, "* [x] b ✅ 2026-10-20");
+    }
+
+    fn row(title: &str, text: &str, due: Option<&str>, modified: i64) -> TaskRow {
+        TaskRow { path: format!("{title}.md"), title: title.into(), modified, line: 0, text: text.into(), done: false, due: due.map(Into::into), done_on: None, line_text: String::new() }
+    }
+    fn texts(v: &[TaskItem]) -> Vec<&str> { v.iter().map(|t| t.text.as_str()).collect() }
+
+    #[test]
+    fn group_tasks_buckets_and_orders() {
+        let rows = vec![
+            row("n", "none", None, 1), row("n", "up", Some("2026-11-02"), 1), row("n", "now", Some("2026-10-27"), 1), row("n", "late", Some("2026-10-20"), 1),
+            row("n", "later", Some("2026-10-25"), 5), row("n", "none2", None, 9),
+        ];
+        let v = group_tasks(rows, "", false, "2026-10-27");
+        assert_eq!(texts(&v.overdue), ["late", "later"]);
+        assert_eq!(texts(&v.today), ["now"]);
+        assert_eq!(texts(&v.upcoming), ["up"]);
+        assert_eq!(texts(&v.no_date), ["none2", "none"], "newest note first");
+        assert_eq!(v.due_count, 3);
+    }
+
+    #[test]
+    fn show_done_only_last_7_days() {
+        let done = |t: &str, d: &str| TaskRow { done: true, done_on: Some(d.into()), ..row("n", t, None, 1) };
+        let rows = || vec![done("recent", "2026-10-21"), done("old", "2026-10-19"), TaskRow { done: true, ..row("n", "undated", None, 1) }];
+        assert_eq!(texts(&group_tasks(rows(), "", true, "2026-10-27").done), ["recent"]);
+        assert!(group_tasks(rows(), "", false, "2026-10-27").done.is_empty());
+    }
+
+    #[test]
+    fn query_matches_task_text_or_title() {
+        let rows = vec![row("Garden", "water", None, 1), row("Home", "buy Café beans", None, 1), row("Home", "other", None, 1)];
+        assert_eq!(texts(&group_tasks(rows.clone(), "garden", false, "2026-10-27").no_date), ["water"]);
+        assert_eq!(texts(&group_tasks(rows, "cafe", false, "2026-10-27").no_date), ["buy Café beans"]);
     }
 
     #[test]

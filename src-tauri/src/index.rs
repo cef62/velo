@@ -1,5 +1,6 @@
 use crate::names::NoteFile;
 use crate::frontmatter::{self, FrontMatter};
+use crate::tasks::parse_tasks;
 use crate::text::{extract_links, extract_tags, fold};
 use rusqlite::{Connection, params, params_from_iter};
 use serde::{Deserialize, Serialize};
@@ -88,15 +89,31 @@ CREATE INDEX IF NOT EXISTS notes_modified ON notes(modified);
 CREATE INDEX IF NOT EXISTS notes_title ON notes(title_folded);
 CREATE INDEX IF NOT EXISTS links_dst ON links(dst_folded);
 CREATE INDEX IF NOT EXISTS links_src ON links(src);
+CREATE TABLE IF NOT EXISTS tasks(path TEXT NOT NULL, line INTEGER NOT NULL, text TEXT NOT NULL, done INTEGER NOT NULL, due TEXT, done_on TEXT, line_text TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS tasks_path ON tasks(path);
 "#;
 
-const DELETES: [&str; 5] = [
+const DELETES: [&str; 6] = [
     "DELETE FROM notes_fts WHERE rowid=(SELECT rowid FROM notes WHERE path=?1)",
     "DELETE FROM notes WHERE path=?1",
     "DELETE FROM links WHERE src=?1",
     "DELETE FROM tags WHERE path=?1",
     "DELETE FROM aliases WHERE path=?1",
+    "DELETE FROM tasks WHERE path=?1",
 ];
+
+#[derive(Debug, Clone)]
+pub struct TaskRow {
+    pub path: String,
+    pub title: String,
+    pub modified: i64,
+    pub line: usize,
+    pub text: String,
+    pub done: bool,
+    pub due: Option<String>,
+    pub done_on: Option<String>,
+    pub line_text: String,
+}
 
 fn preview(title: &str, body: &str) -> String {
     let rest = match body.split_once('\n') {
@@ -132,8 +149,8 @@ impl Index {
         db.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON;")?;
         // Older indexes lack tags, dates or aliases: drop them so the vault's reconcile reindexes every note.
         // DROP, not DELETE: deleting every FTS5 row one by one took ~1 min at 10k notes.
-        if db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? < 3 {
-            db.execute_batch("DROP TABLE IF EXISTS notes_fts; DROP TABLE IF EXISTS notes; DROP TABLE IF EXISTS links; DROP TABLE IF EXISTS tags; DROP TABLE IF EXISTS aliases; PRAGMA user_version=3;")?;
+        if db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? < 4 {
+            db.execute_batch("DROP TABLE IF EXISTS tasks; DROP TABLE IF EXISTS notes_fts; DROP TABLE IF EXISTS notes; DROP TABLE IF EXISTS links; DROP TABLE IF EXISTS tags; DROP TABLE IF EXISTS aliases; PRAGMA user_version=4;")?;
         }
         db.execute_batch(SCHEMA)?;
         // FTS5 deletes otherwise leave old segments (all trigrams) in notes_fts_data.
@@ -177,6 +194,10 @@ impl Index {
             }
             for (f, d) in all_tags(b, fm.as_ref()) {
                 tx.execute("INSERT INTO tags(path,tag_folded,tag_display) VALUES(?,?,?)", params![path, f, d])?;
+            }
+            // Full text, not `b`: task line numbers must match the editor's.
+            for t in parse_tasks(body.unwrap_or_default()) {
+                tx.execute("INSERT INTO tasks(path,line,text,done,due,done_on,line_text) VALUES(?,?,?,?,?,?,?)", params![path, t.line as i64, t.text, t.done, t.due, t.done_on, t.line_text])?;
             }
             let mut seen = HashSet::new();
             for a in fm.iter().flat_map(|f| &f.aliases) {
@@ -313,6 +334,23 @@ impl Index {
     pub fn tags(&self) -> anyhow::Result<Vec<TagCount>> {
         let mut st = self.db.prepare("SELECT MIN(tag_display), COUNT(DISTINCT path) FROM tags GROUP BY tag_folded ORDER BY tag_folded")?;
         Ok(st.query_map([], |r| Ok(TagCount { tag: r.get(0)?, count: r.get::<_, i64>(1)? as usize }))?.collect::<Result<_, _>>()?)
+    }
+
+    /// Task rows of notes carrying every tag in `tags` (same rule as `search_page`). Locked notes have none.
+    pub fn task_rows(&self, tags: &[String]) -> anyhow::Result<Vec<TaskRow>> {
+        let tags: Vec<String> = tags.iter().map(|t| fold(t)).collect();
+        let cond: String = tags.iter().map(|_| " AND EXISTS (SELECT 1 FROM tags g WHERE g.path = t.path AND g.tag_folded = ?)").collect();
+        let mut st = self.db.prepare(&format!(
+            "SELECT t.path, n.title, n.modified, t.line, t.text, t.done, t.due, t.done_on, t.line_text FROM tasks t JOIN notes n ON n.path = t.path WHERE 1{cond}"
+        ))?;
+        let rows = st.query_map(params_from_iter(tags.iter()), |r| {
+            Ok(TaskRow { path: r.get(0)?, title: r.get(1)?, modified: r.get(2)?, line: r.get::<_, i64>(3)? as usize, text: r.get(4)?, done: r.get(5)?, due: r.get(6)?, done_on: r.get(7)?, line_text: r.get(8)? })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn title_modified(&self, path: &str) -> Option<(String, i64)> {
+        self.db.query_row("SELECT title, modified FROM notes WHERE path=?", [path], |r| Ok((r.get(0)?, r.get(1)?))).ok()
     }
 
     pub fn find_title(&self, title: &str) -> anyhow::Result<Option<String>> {
@@ -466,13 +504,36 @@ mod tests {
         for lim in [1, 2, 10] { assert_eq!(i.search_page("secret", Sort::Title, 0, lim, &[], &u).unwrap().total, 4, "{lim}"); }
         assert_eq!(i.search_page("secret", Sort::Title, 0, 10, &[], &HashMap::new()).unwrap().total, 3);
     }
+    #[test] fn upsert_fills_tasks_and_remove_clears() {
+        let mut i = idx(&[("a.md", "# a\n- [ ] one\n- [x] two ✅ 2026-10-20\n", 1)]);
+        let r = i.task_rows(&[]).unwrap();
+        assert_eq!(r.len(), 2);
+        assert_eq!((r[0].line, r[0].text.as_str(), r[0].line_text.as_str()), (1, "one", "- [ ] one"));
+        i.remove("a.md").unwrap();
+        assert!(i.task_rows(&[]).unwrap().is_empty());
+    }
+    #[test] fn task_rows_filter_by_tags() {
+        let i = idx(&[("a.md", "#work\n- [ ] one", 1), ("b.md", "- [ ] two", 2)]);
+        assert_eq!(i.task_rows(&["Work".into()]).unwrap().len(), 1);
+        assert_eq!(i.task_rows(&[]).unwrap().len(), 2);
+    }
+    #[test] fn schema_v3_db_is_rebuilt_as_v4() {
+        let dir = tempfile::tempdir().unwrap(); let db = dir.path().join("i.db");
+        let mut i = Index::open(&db).unwrap();
+        i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("- [ ] t")).unwrap(); drop(i);
+        Connection::open(&db).unwrap().execute_batch("PRAGMA user_version=3").unwrap();
+        let mut i = Index::open(&db).unwrap(); assert!(i.known().unwrap().is_empty()); assert!(i.task_rows(&[]).unwrap().is_empty());
+        assert_eq!(i.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 4);
+        i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("- [ ] t")).unwrap();
+        assert_eq!(i.task_rows(&[]).unwrap().len(), 1);
+    }
     #[test] fn schema_upgrade_reindexes() {
         let dir = tempfile::tempdir().unwrap(); let db = dir.path().join("i.db");
         let mut i = Index::open(&db).unwrap();
         i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("#x")).unwrap(); drop(i);
         Connection::open(&db).unwrap().execute_batch("PRAGMA user_version=2").unwrap();
         let i = Index::open(&db).unwrap(); assert!(i.known().unwrap().is_empty()); assert!(i.tags().unwrap().is_empty());
-        assert_eq!(i.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 3);
+        assert_eq!(i.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 4);
         let mut i = i; i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("#x")).unwrap(); drop(i);
         assert_eq!(Index::open(&db).unwrap().known().unwrap().len(), 1);
     }

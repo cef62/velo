@@ -1,12 +1,13 @@
 use crate::crypto;
 use crate::frontmatter;
-use crate::index::{Index, Meta, Page, Sort, TagCount, all_tags, effective_dates};
+use crate::index::{Index, Meta, Page, Sort, TagCount, TaskRow, all_tags, effective_dates};
+use crate::tasks::{TaskView, group_tasks, local_today, parse_tasks};
 
 const PAGE: usize = 200;
 use crate::revisions::{RevisionInfo, Revisions, fnv64};
 use crate::names::{NoteFile, note_path, parse_note_file};
 use crate::store::{SaveResult, Store, hash, meta_of};
-use crate::text::rewrite_links;
+use crate::text::{fold, rewrite_links};
 use anyhow::{Context, anyhow};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -160,6 +161,21 @@ impl Vault {
 
     pub fn search(&self, query: &str, sort: Sort, offset: usize, tags: &[String]) -> anyhow::Result<Page> {
         self.index.search_page(query, sort, offset, PAGE, tags, &self.unlocked)
+    }
+
+    /// Open and recent tasks; unlocked notes' tasks come from memory, so they never reach SQLite.
+    pub fn tasks(&self, query: &str, tags: &[String], show_done: bool) -> anyhow::Result<TaskView> {
+        let mut rows = self.index.task_rows(tags)?;
+        let wanted: Vec<String> = tags.iter().map(|t| fold(t)).collect();
+        for (path, plain) in &self.unlocked {
+            let Some((title, modified)) = self.index.title_modified(path) else { continue };
+            let have = all_tags(frontmatter::body(plain), frontmatter::parse(plain).as_ref());
+            if !wanted.iter().all(|w| have.iter().any(|(h, _)| h == w)) {
+                continue;
+            }
+            rows.extend(parse_tasks(plain).into_iter().map(|t| TaskRow { path: path.clone(), title: title.clone(), modified, line: t.line, text: t.text, done: t.done, due: t.due, done_on: t.done_on, line_text: t.line_text }));
+        }
+        Ok(group_tasks(rows, query, show_done, &local_today()))
     }
 
     /// Tags of plain notes only: unlocked notes' tags stay in memory and out of this list.
@@ -502,6 +518,23 @@ mod tests {
         let mut v = open(dir.clone(), &db, Some(&id)).unwrap(); assert_eq!(v.search("uniqueplain", Sort::Modified, 0, &[]).unwrap().hits.len(), 1);
         v.lock_all(); assert!(v.search("uniqueplain", Sort::Modified, 0, &[]).unwrap().hits.is_empty());
         assert!(v.open_note(&p, None).is_err()); assert_eq!(v.open_note(&p, Some(&id)).unwrap().text, "uniqueplain zqxjvkplmwqbyfh");
+    }
+    #[test] fn locked_tasks_never_in_sqlite_but_listed_while_unlocked() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, None).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
+        let _r = v.save_note(&d.path, "- [ ] secretzebra", &d.hash, None, false).unwrap();
+        assert_eq!(v.tasks("", &[], false).unwrap().no_date.len(), 1);
+        v.lock_note(&d.path, &id).unwrap();
+        assert!(v.index.task_rows(&[]).unwrap().iter().all(|r| !r.text.contains("secretzebra")));
+        drop(v);
+        for suffix in ["", "-wal", "-shm"] {
+            if let Ok(b) = std::fs::read(format!("{}{suffix}", db.display())) { assert!(!b.windows(11).any(|w| w == b"secretzebra"), "{suffix}"); }
+        }
+        let mut v = open(dir, &db, Some(&id)).unwrap();
+        let t = v.tasks("", &[], false).unwrap();
+        assert_eq!(t.no_date.len(), 1); assert_eq!(t.no_date[0].text, "secretzebra");
+        v.lock_all();
+        assert!(v.tasks("", &[], false).unwrap().no_date.is_empty());
     }
     #[test] fn locked_note_tags_stay_out_of_sqlite() {
         let (dir, db) = setup(); let id = crypto::new_identity();
