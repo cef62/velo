@@ -55,6 +55,16 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
         description: concat!("Replace a note's whole text (front matter included). `expected_hash` must be the hash from your latest read_note or write; if the note changed since, nothing changes. Prefer edit_note for small changes. Returns the new hash.", conventions!()),
         input_schema: r#"{"type":"object","properties":{"title":{"type":"string"},"text":{"type":"string"},"expected_hash":{"type":"string"},"summary":{"type":"string"}},"required":["title","text","expected_hash","summary"]}"#,
     },
+    ToolSpec {
+        name: "add_tags",
+        description: concat!("Add tags to up to 200 notes (`titles`). Each note is its own write; the result lists `changed`, `unchanged` (already has the tag, in front matter or inline) or `failed` with a reason per title. Tags go in the front-matter `tags:` list (or as a #tag line at the end of the note when velo's front-matter setting is off).", conventions!()),
+        input_schema: r#"{"type":"object","properties":{"titles":{"type":"array","items":{"type":"string"},"maxItems":200},"tags":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}},"required":["titles","tags","summary"]}"#,
+    },
+    ToolSpec {
+        name: "remove_tags",
+        description: concat!("Remove tags from up to 200 notes (`titles`): from the front-matter `tags:` list and exact inline #tag words (never inside code or links). Each note is its own write; the result lists `changed`, `unchanged` or `failed` with a reason per title.", conventions!()),
+        input_schema: r#"{"type":"object","properties":{"titles":{"type":"array","items":{"type":"string"},"maxItems":200},"tags":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}},"required":["titles","tags","summary"]}"#,
+    },
 ];
 
 fn arg<'a>(a: &'a Value, k: &str) -> Result<&'a str, String> {
@@ -94,7 +104,7 @@ fn occurrences(text: &str, pat: &str) -> usize {
 }
 
 pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String> {
-    let is_write = matches!(name, "create_note" | "append_to_note" | "edit_note" | "replace_note");
+    let is_write = matches!(name, "create_note" | "append_to_note" | "edit_note" | "replace_note" | "add_tags" | "remove_tags");
     let summary = if is_write {
         let s = a.get("summary").and_then(Value::as_str).unwrap_or("");
         if s.trim().is_empty() {
@@ -157,15 +167,70 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
             let hash = ops.write(&path, text, &doc.hash, summary).map_err(err)?;
             Ok(json!({"title": doc.title, "hash": hash}))
         }
+        "add_tags" | "remove_tags" => bulk_tags(ops, name == "add_tags", &a, summary),
         _ => Err("unknown tool".into()),
     }
+}
+
+/// Max notes per bulk call.
+const BULK_MAX: usize = 200;
+
+fn bulk_tags(ops: &mut dyn NoteOps, add: bool, a: &Value, summary: &str) -> Result<Value, String> {
+    use crate::{frontmatter, index, text};
+    let titles = strings(a, "titles");
+    if titles.len() > BULK_MAX {
+        return Err(format!("too many notes: {} (at most {BULK_MAX} per call). Nothing was changed.", titles.len()));
+    }
+    let tags: Vec<String> = strings(a, "tags").iter().map(|t| t.trim().trim_start_matches('#').to_string()).filter(|t| !t.is_empty()).collect();
+    if tags.is_empty() {
+        return Err("tags is required".into());
+    }
+    if let Some(t) = tags.iter().find(|t| !t.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '/')) || !t.chars().any(char::is_alphabetic)) {
+        return Err(format!("invalid tag: {t}"));
+    }
+    let wfm = ops.settings().write_front_matter;
+    let one = |ops: &mut dyn NoteOps, title: &str| -> Result<bool, String> {
+        let path = ops.find(title).map_err(err)?.ok_or("not found")?;
+        let doc = ops.read(&path).map_err(err)?;
+        let fm = frontmatter::parse(&doc.text);
+        let new = if add {
+            let have: Vec<String> = index::all_tags(frontmatter::body(&doc.text), fm.as_ref()).into_iter().map(|(f, _)| f).collect();
+            let mut missing: Vec<String> = vec![];
+            for t in tags.iter().filter(|t| !have.contains(&text::fold(t))) {
+                if !missing.iter().any(|m| text::fold(m) == text::fold(t)) { missing.push(t.clone()); }
+            }
+            if missing.is_empty() {
+                None
+            } else if wfm {
+                frontmatter::set_tags(&doc.text, &missing, &[], true)
+            } else {
+                let sep = if doc.text.is_empty() || doc.text.ends_with('\n') { "" } else { "\n" };
+                Some(format!("{}{sep}{}\n", doc.text, missing.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")))
+            }
+        } else {
+            let mut cur = frontmatter::set_tags(&doc.text, &[], &tags, false).unwrap_or_else(|| doc.text.clone());
+            let start = frontmatter::parse(&cur).map_or(0, |f| f.end);
+            let mut body = cur.split_off(start);
+            for t in &tags { body = text::remove_inline_tag(&body, &text::fold(t)).0; }
+            cur.push_str(&body);
+            Some(cur).filter(|c| *c != doc.text)
+        };
+        let Some(new) = new else { return Ok(false) };
+        ops.write(&path, &new, &doc.hash, summary).map_err(err)?;
+        Ok(true)
+    };
+    let results: Vec<Value> = titles.iter().map(|t| match one(ops, t) {
+        Ok(c) => json!({"title": t, "status": if c { "changed" } else { "unchanged" }}),
+        Err(e) => json!({"title": t, "status": "failed", "reason": e}),
+    }).collect();
+    Ok(json!({"results": results}))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::agent::ops::DirectOps;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     fn vault(files: &[(&str, &str)]) -> (DirectOps, PathBuf) {
         let dir = tempfile::tempdir().unwrap().keep();
@@ -298,5 +363,57 @@ mod tests {
     #[test] fn unknown_tool_errors() {
         let (mut ops, _) = vault(&[]);
         assert_eq!(call(&mut ops, "nope", json!({})), Err("unknown tool".to_string()));
+    }
+
+    fn vault_wfm(files: &[(&str, &str)], wfm: bool) -> (DirectOps, PathBuf) {
+        let dir = tempfile::tempdir().unwrap().keep();
+        for (name, text) in files {
+            std::fs::write(dir.join(name), text).unwrap();
+        }
+        let data = tempfile::tempdir().unwrap().keep();
+        std::fs::write(data.join("settings.json"), format!("{{\"write_front_matter\": {wfm}}}")).unwrap();
+        (DirectOps::open(dir.clone(), &data.join("i.sqlite"), data.join("settings.json")).unwrap(), dir)
+    }
+
+    fn read(dir: &Path, f: &str) -> String { std::fs::read_to_string(dir.join(f)).unwrap() }
+
+    #[test] fn add_tags_skips_inline_present() {
+        let (mut ops, dir) = vault(&[("a.md", "hello #Work"), ("b.md", "---\ntags: [work]\n---\nx"), ("c.md", "plain")]);
+        let r = call(&mut ops, "add_tags", json!({"titles": ["a", "b", "c"], "tags": ["#WORK"], "summary": "t"})).unwrap();
+        let st: Vec<&str> = r["results"].as_array().unwrap().iter().map(|x| x["status"].as_str().unwrap()).collect();
+        assert_eq!(st, ["unchanged", "unchanged", "changed"]);
+        assert_eq!(read(&dir, "a.md"), "hello #Work");
+        assert!(read(&dir, "c.md").contains("tags: [WORK]"), "{}", read(&dir, "c.md"));
+    }
+
+    #[test] fn add_tags_without_front_matter_setting_appends_hash_line() {
+        let (mut ops, dir) = vault_wfm(&[("a.md", "text")], false);
+        call(&mut ops, "add_tags", json!({"titles": ["a"], "tags": ["x", "#y"], "summary": "t"})).unwrap();
+        assert_eq!(read(&dir, "a.md"), "text\n#x #y\n");
+    }
+
+    #[test] fn remove_tags_front_matter_and_inline() {
+        let (mut ops, dir) = vault_wfm(&[("a.md", "---\ntags: [x, keep]\n---\nsee #x and #xylo")], false);
+        let r = call(&mut ops, "remove_tags", json!({"titles": ["a"], "tags": ["X"], "summary": "t"})).unwrap();
+        assert_eq!(r["results"][0]["status"], "changed");
+        assert_eq!(read(&dir, "a.md"), "---\ntags: [keep]\n---\nsee and #xylo");
+    }
+
+    #[test] fn bulk_partial_failure() {
+        let (mut ops, dir) = vault(&[("a.md", "one"), ("s.md.age", "x")]);
+        let r = call(&mut ops, "add_tags", json!({"titles": ["a", "missing", "s"], "tags": ["t"], "summary": "t"})).unwrap();
+        let rs = r["results"].as_array().unwrap();
+        assert_eq!(rs[0]["status"], "changed");
+        assert_eq!((rs[1]["status"].as_str(), rs[1]["reason"].as_str()), (Some("failed"), Some("not found")));
+        assert_eq!((rs[2]["status"].as_str(), rs[2]["reason"].as_str()), (Some("failed"), Some("not found")));
+        assert!(read(&dir, "a.md").contains("tags: [t]"));
+    }
+
+    #[test] fn bulk_over_200_rejected() {
+        let (mut ops, dir) = vault(&[("a.md", "one")]);
+        let titles: Vec<String> = (0..201).map(|_| "a".to_string()).collect();
+        let e = call(&mut ops, "add_tags", json!({"titles": titles, "tags": ["t"], "summary": "t"})).unwrap_err();
+        assert!(e.contains("200"), "{e}");
+        assert_eq!(read(&dir, "a.md"), "one");
     }
 }
