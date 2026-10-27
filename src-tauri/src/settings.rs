@@ -31,11 +31,13 @@ pub struct Settings {
     pub capture_target: String,
     /// the Inbox note's title; empty/invalid falls back to "Inbox"
     pub inbox_title: String,
+    /// let AI agents use the notes through `velo --mcp`; the headless server re-reads this on every tool call
+    pub agent_access: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), header_labels: false, shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into() }
+        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), header_labels: false, shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into(), agent_access: false }
     }
 }
 
@@ -190,6 +192,12 @@ mod tests {
         assert!(parse_hotkey("none").unwrap().is_none());
         assert!(parse_hotkey("Mod+Shift+Space").unwrap().is_some());
         assert!(parse_hotkey("bogus").is_err());
+    }
+    #[test] fn settings_agent_access_defaults_off() {
+        let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");
+        std::fs::write(&p, r#"{"font_size":16}"#).unwrap();
+        assert!(!load(&p).agent_access);
+        assert!(!Settings::default().agent_access);
     }
     #[test] fn defaults() { let s = Settings::default(); assert_eq!(s.sort, "modified"); assert_eq!(s.toggle_window_binding(), "Mod+Shift+Space"); }
     #[test] fn from_plugin_format_matches_ui_normalization() {
