@@ -66,6 +66,7 @@ pub fn run() {
                 // gated from the start so an early UI query sees "indexing", not "no-folder"
                 indexing: Mutex::new(dir.is_some().then_some((0, 0))),
                 open_gen: Default::default(),
+                locked: Default::default(),
                 settings_path,
                 data_dir,
             });

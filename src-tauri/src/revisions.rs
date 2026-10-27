@@ -121,6 +121,17 @@ impl Revisions {
         Ok(())
     }
 
+    /// Delete every plaintext snapshot of the note (no key to encrypt them with).
+    pub fn remove_plain(&self, title: &str) -> io::Result<()> {
+        let Ok(rd) = std::fs::read_dir(self.dir(title)) else { return Ok(()) };
+        for e in rd.flatten() {
+            if e.path().extension().is_some_and(|x| x == "md") {
+                std::fs::remove_file(e.path())?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn prune(&self, now_ms: i64) {
         let Ok(rd) = std::fs::read_dir(&self.root) else { return };
         for d in rd.flatten() {

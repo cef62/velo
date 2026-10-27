@@ -25,6 +25,12 @@ pub enum SaveResult {
     Conflict { conflict_path: String, disk_hash: String },
 }
 
+/// Epoch-ms modification and birth times (0 when the platform has none) and size.
+pub fn meta_of(md: &std::fs::Metadata) -> Meta {
+    let ms = |t: io::Result<std::time::SystemTime>| t.ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as i64);
+    Meta { mtime: ms(md.modified()), size: md.len(), birth: ms(md.created()) }
+}
+
 pub struct Store {
     pub dir: PathBuf,
     self_writes: Mutex<HashMap<PathBuf, String>>,
@@ -45,13 +51,7 @@ impl Store {
             if !md.is_file() {
                 continue;
             }
-            let mtime = md
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map_or(0, |d| d.as_millis() as i64);
-            let birth = md.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as i64);
-            out.push((path, note, Meta { mtime, size: md.len(), birth }));
+            out.push((path, note, meta_of(&md)));
         }
         Ok(out)
     }
@@ -63,7 +63,10 @@ impl Store {
     pub fn write_atomic(&self, path: &Path, bytes: &[u8]) -> io::Result<String> {
         let name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
         let tmp = path.with_file_name(format!(".{name}.tmp"));
-        let res = std::fs::write(&tmp, bytes).and_then(|_| std::fs::rename(&tmp, path));
+        // sync before the rename: after a power cut the note is either the old or the new version, never empty
+        let res = std::fs::File::create(&tmp)
+            .and_then(|mut f| io::Write::write_all(&mut f, bytes).and_then(|_| f.sync_all()))
+            .and_then(|_| std::fs::rename(&tmp, path));
         if let Err(e) = res {
             let _ = std::fs::remove_file(&tmp);
             return Err(e);

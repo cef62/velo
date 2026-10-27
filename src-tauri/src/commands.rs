@@ -7,7 +7,7 @@ use crate::vault::{NoteDoc, RenameResult, Vault};
 use crate::watch;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
@@ -21,6 +21,8 @@ pub struct AppState {
     pub indexing: Mutex<Option<(usize, usize)>>,
     /// bumped by every open/close; an open whose number is no longer current is stale and discards its result
     pub open_gen: AtomicU64,
+    /// set by Lock all: the keychain identity is not reloaded until the passphrase is entered again
+    pub locked: AtomicBool,
     pub settings_path: PathBuf,
     pub data_dir: PathBuf,
 }
@@ -95,16 +97,9 @@ fn open_vault_inner(app: &AppHandle, st: &AppState, dir: &Path, me: u64) -> anyh
     }
     let handle = app.clone();
     let base = dir.to_path_buf();
-    let w = watch::spawn(dir.to_path_buf(), move |paths| {
+    let w = watch::spawn(dir.to_path_buf(), move |batch| {
         let st = handle.state::<AppState>();
-        let id = identity(&st);
-        let changed = match st.vault.lock().unwrap().as_mut() {
-            Some(v) if watch::applies_to(&v.store.dir, &base) => v.apply_fs_changes(&paths, id.as_deref()),
-            _ => return,
-        };
-        if !changed.is_empty() {
-            handle.emit("notes-changed", serde_json::json!({ "paths": changed })).ok();
-        }
+        notify_changed(&handle, apply_watch(&st, &base, batch));
     })?;
     if !current() {
         w.stop();
@@ -115,7 +110,32 @@ fn open_vault_inner(app: &AppHandle, st: &AppState, dir: &Path, me: u64) -> anyh
     if let Some(old) = old {
         old.stop(); // joins; must not hold the vault lock (an in-flight callback may want it)
     }
+    // changes made while indexing, before the watcher ran or before this vault was installed
+    notify_changed(app, apply_watch(st, dir, None));
     Ok(())
+}
+
+/// Apply watcher changes (`None` = rescan the folder) in chunks, releasing the vault lock between them so
+/// note commands aren't stuck behind a sync that touched thousands of files.
+fn apply_watch(st: &AppState, base: &Path, batch: Option<Vec<PathBuf>>) -> Vec<String> {
+    let id = identity(st);
+    let with = |f: &mut dyn FnMut(&mut Vault) -> Vec<String>| match st.vault.lock().unwrap().as_mut() {
+        Some(v) if watch::applies_to(&v.store.dir, base) => Some(f(v)),
+        _ => None,
+    };
+    let Some(paths) = batch else { return with(&mut |v| v.rescan(id.as_deref())).unwrap_or_default() };
+    let mut changed = Vec::new();
+    for chunk in paths.chunks(100) {
+        let Some(c) = with(&mut |v| v.apply_fs_changes(chunk, id.as_deref())) else { break };
+        changed.extend(c);
+    }
+    changed
+}
+
+fn notify_changed(app: &AppHandle, changed: Vec<String>) {
+    if !changed.is_empty() {
+        app.emit("notes-changed", serde_json::json!({ "paths": changed })).ok();
+    }
 }
 
 pub fn toggle_window(app: &AppHandle) {
@@ -198,95 +218,104 @@ fn needs_reopen(old: &Option<PathBuf>, new: &Option<PathBuf>, no_vault: bool, in
     old != new || (no_vault && !indexing && new.is_some())
 }
 
-#[tauri::command]
-pub fn index_status(st: State<AppState>) -> Option<(usize, usize)> {
+#[tauri::command(async)]
+pub fn index_status(st: State<'_, AppState>) -> Option<(usize, usize)> {
     *st.indexing.lock().unwrap()
 }
 
-#[tauri::command]
-pub fn search(st: State<AppState>, query: String, sort: Sort, offset: usize, tags: Vec<String>) -> Res<Page> {
+#[tauri::command(async)]
+pub fn search(st: State<'_, AppState>, query: String, sort: Sort, offset: usize, tags: Vec<String>) -> Res<Page> {
     with_vault(&st, |v, _| v.search(&query, sort, offset, &tags))
 }
 
-#[tauri::command]
-pub fn list_tags(st: State<AppState>) -> Res<Vec<TagCount>> {
+#[tauri::command(async)]
+pub fn list_tags(st: State<'_, AppState>) -> Res<Vec<TagCount>> {
     with_vault(&st, |v, _| v.tags())
 }
 
-#[tauri::command]
-pub fn list_titles(st: State<AppState>) -> Res<Vec<String>> {
+#[tauri::command(async)]
+pub fn list_titles(st: State<'_, AppState>) -> Res<Vec<String>> {
     with_vault(&st, |v, _| v.titles())
 }
 
-#[tauri::command]
-pub fn open_note(st: State<AppState>, path: String) -> Res<NoteDoc> {
+#[tauri::command(async)]
+pub fn open_note(st: State<'_, AppState>, path: String) -> Res<NoteDoc> {
     with_vault(&st, |v, id| v.open_note(&path, id))
 }
 
-#[tauri::command]
-pub fn open_or_create(st: State<AppState>, title: String) -> Res<NoteDoc> {
+#[tauri::command(async)]
+pub fn open_or_create(st: State<'_, AppState>, title: String) -> Res<NoteDoc> {
     let fm = st.settings.lock().unwrap().write_front_matter;
     with_vault(&st, |v, id| v.open_or_create(&title, id, fm))
 }
 
-#[tauri::command]
-pub fn save_note(st: State<AppState>, path: String, text: String, base_hash: String) -> Res<SaveResult> {
+#[tauri::command(async)]
+pub fn save_note(st: State<'_, AppState>, path: String, text: String, base_hash: String) -> Res<SaveResult> {
     let fm = st.settings.lock().unwrap().write_front_matter;
     with_vault(&st, |v, id| v.save_note(&path, &text, &base_hash, id, fm))
 }
 
-#[tauri::command]
-pub fn rename_note(st: State<AppState>, path: String, new_title: String, rewrite_links: bool) -> Res<RenameResult> {
+#[tauri::command(async)]
+pub fn rename_note(st: State<'_, AppState>, path: String, new_title: String, rewrite_links: bool) -> Res<RenameResult> {
     with_vault(&st, |v, _| v.rename_note(&path, &new_title, rewrite_links))
 }
 
-#[tauri::command]
-pub fn backlink_count(st: State<AppState>, title: String) -> Res<usize> {
+#[tauri::command(async)]
+pub fn backlink_count(st: State<'_, AppState>, title: String) -> Res<usize> {
     with_vault(&st, |v, _| v.backlink_count(&title))
 }
 
-#[tauri::command]
-pub fn lock_note(st: State<AppState>, path: String) -> Res<String> {
+#[tauri::command(async)]
+pub fn lock_note(st: State<'_, AppState>, path: String) -> Res<String> {
     with_vault(&st, |v, id| v.lock_note(&path, id.ok_or_else(|| anyhow::anyhow!("no-identity"))?))
 }
 
-#[tauri::command]
-pub fn unlock_note(st: State<AppState>, path: String) -> Res<String> {
+#[tauri::command(async)]
+pub fn unlock_note(st: State<'_, AppState>, path: String) -> Res<String> {
     with_vault(&st, |v, id| v.unlock_note(&path, id.ok_or_else(|| anyhow::anyhow!("no-identity"))?))
 }
 
-#[tauri::command]
-pub fn list_revisions(st: State<AppState>, path: String) -> Res<Vec<RevisionInfo>> {
+#[tauri::command(async)]
+pub fn list_revisions(st: State<'_, AppState>, path: String) -> Res<Vec<RevisionInfo>> {
     with_vault(&st, |v, _| v.list_revisions(&path))
 }
 
-#[tauri::command]
-pub fn read_revision(st: State<AppState>, path: String, id: String) -> Res<String> {
+#[tauri::command(async)]
+pub fn read_revision(st: State<'_, AppState>, path: String, id: String) -> Res<String> {
     with_vault(&st, |v, ident| v.read_revision(&path, &id, ident))
 }
 
-#[tauri::command]
-pub fn snapshot_text(st: State<AppState>, path: String, text: String) -> Res<()> {
+#[tauri::command(async)]
+pub fn snapshot_text(st: State<'_, AppState>, path: String, text: String) -> Res<()> {
     with_vault(&st, |v, ident| v.snapshot_text(&path, &text, ident))
 }
 
-#[tauri::command]
-pub fn delete_note(st: State<AppState>, path: String) -> Res<()> {
+#[tauri::command(async)]
+pub fn delete_note(st: State<'_, AppState>, path: String) -> Res<()> {
     with_vault(&st, |v, _| v.delete_note(&path))
 }
 
-#[tauri::command]
-pub fn lock_all(st: State<AppState>) -> Res<()> {
+/// Forget the decrypted notes and the identity; locked notes need the passphrase again.
+#[tauri::command(async)]
+pub fn lock_all(st: State<'_, AppState>) -> Res<()> {
     with_vault(&st, |v, _| {
         v.lock_all();
         Ok(())
-    })
+    })?;
+    st.locked.store(true, Ordering::SeqCst);
+    *st.identity.lock().unwrap() = None;
+    Ok(())
 }
 
-#[tauri::command]
-pub fn has_identity(st: State<AppState>) -> bool {
+#[tauri::command(async)]
+pub fn has_identity(st: State<'_, AppState>) -> bool {
     if identity(&st).is_some() {
         return true;
+    }
+    // After Lock all only the passphrase brings the key back, when the folder has an identity.age to check it against.
+    let dir = st.settings.lock().unwrap().notes_dir.clone();
+    if st.locked.load(Ordering::SeqCst) && dir.is_some_and(|d| identity_file_exists_in(&d).unwrap_or(true)) {
+        return false;
     }
     let found = crypto::keychain_get(); // no locks held across the keychain call
     let has = found.is_some();
@@ -301,8 +330,8 @@ fn identity_file_exists_in(dir: &Path) -> std::io::Result<bool> {
     Ok(read_identity_file(&dir.join(crypto::IDENTITY_FILE))?.is_some())
 }
 
-#[tauri::command]
-pub fn identity_file_exists(st: State<AppState>) -> Res<bool> {
+#[tauri::command(async)]
+pub fn identity_file_exists(st: State<'_, AppState>) -> Res<bool> {
     let dir = st.settings.lock().unwrap().notes_dir.clone().ok_or("no-folder")?;
     identity_file_exists_in(&dir).map_err(|e| e.to_string())
 }
@@ -345,6 +374,7 @@ pub fn setup_passphrase(app: AppHandle, st: State<'_, AppState>, passphrase: Str
     }
     let warning = keychain_warning(existing.as_deref() != Some(id.as_str()), || crypto::keychain_set(&id));
     *st.identity.lock().unwrap() = Some(id);
+    st.locked.store(false, Ordering::SeqCst);
     open_vault(&app, &st, &dir).map_err(err)?; // reopening re-decrypts locked notes
     Ok(warning)
 }
