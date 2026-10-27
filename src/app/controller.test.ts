@@ -253,6 +253,44 @@ test("a slow auto-show doesn't replace the note Enter just opened", async () => 
   expect(store.get().openPath).toBe(P("B"));
 });
 
+test("update install saves, freezes the editor, then installs", async () => {
+  const { c, api, store, editor } = setup();
+  c.onUpdateAvailable("0.6.1");
+  await c.installUpdate();
+  expect(editor.flush).toHaveBeenCalled();
+  expect(editor.suspended).toBe(true);
+  expect(api.installUpdate).toHaveBeenCalled();
+  expect(store.get().update).toEqual({ version: "0.6.1", status: "installing" });
+});
+
+test("update install refused by a failed save installs nothing", async () => {
+  const { c, api, store, editor } = setup();
+  c.onUpdateAvailable("0.6.1");
+  editor.flushResult = false;
+  await c.installUpdate();
+  expect(api.installUpdate).not.toHaveBeenCalled();
+  expect(store.get().update?.status).toBe("available");
+});
+
+test("a failed update install gives the editor back and says why", async () => {
+  const { c, api, store, editor } = setup();
+  api.installUpdate.mockRejectedValueOnce("signature mismatch");
+  c.onUpdateAvailable("0.6.1");
+  await c.installUpdate();
+  expect(editor.suspended).toBe(false);
+  expect(store.get().update).toBeNull();
+  expect(store.get().err).toBe("Update failed: signature mismatch");
+});
+
+test("manual update check: up to date names the current version", async () => {
+  const { c, api, store } = setup();
+  await c.checkUpdates();
+  expect(store.get().update).toEqual({ version: "0.6.0", status: "current" });
+  api.checkUpdate.mockResolvedValueOnce({ version: "0.6.1" });
+  await c.checkUpdates();
+  expect(store.get().update).toEqual({ version: "0.6.1", status: "available" });
+});
+
 const key = (code: string, mods: { meta?: boolean; shift?: boolean } = {}, where: Partial<KeyEventLike> = {}): KeyEventLike => ({
   key: code.replace(/^Key/, "").toLowerCase(),
   code,

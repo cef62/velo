@@ -27,7 +27,7 @@ export function fakeApi(notes: Record<string, string> = {}) {
     if (!(title in notes)) throw "not-found";
     return { path, title, text: notes[title], hash: "h", encrypted: false, meta: noMeta };
   };
-  const settings: Settings = { notes_dir: "/n", layout: "vertical", font_size: 14, sort: "modified", editor_style: "rich", theme: "system", header_labels: false, shortcuts: {}, write_front_matter: true, show_front_matter: false, info_panel: false };
+  const settings: Settings = { notes_dir: "/n", layout: "vertical", font_size: 14, sort: "modified", editor_style: "rich", theme: "system", header_labels: false, shortcuts: {}, write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true };
   const api = {
     getSettings: vi.fn(async () => ({ ...settings })),
     setSettings: vi.fn(async (_s: Settings) => {}),
@@ -56,6 +56,9 @@ export function fakeApi(notes: Record<string, string> = {}) {
     snapshotText: vi.fn(async (_p: string, _t: string) => {}),
     listRevisions: vi.fn(async (_p: string): Promise<RevisionInfo[]> => []),
     readRevision: vi.fn(async (_p: string, _id: string): Promise<string> => { throw "unset"; }),
+    checkUpdate: vi.fn(async (): Promise<{ version: string } | null> => null),
+    installUpdate: vi.fn(async () => {}),
+    appVersion: vi.fn(async () => "0.6.0"),
   };
   return { api: api as unknown as Api & typeof api, notes };
 }

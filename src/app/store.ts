@@ -72,6 +72,7 @@ export interface AppState {
   tagPanelOpen: boolean;
   exactTitleMatch: boolean; // drives the ⇧↩ Create hint
   settings: Settings | null; // non-null = the Settings dialog is open on these saved settings
+  update: { version: string; status: "available" | "current" | "installing" } | null; // the update banner
 }
 
 export const initialState = (isMac: boolean): AppState => ({
@@ -111,4 +112,5 @@ export const initialState = (isMac: boolean): AppState => ({
   tagPanelOpen: false,
   exactTitleMatch: false,
   settings: null,
+  update: null,
 });

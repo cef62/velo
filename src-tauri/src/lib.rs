@@ -7,6 +7,7 @@ pub mod revisions;
 pub mod settings;
 pub mod store;
 pub mod text;
+pub mod update;
 pub mod vault;
 pub mod watch;
 
@@ -20,9 +21,10 @@ use tauri::Manager;
 fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{MenuItem, PredefinedMenuItem as P, Submenu};
     let quit = MenuItem::with_id(app, "quit", "Quit velo", true, Some("CmdOrCtrl+Q"))?;
+    let check = MenuItem::with_id(app, "check-updates", "Check for Updates…", true, None::<&str>)?;
     tauri::menu::Menu::with_items(app, &[
         &Submenu::with_items(app, "velo", true, &[
-            &P::about(app, None, None)?, &P::separator(app)?, &P::hide(app, None)?, &P::hide_others(app, None)?,
+            &P::about(app, None, None)?, &check, &P::separator(app)?, &P::hide(app, None)?, &P::hide_others(app, None)?,
             &P::show_all(app, None)?, &P::separator(app)?, &quit,
         ])?,
         &Submenu::with_items(app, "Edit", true, &[
@@ -38,6 +40,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {
@@ -47,6 +50,10 @@ pub fn run() {
                         && let Some(w) = app.get_webview_window("main")
                     {
                         w.close().ok();
+                    }
+                    if ev.id() == "check-updates" {
+                        use tauri::Emitter;
+                        app.emit("check-updates", ()).ok(); // the UI runs the check and shows the result
                     }
                 });
             }
@@ -82,6 +89,8 @@ pub fn run() {
             if let Err(e) = commands::register_hotkey(&h, &hotkey) {
                 eprintln!("velo: hotkey not registered: {e}");
             }
+            app.manage(Mutex::new(update::UpdateState::default()));
+            update::spawn_checker(h.clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -106,6 +115,8 @@ pub fn run() {
             commands::has_identity,
             commands::setup_passphrase,
             commands::identity_file_exists,
+            update::check_update,
+            update::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running velo");

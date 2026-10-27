@@ -891,6 +891,49 @@ export class Controller {
     this.store.set({ conflict: null });
   }
 
+  /** The background check found a new version (the backend announces each version once). */
+  onUpdateAvailable(version: string) {
+    if (this.store.get().update?.status !== "installing") this.store.set({ update: { version, status: "available" } });
+  }
+
+  /** Manual check (app menu, Settings): the result shows in the update banner. */
+  async checkUpdates() {
+    try {
+      const found = await this.api.checkUpdate();
+      this.store.set({ update: found ? { version: found.version, status: "available" } : { version: await this.api.appVersion(), status: "current" } });
+    } catch (e) {
+      this.setErr(errText(e));
+    }
+  }
+
+  /** Save, freeze the editor, then install; the backend relaunches velo. On failure the editor comes back. */
+  async installUpdate() {
+    const u = this.store.get().update;
+    if (u?.status !== "available") return;
+    if (this.busy) return this.setErr(BUSY_MSG);
+    this.busy = true;
+    try {
+      if (!(await this.editor.flush())) return; // the save error stays visible; nothing is lost
+      this.editor.suspend(); // the relaunch skips the close flow: no edit may start now
+      this.store.set({ update: { ...u, status: "installing" } });
+      await this.api.installUpdate();
+    } catch (e) {
+      this.editor.resume();
+      this.store.set({ update: null }); // the backend dropped it; the next check re-arms it
+      this.setErr(`Update failed: ${errText(e)}`);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  dismissUpdate() {
+    if (this.store.get().update?.status !== "installing") this.store.set({ update: null });
+  }
+
+  openReleaseNotes(version: string) {
+    void this.ui.openUrl(`https://github.com/cef62/velo/releases/tag/v${version}`).catch((e) => this.setErr(String(e)));
+  }
+
   /** Title-bar Retry after a save error. */
   retrySave() {
     void this.editor.flush();

@@ -346,7 +346,7 @@ export const divider = defineRecipe({
 })
 
 /* ------------------------------------------------------------------ */
-/* Banners: conflict (amber), filter line (indigo), preview strip.      */
+/* Banners: conflict (amber), filter line (indigo), update, preview strip.      */
 /* ------------------------------------------------------------------ */
 export const banner = defineRecipe({
   className: 'banner',
@@ -372,6 +372,15 @@ export const banner = defineRecipe({
         color: 'velo.fgMuted',
         fontSize: 'uiSm',
         '& b': { fontWeight: '500', color: 'velo.accentText' },
+      },
+      update: {
+        py: '2',
+        px: '5',
+        bg: 'velo.accentSubtle',
+        borderBottomWidth: '1px',
+        borderColor: 'velo.accentHalo',
+        color: 'velo.accentText',
+        '& a': { color: 'velo.accentText', fontWeight: '600', textDecoration: 'underline', textUnderlineOffset: '2px' },
       },
       preview: {
         h: '30px',
