@@ -35,6 +35,7 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | ⌘⇧T | Ctrl+Shift+T | Show / hide the tag panel |
 | ⌘⇧R | Ctrl+Shift+R | Rich / plain editing |
 | ⌘⇧J | Ctrl+Shift+J | Vertical / horizontal layout |
+| ⌘I | Ctrl+I | Show / hide the note info panel |
 | ⌘⇧Space | Ctrl+Shift+Space | Show / hide velo (system-wide) |
 
 Right-click a note in the list (or press the Menu key / Shift+F10 on the highlighted row) for a menu: open, rename, lock/unlock, copy `[[link]]`, show in Finder/Explorer, move to Trash. It opens the note first, so no menu appears if the switch is refused.
@@ -44,6 +45,30 @@ Fixed: Enter (in search) opens the highlighted note, or creates a note titled wi
 ## Tags
 
 Write `#tag` anywhere in a note (at the start of a line, after a space, or after `(`; letters, digits, `_`, `-`, `/`; at least one letter; not in fenced code blocks; `# Heading` is not a tag). The `#` button next to search (or ⌘⇧T) shows every tag with its note count; click chips to filter the list to notes having all selected tags, combined with the search text. A "Filtered by" line stays visible while tags are selected. In the preview, click a `#tag` to filter by it. Locked notes are not listed in the tag panel.
+
+## Dates and front matter
+
+Notes sync through Drive, Dropbox, iCloud or git, which reset or rewrite file dates. So velo stores each note's dates inside the note, in a YAML front-matter block at the top:
+
+```
+---
+created: 2026-10-27T09:14:05+01:00
+modified: 2026-10-27T10:02:41+01:00
+---
+```
+
+- New notes start with both dates. Saving a note without a block prepends one (`created` from the file's date, `modified` now); saving a note with a block updates `modified` and adds `created` if missing. Locked notes are stamped before encryption.
+- Everything else in the block (other keys, comments, order) is left byte for byte. velo never overwrites an existing `created:` line, and edits only the first `modified:` line. Other date formats (`2026-10-27`, `2026-10-27 09:14`, quoted) are read; an unreadable value falls back to the file date, shown with a "from file" hint.
+- Turn writing off in Settings, General ("Add created/modified dates to notes"). Existing blocks are still read.
+- The block is hidden in the editor and preview. Show it with the "Show front matter in the editor" checkbox in the info panel, or bind a key to "Show / hide front matter" in Settings (unbound by default).
+- `tags:` and `aliases:` (flow list `[a, b]`, block list or single value) are read, never written. Tags merge with `#tags`. Aliases work as titles for `[[wikilinks]]`, opening by name, and search.
+- The list's date and the Recent sort use the modified date from the note.
+
+## Revisions
+
+velo keeps local snapshots of each note: on save when the last one is over 10 minutes old, before an external change replaces the editor text, and before a restore. They are kept for 30 days, stored in the app data directory (never in the notes folder, never synced), and encrypted for locked notes.
+
+Press ⌘I (Ctrl+I) for the info panel: created and modified dates, word count, "linked from N notes", tags, aliases and the revision list. Select a revision to preview it, then Restore; the current text is kept as a revision first.
 
 ## How it's built
 
