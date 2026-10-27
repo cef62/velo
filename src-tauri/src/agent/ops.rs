@@ -30,8 +30,10 @@ pub trait NoteOps {
     fn toggle_task(&mut self, path: &str, line: usize, expected: &str, summary: &str) -> anyhow::Result<Toggled>;
     /// Appends `- [ ] text` to the plain note `title` (created if missing); returns its path.
     fn capture_task(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<String>;
-    /// The plain note `title`, created empty (no template) if missing.
+    /// The plain note `title`; a missing one is created from no template (only the stamped front matter).
     fn open_or_create(&mut self, title: &str) -> anyhow::Result<NoteDoc>;
+    /// Agent snapshot of the note's current text (for a note just created).
+    fn snapshot(&mut self, path: &str, summary: &str) -> anyhow::Result<()>;
     fn settings(&self) -> Settings;
     /// Tags of one plain note (for search results).
     fn note_tags(&self, path: &str) -> anyhow::Result<Vec<String>>;
@@ -188,6 +190,10 @@ impl NoteOps for DirectOps {
         }
         let wfm = self.settings().write_front_matter;
         self.vault.open_or_create(title, None, wfm)
+    }
+
+    fn snapshot(&mut self, path: &str, summary: &str) -> anyhow::Result<()> {
+        self.vault.agent_snapshot(plain(path)?, summary)
     }
 
     fn settings(&self) -> Settings {
