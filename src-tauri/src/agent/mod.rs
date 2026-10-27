@@ -1,4 +1,6 @@
 //! Agent access: the headless `velo --mcp` MCP server (stdio).
+pub mod app_ops;
+pub mod listener;
 pub mod ops;
 pub mod paths;
 pub mod server;
@@ -9,7 +11,7 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-const OFF: &str = "Agent access is off — turn it on in velo Settings → General";
+pub(crate) const OFF: &str = "Agent access is off — turn it on in velo Settings → General";
 
 /// Entry point for `velo --mcp`; returns the process exit code. No Tauri app is built on this path.
 pub fn run_headless() -> i32 {

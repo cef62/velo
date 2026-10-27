@@ -60,6 +60,7 @@ void listen("index-done", () => void controller.onIndexDone());
 void listen<{ message: string }>("index-error", (ev) => controller.onIndexError(ev.payload.message));
 void listen<{ version: string }>("update-available", (ev) => controller.onUpdateAvailable(ev.payload.version));
 void listen("check-updates", () => void controller.checkUpdates());
+void listen<api.AgentWrite>("agent-write", (ev) => void controller.onAgentWrite(ev.payload));
 
 // "today" rolls over at local midnight: refresh the Tasks groups and the due count/badge then.
 const armMidnight = () => {

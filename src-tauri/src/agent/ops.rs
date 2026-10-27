@@ -7,6 +7,7 @@ use crate::store::SaveResult;
 use crate::tasks::TaskView;
 use crate::vault::{NoteDoc, Toggled, Vault};
 use anyhow::anyhow;
+use std::ops::DerefMut;
 use std::path::{Path, PathBuf};
 
 /// Search results per page.
@@ -50,25 +51,35 @@ fn title_of(path: &str) -> String {
 }
 
 /// Refuses a locked path with the same error as a missing note, so the lock is not revealed.
-fn plain(path: &str) -> anyhow::Result<&str> {
+pub(crate) fn plain(path: &str) -> anyhow::Result<&str> {
     if locked(path) { Err(anyhow!("not found")) } else { Ok(path) }
 }
 
-pub struct DirectOps {
-    pub(crate) vault: Vault,
+/// `NoteOps` over a vault: owned in direct mode (`DirectOps`), borrowed from the app's state by `AppOps`, so both
+/// share one copy of the locked-note filtering.
+pub struct VaultOps<V: DerefMut<Target = Vault>> {
+    pub(crate) vault: V,
     settings_path: PathBuf,
     /// Real OS Trash; tests swap it for a plain remove.
     pub(crate) remove: fn(&Path) -> std::io::Result<()>,
 }
 
+pub type DirectOps = VaultOps<Box<Vault>>;
+
 impl DirectOps {
     pub fn open(dir: PathBuf, db_path: &Path, settings_path: PathBuf) -> anyhow::Result<DirectOps> {
-        Ok(DirectOps { vault: Vault::open_with_progress(dir, db_path, None, &mut |_, _| {})?, settings_path, remove: crate::vault::move_to_trash })
+        Ok(VaultOps::new(Box::new(Vault::open_with_progress(dir, db_path, None, &mut |_, _| {})?), settings_path))
     }
 
     /// Catch up with outside changes since the last call (mtime/size diff, as the app does after missed events).
     pub fn rescan(&mut self) {
         self.vault.rescan(None);
+    }
+}
+
+impl<V: DerefMut<Target = Vault>> VaultOps<V> {
+    pub fn new(vault: V, settings_path: PathBuf) -> Self {
+        VaultOps { vault, settings_path, remove: crate::vault::move_to_trash }
     }
 
     fn save(&mut self, path: &str, text: &str, base_hash: &str) -> anyhow::Result<String> {
@@ -84,7 +95,7 @@ impl DirectOps {
     }
 }
 
-impl NoteOps for DirectOps {
+impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
     fn find(&self, title: &str) -> anyhow::Result<Option<String>> {
         Ok(self.vault.find_note(title)?.filter(|p| !locked(p)))
     }
@@ -109,7 +120,8 @@ impl NoteOps for DirectOps {
         if self.vault.find_note(title)?.is_some() || note_path(&dir, title, false).exists() || note_path(&dir, title, true).exists() {
             return Err(anyhow!("a note with that title already exists"));
         }
-        let doc = self.vault.open_or_create(title, None, self.settings().write_front_matter)?;
+        let wfm = self.settings().write_front_matter;
+        let doc = self.vault.open_or_create(title, None, wfm)?;
         self.save(&doc.path, text, &doc.hash)?; // the new stub is not snapshotted: the created text is the first revision
         let doc = self.read(&doc.path)?;
         self.vault.agent_snapshot_text(&doc.path, &doc.text, summary)?;

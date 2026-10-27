@@ -38,6 +38,11 @@ export const deleteNote = (path: string) => invoke<void>("delete_note", { path }
 export type RevisionInfo = { id: string; ts: number; size: number; summary?: string | null; agent: boolean };
 export const listRevisions = (path: string) => invoke<RevisionInfo[]>("list_revisions", { path });
 export const readRevision = (path: string, id: string) => invoke<string>("read_revision", { path, id });
+/** An agent write offered to the editor (`agent-write`): `replace` carries the note's whole new text and the hash it was based on. */
+export type AgentWrite = { id: number; path: string; kind: "replace" | "append"; insert: string; base?: string; summary: string };
+export type AgentReply = { hash: string } | "not-open" | "refused" | "conflict";
+export const agentWriteDone = (id: number, result: AgentReply) => invoke<void>("agent_write_done", { id, result });
+export const snapshotAgent = (path: string, summary: string) => invoke<void>("snapshot_agent", { path, summary });
 export const snapshotText = (path: string, text: string) => invoke<void>("snapshot_text", { path, text });
 export const hasIdentity = () => invoke<boolean>("has_identity");
 export const setupPassphrase = (passphrase: string) => invoke<string | null>("setup_passphrase", { passphrase });

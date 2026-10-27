@@ -1,5 +1,5 @@
 import type * as ApiModule from "../api";
-import type { Hit, NoteDoc, Settings, TagCount, TaskItem } from "../api";
+import type { AgentReply, AgentWrite, Hit, NoteDoc, Settings, TagCount, TaskItem } from "../api";
 // Types only: editor.ts loads editortheme.ts, which touches `window` at import time (tests run in node).
 import type { Editor, EditorOpts } from "../editor";
 import type { Preview } from "../preview";
@@ -1278,6 +1278,28 @@ export class Controller {
     }
   }
 
+  /** An agent write (via the backend's `agent-write`) to the note open in the editor: applied as a user edit, then saved. */
+  async onAgentWrite(req: AgentWrite) {
+    const reply = await this.agentWrite(req).catch((): AgentReply => "refused");
+    await this.api.agentWriteDone(req.id, reply);
+  }
+
+  protected async agentWrite(req: AgentWrite): Promise<AgentReply> {
+    const open = () => this.editor.currentPath() === req.path;
+    if (!open()) return "not-open"; // the backend writes the file itself
+    if (this.busy || !(await this.editor.flush())) return "refused";
+    if (!open()) return "not-open";
+    await this.api.snapshotAgent(req.path, req.summary);
+    const saved = await this.api.openNote(req.path);
+    if (!open() || this.busy) return "refused";
+    // a replace was computed from the saved text `base`; a keystroke during the awaits would be overwritten
+    if (this.editor.isDirty() || (req.kind === "replace" && saved.hash !== req.base)) return "conflict";
+    const ok = req.kind === "append" ? this.editor.appendLine(req.insert) : this.editor.applyChange(changedSpan(this.editor.getText(), req.insert));
+    if (!ok) return "refused";
+    if (!(await this.editor.flush())) return "conflict"; // the edit stays in the editor; its save error or conflict banner shows
+    return { hash: (await this.api.openNote(req.path)).hash };
+  }
+
   onIndexProgress(done: number, total: number) {
     this.setIndexing(true, done, total);
   }
@@ -1297,4 +1319,13 @@ export class Controller {
     this.setErr(message);
     void this.runSearch(false); // no vault -> shows the setup screen
   }
+}
+
+/** The single change turning `a` into `b`: common prefix and suffix kept, so undo and the caret only touch what changed. */
+export function changedSpan(a: string, b: string) {
+  let s = 0;
+  while (s < a.length && s < b.length && a[s] === b[s]) s++;
+  let e = 0;
+  while (e < a.length - s && e < b.length - s && a[a.length - 1 - e] === b[b.length - 1 - e]) e++;
+  return { from: s, to: a.length - e, insert: b.slice(s, b.length - e) };
 }

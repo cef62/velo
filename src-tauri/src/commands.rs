@@ -1,3 +1,4 @@
+use crate::agent::listener::{self, AgentState, set_access};
 use crate::crypto;
 use crate::index::{Page, Sort, TagCount};
 use crate::revisions::RevisionInfo;
@@ -255,8 +256,17 @@ pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings)
             return Err(e);
         }
     }
+    let agent = app.state::<AgentState>();
+    if settings.agent_access {
+        // before saving: a listener that can't start must not leave access "on" with nothing answering
+        set_access(&agent.listener, true, || listener::start(app.clone())).map_err(|e| e.to_string())?;
+    }
     settings::save(&st.settings_path, &settings).map_err(err)?;
+    let on = settings.agent_access;
     *st.settings.lock().unwrap() = settings;
+    if !on {
+        set_access(&agent.listener, false, || unreachable!()).ok(); // removes agent.json; later calls see the switch off
+    }
     Ok(())
 }
 
@@ -393,6 +403,18 @@ pub fn read_revision(st: State<'_, AppState>, path: String, id: String) -> Res<S
 #[tauri::command(async)]
 pub fn snapshot_text(st: State<'_, AppState>, path: String, text: String) -> Res<()> {
     with_vault(&st, |v, ident| v.snapshot_text(&path, &text, ident))
+}
+
+/// Agent undo trail for a write the editor applies (`agent-write`): snapshot the saved note with the summary first.
+#[tauri::command(async)]
+pub fn snapshot_agent(st: State<'_, AppState>, path: String, summary: String) -> Res<()> {
+    with_vault(&st, |v, _| v.agent_snapshot(&path, &summary))
+}
+
+/// The webview's answer to `agent-write` `id`: `{hash}`, "not-open", "refused" or "conflict".
+#[tauri::command]
+pub fn agent_write_done(agent: State<'_, AgentState>, id: u64, result: serde_json::Value) {
+    agent.editors.done(id, result);
 }
 
 #[tauri::command(async)]

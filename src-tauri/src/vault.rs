@@ -13,6 +13,25 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// `text` with the task on `line` (0-based) flipped, if that line still reads `expected`; and the flipped line.
+pub fn toggled_text(text: &str, line: usize, expected: &str) -> anyhow::Result<(String, String)> {
+    let moved = || anyhow!("task-moved");
+    let mut lines: Vec<&str> = text.split('\n').collect();
+    let cur = *lines.get(line).ok_or_else(moved)?;
+    // parse_tasks skips fenced code, which toggle_line alone would not
+    if cur.strip_suffix('\r').unwrap_or(cur) != expected || !parse_tasks(text).iter().any(|t| t.line == line) {
+        return Err(moved());
+    }
+    let new = toggle_line(cur, &local_today()).ok_or_else(moved)?;
+    lines[line] = &new;
+    Ok((lines.join("\n"), new.strip_suffix('\r').unwrap_or(&new).to_string()))
+}
+
+/// Lines in `text`'s front-matter block (0 without one).
+pub fn fm_lines(t: &str) -> usize {
+    frontmatter::parse(t).map_or(0, |f| t[..f.end].matches('\n').count())
+}
+
 /// Where a toggled task is in the text as saved (after front-matter stamping): what undo sends back.
 #[derive(Serialize, Debug, PartialEq)]
 pub struct Toggled {
@@ -237,24 +256,11 @@ impl Vault {
     }
 
     fn toggle_in(&mut self, doc: NoteDoc, line: usize, expected: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<Toggled> {
-        let moved = || anyhow!("task-moved");
-        let mut lines: Vec<&str> = doc.text.split('\n').collect();
-        let cur = *lines.get(line).ok_or_else(moved)?;
-        // parse_tasks skips fenced code, which toggle_line alone would not
-        if cur.strip_suffix('\r').unwrap_or(cur) != expected || !parse_tasks(&doc.text).iter().any(|t| t.line == line) {
-            return Err(moved());
-        }
-        let new = toggle_line(cur, &local_today()).ok_or_else(moved)?;
-        lines[line] = &new;
-        let text = lines.join("\n");
-        let fm_lines = |t: &str| frontmatter::parse(t).map_or(0, |f| t[..f.end].matches('\n').count());
+        let (text, line_text) = toggled_text(&doc.text, line, expected)?;
         match self.save_note(&doc.path, &text, &doc.hash, identity, write_fm)? {
             // stamping may replace or prepend the front-matter block: shift the line by its change in height
-            SaveResult::Saved { front_matter, .. } => Ok(Toggled {
-                line: line - fm_lines(&text) + front_matter.as_deref().map_or(fm_lines(&text), fm_lines),
-                line_text: new.strip_suffix('\r').unwrap_or(&new).to_string(),
-            }),
-            SaveResult::Conflict { .. } => Err(moved()), // disk changed since we read it
+            SaveResult::Saved { front_matter, .. } => Ok(Toggled { line: line - fm_lines(&text) + front_matter.as_deref().map_or(fm_lines(&text), fm_lines), line_text }),
+            SaveResult::Conflict { .. } => Err(anyhow!("task-moved")), // disk changed since we read it
         }
     }
 

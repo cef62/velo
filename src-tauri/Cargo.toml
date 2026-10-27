@@ -16,6 +16,7 @@ tauri-build = { version = "2", features = [] }
 age = "0.12.1"
 anyhow = "1.0.104"
 chrono = "0.4.45"
+getrandom = "0.3.4"
 keyring = "4.2.0"
 notify = "8.2.1"
 notify-debouncer-full = "0.7.0"

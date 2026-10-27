@@ -1160,3 +1160,73 @@ test("Lock all drops the undo payload and a tasks reply that was in flight", asy
   expect(store.get().taskView?.no_date).toEqual([]);
   expect(store.get().dueCount).toBe(0);
 });
+
+test("agent write to the open note goes through the editor and replies with the hash", async () => {
+  const { c, api, editor } = setup({ A: "hello world" });
+  await c.show(P("A"));
+  const atSnapshot: string[] = [];
+  api.snapshotAgent.mockImplementation(async () => void atSnapshot.push(editor.text));
+  await c.onAgentWrite({ id: 7, path: P("A"), kind: "replace", insert: "hello there world", base: "h", summary: "s" });
+  expect(editor.changes).toEqual([{ from: 6, to: 6, insert: "there " }]); // only the changed span: a small undo step
+  expect(editor.text).toBe("hello there world");
+  expect(api.snapshotAgent).toHaveBeenCalledWith(P("A"), "s");
+  expect(atSnapshot).toEqual(["hello world"]); // snapshot of the text before the change
+  expect(editor.flush).toHaveBeenCalled();
+  expect(api.agentWriteDone).toHaveBeenCalledWith(7, { hash: "h" });
+});
+
+test("agent append to the open note uses appendLine", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 1, path: P("A"), kind: "append", insert: "- [ ] milk", summary: "s" });
+  expect(editor.appended).toEqual(["- [ ] milk"]);
+  expect(api.agentWriteDone).toHaveBeenCalledWith(1, { hash: "h" });
+});
+
+test("agent write refused when the editor is read-only", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  editor.readOnly = true;
+  await c.onAgentWrite({ id: 2, path: P("A"), kind: "replace", insert: "b", base: "h", summary: "s" });
+  expect(editor.text).toBe("a");
+  expect(api.agentWriteDone).toHaveBeenCalledWith(2, "refused");
+});
+
+test("agent write refused while busy", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  c.busy = true;
+  await c.onAgentWrite({ id: 3, path: P("A"), kind: "replace", insert: "b", base: "h", summary: "s" });
+  expect(editor.text).toBe("a");
+  expect(api.agentWriteDone).toHaveBeenCalledWith(3, "refused");
+});
+
+test("agent write gets not-open for another note", async () => {
+  const { c, api, editor } = setup({ A: "a", B: "b" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 4, path: P("B"), kind: "replace", insert: "x", base: "h", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(4, "not-open");
+  expect(api.snapshotAgent).not.toHaveBeenCalled();
+  expect(editor.text).toBe("a");
+});
+
+test("agent write conflicts when the saved note moved on from its base", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 5, path: P("A"), kind: "replace", insert: "b", base: "stale", summary: "s" });
+  expect(editor.text).toBe("a");
+  expect(api.agentWriteDone).toHaveBeenCalledWith(5, "conflict");
+});
+
+test("agent write conflicts when the user typed during the round trip", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  api.openNote.mockImplementationOnce(async (path: string) => {
+    editor.text = "a typed";
+    editor.dirty = true;
+    return { path, title: "A", text: "a", hash: "h", encrypted: false, meta: noMeta };
+  });
+  await c.onAgentWrite({ id: 6, path: P("A"), kind: "replace", insert: "b", base: "h", summary: "s" });
+  expect(editor.text).toBe("a typed"); // the keystroke survives
+  expect(api.agentWriteDone).toHaveBeenCalledWith(6, "conflict");
+});
