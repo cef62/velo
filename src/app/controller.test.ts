@@ -819,3 +819,29 @@ test("submit re-reads the target: a capture across midnight never writes yesterd
   expect(editor.appended).toEqual([]);
   expect(api.captureTask).toHaveBeenCalledWith("buy milk");
 });
+
+test("daily_note opens today's note", async () => {
+  const { c, api } = setup();
+  c.onKeyDown({ key: "D", code: "KeyD", metaKey: true, ctrlKey: false, altKey: false, shiftKey: true, inEditor: false, inSearchWithText: false, inDialog: false, inRename: false });
+  await settle();
+  expect(api.openOrCreate).toHaveBeenCalledWith(localToday());
+});
+
+test("alt-enter creates a checklist note", async () => {
+  const { c, api, editor, store } = setup();
+  c.setQuery("groceries");
+  await settle();
+  await c.enter(true, true);
+  expect(api.openOrCreate).toHaveBeenCalledWith("groceries");
+  expect(store.get().openPath).toBe(P("groceries"));
+  expect(editor.appended).toEqual(["- [ ] "]);
+});
+
+test("alt-enter on an existing title just opens it", async () => {
+  const { c, editor, store } = setup();
+  c.setQuery("B");
+  await settle();
+  await c.enter(true, true);
+  expect(store.get().openPath).toBe(P("B"));
+  expect(editor.appended).toEqual([]);
+});

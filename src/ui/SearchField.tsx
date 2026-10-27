@@ -65,7 +65,7 @@ export function SearchField({ controller, store }: { controller: Controller; sto
             controller.setQuery("");
           } else if (e.key === "Enter") {
             e.preventDefault();
-            void controller.enter(e.shiftKey);
+            void controller.enter(e.shiftKey || e.altKey, e.altKey);
           }
         }}
       />

@@ -16,6 +16,7 @@ import { stripFrontMatter, wordCount } from "../frontmatter";
 import { formatBinding, matches, resolve, type Action, type GLOBAL_ACTIONS } from "../shortcuts";
 import { isMenuKey, linkFor, menuModel, type MenuAction } from "../contextmenu";
 import { isLockedPath } from "../passphrase";
+import { localToday } from "../tasks";
 import type { MenuSpec, UiPort } from "./ports";
 import { noInfo, type AppState, type Store } from "./store";
 
@@ -520,7 +521,7 @@ export class Controller {
     if (r.focusEditor) this.editor.focus();
   }
 
-  async enter(force = false) {
+  async enter(force = false, checklist = false) {
     await this.searching;
     const a = enterAction(this.store.get().query, this.results.loaded, this.results.get(this.store.get().sel), force);
     if (!a) return;
@@ -529,14 +530,14 @@ export class Controller {
         // show() reports true even when it swallowed an open error; only settle if the note really loaded
         if (!(await this.show(a.path)) || this.editor.currentPath() !== a.path) return;
         this.settleAfterOpen(false, "enter");
-      } else await this.openTitle(a.title, "enter");
+      } else await this.openTitle(a.title, "enter", checklist);
     } catch (e) {
       this.setErr(errText(e));
     }
   }
 
   /** Open the note titled `title`, creating it if missing; same flush-then-load path as everywhere. */
-  async openTitle(title: string, source: "enter" | "wikilink"): Promise<boolean> {
+  async openTitle(title: string, source: "enter" | "wikilink", checklist = false): Promise<boolean> {
     if (this.busy) {
       this.setErr(BUSY_MSG);
       return false;
@@ -558,6 +559,7 @@ export class Controller {
         await this.resort();
       } else await this.runSearch(false);
       void this.refreshTitles();
+      if (created && checklist && this.editor.currentPath() === doc.path) this.editor.appendLine("- [ ] "); // after the stamped front matter, caret at the end
       if (this.editor.currentPath() === doc.path) this.settleAfterOpen(created, source);
       return true;
     } catch (e) {
@@ -1174,6 +1176,7 @@ export class Controller {
     toggle_tags: () => this.showTags(!this.store.get().tagPanelOpen),
     toggle_rich: () => void this.toggleStyle(),
     toggle_layout: () => void this.toggleLayout(),
+    daily_note: () => void this.openTitle(localToday(), "enter"),
     toggle_tasks: () => this.setPaneMode(this.store.get().paneMode === "tasks" ? "notes" : "tasks"),
   };
 

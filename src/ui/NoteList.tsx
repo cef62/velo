@@ -128,7 +128,7 @@ export function NoteList({ controller, store }: { controller: Controller; store:
       {count === 0 && query ? (
         <div className={empty}>
           <strong>No notes match “{query}”</strong>
-          <span>Press <Kbd>{isMac ? "⇧↩" : "Shift+Enter"}</Kbd> to create a note with that title</span>
+          <span>Press <Kbd>{isMac ? "⇧↩" : "Shift+Enter"}</Kbd> to create a note with that title, <Kbd>{isMac ? "⌥↩" : "Alt+Enter"}</Kbd> for a task list</span>
           <span>or <Kbd>Esc</Kbd> to clear the search</span>
         </div>
       ) : (

@@ -36,15 +36,29 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | ⌘⇧R | Ctrl+Shift+R | Rich / plain editing |
 | ⌘⇧J | Ctrl+Shift+J | Vertical / horizontal layout |
 | ⌘I | Ctrl+I | Show / hide the note info panel |
+| ⌘⇧X | Ctrl+Shift+X | Switch between Notes and Tasks |
+| ⌘⇧D | Ctrl+Shift+D | Open today's daily note |
 | ⌘⇧Space | Ctrl+Shift+Space | Show / hide velo (system-wide) |
+| ⌥⇧⌘N | Ctrl+Alt+Shift+N | Quick capture (system-wide) |
 
 Right-click a note in the list (or press the Menu key / Shift+F10 on the highlighted row) for a menu: open, rename, lock/unlock, copy `[[link]]`, show in Finder/Explorer, move to Trash. It opens the note first, so no menu appears if the switch is refused.
 
-Fixed: Enter (in search) opens the highlighted note, or creates a note titled with the query when nothing matches; Shift+Enter creates a note titled exactly as typed (or opens that exact title if it exists); ↑ / ↓ move the selection; Esc (in editor) returns to search.
+Fixed: Enter (in search) opens the highlighted note, or creates a note titled with the query when nothing matches; Shift+Enter creates a note titled exactly as typed (or opens that exact title if it exists); Alt+Enter (⌥↩) does the same and starts the new note with an empty `- [ ]` task; ↑ / ↓ move the selection; Esc (in editor) returns to search.
 
 ## Tags
 
 Write `#tag` anywhere in a note (at the start of a line, after a space, or after `(`; letters, digits, `_`, `-`, `/`; at least one letter; not in fenced code blocks; `# Heading` is not a tag). The `#` button next to search (or ⌘⇧T) shows every tag with its note count; click chips to filter the list to notes having all selected tags, combined with the search text. A "Filtered by" line stays visible while tags are selected. In the preview, click a `#tag` to filter by it. Locked notes are not listed in the tag panel.
+
+## Tasks
+
+Any markdown task line is a task: `- [ ] buy milk` (also `*`, `+`, numbered lists and quotes; not inside fenced code blocks).
+
+- Add a due date with `📅 2026-10-30`. Typing `due:` and a space in the editor turns into `📅 ` as a typing aid; you type the date. velo never writes a due date itself.
+- Ticking a task through velo (the checkbox in the editor or the Tasks view) appends `✅ YYYY-MM-DD` (local date); unticking removes it. Typing `x` by hand adds no date.
+- The Tasks view (⌘⇧X, or the toggle by the search box) lists open tasks from every note, grouped Overdue, Today, Upcoming and No date. Search filters it. "Show done" adds tasks ticked in the last 7 days. Ticking shows a "Ticked · Undo" toast for 5 seconds. Click a task to jump to its line.
+- The Dock icon shows the count of overdue and due-today tasks on macOS; other platforms show the count inside the app.
+- Quick capture (⌥⇧⌘N, system-wide) opens a one-line box and appends `- [ ] text` to your Inbox note, or to today's daily note. Choose in Settings, General. The Inbox note is called `Inbox` unless you rename it there.
+- The daily note (⌘⇧D) opens or creates a note titled with today's date, `YYYY-MM-DD`.
 
 ## Dates and front matter
 
