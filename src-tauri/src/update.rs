@@ -75,8 +75,9 @@ pub fn spawn_checker(app: AppHandle) {
             }
             // Wall-clock deadline, re-read after short naps: `Instant` and thread sleeps stop while
             // the machine sleeps (macOS, Linux), so a laptop would otherwise check every ~week.
-            let due = SystemTime::now() + CHECK_INTERVAL;
-            while SystemTime::now() < due {
+            // The awake-time bound ends the wait if the clock was set back after a check.
+            let (due, started) = (SystemTime::now() + CHECK_INTERVAL, std::time::Instant::now());
+            while SystemTime::now() < due && started.elapsed() < CHECK_INTERVAL {
                 std::thread::sleep(WAKE_POLL);
             }
         }

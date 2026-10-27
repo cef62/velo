@@ -358,6 +358,22 @@ test("manual check returns its result as a line for Settings", async () => {
   expect(await c.checkUpdates()).toBe("offline");
 });
 
+test("Lock and Lock all during an update install say busy instead of doing nothing", async () => {
+  const { c, api, store } = setup();
+  await c.runSearch(true);
+  await settle();
+  api.installUpdate.mockImplementationOnce(() => new Promise(() => {}));
+  c.onUpdateAvailable("0.6.1");
+  void c.installUpdate();
+  await settle();
+  await c.lockEverything();
+  expect(api.lockAll).not.toHaveBeenCalled();
+  expect(store.get().err).toBe("Busy — try again in a moment");
+  store.set({ err: "" });
+  await c.toggleLock();
+  expect(store.get().err).toBe("Busy — try again in a moment");
+});
+
 const key = (code: string, mods: { meta?: boolean; shift?: boolean } = {}, where: Partial<KeyEventLike> = {}): KeyEventLike => ({
   key: code.replace(/^Key/, "").toLowerCase(),
   code,

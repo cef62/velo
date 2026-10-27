@@ -514,7 +514,7 @@ export class Controller {
    * it is rebound to the new path, so no autosave/blur/watcher save can recreate the old path.
    */
   async toggleLock() {
-    if (this.busy) return;
+    if (this.busy) return this.setErr(BUSY_MSG);
     const path = this.editor.currentPath();
     if (!path) return;
     this.busy = true;
@@ -610,7 +610,7 @@ export class Controller {
   }
 
   async lockEverything() {
-    if (this.busy) return;
+    if (this.busy) return this.setErr(BUSY_MSG);
     this.busy = true;
     try {
       const path = this.editor.currentPath();
