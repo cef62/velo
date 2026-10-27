@@ -1,7 +1,8 @@
 //! `NoteOps` for the running app: the app's vault (which holds unlocked notes in memory) behind the same locked-note
 //! filtering as direct mode, never with the app's identity. A write to a note the editor may have open is first offered
 //! to the webview (`agent-write`), which applies it as a user edit or answers `not-open`.
-use super::ops::{NoteOps, VaultOps, plain};
+use super::ops::{NoteOps, VaultOps, locked, plain};
+use crate::names::parse_note_file;
 use crate::commands::AppState;
 use crate::index::{Page, TagCount};
 use crate::settings::Settings;
@@ -10,36 +11,61 @@ use crate::vault::{NoteDoc, Toggled, Vault, fm_lines, toggled_text};
 use anyhow::anyhow;
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
 /// How long a write waits for the webview before failing with "velo is busy, retry".
 pub const EDITOR_TIMEOUT: Duration = Duration::from_secs(5);
+/// Once the webview has claimed a request (it is applying it), the wait for its answer goes on this long instead.
+pub const CLAIMED_TIMEOUT: Duration = Duration::from_secs(60);
 const BUSY: &str = "velo is busy, retry";
 
-/// Writes awaiting the webview's `agent_write_done`.
+/// Requests awaiting the webview's `agent_write_done`; the flag is set once it claimed one (`agent_write_claim`).
 #[derive(Default)]
 pub struct Editors {
     next: AtomicU64,
-    pub(crate) pending: Mutex<HashMap<u64, mpsc::Sender<Value>>>,
+    pub(crate) pending: Mutex<HashMap<u64, (mpsc::Sender<Value>, bool)>>,
 }
 
 impl Editors {
-    /// Hands `req` (with an `id` added) to `emit`, then waits up to `timeout` for `done(id, ..)`.
-    pub fn ask(&self, mut req: Value, emit: impl FnOnce(Value), timeout: Duration) -> anyhow::Result<Value> {
+    /// Hands `req` (with an `id` added) to `emit`, then waits up to `timeout` for `done(id, ..)`, or up to
+    /// `CLAIMED_TIMEOUT` if the webview claimed it in time.
+    pub fn ask(&self, req: Value, emit: impl FnOnce(Value), timeout: Duration) -> anyhow::Result<Value> {
+        self.ask_within(req, emit, timeout, CLAIMED_TIMEOUT)
+    }
+
+    fn ask_within(&self, mut req: Value, emit: impl FnOnce(Value), timeout: Duration, claimed_timeout: Duration) -> anyhow::Result<Value> {
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = mpsc::channel();
-        self.pending.lock().unwrap().insert(id, tx);
+        self.pending.lock().unwrap().insert(id, (tx, false));
         req["id"] = id.into();
         emit(req);
-        let r = rx.recv_timeout(timeout);
+        let r = rx.recv_timeout(timeout).or_else(|e| {
+            // decided under the lock, so a claim either lands before this (and is waited for) or is refused after it
+            let claimed = {
+                let mut p = self.pending.lock().unwrap();
+                let c = p.get(&id).is_some_and(|e| e.1);
+                if !c {
+                    p.remove(&id);
+                }
+                c
+            };
+            if claimed { rx.recv_timeout(claimed_timeout) } else { rx.try_recv().map_err(|_| e) }
+        });
         self.pending.lock().unwrap().remove(&id);
         r.map_err(|_| anyhow!(BUSY))
     }
 
+    /// The webview is about to apply request `id`: true while the backend still waits for it, false once it gave up
+    /// (the webview must then leave everything as it is).
+    pub fn claim(&self, id: u64) -> bool {
+        self.pending.lock().unwrap().get_mut(&id).map(|e| e.1 = true).is_some()
+    }
+
     pub fn done(&self, id: u64, result: Value) {
-        if let Some(tx) = self.pending.lock().unwrap().remove(&id) {
+        if let Some((tx, _)) = self.pending.lock().unwrap().remove(&id) {
             tx.send(result).ok();
         }
     }
@@ -49,11 +75,13 @@ pub struct AppOps<'a> {
     st: &'a AppState,
     /// The `agent-write` round trip: `{path, kind, insert, base?, summary}` in, the webview's reply out.
     route: &'a dyn Fn(Value) -> anyhow::Result<Value>,
+    /// Real OS Trash; tests swap it for a plain remove.
+    pub(crate) remove: fn(&Path) -> std::io::Result<()>,
 }
 
 impl<'a> AppOps<'a> {
     pub fn new(st: &'a AppState, route: &'a dyn Fn(Value) -> anyhow::Result<Value>) -> Self {
-        AppOps { st, route }
+        AppOps { st, route, remove: crate::vault::move_to_trash }
     }
 
     /// Runs `f` on the app's vault, locked for this one operation only (the editor round trip needs it free).
@@ -63,18 +91,27 @@ impl<'a> AppOps<'a> {
         }
         let mut g = self.st.vault.lock().unwrap();
         let v = g.as_mut().ok_or_else(|| anyhow!("No notes folder set in velo"))?;
-        f(&mut VaultOps::new(v, self.st.settings_path.clone()))
+        let mut o = VaultOps::new(v, self.st.settings_path.clone());
+        o.remove = self.remove;
+        f(&mut o)
+    }
+
+    /// The webview's reply to `req`, which must be one of `ok` (`conflict` and `refused` become errors).
+    fn ask_editor(&self, req: Value, ok: &[&str]) -> anyhow::Result<Value> {
+        let r = (self.route)(req)?;
+        match r.as_str() {
+            Some("conflict") => Err(anyhow!("note changed since you read it")),
+            Some("refused") => Err(anyhow!("the note is open in velo and can't be edited right now, retry")),
+            Some(s) if ok.contains(&s) => Ok(r),
+            _ if ok.contains(&"hash") && r.get("hash").is_some_and(Value::is_string) => Ok(r),
+            _ => Err(anyhow!("bad reply from velo's editor: {r}")),
+        }
     }
 
     /// Offers a write to the editor: `Some(hash)` when it applied and saved it, `None` when the note isn't open there.
     fn via_editor(&self, req: Value) -> anyhow::Result<Option<String>> {
-        let r = (self.route)(req)?;
-        match r.as_str() {
-            Some("not-open") => Ok(None),
-            Some("conflict") => Err(anyhow!("note changed since you read it")),
-            Some("refused") => Err(anyhow!("the note is open in velo and can't be edited right now, retry")),
-            _ => r.get("hash").and_then(Value::as_str).map(|h| Some(h.to_string())).ok_or_else(|| anyhow!("bad reply from velo's editor: {r}")),
-        }
+        let r = self.ask_editor(req, &["not-open", "hash"])?;
+        Ok(r.get("hash").and_then(Value::as_str).map(String::from))
     }
 }
 
@@ -112,13 +149,30 @@ impl NoteOps for AppOps<'_> {
         self.with(|o| o.tasks(query, tags, show_done))
     }
 
-    // shortcut: rename and trash of the note open in the editor go straight to the backend; the editor follows them
-    // through the watcher like any outside change. Route them if that proves lossy.
+    /// The open note is saved and frozen in the editor first, so autosave can't recreate it under its old name; the
+    /// editor then follows it to the new path (`renamed`). Notes whose links get rewritten are saved first too.
     fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<String> {
-        self.with(|o| o.rename(path, new_title, rewrite_links, summary))
+        let path = plain(path)?;
+        if rewrite_links {
+            let title = parse_note_file(Path::new(path)).map(|n| n.title).unwrap_or_default();
+            let sources: Vec<String> = self.with(|o| o.vault.index.backlinks(&title))?.into_iter().filter(|p| !locked(p)).collect();
+            if !sources.is_empty() && (self.route)(json!({"kind": "flush", "paths": sources}))? == "refused" {
+                return Err(anyhow!("note is open in velo with unsaved changes"));
+            }
+        }
+        let ready = self.ask_editor(json!({"path": path, "kind": "rename", "summary": summary}), &["ready", "not-open"])? == "ready";
+        let r = self.with(|o| o.rename(path, new_title, rewrite_links, summary));
+        if ready {
+            // unfreezes the editor, on the new path or (failed) the old one
+            (self.route)(json!({"path": path, "kind": "renamed", "to": r.as_ref().ok()})).ok();
+        }
+        r
     }
 
+    /// The open note is saved and closed in the editor first, so autosave can't bring it back.
     fn trash(&mut self, path: &str, summary: &str) -> anyhow::Result<()> {
+        let path = plain(path)?;
+        self.ask_editor(json!({"path": path, "kind": "trash", "summary": summary}), &["closed", "not-open"])?;
         self.with(|o| o.trash(path, summary))
     }
 
@@ -173,6 +227,7 @@ mod tests {
     use serde_json::json;
     use std::path::PathBuf;
     use std::sync::Mutex;
+    use std::sync::mpsc;
     use std::time::Duration;
 
     /// App state over a vault holding `P.md` (plain, with a task) and `L.md.age` unlocked in memory.
@@ -269,5 +324,89 @@ mod tests {
         assert_eq!((t.line, t.line_text.starts_with("- [x] a")), (0, true));
         let last = seen.lock().unwrap().last().unwrap().clone();
         assert_eq!((last["kind"].as_str(), last["insert"].as_str().unwrap().starts_with("- [x] a")), (Some("replace"), true));
+    }
+
+    /// Runs `ask_within` (50 ms, then 2 s once claimed) while `webview` gets the request's id on another thread.
+    fn round_trip(webview: impl FnOnce(&Editors, u64) + Send) -> anyhow::Result<Value> {
+        let editors = Editors::default();
+        let (tx, rx) = mpsc::channel();
+        std::thread::scope(|s| {
+            let e = &editors;
+            s.spawn(move || webview(e, rx.recv().unwrap()));
+            editors.ask_within(json!({}), |r| tx.send(r["id"].as_u64().unwrap()).unwrap(), Duration::from_millis(50), Duration::from_secs(2))
+        })
+    }
+
+    #[test] fn claim_after_timeout_is_refused() {
+        let claimed = Mutex::new(None);
+        let r = round_trip(|e, id| {
+            std::thread::sleep(Duration::from_millis(150));
+            *claimed.lock().unwrap() = Some(e.claim(id));
+            e.done(id, json!({"hash": "late"}));
+        });
+        assert_eq!(r.unwrap_err().to_string(), "velo is busy, retry");
+        assert_eq!(*claimed.lock().unwrap(), Some(false), "the webview must not apply it");
+    }
+
+    #[test] fn claimed_write_waits_past_timeout() {
+        assert_eq!(CLAIMED_TIMEOUT, Duration::from_secs(60));
+        let r = round_trip(|e, id| {
+            assert!(e.claim(id));
+            std::thread::sleep(Duration::from_millis(200)); // well past the 50 ms timeout
+            e.done(id, json!({"hash": "h2"}));
+        });
+        assert_eq!(r.unwrap(), json!({"hash": "h2"}));
+    }
+
+    #[test] fn trash_of_open_note_waits_for_the_editor_to_close_it() {
+        let (st, dir) = state();
+        let p = dir.join("P.md").to_string_lossy().into_owned();
+        let reply = Mutex::new(json!("refused"));
+        let seen = Mutex::new(Vec::new());
+        let route = |req: Value| { seen.lock().unwrap().push(req); Ok(reply.lock().unwrap().clone()) };
+        let mut ops = AppOps::new(&st, &route);
+        ops.remove = |p| std::fs::remove_file(p);
+        assert!(ops.trash(&p, "s").is_err());
+        assert!(std::path::Path::new(&p).exists(), "refused: not trashed");
+        *reply.lock().unwrap() = json!("closed");
+        ops.trash(&p, "s").unwrap();
+        assert!(!std::path::Path::new(&p).exists());
+        assert_eq!(seen.lock().unwrap()[1], json!({"path": p, "kind": "trash", "summary": "s"}));
+    }
+
+    #[test] fn rename_of_open_note_freezes_then_moves_the_editor() {
+        let (st, dir) = state();
+        let p = dir.join("P.md").to_string_lossy().into_owned();
+        let seen = Mutex::new(Vec::new());
+        let route = |req: Value| { seen.lock().unwrap().push(req.clone()); Ok(json!(if req["kind"] == "rename" { "ready" } else { "ok" })) };
+        let mut ops = AppOps::new(&st, &route);
+        let np = ops.rename(&p, "Q", false, "s").unwrap();
+        let seen = seen.into_inner().unwrap();
+        assert_eq!(seen, vec![json!({"path": p, "kind": "rename", "summary": "s"}), json!({"path": p, "kind": "renamed", "to": np})]);
+        // a failed rename unfreezes it on the old path
+        let seen2 = Mutex::new(Vec::new());
+        let route = |req: Value| { seen2.lock().unwrap().push(req.clone()); Ok(json!(if req["kind"] == "rename" { "ready" } else { "ok" })) };
+        let mut ops = AppOps::new(&st, &route);
+        std::fs::write(dir.join("R.md"), "r").unwrap();
+        st.vault.lock().unwrap().as_mut().unwrap().rescan(None);
+        assert!(ops.rename(&np, "R", false, "s").is_err());
+        assert_eq!(seen2.lock().unwrap().last().unwrap(), &json!({"path": np, "kind": "renamed", "to": null}));
+    }
+
+    #[test] fn rename_with_rewrite_saves_open_link_sources_first() {
+        let (st, dir) = state();
+        let (p, a) = (dir.join("P.md").to_string_lossy().into_owned(), dir.join("A.md").to_string_lossy().into_owned());
+        std::fs::write(&a, "see [[P]]\n").unwrap();
+        st.vault.lock().unwrap().as_mut().unwrap().rescan(None);
+        let seen = Mutex::new(Vec::new());
+        let route = |req: Value| { seen.lock().unwrap().push(req.clone()); Ok(json!(if req["kind"] == "flush" { "refused" } else { "not-open" })) };
+        let mut ops = AppOps::new(&st, &route);
+        assert_eq!(ops.rename(&p, "Q", true, "s").unwrap_err().to_string(), "note is open in velo with unsaved changes");
+        assert_eq!(seen.lock().unwrap()[0], json!({"kind": "flush", "paths": [a]}), "the locked source is not listed");
+        assert!(std::path::Path::new(&p).exists(), "not renamed");
+        let route = |req: Value| Ok(json!(if req["kind"] == "flush" { "flushed" } else { "not-open" }));
+        let mut ops = AppOps::new(&st, &route);
+        ops.rename(&p, "Q", true, "s").unwrap();
+        assert_eq!(std::fs::read_to_string(&a).unwrap(), "see [[Q]]\n");
     }
 }

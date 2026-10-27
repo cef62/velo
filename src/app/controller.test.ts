@@ -1230,3 +1230,96 @@ test("agent write conflicts when the user typed during the round trip", async ()
   expect(editor.text).toBe("a typed"); // the keystroke survives
   expect(api.agentWriteDone).toHaveBeenCalledWith(6, "conflict");
 });
+
+test("agent write the backend gave up on (claim refused) changes nothing and sends no reply", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  api.agentWriteClaim.mockResolvedValueOnce(false);
+  await c.onAgentWrite({ id: 8, path: P("A"), kind: "append", insert: "- [ ] late", summary: "s" });
+  expect(editor.appended).toEqual([]);
+  expect(api.snapshotAgent).not.toHaveBeenCalled();
+  expect(api.agentWriteDone).not.toHaveBeenCalled();
+});
+
+test("agent write conflicts when an autosave left the editor newer than its read", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  editor.text = "a saved later"; // clean, but not what the agent's text was computed from
+  await c.onAgentWrite({ id: 9, path: P("A"), kind: "replace", insert: "b", base: "h", summary: "s" });
+  expect(editor.text).toBe("a saved later");
+  expect(api.snapshotAgent).not.toHaveBeenCalled(); // no agent revision for a refused write
+  expect(api.agentWriteDone).toHaveBeenCalledWith(9, "conflict");
+});
+
+test("two interleaved agent writes: the second, based on the old text, conflicts", async () => {
+  const { c, api, editor, notes } = setup({ A: "hello world" });
+  await c.show(P("A"));
+  api.openNote.mockImplementation(async (path: string) => ({ path, title: "A", text: notes.A, hash: `h:${notes.A}`, encrypted: false, meta: noMeta }));
+  editor.flush.mockImplementation(async () => ((notes.A = editor.text), (editor.dirty = false), true));
+  const one = c.onAgentWrite({ id: 1, path: P("A"), kind: "replace", insert: "hello there world", base: "h:hello world", summary: "s" });
+  const two = c.onAgentWrite({ id: 2, path: P("A"), kind: "replace", insert: "hello world!", base: "h:hello world", summary: "s" });
+  await Promise.all([one, two]);
+  expect(editor.text).toBe("hello there world");
+  expect(api.agentWriteDone).toHaveBeenCalledWith(1, { hash: "h:hello there world" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(2, "conflict");
+});
+
+test("agent trash of the open note saves and closes it first", async () => {
+  const { c, api, editor, store } = setup({ A: "a" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 3, path: P("A"), kind: "trash", summary: "s" });
+  expect(editor.flush).toHaveBeenCalled();
+  expect(editor.currentPath()).toBe(null);
+  expect(store.get().openPath).toBe(null);
+  expect(api.agentWriteDone).toHaveBeenCalledWith(3, "closed");
+});
+
+test("agent trash refused when the open note can't be saved", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  editor.dirty = true;
+  editor.flushResult = false;
+  await c.onAgentWrite({ id: 4, path: P("A"), kind: "trash", summary: "s" });
+  expect(editor.currentPath()).toBe(P("A"));
+  expect(api.agentWriteDone).toHaveBeenCalledWith(4, "refused");
+});
+
+test("agent rename freezes the open note, then follows it to the new path", async () => {
+  const { c, api, editor, store, notes } = setup({ A: "a" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 5, path: P("A"), kind: "rename", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(5, "ready");
+  expect(editor.suspended).toBe(true);
+  expect(c.busy).toBe(true);
+  notes.B = notes.A; // the backend renamed A.md to B.md
+  delete notes.A;
+  await c.onAgentWrite({ id: 6, path: P("A"), kind: "renamed", to: P("B") });
+  expect(editor.currentPath()).toBe(P("B"));
+  expect(store.get().openPath).toBe(P("B"));
+  expect(store.get().title).toBe("B");
+  expect(c.busy).toBe(false);
+  expect(api.agentWriteDone).toHaveBeenCalledWith(6, "ok");
+});
+
+test("agent rename that failed unfreezes the note where it was", async () => {
+  const { c, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 5, path: P("A"), kind: "rename", summary: "s" });
+  await c.onAgentWrite({ id: 6, path: P("A"), kind: "renamed", to: null });
+  expect(editor.suspended).toBe(false);
+  expect(editor.currentPath()).toBe(P("A"));
+  expect(c.busy).toBe(false);
+});
+
+test("agent flush before a link rewrite saves the open note, or refuses", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 1, path: "", kind: "flush", paths: [P("B")] });
+  expect(api.agentWriteDone).toHaveBeenLastCalledWith(1, "not-open");
+  await c.onAgentWrite({ id: 2, path: "", kind: "flush", paths: [P("A")] });
+  expect(api.agentWriteDone).toHaveBeenLastCalledWith(2, "flushed");
+  editor.dirty = true;
+  editor.flushResult = false;
+  await c.onAgentWrite({ id: 3, path: "", kind: "flush", paths: [P("A")] });
+  expect(api.agentWriteDone).toHaveBeenLastCalledWith(3, "refused");
+});

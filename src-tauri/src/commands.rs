@@ -257,11 +257,17 @@ pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings)
         }
     }
     let agent = app.state::<AgentState>();
+    let was_running = agent.listener.lock().unwrap().is_some();
     if settings.agent_access {
         // before saving: a listener that can't start must not leave access "on" with nothing answering
         set_access(&agent.listener, true, || listener::start(app.clone())).map_err(|e| e.to_string())?;
     }
-    settings::save(&st.settings_path, &settings).map_err(err)?;
+    if let Err(e) = settings::save(&st.settings_path, &settings) {
+        if !was_running {
+            set_access(&agent.listener, false, || unreachable!()).ok(); // access stays off: no listener
+        }
+        return Err(err(e));
+    }
     let on = settings.agent_access;
     *st.settings.lock().unwrap() = settings;
     if !on {
@@ -409,6 +415,12 @@ pub fn snapshot_text(st: State<'_, AppState>, path: String, text: String) -> Res
 #[tauri::command(async)]
 pub fn snapshot_agent(st: State<'_, AppState>, path: String, summary: String) -> Res<()> {
     with_vault(&st, |v, _| v.agent_snapshot(&path, &summary))
+}
+
+/// The webview is about to apply `agent-write` `id`: false once the backend stopped waiting (then it must not).
+#[tauri::command]
+pub fn agent_write_claim(agent: State<'_, AgentState>, id: u64) -> bool {
+    agent.editors.claim(id)
 }
 
 /// The webview's answer to `agent-write` `id`: `{hash}`, "not-open", "refused" or "conflict".

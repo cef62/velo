@@ -39,8 +39,22 @@ export type RevisionInfo = { id: string; ts: number; size: number; summary?: str
 export const listRevisions = (path: string) => invoke<RevisionInfo[]>("list_revisions", { path });
 export const readRevision = (path: string, id: string) => invoke<string>("read_revision", { path, id });
 /** An agent write offered to the editor (`agent-write`): `replace` carries the note's whole new text and the hash it was based on. */
-export type AgentWrite = { id: number; path: string; kind: "replace" | "append"; insert: string; base?: string; summary: string };
-export type AgentReply = { hash: string } | "not-open" | "refused" | "conflict";
+export type AgentWrite = {
+  id: number;
+  path: string;
+  kind: "replace" | "append" | "trash" | "rename" | "renamed" | "flush";
+  /** `replace`: the note's whole new text; `append`: the line to add. */
+  insert?: string;
+  base?: string;
+  summary?: string;
+  /** `renamed`: the new path, null when the rename failed. */
+  to?: string | null;
+  /** `flush`: notes whose links a rename is about to rewrite. */
+  paths?: string[];
+};
+export type AgentReply = { hash: string } | "not-open" | "refused" | "conflict" | "closed" | "ready" | "flushed" | "ok";
+/** Called right before applying `id`: false once the backend stopped waiting (then leave everything as it is). */
+export const agentWriteClaim = (id: number) => invoke<boolean>("agent_write_claim", { id });
 export const agentWriteDone = (id: number, result: AgentReply) => invoke<void>("agent_write_done", { id, result });
 export const snapshotAgent = (path: string, summary: string) => invoke<void>("snapshot_agent", { path, summary });
 export const snapshotText = (path: string, text: string) => invoke<void>("snapshot_text", { path, text });

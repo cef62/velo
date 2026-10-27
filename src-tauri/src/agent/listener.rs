@@ -38,8 +38,12 @@ impl ListenerHandle {
     pub fn stop(mut self) {
         std::fs::remove_file(&self.file).ok();
         self.stop.store(true, Ordering::SeqCst);
-        TcpStream::connect(self.addr).ok(); // wakes the blocking accept
-        if let Some(t) = self.accept.take() {
+        // wakes the blocking accept; if that fails, don't join (it would hang the caller): the loop exits on its next
+        // connection, refusing it
+        let woke = TcpStream::connect_timeout(&self.addr, std::time::Duration::from_secs(1)).is_ok();
+        if let Some(t) = self.accept.take()
+            && woke
+        {
             t.join().ok();
         }
     }

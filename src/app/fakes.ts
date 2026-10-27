@@ -62,6 +62,7 @@ export function fakeApi(notes: Record<string, string> = {}) {
     snapshotText: vi.fn(async (_p: string, _t: string) => {}),
     snapshotAgent: vi.fn(async (_p: string, _s: string) => {}),
     agentWriteDone: vi.fn(async (_id: number, _r: unknown) => {}),
+    agentWriteClaim: vi.fn(async (_id: number) => true),
     listRevisions: vi.fn(async (_p: string): Promise<RevisionInfo[]> => []),
     readRevision: vi.fn(async (_p: string, _id: string): Promise<string> => { throw "unset"; }),
     checkUpdate: vi.fn(async (): Promise<{ version: string } | null> => null),
