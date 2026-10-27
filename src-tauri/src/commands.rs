@@ -200,6 +200,29 @@ fn changed_globals(old: &Settings, new: &Settings) -> Vec<(GlobalAction, String,
         .collect()
 }
 
+type Reg<'a> = dyn FnMut(GlobalAction, &str) -> Result<(), String> + 'a;
+type Unreg<'a> = dyn FnMut(&str) + 'a;
+
+/// Release every old key first (a swap A<->B needs that), then register the new ones.
+/// On failure the new keys registered so far are released and all old keys are back.
+fn swap_globals(changed: &[(GlobalAction, String, String)], reg: &mut Reg, unreg: &mut Unreg) -> Result<(), String> {
+    changed.iter().for_each(|(_, o, _)| unreg(o));
+    for (i, (a, _, n)) in changed.iter().enumerate() {
+        if let Err(e) = reg(*a, n) {
+            changed[..i].iter().for_each(|(_, _, n)| unreg(n));
+            changed.iter().for_each(|(a, o, _)| { reg(*a, o).ok(); });
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
+/// Undo a finished `swap_globals` (the vault reopen failed after it).
+fn revert_globals(changed: &[(GlobalAction, String, String)], reg: &mut Reg, unreg: &mut Unreg) {
+    changed.iter().for_each(|(_, _, n)| unreg(n));
+    changed.iter().for_each(|(a, o, _)| { reg(*a, o).ok(); });
+}
+
 #[tauri::command]
 pub fn get_settings(st: State<AppState>) -> Settings {
     st.settings.lock().unwrap().clone()
@@ -209,13 +232,10 @@ pub fn get_settings(st: State<AppState>) -> Settings {
 pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings) -> Res<()> {
     let old = st.settings.lock().unwrap().clone();
     let changed = changed_globals(&old, &settings);
-    for (i, (action, _, new_key)) in changed.iter().enumerate() {
-        if let Err(e) = register_global(&app, *action, new_key) {
-            // on failure the old hotkeys stay registered: undo the new ones registered so far
-            changed[..i].iter().for_each(|(_, _, k)| unregister_hotkey(&app, k));
-            return Err(e);
-        }
-    }
+    // All-or-nothing on purpose: if any new key fails, every action keeps its old key and nothing is saved,
+    // so settings.json and the registered keys always agree.
+    let (mut reg, mut unreg) = (|a, k: &str| register_global(&app, a, k), |k: &str| unregister_hotkey(&app, k));
+    swap_globals(&changed, &mut reg, &mut unreg)?;
     let (no_vault, indexing) = (st.vault.lock().unwrap().is_none(), st.indexing.lock().unwrap().is_some());
     if needs_reopen(&old.notes_dir, &settings.notes_dir, no_vault, indexing) {
         let opened = match &settings.notes_dir {
@@ -229,11 +249,10 @@ pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings)
             }
         };
         if let Err(e) = opened {
-            changed.iter().for_each(|(_, _, k)| unregister_hotkey(&app, k));
+            revert_globals(&changed, &mut reg, &mut unreg); // old keys must be live again
             return Err(e);
         }
     }
-    changed.iter().for_each(|(_, k, _)| unregister_hotkey(&app, k));
     settings::save(&st.settings_path, &settings).map_err(err)?;
     *st.settings.lock().unwrap() = settings;
     Ok(())
@@ -509,5 +528,52 @@ mod global_tests {
         b.shortcuts.insert("capture".into(), "Mod+KeyG".into());
         b.shortcuts.insert("toggle_window".into(), "Mod+Shift+Space".into()); // same as default: unchanged
         assert_eq!(changed_globals(&a, &b), vec![(GlobalAction::Capture, "Mod+Shift+Alt+KeyN".to_string(), "Mod+KeyG".to_string())]);
+    }
+    fn with(t: &str, c: &str) -> Settings {
+        let mut s = Settings::default();
+        s.shortcuts.insert("toggle_window".into(), t.into()); s.shortcuts.insert("capture".into(), c.into()); s
+    }
+    const T: &str = "Mod+Shift+Space";
+    const C: &str = "Mod+Shift+Alt+KeyN";
+    fn ch(a: GlobalAction, o: &str, n: &str) -> (GlobalAction, String, String) { (a, o.into(), n.into()) }
+    #[test] fn changed_globals_toggle_both_swap_none() {
+        use GlobalAction::*;
+        let d = Settings::default();
+        assert_eq!(changed_globals(&d, &with("Mod+KeyG", C)), vec![ch(ToggleWindow, T, "Mod+KeyG")]);
+        assert_eq!(changed_globals(&d, &with("Mod+KeyG", "Mod+KeyH")), vec![ch(ToggleWindow, T, "Mod+KeyG"), ch(Capture, C, "Mod+KeyH")]);
+        assert_eq!(changed_globals(&d, &with(C, T)), vec![ch(ToggleWindow, T, C), ch(Capture, C, T)]);
+        assert_eq!(changed_globals(&d, &with("none", C)), vec![ch(ToggleWindow, T, "none")]);
+        assert_eq!(changed_globals(&with("none", C), &d), vec![ch(ToggleWindow, "none", T)]);
+    }
+    /// Runs swap_globals with a fake OS that rejects registering a held key or `bad`; returns (log, result, held keys).
+    fn run(changed: &[(GlobalAction, String, String)], bad: &str) -> (Vec<String>, Result<(), String>, Vec<String>) {
+        use std::cell::RefCell;
+        let held = RefCell::new(vec![T.to_string(), C.to_string()]);
+        let log = RefCell::new(vec![]);
+        let r = swap_globals(
+            changed,
+            &mut |_, k| {
+                log.borrow_mut().push(format!("+{k}"));
+                if k == bad || held.borrow().iter().any(|h| h == k) { return Err(format!("taken {k}")); }
+                held.borrow_mut().push(k.into()); Ok(())
+            },
+            &mut |k| { log.borrow_mut().push(format!("-{k}")); held.borrow_mut().retain(|h| h != k); },
+        );
+        (log.into_inner(), r, held.into_inner())
+    }
+    #[test] fn swap_releases_old_before_registering_new() {
+        use GlobalAction::*;
+        let (log, r, held) = run(&[ch(ToggleWindow, T, C), ch(Capture, C, T)], "");
+        assert!(r.is_ok());
+        assert_eq!(log, vec![format!("-{T}"), format!("-{C}"), format!("+{C}"), format!("+{T}")]);
+        assert_eq!(held, vec![C.to_string(), T.to_string()]);
+    }
+    #[test] fn failed_swap_rolls_back_to_old_keys() {
+        use GlobalAction::*;
+        let (log, r, held) = run(&[ch(ToggleWindow, T, "Mod+KeyG"), ch(Capture, C, "Mod+KeyH")], "Mod+KeyH");
+        assert!(r.is_err());
+        // release old, register G, H fails, release G, re-register old T and C
+        assert_eq!(log, vec![format!("-{T}"), format!("-{C}"), "+Mod+KeyG".into(), "+Mod+KeyH".into(), "-Mod+KeyG".into(), format!("+{T}"), format!("+{C}")]);
+        assert_eq!(held, vec![T.to_string(), C.to_string()]);
     }
 }
