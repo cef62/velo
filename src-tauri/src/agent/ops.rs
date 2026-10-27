@@ -49,11 +49,13 @@ fn plain(path: &str) -> anyhow::Result<&str> {
 pub struct DirectOps {
     vault: Vault,
     settings_path: PathBuf,
+    /// Real OS Trash; tests swap it for a plain remove.
+    remove: fn(&Path) -> std::io::Result<()>,
 }
 
 impl DirectOps {
     pub fn open(dir: PathBuf, db_path: &Path, settings_path: PathBuf) -> anyhow::Result<DirectOps> {
-        Ok(DirectOps { vault: Vault::open_with_progress(dir, db_path, None, &mut |_, _| {})?, settings_path })
+        Ok(DirectOps { vault: Vault::open_with_progress(dir, db_path, None, &mut |_, _| {})?, settings_path, remove: crate::vault::move_to_trash })
     }
 
     /// Catch up with outside changes since the last call (mtime/size diff, as the app does after missed events).
@@ -149,7 +151,7 @@ impl NoteOps for DirectOps {
     fn trash(&mut self, path: &str, summary: &str) -> anyhow::Result<()> {
         let path = plain(path)?;
         self.vault.agent_snapshot(path, summary)?;
-        self.vault.delete_note(path)
+        self.vault.delete_note_with(path, self.remove)
     }
 
     fn settings(&self) -> Settings {
@@ -192,11 +194,18 @@ mod tests {
         let r = o.vault.list_revisions(&d.path).unwrap();
         assert_eq!(r.iter().filter_map(|x| x.summary.as_deref()).collect::<Vec<_>>(), ["edit two", "edit one", "c"]);
     }
+    #[test] fn rename_snapshots_under_new_title() {
+        let (mut o, _) = ops();
+        let d = o.create("Before", "body", "c").unwrap();
+        let np = o.rename(&d.path, "After", false, "renamed it").unwrap();
+        let r = o.vault.list_revisions(&np).unwrap();
+        assert!(r.iter().any(|x| x.summary.as_deref() == Some("renamed it")));
+    }
     #[test] fn trash_keeps_revisions_with_summary() {
         let (mut o, dir) = ops();
+        o.remove = |p| std::fs::remove_file(p); // real trash would hit the OS Trash
         let d = o.create("T", "bye", "c").unwrap();
-        o.vault.agent_snapshot(&d.path, "trashed").unwrap();
-        o.vault.delete_note_with(&d.path, |p| std::fs::remove_file(p)).unwrap(); // real trash would hit the OS Trash
+        o.trash(&d.path, "trashed").unwrap();
         assert!(!dir.join("T.md").exists());
         let r = o.vault.list_revisions(&d.path).unwrap();
         assert_eq!(r[0].summary.as_deref(), Some("trashed"));

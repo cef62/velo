@@ -52,6 +52,15 @@ fn ts_of(name: &str) -> Option<i64> {
     name.split('.').next()?.parse().ok()
 }
 
+/// First snapshot id at or after `now_ms` that no snapshot uses yet (same-ms ids bump by 1 ms).
+fn free_id(dir: &std::path::Path, now_ms: i64, encrypted: bool) -> (i64, String) {
+    let mut ms = now_ms;
+    while dir.join(format!("{ms}.md")).exists() || dir.join(format!("{ms}.md.age")).exists() {
+        ms += 1;
+    }
+    (ms, format!("{ms}.{}", if encrypted { "md.age" } else { "md" }))
+}
+
 impl Revisions {
     pub fn new(root: PathBuf) -> Revisions {
         Revisions { root, last_prune: 0 }
@@ -92,7 +101,8 @@ impl Revisions {
         }
         let dir = self.dir(title);
         std::fs::create_dir_all(&dir)?;
-        std::fs::write(dir.join(format!("{now_ms}.{}", if encrypted { "md.age" } else { "md" })), bytes)?;
+        let (_, id) = free_id(&dir, now_ms, encrypted);
+        std::fs::write(dir.join(id), bytes)?;
         Ok(true)
     }
 
@@ -101,11 +111,7 @@ impl Revisions {
     pub fn snapshot_agent(&self, title: &str, bytes: &[u8], encrypted: bool, now_ms: i64, summary: &str) -> io::Result<String> {
         let dir = self.dir(title);
         std::fs::create_dir_all(&dir)?;
-        let mut ms = now_ms;
-        while dir.join(format!("{ms}.md")).exists() || dir.join(format!("{ms}.md.age")).exists() {
-            ms += 1;
-        }
-        let id = format!("{ms}.{}", if encrypted { "md.age" } else { "md" });
+        let (ms, id) = free_id(&dir, now_ms, encrypted);
         std::fs::write(dir.join(&id), bytes)?;
         std::fs::write(dir.join(format!("{ms}.json")), serde_json::to_vec(&Sidecar { summary: summary.into(), agent: true })?)?;
         Ok(id)
@@ -245,6 +251,15 @@ mod tests {
         assert_eq!(l[1].summary.as_deref(), Some("first"));
         r.snapshot_bytes("n", b"c", false, 3000, false).unwrap();
         assert_eq!((r.list("n")[0].summary.clone(), r.list("n")[0].agent), (None, false));
+    }
+    #[test] fn plain_snapshot_never_overwrites_agent_snapshot() {
+        let r = rev();
+        r.snapshot_agent("n", b"agent", false, 7, "mine").unwrap();
+        r.snapshot_bytes("n", b"user", false, 7, false).unwrap();
+        let l = r.list("n");
+        assert_eq!(l.len(), 2);
+        let a = l.iter().find(|x| x.agent).unwrap();
+        assert_eq!((r.read("n", &a.id).unwrap().0, a.summary.as_deref()), (b"agent".to_vec(), Some("mine")));
     }
     #[test] fn same_ms_bumps() {
         let r = rev();

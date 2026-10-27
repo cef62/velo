@@ -86,7 +86,7 @@ fn parse(p: &Path) -> anyhow::Result<NoteFile> {
 
 /// macOS uses NSFileManager instead of the crate's Finder default, which drives Finder over AppleScript
 /// (Automation permission prompt; denying it would break every later delete).
-fn move_to_trash(p: &Path) -> std::io::Result<()> {
+pub(crate) fn move_to_trash(p: &Path) -> std::io::Result<()> {
     #[allow(unused_mut)]
     let mut ctx = trash::TrashContext::default();
     #[cfg(target_os = "macos")]
