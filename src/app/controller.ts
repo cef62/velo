@@ -320,7 +320,9 @@ export class Controller {
     this.captureSession++;
     this.keptCapture = keep;
     this.store.set({ capture: null, ...(keep ? {} : { query: this.captureQuery }) });
-    if (keep) this.filterChanged(false); // as if typed into the search field
+    // the kept text lists like a search, but never opens a hit: focus went to the open note (or a note just opened)
+    if (keep && this.store.get().paneMode === "tasks") this.filterChanged(false);
+    else if (keep) void this.resort();
     else if (captured !== undefined) void this.runSearch(false); // the target's row moved; the list is otherwise unchanged
     if (hide) void this.api.captureDone().catch((e) => console.error("capture done failed", e));
   }
@@ -835,7 +837,7 @@ export class Controller {
     if (m === "tasks") void this.loadTasks();
     else if (this.listStale) {
       this.listStale = false;
-      void this.runSearch(true, "highlight");
+      void this.resort(); // switching modes never changes the open note: its row is selected if listed, else none
     }
   }
 

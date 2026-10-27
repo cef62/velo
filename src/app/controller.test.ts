@@ -973,3 +973,51 @@ test("typing a filter in Tasks mode never opens a note; back in Notes the list f
   expect(api.search.mock.calls.length).toBe(n + 1);
   expect(api.openNote).not.toHaveBeenCalled();
 });
+
+/** Real DOM: focusing the editor blurs the search field (and so ends capture mode). */
+function setupBlurOnFocus(notes: Record<string, string>) {
+  const t = setup(notes);
+  t.editor.focus = () => { t.editor.focused++; t.c.blurCapture(); };
+  return t;
+}
+
+test("⇧⌘D in capture mode: the editor focus blurs the field, the daily note stays open and the text is kept", async () => {
+  const { c, store } = setupBlurOnFocus({ Groceries: "buy milk" });
+  await c.startCapture();
+  c.setQuery("buy milk");
+  c.onKeyDown(key("KeyD", { meta: true, shift: true }, { inSearchWithText: true }));
+  await settle();
+  await settle();
+  expect(store.get().capture).toBeNull();
+  expect(store.get().query).toBe("buy milk");
+  expect(store.get().openPath).toBe(P(localToday()));
+});
+
+test("clicking into the open note during capture keeps that note open; the kept text only lists", async () => {
+  const { c, api, store } = setup({ Groceries: "buy milk", X: "x" });
+  await c.show(P("X"));
+  await c.startCapture();
+  api.search.mockImplementation(async () => ({ hits: [hit("Groceries")], has_more: false, total: 1 })); // the query matches Groceries only
+  c.setQuery("milk");
+  const n = api.search.mock.calls.length;
+  c.blurCapture();
+  await settle();
+  expect(api.search.mock.calls.length).toBe(n + 1);
+  expect(store.get().openPath).toBe(P("X"));
+  expect(store.get().sel).toBe(-1); // X is not listed for "milk": no selection
+});
+
+test("back to Notes after a Tasks filter never changes the open note", async () => {
+  const { c, api, store } = setup({ Groceries: "a", X: "x" });
+  await c.show(P("X"));
+  c.setPaneMode("tasks");
+  await settle();
+  api.search.mockImplementation(async () => ({ hits: [hit("Groceries")], has_more: false, total: 1 })); // the query matches Groceries only
+  c.setQuery("groc");
+  await settle();
+  c.setPaneMode("notes");
+  await settle();
+  expect(store.get().openPath).toBe(P("X"));
+  expect(api.openNote).toHaveBeenCalledTimes(1);
+  expect(store.get().sel).toBe(-1);
+});
