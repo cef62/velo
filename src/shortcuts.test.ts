@@ -87,7 +87,14 @@ test("metadata shortcut defaults", () => { expect(DEFAULTS.toggle_info).toBe("Mo
 test("capture is a global action with a non-conflicting default", () => {
   expect(GLOBAL_ACTIONS).toEqual(["toggle_window", "capture"]);
   expect(LABELS.capture).toBe("Quick capture (global)");
-  expect(DEFAULTS.capture).toBe("Mod+Shift+Alt+KeyN");
+  expect(DEFAULTS.capture).toBe("Mod+Alt+Shift+KeyN");
+  expect(normalizeBinding(DEFAULTS.capture)).toBe(DEFAULTS.capture); // canonical: a recorded ⌥⇧⌘N must compare equal
   expect(validateBinding(DEFAULTS, "capture", DEFAULTS.capture)).toEqual({ ok: true });
   expect(Object.values(DEFAULTS).filter((b) => b === DEFAULTS.capture)).toHaveLength(1);
+});
+
+test("upgrade: a saved binding equal to a new default wins, the new action gets none", () => {
+  const m = resolve({ toggle_sort: "Mod+Shift+KeyD", toggle_window: "Mod+Shift+Alt+KeyN", rename: "Mod+Shift+KeyX" });
+  expect(m).toMatchObject({ toggle_sort: "Mod+Shift+KeyD", daily_note: "none", toggle_window: "Mod+Alt+Shift+KeyN", capture: "none", rename: "Mod+Shift+KeyX", toggle_tasks: "none" });
+  expect(resolve({ toggle_sort: "Mod+Shift+KeyD", daily_note: "Mod+Shift+KeyD" }).daily_note).toBe("Mod+Shift+KeyD"); // both chosen: a real conflict, shown
 });

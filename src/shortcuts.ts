@@ -28,7 +28,7 @@ export const DEFAULTS: Record<Action, string> = {
   toggle_info: "Mod+KeyI",
   toggle_front_matter: NONE,
   toggle_tasks: "Mod+Shift+KeyX",
-  capture: "Mod+Shift+Alt+KeyN",
+  capture: "Mod+Alt+Shift+KeyN", // canonical modifier order, as recorded and as resolve() normalizes saved values
   daily_note: "Mod+Shift+KeyD",
 };
 
@@ -101,12 +101,20 @@ const OLD_DEFAULTS: Partial<Record<string, string>> = { next_note: "Mod+KeyJ", p
 
 export function resolve(saved: Record<string, string> | undefined, isMac = false): Record<Action, string> {
   const out = { ...DEFAULTS };
+  const mine = new Set<Action>(); // actions with a valid saved binding
   const legacy = saved !== undefined && Object.entries(OLD_DEFAULTS).every(([a, b]) => saved[a] === b);
   for (const a of Object.keys(DEFAULTS) as Action[]) {
     const s = legacy && saved[a] === OLD_DEFAULTS[a] ? undefined : saved?.[a];
     if (s === NONE) { out[a] = NONE; continue; }
     const n = s ? normalizeBinding(s) : null;
-    if (n && !basicProblem(n, isMac)) out[a] = n;
+    if (n && !basicProblem(n, isMac)) {
+      out[a] = n;
+      mine.add(a);
+    }
+  }
+  // a default added later (upgrade) never takes a key the user already chose: their binding wins
+  for (const a of Object.keys(DEFAULTS) as Action[]) {
+    if (!mine.has(a) && out[a] !== NONE && [...mine].some((b) => out[b] === out[a])) out[a] = NONE;
   }
   return out;
 }

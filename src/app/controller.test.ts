@@ -915,3 +915,61 @@ test("capture whose target is an alias of the open note appends through the edit
   expect(api.captureTask).not.toHaveBeenCalled();
   expect(editor.appended).toEqual(["- [ ] buy milk"]);
 });
+
+test("the daily-note shortcut in capture mode keeps the capture text", async () => {
+  const { c, api, store } = setup({ A: "a" });
+  await c.startCapture();
+  c.setQuery("buy milk");
+  c.onKeyDown(key("KeyD", { meta: true, shift: true }, { inSearchWithText: true }));
+  await settle();
+  expect(api.openOrCreate).toHaveBeenCalledWith(localToday());
+  expect(store.get().query).toBe("buy milk");
+  await c.submitCapture(store.get().query);
+  expect(api.captureTask).toHaveBeenCalledWith("buy milk");
+});
+
+test("creating a note from a wikilink after a capture blur keeps the kept text", async () => {
+  const { c, store } = setup({ A: "a" });
+  await c.startCapture();
+  c.setQuery("buy milk");
+  c.blurCapture();
+  await settle();
+  await c.openTitle("New note", "wikilink");
+  expect(store.get().query).toBe("buy milk");
+  c.setQuery("x"); // once edited it is a normal search again
+  await settle();
+  await c.openTitle("Other", "wikilink");
+  expect(store.get().query).toBe("Other");
+});
+
+test("Lock all reloads the tasks: decrypted rows, the due count and the badge go", async () => {
+  const { c, api, store } = setup({ A: "a" });
+  const secret: TaskItem = { path: "/n/S.md.age", title: "S", line: 0, text: "secret", due: localToday(), done: false, done_on: null, line_text: "- [ ] secret" };
+  api.tasks.mockResolvedValue({ overdue: [], today: [secret], upcoming: [], no_date: [], done: [], due_count: 1 });
+  c.setPaneMode("tasks");
+  await settle();
+  expect(store.get().dueCount).toBe(1);
+  api.tasks.mockResolvedValue({ overdue: [], today: [], upcoming: [], no_date: [], done: [], due_count: 0 });
+  await c.lockEverything();
+  await settle();
+  expect(store.get().taskView?.today).toEqual([]);
+  expect(store.get().dueCount).toBe(0);
+  expect(api.setBadge).toHaveBeenLastCalledWith(0);
+});
+
+test("typing a filter in Tasks mode never opens a note; back in Notes the list follows without opening", async () => {
+  const { c, api, store } = setup({ A: "a", "milk run": "x" });
+  c.setPaneMode("tasks");
+  await settle();
+  c.setQuery("milk");
+  c.setTags(["home"]);
+  await settle();
+  expect(store.get().openPath).toBe(null);
+  expect(api.openNote).not.toHaveBeenCalled();
+  expect(api.tasks).toHaveBeenCalledWith("milk", ["home"], false);
+  const n = api.search.mock.calls.length;
+  c.setPaneMode("notes");
+  await settle();
+  expect(api.search.mock.calls.length).toBe(n + 1);
+  expect(api.openNote).not.toHaveBeenCalled();
+});

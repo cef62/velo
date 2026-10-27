@@ -218,14 +218,24 @@ export class Controller {
   /** The search text changed: fresh first page. */
   setQuery(q: string) {
     if (this.store.get().capture) return this.store.set((s) => ({ query: q, capture: { ...s.capture!, err: "" } })); // capture text, not a search
+    this.keptCapture = false;
     this.store.set({ query: q });
-    void this.runSearch(true);
-    if (this.store.get().paneMode === "tasks") void this.loadTasks();
+    this.filterChanged(false);
+  }
+
+  protected listStale = false; // the query/tags changed in Tasks mode: the Notes list reloads when it is shown again
+  /** Query or tag filter changed. In Tasks mode only the tasks follow it: the editor must not jump to a hidden list's first hit. */
+  protected filterChanged(keepOpen: boolean | "highlight") {
+    if (this.store.get().paneMode === "tasks") {
+      this.listStale = true;
+      void this.loadTasks();
+    } else void this.runSearch(true, keepOpen);
   }
 
   protected captureQuery = ""; // the search text before capture mode, restored when it ends empty
   protected captureSession = 0; // bumped when capture mode ends: a late submit result belongs to an old session
   protected capturePending = false; // a submit is in flight: another Enter would append the task twice
+  protected keptCapture = false; // the query is capture text kept after a blur, not yet edited: never overwrite it
 
   /** The capture shortcut: the search field becomes "→ <target>", empty (text already typed in capture mode stays). */
   async startCapture() {
@@ -308,8 +318,9 @@ export class Controller {
     const q = this.store.get().query;
     const keep = q !== captured && q.trim() !== "";
     this.captureSession++;
+    this.keptCapture = keep;
     this.store.set({ capture: null, ...(keep ? {} : { query: this.captureQuery }) });
-    if (keep) void this.runSearch(true); // as if typed into the search field
+    if (keep) this.filterChanged(false); // as if typed into the search field
     else if (captured !== undefined) void this.runSearch(false); // the target's row moved; the list is otherwise unchanged
     if (hide) void this.api.captureDone().catch((e) => console.error("capture done failed", e));
   }
@@ -563,7 +574,7 @@ export class Controller {
       this.setErr("");
       this.history.loaded(doc.path, "explicit");
       if (created) {
-        this.store.set({ query: doc.title }); // list the new note, selected (resort keeps the open note selected)
+        if (!this.store.get().capture && !this.keptCapture) this.store.set({ query: doc.title }); // list the new note, selected (resort keeps the open note selected); typed capture text is never replaced
         await this.resort();
       } else await this.runSearch(false);
       void this.refreshTitles();
@@ -648,6 +659,7 @@ export class Controller {
       this.setErr(e === "already-exists" ? "A note with that title already exists in the other form" : errText(e));
       return;
     }
+    void this.loadTasks(); // the path moved (and a locked note's tasks leave the index)
     try {
       const doc = await this.api.openNote(np);
       this.history.rename(path, np);
@@ -734,6 +746,7 @@ export class Controller {
       } else this.editor.resume();
       await this.runSearch(false);
       void this.refreshTags(); // a tag only a now-locked note had must leave the panel and filter
+      void this.loadTasks(); // and its decrypted tasks the view, the due count and the badge
     } catch (e) {
       this.setErr(errText(e));
     } finally {
@@ -799,8 +812,7 @@ export class Controller {
   /** Tag filter changed: fresh first page, keeping the open note selected if it is still listed. */
   setTags(next: string[]) {
     this.store.set({ selectedTags: next });
-    void this.runSearch(true, true);
-    if (this.store.get().paneMode === "tasks") void this.loadTasks();
+    this.filterChanged(true);
   }
 
   toggleTagFilter(tag: string) {
@@ -821,6 +833,10 @@ export class Controller {
   setPaneMode(m: "notes" | "tasks") {
     this.store.set({ paneMode: m });
     if (m === "tasks") void this.loadTasks();
+    else if (this.listStale) {
+      this.listStale = false;
+      void this.runSearch(true, "highlight");
+    }
   }
 
   async toggleShowDone() {

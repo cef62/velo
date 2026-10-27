@@ -204,9 +204,10 @@ type Reg<'a> = dyn FnMut(GlobalAction, &str) -> Result<(), String> + 'a;
 type Unreg<'a> = dyn FnMut(&str) + 'a;
 
 /// Release every old key first (a swap A<->B needs that), then register the new ones.
+/// An old key an unchanged action still holds (`held`) stays registered: it was never this action's.
 /// On failure the new keys registered so far are released and all old keys are back.
-fn swap_globals(changed: &[(GlobalAction, String, String)], reg: &mut Reg, unreg: &mut Unreg) -> Result<(), String> {
-    changed.iter().for_each(|(_, o, _)| unreg(o));
+fn swap_globals(changed: &[(GlobalAction, String, String)], held: &[String], reg: &mut Reg, unreg: &mut Unreg) -> Result<(), String> {
+    changed.iter().filter(|(_, o, _)| !held.iter().any(|h| settings::same_shortcut(h, o))).for_each(|(_, o, _)| unreg(o));
     for (i, (a, _, n)) in changed.iter().enumerate() {
         if let Err(e) = reg(*a, n) {
             changed[..i].iter().for_each(|(_, _, n)| unreg(n));
@@ -235,7 +236,8 @@ pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings)
     // All-or-nothing on purpose: if any new key fails, every action keeps its old key and nothing is saved,
     // so settings.json and the registered keys always agree.
     let (mut reg, mut unreg) = (|a, k: &str| register_global(&app, a, k), |k: &str| unregister_hotkey(&app, k));
-    swap_globals(&changed, &mut reg, &mut unreg)?;
+    let held: Vec<String> = old.global_bindings().into_iter().filter(|(a, _)| !changed.iter().any(|(c, ..)| c == a)).map(|(_, k)| k).collect();
+    swap_globals(&changed, &held, &mut reg, &mut unreg)?;
     let (no_vault, indexing) = (st.vault.lock().unwrap().is_none(), st.indexing.lock().unwrap().is_some());
     if needs_reopen(&old.notes_dir, &settings.notes_dir, no_vault, indexing) {
         let opened = match &settings.notes_dir {
@@ -576,12 +578,14 @@ mod global_tests {
         assert_eq!(changed_globals(&with("none", C), &d), vec![ch(ToggleWindow, "none", T)]);
     }
     /// Runs swap_globals with a fake OS that rejects registering a held key or `bad`; returns (log, result, held keys).
-    fn run(changed: &[(GlobalAction, String, String)], bad: &str) -> (Vec<String>, Result<(), String>, Vec<String>) {
+    fn run(changed: &[(GlobalAction, String, String)], bad: &str) -> (Vec<String>, Result<(), String>, Vec<String>) { run_held(changed, &[], bad) }
+    fn run_held(changed: &[(GlobalAction, String, String)], keep: &[String], bad: &str) -> (Vec<String>, Result<(), String>, Vec<String>) {
         use std::cell::RefCell;
         let held = RefCell::new(vec![T.to_string(), C.to_string()]);
         let log = RefCell::new(vec![]);
         let r = swap_globals(
             changed,
+            keep,
             &mut |_, k| {
                 log.borrow_mut().push(format!("+{k}"));
                 if k == bad || held.borrow().iter().any(|h| h == k) { return Err(format!("taken {k}")); }
@@ -605,5 +609,12 @@ mod global_tests {
         // release old, register G, H fails, release G, re-register old T and C
         assert_eq!(log, vec![format!("-{T}"), format!("-{C}"), "+Mod+KeyG".into(), "+Mod+KeyH".into(), "-Mod+KeyG".into(), format!("+{T}"), format!("+{C}")]);
         assert_eq!(held, vec![T.to_string(), C.to_string()]);
+    }
+    #[test] fn swap_keeps_a_key_another_action_holds() {
+        // upgrade: toggle_window was saved on capture's new default, so capture never got it; remapping capture must not free it
+        let (log, r, held) = run_held(&[ch(GlobalAction::Capture, C, "Mod+KeyG")], &[C.to_string()], "");
+        assert!(r.is_ok());
+        assert_eq!(log, vec!["+Mod+KeyG".to_string()]);
+        assert!(held.contains(&C.to_string()));
     }
 }
