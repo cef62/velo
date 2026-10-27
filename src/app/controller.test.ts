@@ -633,12 +633,13 @@ test("tick on the open note refuses a line the editor no longer has", async () =
 
 test("tick on a closed note calls the backend and offers undo", async () => {
   const { c, api, store } = setup();
+  const ticked = toggleTaskLine("- [ ] buy", localToday())!;
+  api.toggleTask.mockResolvedValueOnce({ line: 7, line_text: ticked }); // the save stamped front matter above it
   await c.tickTask(task("B", 2, "- [ ] buy"));
   expect(api.toggleTask).toHaveBeenCalledWith(P("B"), 2, "- [ ] buy");
-  const ticked = toggleTaskLine("- [ ] buy", localToday())!;
-  expect(store.get().tickUndo).toEqual({ path: P("B"), line: 2, lineText: ticked });
+  expect(store.get().tickUndo).toEqual({ path: P("B"), line: 7, lineText: ticked });
   await c.undoTick();
-  expect(api.toggleTask).toHaveBeenLastCalledWith(P("B"), 2, ticked);
+  expect(api.toggleTask).toHaveBeenLastCalledWith(P("B"), 7, ticked);
   expect(store.get().tickUndo).toBeNull();
 });
 

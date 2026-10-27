@@ -3,6 +3,7 @@ import type { TaskItem } from "../api";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { Badge, Button, Checkbox } from "@/components/ui";
+import { renderInline } from "../preview";
 import { HighlightedText } from "./HighlightedText";
 import { useStore } from "./useStore";
 
@@ -32,7 +33,14 @@ const row = css({
   _hover: { bg: "velo.subtle" },
   _focusVisible: { outline: "2px solid", outlineColor: "velo.accent", outlineOffset: "-2px" },
 });
-const text = css({ truncate: true, flex: "0 1 auto", minW: "0", "[data-done] &": { color: "velo.fgMuted", textDecoration: "line-through" } });
+const text = css({
+  truncate: true,
+  flex: "0 1 auto",
+  minW: "0",
+  "[data-done] &": { color: "velo.fgMuted", textDecoration: "line-through" },
+  "& a": { color: "velo.accentText", textDecoration: "none" },
+  "& code": { fontFamily: "mono", fontSize: "0.9em", bg: "velo.subtle", px: "1", borderRadius: "l1" },
+});
 const note = css({ color: "velo.fgMuted", truncate: true, flex: "1 1 0", minW: "0", fontSize: "var(--velo-snippet-fs)" });
 const footer = css({ display: "flex", alignItems: "center", gap: "2", px: "2.5", py: "1", borderTop: "1px solid", borderColor: "velo.divider", fontSize: "uiSm", color: "velo.fgMuted", flex: "none" });
 const empty = css({ p: "4", textAlign: "center", color: "velo.fgMuted", fontSize: "uiSm" });
@@ -58,7 +66,10 @@ export function TaskList({ controller, store }: { controller: Controller; store:
       tabIndex={0}
       className={row}
       data-done={t.done || undefined}
-      onClick={() => void controller.openTask(t)}
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest("a")) e.preventDefault(); // links, wikilinks and tags in a row don't navigate: the row opens the task
+        void controller.openTask(t);
+      }}
       onKeyDown={(e) => e.key === "Enter" && void controller.openTask(t)}
     >
       <Checkbox.Root size="sm" checked={t.done} onCheckedChange={() => void controller.tickTask(t)} onClick={(e) => e.stopPropagation()}>
@@ -67,7 +78,8 @@ export function TaskList({ controller, store }: { controller: Controller; store:
         </Checkbox.Control>
         <Checkbox.HiddenInput aria-label={t.text} />
       </Checkbox.Root>
-      <span className={text}><HighlightedText text={t.text} query={query} /></span>
+      {/* renderInline escapes HTML (markdown-it, html: false), as the preview does */}
+      <span className={text} dangerouslySetInnerHTML={{ __html: renderInline(t.text) }} />
       <span className={note}><HighlightedText text={t.title} query={query} /></span>
       {t.due && (
         <Badge size="sm" variant="subtle" colorPalette={overdue ? "red" : "gray"} flex="none">

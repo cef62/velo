@@ -21,7 +21,8 @@ export const openNote = (path: string) => invoke<NoteDoc>("open_note", { path })
 export const openOrCreate = (title: string) => invoke<NoteDoc>("open_or_create", { title });
 export const saveNote = (path: string, text: string, baseHash: string) => invoke<SaveResult>("save_note", { path, text, baseHash });
 export const tasks = (query: string, tags: string[], showDone: boolean) => invoke<TaskView>("tasks", { query, tags, showDone });
-export const toggleTask = (path: string, line: number, expected: string) => invoke<void>("toggle_task", { path, line, expected });
+/** Resolves to the toggled task's line and raw text as saved (front-matter stamping may shift it): what undo sends. */
+export const toggleTask = (path: string, line: number, expected: string) => invoke<{ line: number; line_text: string }>("toggle_task", { path, line, expected });
 export const captureTask = (text: string) => invoke<string>("capture_task", { text });
 export const setBadge = (count: number) => invoke<void>("set_badge", { count });
 export const renameNote = (path: string, newTitle: string, rewriteLinks: boolean) => invoke<RenameResult>("rename_note", { path, newTitle, rewriteLinks });

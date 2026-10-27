@@ -262,7 +262,7 @@ pub fn tasks(st: State<'_, AppState>, query: String, tags: Vec<String>, show_don
 }
 
 #[tauri::command(async)]
-pub fn toggle_task(st: State<'_, AppState>, path: String, line: usize, expected: String) -> Res<()> {
+pub fn toggle_task(st: State<'_, AppState>, path: String, line: usize, expected: String) -> Res<crate::vault::Toggled> {
     let fm = st.settings.lock().unwrap().write_front_matter;
     with_vault(&st, |v, id| v.toggle_task(&path, line, &expected, id, fm))
 }

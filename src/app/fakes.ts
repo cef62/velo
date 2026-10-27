@@ -45,7 +45,7 @@ export function fakeApi(notes: Record<string, string> = {}) {
     }),
     saveNote: vi.fn(),
     tasks: vi.fn(async (_q: string, _t: string[], _d: boolean): Promise<TaskView> => ({ overdue: [], today: [], upcoming: [], no_date: [], done: [], due_count: 0 })),
-    toggleTask: vi.fn(async (_p: string, _l: number, _e: string) => {}),
+    toggleTask: vi.fn(async (_p: string, line: number, line_text: string) => ({ line, line_text })),
     captureTask: vi.fn(async (_t: string) => "/n/Inbox.md"),
     setBadge: vi.fn(async (_c: number) => {}),
     renameNote: vi.fn(async (_p: string, _t: string, _r: boolean): Promise<RenameResult> => { throw "unset"; }),

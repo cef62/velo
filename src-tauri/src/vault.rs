@@ -13,6 +13,13 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// Where a toggled task is in the text as saved (after front-matter stamping): what undo sends back.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct Toggled {
+    pub line: usize,
+    pub line_text: String,
+}
+
 #[derive(Serialize)]
 pub struct NoteDoc {
     pub path: String,
@@ -219,12 +226,12 @@ impl Vault {
     }
 
     /// Tick or untick the task on `line` (0-based) if it still reads `expected`; saves through `save_note`.
-    pub fn toggle_task(&mut self, path: &str, line: usize, expected: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<()> {
+    pub fn toggle_task(&mut self, path: &str, line: usize, expected: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<Toggled> {
         let doc = self.open_note(path, identity)?;
         self.toggle_in(doc, line, expected, identity, write_fm)
     }
 
-    fn toggle_in(&mut self, doc: NoteDoc, line: usize, expected: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<()> {
+    fn toggle_in(&mut self, doc: NoteDoc, line: usize, expected: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<Toggled> {
         let moved = || anyhow!("task-moved");
         let mut lines: Vec<&str> = doc.text.split('\n').collect();
         let cur = *lines.get(line).ok_or_else(moved)?;
@@ -234,8 +241,14 @@ impl Vault {
         }
         let new = toggle_line(cur, &local_today()).ok_or_else(moved)?;
         lines[line] = &new;
-        match self.save_note(&doc.path, &lines.join("\n"), &doc.hash, identity, write_fm)? {
-            SaveResult::Saved { .. } => Ok(()),
+        let text = lines.join("\n");
+        let fm_lines = |t: &str| frontmatter::parse(t).map_or(0, |f| t[..f.end].matches('\n').count());
+        match self.save_note(&doc.path, &text, &doc.hash, identity, write_fm)? {
+            // stamping may replace or prepend the front-matter block: shift the line by its change in height
+            SaveResult::Saved { front_matter, .. } => Ok(Toggled {
+                line: line - fm_lines(&text) + front_matter.as_deref().map_or(fm_lines(&text), fm_lines),
+                line_text: new.strip_suffix('\r').unwrap_or(&new).to_string(),
+            }),
             SaveResult::Conflict { .. } => Err(moved()), // disk changed since we read it
         }
     }
@@ -769,6 +782,18 @@ mod tests {
         let mut v = open_empty(); let p = note_with(&mut v, "t", "- [ ] a\n");
         v.toggle_task(&p, 0, "- [ ] a", None, false).unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), format!("- [x] a ✅ {}\n", local_today()));
+    }
+    #[test] fn toggle_task_reports_line_after_stamping() {
+        let mut v = open_empty(); let p = note_with(&mut v, "t", "x\n- [ ] a\n");
+        let t = v.toggle_task(&p, 1, "- [ ] a", None, true).unwrap();
+        let saved = std::fs::read_to_string(&p).unwrap();
+        assert!(saved.starts_with("---\n"), "stamped front matter: {saved}");
+        assert!(t.line > 1);
+        assert_eq!(saved.split('\n').nth(t.line).unwrap(), t.line_text);
+        assert_eq!(t.line_text, format!("- [x] a ✅ {}", local_today()));
+        let back = v.toggle_task(&p, t.line, &t.line_text, None, true).unwrap();
+        assert_eq!(back, Toggled { line: t.line, line_text: "- [ ] a".into() });
+        assert!(std::fs::read_to_string(&p).unwrap().ends_with("x\n- [ ] a\n"));
     }
     #[test] fn toggle_task_refuses_moved_line() {
         let mut v = open_empty(); let p = note_with(&mut v, "t", "- [ ] a\n");

@@ -16,7 +16,6 @@ import { stripFrontMatter, wordCount } from "../frontmatter";
 import { formatBinding, matches, resolve, type Action } from "../shortcuts";
 import { isMenuKey, linkFor, menuModel, type MenuAction } from "../contextmenu";
 import { isLockedPath } from "../passphrase";
-import { localToday, toggleTaskLine } from "../tasks";
 import type { MenuSpec, UiPort } from "./ports";
 import { noInfo, type AppState, type Store } from "./store";
 
@@ -748,10 +747,10 @@ export class Controller {
   protected undoTimer: ReturnType<typeof setTimeout> | undefined;
   /** Tick from the Tasks view; a backend tick offers undo for 5 s. */
   async tickTask(item: TaskItem) {
-    if (!(await this.flipTask(item.path, item.line, item.line_text))) return;
-    if (this.editor.currentPath() === item.path) return; // went through the editor: ⌘Z undoes it
+    const r = await this.flipTask(item.path, item.line, item.line_text);
+    if (!r || r === "editor") return; // through the editor, ⌘Z undoes it
     clearTimeout(this.undoTimer);
-    this.store.set({ tickUndo: { path: item.path, line: item.line, lineText: toggleTaskLine(item.line_text, localToday()) ?? item.line_text } });
+    this.store.set({ tickUndo: { path: item.path, line: r.line, lineText: r.line_text } });
     this.undoTimer = setTimeout(() => this.store.set({ tickUndo: null }), UNDO_MS);
   }
 
@@ -765,40 +764,41 @@ export class Controller {
 
   /**
    * One writer per note: the open note flips through the editor (a backend write would stale its base hash),
-   * any other through the backend's line-checked toggle. false = nothing changed.
+   * any other through the backend's line-checked toggle. null = nothing changed; else where the backend put the line.
    */
-  protected async flipTask(path: string, line: number, expected: string, retried = false): Promise<boolean> {
+  protected async flipTask(path: string, line: number, expected: string, retried = false): Promise<"editor" | { line: number; line_text: string } | null> {
     if (this.busy) {
       this.setErr(BUSY_MSG);
-      return false;
+      return null;
     }
     if (this.editor.currentPath() === path) {
       const cur = this.editor.getText().split("\n")[line]?.replace(/\r$/, "");
       if (cur !== expected) return this.taskMoved();
-      if (!this.editor.toggleTask(line)) return false;
+      if (!this.editor.toggleTask(line)) return null;
       void this.editor.flush(); // its onSaved refreshes the view
-      return true;
+      return "editor";
     }
+    let r;
     try {
-      await this.api.toggleTask(path, line, expected);
+      r = await this.api.toggleTask(path, line, expected);
     } catch (e) {
       if (e === "task-moved") return this.taskMoved();
       if (e === "locked" && !retried) {
         const ok = await this.promptPassphrase({ trigger: "open", context: null });
         if (ok) return this.flipTask(path, line, expected, true);
-        if (ok === null) return false; // no key on this computer: keep the copy-identity error
+        if (ok === null) return null; // no key on this computer: keep the copy-identity error
       }
       this.setErr(e === "locked" ? "Note is locked" : errText(e));
-      return false;
+      return null;
     }
     void this.loadTasks();
-    return true;
+    return r;
   }
 
-  protected taskMoved(): false {
+  protected taskMoved(): null {
     this.setErr(TASK_MOVED);
     void this.loadTasks();
-    return false;
+    return null;
   }
 
   /** Open the task's note (same flush-then-load path) with the caret on its line. */
