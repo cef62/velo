@@ -778,3 +778,44 @@ test("capture mode does not search while typing; blur keeps the text as the quer
   expect(api.search.mock.calls.length).toBe(n + 1);
   expect(api.captureDone).not.toHaveBeenCalled();
 });
+
+test("a second Enter while a capture is in flight does nothing; text typed meanwhile survives", async () => {
+  const { c, api, store } = setup();
+  const d = deferred<string>();
+  api.captureTask.mockImplementationOnce(() => d.promise);
+  await c.startCapture();
+  c.setQuery("buy milk");
+  const first = c.submitCapture("buy milk");
+  await settle();
+  await c.submitCapture("buy milk");
+  c.setQuery("buy milk and eggs");
+  d.resolve("/n/Inbox.md");
+  await first;
+  expect(api.captureTask).toHaveBeenCalledTimes(1);
+  expect(store.get().query).toBe("buy milk and eggs");
+});
+
+test("a blur during an in-flight capture: success does not hide velo", async () => {
+  const { c, api, store } = setup();
+  const d = deferred<string>();
+  api.captureTask.mockImplementationOnce(() => d.promise);
+  await c.startCapture();
+  c.setQuery("buy milk");
+  const p = c.submitCapture("buy milk");
+  await settle();
+  c.blurCapture();
+  d.resolve("/n/Inbox.md");
+  await p;
+  expect(api.captureDone).not.toHaveBeenCalled();
+  expect(store.get().capture).toBeNull();
+});
+
+test("submit re-reads the target: a capture across midnight never writes yesterday's open daily note", async () => {
+  const { c, api, editor } = setup({ "2026-10-26": "", B: "b" });
+  await c.show(P("2026-10-26"));
+  api.captureTargetTitle.mockResolvedValueOnce("2026-10-26").mockResolvedValueOnce("2026-10-27");
+  await c.startCapture();
+  await c.submitCapture("buy milk");
+  expect(editor.appended).toEqual([]);
+  expect(api.captureTask).toHaveBeenCalledWith("buy milk");
+});

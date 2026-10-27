@@ -223,6 +223,8 @@ export class Controller {
   }
 
   protected captureQuery = ""; // the search text before capture mode, restored when it ends empty
+  protected captureSession = 0; // bumped when capture mode ends: a late submit result belongs to an old session
+  protected capturePending = false; // a submit is in flight: another Enter would append the task twice
 
   /** The capture shortcut: the search field becomes "→ <target>", empty (text already typed in capture mode stays). */
   async startCapture() {
@@ -243,32 +245,47 @@ export class Controller {
    * any other through the backend. On error the text stays in the field with the message under it.
    */
   async submitCapture(text: string) {
-    const cap = this.store.get().capture;
-    if (!cap) return;
+    if (!this.store.get().capture || this.capturePending) return;
     const t = text.trim();
     if (!t) return this.endCapture(true);
-    const fail = (msg: string) => this.store.set({ capture: { ...cap, err: msg } });
-    if (this.busy) return fail(BUSY_MSG);
-    const { openPath, title, indexing } = this.store.get();
-    if (openPath && this.editor.currentPath() === openPath && fold(title) === fold(cap.target)) {
-      // not editable: read-only while indexing (the gate) or suspended mid lock hand-off
-      if (!this.editor.appendLine("- [ ] " + t)) return fail(indexing ? errText("indexing") : `${cap.target} can't be edited right now`);
-      void this.editor.flush();
-      return this.endCapture(true, true);
-    }
+    if (this.busy) return this.failCapture(BUSY_MSG);
+    const session = this.captureSession;
+    const live = () => this.captureSession === session && this.store.get().capture !== null;
+    this.capturePending = true;
     try {
-      await this.api.captureTask(t);
-    } catch (e) {
-      if (e === "empty") return this.endCapture(true);
-      if (e === "conflict") {
-        // the line is in the conflict copy: re-sending would add it twice
-        this.endCapture(true, true);
-        return this.setErr(`Saved to a conflict copy — check ${cap.target}`);
+      // re-read: a capture spanning midnight must target today's daily note, not the one shown at start
+      const target = await this.api.captureTargetTitle().catch(() => this.store.get().capture?.target ?? "Inbox");
+      if (!live()) return;
+      this.store.set((s) => ({ capture: { ...s.capture!, target } }));
+      const { openPath, title, indexing } = this.store.get();
+      if (openPath && this.editor.currentPath() === openPath && fold(title) === fold(target)) {
+        // not editable: read-only while indexing (the gate) or suspended mid lock hand-off
+        if (!this.editor.appendLine("- [ ] " + t)) return this.failCapture(indexing ? errText("indexing") : `${target} can't be edited right now`);
+        void this.editor.flush();
+        return this.endCapture(true, text);
       }
-      return fail(e === "locked" ? `${cap.target} is locked` : errText(e));
+      try {
+        await this.api.captureTask(t);
+      } catch (e) {
+        if (e === "empty") return live() && this.endCapture(true);
+        if (e === "conflict") {
+          // the line is in the conflict copy: re-sending would add it twice
+          if (live()) this.endCapture(true, text);
+          return this.setErr(`Saved to a conflict copy — check ${target}`);
+        }
+        const msg = e === "locked" ? `${target} is locked` : errText(e);
+        return live() ? this.failCapture(msg) : this.setErr(msg); // after a blur the text is already the search query
+      }
+      void this.loadTasks(); // a backend write: the watcher skips it
+      if (live()) this.endCapture(true, text);
+      else void this.runSearch(false);
+    } finally {
+      this.capturePending = false;
     }
-    this.endCapture(true, true);
-    void this.loadTasks(); // a backend write: the watcher skips it
+  }
+
+  protected failCapture(err: string) {
+    this.store.set((s) => (s.capture ? { capture: { ...s.capture, err } } : {}));
   }
 
   /** Esc in capture mode. */
@@ -281,12 +298,17 @@ export class Controller {
     if (this.store.get().capture) this.endCapture(false);
   }
 
-  /** Typed text is never dropped: uncaptured text stays as a search; otherwise the earlier search comes back. */
-  protected endCapture(hide: boolean, captured = false) {
-    const keep = !captured && this.store.get().query.trim() !== "";
+  /**
+   * Typed text is never dropped: uncaptured text stays as a search; otherwise the earlier search comes back.
+   * `captured` = the text just appended; anything typed after it (field no longer equal) is kept.
+   */
+  protected endCapture(hide: boolean, captured?: string) {
+    const q = this.store.get().query;
+    const keep = q !== captured && q.trim() !== "";
+    this.captureSession++;
     this.store.set({ capture: null, ...(keep ? {} : { query: this.captureQuery }) });
     if (keep) void this.runSearch(true); // as if typed into the search field
-    else if (captured) void this.runSearch(false); // the target's row moved; the list is otherwise unchanged
+    else if (captured !== undefined) void this.runSearch(false); // the target's row moved; the list is otherwise unchanged
     if (hide) void this.api.captureDone().catch((e) => console.error("capture done failed", e));
   }
 
