@@ -25,6 +25,15 @@ for (let i = 0; i < count; i++) {
   const paras = Array.from({ length: 2 + Math.floor(rand() * 6) }, () => phrase(20 + Math.floor(rand() * 60)));
   if (i > 0 && rand() < 0.5) paras.push(`See [[${pick(titles.slice(0, i))}]].`);
   paras.push(`#${pick(tags)} #${pick(tags)}`);
+  // Tasks on ~30% of notes, a mix of open/done/dated.
+  if (rand() < 0.3) {
+    const n = 1 + Math.floor(rand() * 3);
+    paras.push(Array.from({ length: n }, () => {
+      const r = rand();
+      const day = String(1 + Math.floor(rand() * 28)).padStart(2, '0');
+      return r < 0.3 ? `- [x] ${phrase(4)} ✅ 2026-10-${day}` : r < 0.7 ? `- [ ] ${phrase(4)} 📅 2026-10-${day}` : `- [ ] ${phrase(4)}`;
+    }).join('\n'));
+  }
   // Front matter on about half the notes (dates, tags, an alias) to exercise the parser and alias lookups.
   const fm = rand() < 0.5
     ? `---\ncreated: 2024-01-${String(1 + (i % 28)).padStart(2, '0')}T10:00:00+00:00\nmodified: 2025-${String(1 + (i % 12)).padStart(2, '0')}-15T12:30:00+00:00\ntags: [${pick(tags)}]\naliases: [${pick(words)} ${i}]\n---\n`

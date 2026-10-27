@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { emptyWatermark, externalUrl, afterOpen, renderMarkdown, shouldAutoEdit } from "./preview";
+import { emptyWatermark, externalUrl, afterOpen, renderInline, renderMarkdown, shouldAutoEdit } from "./preview";
 
 test("wikilink existing", () => expect(renderMarkdown("see [[Foo Bar]]", () => true)).toContain('<a href="#" class="wikilink" data-title="Foo Bar">Foo Bar</a>'));
 test("wikilink missing", () => expect(renderMarkdown("[[Nope]]", () => false)).toContain('class="wikilink missing"'));
@@ -69,4 +69,9 @@ test("front matter is stripped before rendering", () => {
 
 test("task lines still count the stripped front matter", () => {
   expect(renderMarkdown("---\na: 1\n---\n- [ ] t", () => true)).toContain('data-line="3"');
+});
+
+test("renderInline: marks, no block wrapper, html escaped", () => {
+  expect(renderInline("**b** and [[N]] #t")).toBe('<strong>b</strong> and <a href="#" class="wikilink" data-title="N">N</a> <a href="#" class="tag" data-tag="t">#t</a>');
+  expect(renderInline("<script>x</script>")).toBe("&lt;script&gt;x&lt;/script&gt;");
 });

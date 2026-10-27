@@ -1,16 +1,24 @@
 use crate::crypto;
 use crate::frontmatter;
-use crate::index::{Index, Meta, Page, Sort, TagCount, all_tags, effective_dates};
+use crate::index::{Index, Meta, Page, Sort, TagCount, TaskRow, all_tags, effective_dates};
+use crate::tasks::{TaskView, group_tasks, local_today, parse_tasks, toggle_line};
 
 const PAGE: usize = 200;
 use crate::revisions::{RevisionInfo, Revisions, fnv64};
 use crate::names::{NoteFile, note_path, parse_note_file};
 use crate::store::{SaveResult, Store, hash, meta_of};
-use crate::text::rewrite_links;
+use crate::text::{fold, rewrite_links};
 use anyhow::{Context, anyhow};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+/// Where a toggled task is in the text as saved (after front-matter stamping): what undo sends back.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct Toggled {
+    pub line: usize,
+    pub line_text: String,
+}
 
 #[derive(Serialize)]
 pub struct NoteDoc {
@@ -162,6 +170,21 @@ impl Vault {
         self.index.search_page(query, sort, offset, PAGE, tags, &self.unlocked)
     }
 
+    /// Open and recent tasks; unlocked notes' tasks come from memory, so they never reach SQLite.
+    pub fn tasks(&self, query: &str, tags: &[String], show_done: bool) -> anyhow::Result<TaskView> {
+        let mut rows = self.index.task_rows(tags)?;
+        let wanted: Vec<String> = tags.iter().map(|t| fold(t)).collect();
+        for (path, plain) in &self.unlocked {
+            let Some((title, modified)) = self.index.title_modified(path)? else { continue };
+            let have = all_tags(frontmatter::body(plain), frontmatter::parse(plain).as_ref());
+            if !wanted.iter().all(|w| have.iter().any(|(h, _)| h == w)) {
+                continue;
+            }
+            rows.extend(parse_tasks(plain).into_iter().map(|t| TaskRow { path: path.clone(), title: title.clone(), modified, line: t.line, text: t.text, done: t.done, due: t.due, done_on: t.done_on, line_text: t.line_text }));
+        }
+        Ok(group_tasks(rows, query, show_done, &local_today()))
+    }
+
     /// Tags of plain notes only: unlocked notes' tags stay in memory and out of this list.
     pub fn tags(&self) -> anyhow::Result<Vec<TagCount>> {
         self.index.tags()
@@ -187,8 +210,13 @@ impl Vault {
         Ok(NoteDoc { path: path.into(), title: nf.title, text, hash: hash(&bytes), encrypted: nf.encrypted, meta })
     }
 
+    /// The existing note `title` names (title or alias, case-folded): the one open_or_create and capture_task use.
+    pub fn find_note(&self, title: &str) -> anyhow::Result<Option<String>> {
+        self.index.find_title(title)
+    }
+
     pub fn open_or_create(&mut self, title: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<NoteDoc> {
-        if let Some(path) = self.index.find_title(title)? {
+        if let Some(path) = self.find_note(title)? {
             return self.open_note(&path, identity);
         }
         let p = note_path(&self.store.dir, title, false);
@@ -200,6 +228,51 @@ impl Vault {
         let body = lossy(&self.store.read(&p)?);
         self.reindex(&p, Some(&body))?;
         self.open_note(&s(&p), identity)
+    }
+
+    /// Tick or untick the task on `line` (0-based) if it still reads `expected`; saves through `save_note`.
+    pub fn toggle_task(&mut self, path: &str, line: usize, expected: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<Toggled> {
+        let doc = self.open_note(path, identity)?;
+        self.toggle_in(doc, line, expected, identity, write_fm)
+    }
+
+    fn toggle_in(&mut self, doc: NoteDoc, line: usize, expected: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<Toggled> {
+        let moved = || anyhow!("task-moved");
+        let mut lines: Vec<&str> = doc.text.split('\n').collect();
+        let cur = *lines.get(line).ok_or_else(moved)?;
+        // parse_tasks skips fenced code, which toggle_line alone would not
+        if cur.strip_suffix('\r').unwrap_or(cur) != expected || !parse_tasks(&doc.text).iter().any(|t| t.line == line) {
+            return Err(moved());
+        }
+        let new = toggle_line(cur, &local_today()).ok_or_else(moved)?;
+        lines[line] = &new;
+        let text = lines.join("\n");
+        let fm_lines = |t: &str| frontmatter::parse(t).map_or(0, |f| t[..f.end].matches('\n').count());
+        match self.save_note(&doc.path, &text, &doc.hash, identity, write_fm)? {
+            // stamping may replace or prepend the front-matter block: shift the line by its change in height
+            SaveResult::Saved { front_matter, .. } => Ok(Toggled {
+                line: line - fm_lines(&text) + front_matter.as_deref().map_or(fm_lines(&text), fm_lines),
+                line_text: new.strip_suffix('\r').unwrap_or(&new).to_string(),
+            }),
+            SaveResult::Conflict { .. } => Err(moved()), // disk changed since we read it
+        }
+    }
+
+    /// Append `- [ ] text` to the note titled `title` (created if missing); returns its path.
+    pub fn capture_task(&mut self, title: &str, text: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<String> {
+        let text = text.trim().replace(['\r', '\n'], " ");
+        if text.is_empty() { return Err(anyhow!("empty")); }
+        let doc = self.open_or_create(title, identity, write_fm)?;
+        self.append_in(doc, &text, identity, write_fm)
+    }
+
+    fn append_in(&mut self, doc: NoteDoc, text: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<String> {
+        let eol = if doc.text.contains("\r\n") { "\r\n" } else { "\n" };
+        let sep = if doc.text.is_empty() || doc.text.ends_with('\n') { "" } else { eol };
+        match self.save_note(&doc.path, &format!("{}{sep}- [ ] {text}{eol}", doc.text), &doc.hash, identity, write_fm)? {
+            SaveResult::Saved { .. } => Ok(doc.path),
+            SaveResult::Conflict { .. } => Err(anyhow!("conflict")),
+        }
     }
 
     pub fn save_note(&mut self, path: &str, text: &str, base_hash: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<SaveResult> {
@@ -503,6 +576,23 @@ mod tests {
         v.lock_all(); assert!(v.search("uniqueplain", Sort::Modified, 0, &[]).unwrap().hits.is_empty());
         assert!(v.open_note(&p, None).is_err()); assert_eq!(v.open_note(&p, Some(&id)).unwrap().text, "uniqueplain zqxjvkplmwqbyfh");
     }
+    #[test] fn locked_tasks_never_in_sqlite_but_listed_while_unlocked() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, None).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
+        let _r = v.save_note(&d.path, "- [ ] secretzebra", &d.hash, None, false).unwrap();
+        assert_eq!(v.tasks("", &[], false).unwrap().no_date.len(), 1);
+        v.lock_note(&d.path, &id).unwrap();
+        assert!(v.index.task_rows(&[]).unwrap().iter().all(|r| !r.text.contains("secretzebra")));
+        drop(v);
+        for suffix in ["", "-wal", "-shm"] {
+            if let Ok(b) = std::fs::read(format!("{}{suffix}", db.display())) { assert!(!b.windows(11).any(|w| w == b"secretzebra"), "{suffix}"); }
+        }
+        let mut v = open(dir, &db, Some(&id)).unwrap();
+        let t = v.tasks("", &[], false).unwrap();
+        assert_eq!(t.no_date.len(), 1); assert_eq!(t.no_date[0].text, "secretzebra");
+        v.lock_all();
+        assert!(v.tasks("", &[], false).unwrap().no_date.is_empty());
+    }
     #[test] fn locked_note_tags_stay_out_of_sqlite() {
         let (dir, db) = setup(); let id = crypto::new_identity();
         let mut v = open(dir.clone(), &db, None).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
@@ -687,7 +777,101 @@ mod tests {
         let t = frontmatter::stamp("body", now, now);
         assert_eq!(frontmatter::stamp(&t, now, now), t);
     }
+
+    fn note_with(v: &mut Vault, title: &str, text: &str) -> String {
+        let d = v.open_or_create(title, None, false).unwrap();
+        std::fs::write(&d.path, text).unwrap();
+        d.path
+    }
+    #[test] fn toggle_task_flips_and_dates() {
+        let mut v = open_empty(); let p = note_with(&mut v, "t", "- [ ] a\n");
+        v.toggle_task(&p, 0, "- [ ] a", None, false).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), format!("- [x] a ✅ {}\n", local_today()));
+    }
+    #[test] fn toggle_task_reports_line_after_stamping() {
+        let mut v = open_empty(); let p = note_with(&mut v, "t", "x\n- [ ] a\n");
+        let t = v.toggle_task(&p, 1, "- [ ] a", None, true).unwrap();
+        let saved = std::fs::read_to_string(&p).unwrap();
+        assert!(saved.starts_with("---\n"), "stamped front matter: {saved}");
+        assert!(t.line > 1);
+        assert_eq!(saved.split('\n').nth(t.line).unwrap(), t.line_text);
+        assert_eq!(t.line_text, format!("- [x] a ✅ {}", local_today()));
+        let back = v.toggle_task(&p, t.line, &t.line_text, None, true).unwrap();
+        assert_eq!(back, Toggled { line: t.line, line_text: "- [ ] a".into() });
+        assert!(std::fs::read_to_string(&p).unwrap().ends_with("x\n- [ ] a\n"));
+    }
+    #[test] fn toggle_task_refuses_moved_line() {
+        let mut v = open_empty(); let p = note_with(&mut v, "t", "- [ ] a\n");
+        let e = v.toggle_task(&p, 0, "- [ ] b", None, false).unwrap_err();
+        assert_eq!(e.to_string(), "task-moved");
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "- [ ] a\n");
+    }
+    #[test] fn toggle_task_keeps_crlf() {
+        let mut v = open_empty(); let p = note_with(&mut v, "t", "x\r\n- [ ] a\r\n");
+        v.toggle_task(&p, 1, "- [ ] a", None, false).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), format!("x\r\n- [x] a ✅ {}\r\n", local_today()));
+    }
+    #[test] fn toggle_task_in_code_fence_refused() {
+        let mut v = open_empty(); let p = note_with(&mut v, "t", "```\n- [ ] a\n```\n");
+        assert_eq!(v.toggle_task(&p, 1, "- [ ] a", None, false).unwrap_err().to_string(), "task-moved");
+    }
+    #[test] fn capture_appends_and_creates() {
+        let mut v = open_empty();
+        let p = v.capture_task("Inbox", "buy milk", None, false).unwrap();
+        assert!(p.ends_with("Inbox.md"));
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "- [ ] buy milk\n");
+        v.capture_task("Inbox", "two", None, false).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "- [ ] buy milk\n- [ ] two\n");
+        std::fs::write(&p, "no newline").unwrap();
+        v.capture_task("Inbox", "three", None, false).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "no newline\n- [ ] three\n");
+    }
+    #[test] fn capture_target_resolves_an_alias_like_capture() {
+        let mut v = open_empty();
+        let p = note_with(&mut v, "Todo", "---\naliases: [Inbox]\n---\n");
+        v.reindex(Path::new(&p), Some("---\naliases: [Inbox]\n---\n")).unwrap();
+        assert_eq!(v.find_note("inbox").unwrap().as_deref(), Some(p.as_str()));
+        assert_eq!(v.capture_task("Inbox", "x", None, false).unwrap(), p);
+        assert_eq!(v.find_note("Nope").unwrap(), None);
+    }
+    #[test] fn capture_to_locked_without_key_fails_locked() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir, &db, None).unwrap(); let d = v.open_or_create("Inbox", None, false).unwrap();
+        v.lock_note(&d.path, &id).unwrap();
+        assert_eq!(v.capture_task("Inbox", "x", None, false).unwrap_err().to_string(), "locked");
+    }
     fn stat_hash(p: &str) -> String { hash(&std::fs::read(p).unwrap()) }
+    #[test] fn toggle_and_capture_conflict_on_stale_hash() {
+        let mut v = open_empty(); let p = note_with(&mut v, "t", "- [ ] a\n");
+        let stale = |v: &mut Vault| { let mut d = v.open_note(&p, None).unwrap(); d.hash = "stale".into(); d };
+        let d = stale(&mut v);
+        assert_eq!(v.toggle_in(d, 0, "- [ ] a", None, false).unwrap_err().to_string(), "task-moved");
+        let d = stale(&mut v);
+        assert_eq!(v.append_in(d, "x", None, false).unwrap_err().to_string(), "conflict");
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "- [ ] a\n");
+    }
+    #[test] fn capture_trims_flattens_and_keeps_crlf() {
+        let mut v = open_empty();
+        assert_eq!(v.capture_task("Inbox", " \n ", None, false).unwrap_err().to_string(), "empty");
+        let p = v.capture_task("Inbox", "  a\r\nb\nc ", None, false).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "- [ ] a  b c\n");
+        std::fs::write(&p, "x\r\ny").unwrap();
+        v.capture_task("Inbox", "z", None, false).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "x\r\ny\r\n- [ ] z\r\n");
+    }
+    #[test] fn toggle_locked_note_needs_key_and_stays_ciphertext() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir, &db, None).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
+        let p = v.lock_note(&d.path, &id).unwrap();
+        let h = stat_hash(&p);
+        v.save_note(&p, "- [ ] secret\n", &h, Some(&id), false).unwrap();
+        assert_eq!(v.toggle_task(&p, 0, "- [ ] secret", None, false).unwrap_err().to_string(), "locked");
+        v.toggle_task(&p, 0, "- [ ] secret", Some(&id), false).unwrap();
+        let raw = std::fs::read(&p).unwrap();
+        assert!(!String::from_utf8_lossy(&raw).contains("secret"));
+        let plain = String::from_utf8(crypto::decrypt(&id, &raw).unwrap()).unwrap();
+        assert_eq!(plain, format!("- [x] secret ✅ {}\n", local_today()));
+    }
     #[test] fn locked_note_encrypts_stamped_text() {
         let (dir, db) = setup(); let id = crypto::new_identity();
         let mut v = open(dir, &db, None).unwrap(); let d = v.open_or_create("s", None, false).unwrap();

@@ -2,7 +2,10 @@
 // Mod = ⌘ on macOS, Ctrl elsewhere. Ctrl = physical Control (macOS only).
 export type Action =
   | "focus_search" | "toggle_preview" | "rename" | "toggle_lock"
-  | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "delete_note" | "toggle_tags" | "toggle_rich" | "toggle_layout" | "toggle_window" | "toggle_info" | "toggle_front_matter";
+  | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "delete_note" | "toggle_tags" | "toggle_rich" | "toggle_layout" | "toggle_window" | "toggle_info" | "toggle_front_matter" | "toggle_tasks" | "capture" | "daily_note";
+
+/** Handled by the OS-level shortcut in the backend, never by the in-app key handler. */
+export const GLOBAL_ACTIONS = ["toggle_window", "capture"] as const;
 
 /** Saved binding meaning "no shortcut". */
 export const NONE = "none";
@@ -24,6 +27,9 @@ export const DEFAULTS: Record<Action, string> = {
   toggle_window: "Mod+Shift+Space",
   toggle_info: "Mod+KeyI",
   toggle_front_matter: NONE,
+  toggle_tasks: "Mod+Shift+KeyX",
+  capture: "Mod+Alt+Shift+KeyN", // canonical modifier order, as recorded and as resolve() normalizes saved values
+  daily_note: "Mod+Shift+KeyD",
 };
 
 export const LABELS: Record<Action, string> = {
@@ -43,6 +49,9 @@ export const LABELS: Record<Action, string> = {
   toggle_window: "Show / hide velo (global)",
   toggle_info: "Note info",
   toggle_front_matter: "Show / hide front matter",
+  toggle_tasks: "Notes / Tasks",
+  capture: "Quick capture (global)",
+  daily_note: "Today's daily note",
 };
 
 type Ev = Pick<KeyboardEvent, "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">;
@@ -92,12 +101,20 @@ const OLD_DEFAULTS: Partial<Record<string, string>> = { next_note: "Mod+KeyJ", p
 
 export function resolve(saved: Record<string, string> | undefined, isMac = false): Record<Action, string> {
   const out = { ...DEFAULTS };
+  const mine = new Set<Action>(); // actions with a valid saved binding
   const legacy = saved !== undefined && Object.entries(OLD_DEFAULTS).every(([a, b]) => saved[a] === b);
   for (const a of Object.keys(DEFAULTS) as Action[]) {
     const s = legacy && saved[a] === OLD_DEFAULTS[a] ? undefined : saved?.[a];
     if (s === NONE) { out[a] = NONE; continue; }
     const n = s ? normalizeBinding(s) : null;
-    if (n && !basicProblem(n, isMac)) out[a] = n;
+    if (n && !basicProblem(n, isMac)) {
+      out[a] = n;
+      mine.add(a);
+    }
+  }
+  // a default added later (upgrade) never takes a key the user already chose: their binding wins
+  for (const a of Object.keys(DEFAULTS) as Action[]) {
+    if (!mine.has(a) && out[a] !== NONE && [...mine].some((b) => out[b] === out[a])) out[a] = NONE;
   }
   return out;
 }

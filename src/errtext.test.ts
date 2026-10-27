@@ -5,5 +5,6 @@ test("indexing rejections read as Still indexing, raw or from the saver", () => 
   expect(errText("indexing")).toBe("Still indexing…");
   expect(errText("Save failed: indexing")).toBe("Still indexing…");
   expect(errText("not-found")).toBe("Note no longer exists");
+  expect(errText("no-folder")).toBe("No notes folder");
   expect(errText("Save failed: locked")).toBe("Save failed: locked");
 });

@@ -54,11 +54,26 @@ window.addEventListener(
 
 void listen<{ paths: string[] }>("notes-changed", (ev) => void controller.onNotesChanged(ev.payload.paths));
 void listen("focus-search", () => controller.focusSearch());
+void listen("capture", () => void controller.startCapture());
 void listen<{ done: number; total: number }>("index-progress", (ev) => controller.onIndexProgress(ev.payload.done, ev.payload.total));
 void listen("index-done", () => void controller.onIndexDone());
 void listen<{ message: string }>("index-error", (ev) => controller.onIndexError(ev.payload.message));
 void listen<{ version: string }>("update-available", (ev) => controller.onUpdateAvailable(ev.payload.version));
 void listen("check-updates", () => void controller.checkUpdates());
+
+// "today" rolls over at local midnight: refresh the Tasks groups and the due count/badge then.
+const armMidnight = () => {
+  const now = new Date();
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  setTimeout(() => {
+    void controller.loadTasks();
+    armMidnight();
+  }, next.getTime() - now.getTime() + 1000); // +1 s: never fire a hair before midnight
+};
+armMidnight();
+// timers stall while the Mac sleeps: catch a missed midnight when the window comes back
+document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && controller.refreshIfNewDay());
+window.addEventListener("focus", () => controller.refreshIfNewDay());
 
 window.addEventListener("blur", () => controller.onBlur());
 void getCurrentWindow().onCloseRequested(async (e) => {

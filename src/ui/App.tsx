@@ -7,6 +7,7 @@ import { Header } from "./Header";
 import { EditorHost } from "./EditorHost";
 import { PreviewHost } from "./PreviewHost";
 import { NoteList } from "./NoteList";
+import { TaskList } from "./TaskList";
 import { TitleBar } from "./TitleBar";
 import { ConflictBanner } from "./ConflictBanner";
 import { UpdateBanner } from "./UpdateBanner";
@@ -41,6 +42,7 @@ const top = css({ flex: "none", minW: "0", "[data-layout=horizontal] &": { gridC
 
 export function App({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const previewOn = useStore(store, (s) => s.previewOn);
+  const paneMode = useStore(store, (s) => s.paneMode);
   // The hosts' layout effects (attachEditor/attachPreview) run before this effect, so start() sees them; once only under StrictMode.
   const started = useRef(false);
   const root = useRef<HTMLDivElement>(null);
@@ -57,7 +59,7 @@ export function App({ controller, store }: { controller: Controller; store: Stor
         <TagPanel controller={controller} store={store} />
         <FilterLine controller={controller} store={store} />
       </div>
-      <NoteList controller={controller} store={store} />
+      {paneMode === "tasks" ? <TaskList controller={controller} store={store} /> : <NoteList controller={controller} store={store} />}
       <Divider store={store} app={root} />
       <div className={pane}>
       <section className={note}>

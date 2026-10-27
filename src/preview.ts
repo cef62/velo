@@ -83,6 +83,12 @@ export function renderMarkdown(text: string, existsFn: (title: string) => boolea
   return md.render(fm ? "\n".repeat(text.slice(0, fm.to).split("\n").length - 1) + text.slice(fm.to) : text);
 }
 
+/** One line of markdown as inline HTML (task rows): same renderer and escaping as the preview, no block wrapper. */
+export function renderInline(text: string): string {
+  exists = () => true; // rows don't mark missing wikilinks
+  return md.renderInline(text);
+}
+
 /** The URL if it may be opened in the system browser (http/https only), else null. */
 export function externalUrl(href: string): string | null {
   try {

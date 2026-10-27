@@ -5,8 +5,10 @@ export type Hit = { path: string; title: string; snippet: string; mtime: number;
 export type NoteMeta = { created: number; created_src: "frontmatter" | "file"; modified: number; modified_src: "frontmatter" | "file"; tags: string[]; aliases: string[] };
 export type NoteDoc = { path: string; title: string; text: string; hash: string; encrypted: boolean; meta: NoteMeta };
 export type SaveResult = { kind: "saved"; hash: string; front_matter: string | null; meta: NoteMeta } | { kind: "conflict"; conflict_path: string; disk_hash: string };
+export type TaskItem = { path: string; title: string; line: number; text: string; due: string | null; done: boolean; done_on: string | null; line_text: string };
+export type TaskView = { overdue: TaskItem[]; today: TaskItem[]; upcoming: TaskItem[]; no_date: TaskItem[]; done: TaskItem[]; due_count: number };
 export type RenameResult = { path: string; rewritten: number };
-export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; header_labels: boolean; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean };
+export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; header_labels: boolean; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean; capture_target: "inbox" | "daily"; inbox_title: string };
 
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<void>("set_settings", { settings });
@@ -18,6 +20,15 @@ export const listTitles = () => invoke<string[]>("list_titles");
 export const openNote = (path: string) => invoke<NoteDoc>("open_note", { path });
 export const openOrCreate = (title: string) => invoke<NoteDoc>("open_or_create", { title });
 export const saveNote = (path: string, text: string, baseHash: string) => invoke<SaveResult>("save_note", { path, text, baseHash });
+export const tasks = (query: string, tags: string[], showDone: boolean) => invoke<TaskView>("tasks", { query, tags, showDone });
+/** Resolves to the toggled task's line and raw text as saved (front-matter stamping may shift it): what undo sends. */
+export const toggleTask = (path: string, line: number, expected: string) => invoke<{ line: number; line_text: string }>("toggle_task", { path, line, expected });
+export const captureTask = (text: string) => invoke<string>("capture_task", { text });
+/** The capture note's title and, if it exists, the path capture_task writes to (an alias resolves to its note). */
+export const captureTargetTitle = () => invoke<{ title: string; path: string | null }>("capture_target_title");
+/** Capture finished or cancelled: hides velo again if the capture shortcut showed it. */
+export const captureDone = () => invoke<void>("capture_done");
+export const setBadge = (count: number) => invoke<void>("set_badge", { count });
 export const renameNote = (path: string, newTitle: string, rewriteLinks: boolean) => invoke<RenameResult>("rename_note", { path, newTitle, rewriteLinks });
 export const backlinkCount = (title: string) => invoke<number>("backlink_count", { title });
 export const lockNote = (path: string) => invoke<string>("lock_note", { path });

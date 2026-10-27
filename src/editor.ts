@@ -2,7 +2,7 @@ import { Annotation, Compartment, Transaction } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { writingSetup } from "./editortheme";
 import { refreshRich, richMarkdown, type RichOpts } from "./richmd";
-import { TASK_ITEM } from "./preview";
+import { dueInputRule, localToday, toggleTaskAt } from "./tasks";
 import { SaveController } from "./saver";
 import { frontMatterHide, replaceAll, undoHistory } from "./fmhide";
 import { stampChange } from "./frontmatter";
@@ -37,8 +37,12 @@ export interface Editor {
   replaceText(text: string): void;
   /** Re-check wikilink targets after the note titles changed. */
   refreshLinks(): void;
-  /** Flip "[ ]" / "[x]" of the task item on this 0-based line (from the preview); false if not editable or not a task. */
+  /** Flip the box of the task item on this 0-based line (from the preview), stamping/removing its done date; false if not editable or not a task. */
   toggleTask(line: number): boolean;
+  /** Append `text` as a new last line (user edit); false if not editable. */
+  appendLine(text: string): boolean;
+  /** Caret to the start of this 0-based line, scrolled into view (a hidden front matter clamps it to the body). */
+  revealLine(line: number): void;
 }
 
 export type EditorOpts = {
@@ -76,6 +80,7 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     extensions: [
       writingSetup(),
       undo.extension,
+      dueInputRule,
       rich.of([]),
       fmHide.of(frontMatterHide(true)),
       editable.of(EditorView.editable.of(false)),
@@ -169,12 +174,24 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     toggleTask(line) {
       const doc = view.state.doc;
       if (!view.state.facet(EditorView.editable) || line < 0 || line >= doc.lines) return false; // no note, indexing, lock hand-off
-      const l = doc.line(line + 1);
-      const m = TASK_ITEM.exec(l.text);
-      if (!m) return false;
-      const pos = l.from + m[1].length;
-      view.dispatch({ changes: { from: pos, to: pos + 1, insert: m[2] === " " ? "x" : " " } });
+      const change = toggleTaskAt(doc, doc.line(line + 1).from, localToday());
+      if (!change) return false;
+      view.dispatch({ changes: change });
       return true;
+    },
+    appendLine(text) {
+      if (!view.state.facet(EditorView.editable)) return false;
+      const doc = view.state.doc;
+      const sep = doc.length === 0 || doc.sliceString(doc.length - 1) === "\n" ? "" : "\n";
+      view.dispatch({ changes: { from: doc.length, insert: sep + text }, selection: { anchor: doc.length + sep.length + text.length } });
+      return true;
+    },
+    revealLine(line) {
+      const doc = view.state.doc;
+      const pos = doc.line(Math.min(Math.max(line, 0), doc.lines - 1) + 1).from;
+      // the hidden-front-matter guard moves the caret past the block; scroll to where it really lands
+      view.dispatch({ selection: { anchor: pos } });
+      view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head, { y: "center" }) });
     },
   };
   return ed;

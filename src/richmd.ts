@@ -4,6 +4,7 @@ import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate
 import { readTag } from "./tags";
 import { docFrontMatter } from "./fmhide";
 import { externalUrl } from "./preview";
+import { localToday, toggleTaskAt } from "./tasks";
 
 // Rich edit: the text stays plain markdown; marks (#, **, >, [ ](url), [[ ]]) are hidden except on the lines the
 // selection touches, so what is on disk is exactly what was typed.
@@ -181,8 +182,8 @@ export function richMarkdown(opts: RichOpts): Extension {
       if (t instanceof HTMLInputElement && t.classList.contains("cm-rich-check")) {
         e.preventDefault();
         if (!view.state.facet(EditorView.editable)) return true; // no note open, indexing, lock hand-off
-        const pos = Number(t.dataset.pos);
-        view.dispatch({ changes: { from: pos, to: pos + 1, insert: view.state.sliceDoc(pos, pos + 1) === " " ? "x" : " " } });
+        const change = toggleTaskAt(view.state.doc, Number(t.dataset.pos), localToday()); // same ✅ stamp as Editor.toggleTask
+        if (change) view.dispatch({ changes: change });
         return true;
       }
       if (!(e.metaKey || e.ctrlKey)) return false; // a plain click edits

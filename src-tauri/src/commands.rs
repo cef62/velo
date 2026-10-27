@@ -1,8 +1,9 @@
 use crate::crypto;
 use crate::index::{Page, Sort, TagCount};
 use crate::revisions::RevisionInfo;
-use crate::settings::{self, Settings};
+use crate::settings::{self, GlobalAction, Settings};
 use crate::store::{self, SaveResult};
+use crate::tasks::TaskView;
 use crate::vault::{NoteDoc, RenameResult, Vault};
 use crate::watch;
 use std::path::{Path, PathBuf};
@@ -23,6 +24,8 @@ pub struct AppState {
     pub open_gen: AtomicU64,
     /// set by Lock all: the keychain identity is not reloaded until the passphrase is entered again
     pub locked: AtomicBool,
+    /// set by `capture_requested`: velo was hidden (or unfocused) when the capture shortcut fired
+    pub capture_was_hidden: AtomicBool,
     pub settings_path: PathBuf,
     pub data_dir: PathBuf,
 }
@@ -155,13 +158,29 @@ pub fn toggle_window(app: &AppHandle) {
     }
 }
 
+/// Remembers whether velo was hidden (for Task 8's capture_done), then shows it like `toggle_window` and tells the UI.
+pub fn capture_requested(app: &AppHandle) {
+    let Some(w) = app.get_webview_window("main") else { return };
+    let hidden = !(w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false));
+    app.state::<AppState>().capture_was_hidden.store(hidden, Ordering::SeqCst);
+    #[cfg(target_os = "macos")]
+    app.show().ok();
+    w.show().ok();
+    w.unminimize().ok();
+    w.set_focus().ok();
+    app.emit("capture", ()).ok();
+}
+
 /// `binding` is in velo format ("Mod+Shift+Space").
-pub fn register_hotkey(app: &AppHandle, binding: &str) -> Result<(), String> {
+pub fn register_global(app: &AppHandle, action: GlobalAction, binding: &str) -> Result<(), String> {
     let Some(sc) = settings::parse_hotkey(binding)? else { return Ok(()) }; // "none": no global shortcut
     app.global_shortcut()
-        .on_shortcut(sc, |app, _, ev| {
+        .on_shortcut(sc, move |app, _, ev| {
             if ev.state == ShortcutState::Pressed {
-                toggle_window(app);
+                match action {
+                    GlobalAction::ToggleWindow => toggle_window(app),
+                    GlobalAction::Capture => capture_requested(app),
+                }
             }
         })
         .map_err(|e| e.to_string())
@@ -173,6 +192,38 @@ fn unregister_hotkey(app: &AppHandle, binding: &str) {
     }
 }
 
+/// (action, old, new) for each global binding that really changed (re-registering the same keys would fail).
+fn changed_globals(old: &Settings, new: &Settings) -> Vec<(GlobalAction, String, String)> {
+    old.global_bindings().into_iter().zip(new.global_bindings())
+        .filter(|((_, o), (_, n))| o != n && !settings::same_shortcut(o, n))
+        .map(|((a, o), (_, n))| (a, o, n))
+        .collect()
+}
+
+type Reg<'a> = dyn FnMut(GlobalAction, &str) -> Result<(), String> + 'a;
+type Unreg<'a> = dyn FnMut(&str) + 'a;
+
+/// Release every old key first (a swap A<->B needs that), then register the new ones.
+/// An old key an unchanged action still holds (`held`) stays registered: it was never this action's.
+/// On failure the new keys registered so far are released and all old keys are back.
+fn swap_globals(changed: &[(GlobalAction, String, String)], held: &[String], reg: &mut Reg, unreg: &mut Unreg) -> Result<(), String> {
+    changed.iter().filter(|(_, o, _)| !held.iter().any(|h| settings::same_shortcut(h, o))).for_each(|(_, o, _)| unreg(o));
+    for (i, (a, _, n)) in changed.iter().enumerate() {
+        if let Err(e) = reg(*a, n) {
+            changed[..i].iter().for_each(|(_, _, n)| unreg(n));
+            changed.iter().for_each(|(a, o, _)| { reg(*a, o).ok(); });
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
+/// Undo a finished `swap_globals` (the vault reopen failed after it).
+fn revert_globals(changed: &[(GlobalAction, String, String)], reg: &mut Reg, unreg: &mut Unreg) {
+    changed.iter().for_each(|(_, _, n)| unreg(n));
+    changed.iter().for_each(|(a, o, _)| { reg(*a, o).ok(); });
+}
+
 #[tauri::command]
 pub fn get_settings(st: State<AppState>) -> Settings {
     st.settings.lock().unwrap().clone()
@@ -181,11 +232,12 @@ pub fn get_settings(st: State<AppState>) -> Settings {
 #[tauri::command(async)]
 pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings) -> Res<()> {
     let old = st.settings.lock().unwrap().clone();
-    let (old_key, new_key) = (old.toggle_window_binding(), settings.toggle_window_binding());
-    let hotkey_changed = old_key != new_key && !settings::same_shortcut(&old_key, &new_key); // re-registering the same keys would fail
-    if hotkey_changed {
-        register_hotkey(&app, &new_key)?; // on failure the old hotkey stays registered
-    }
+    let changed = changed_globals(&old, &settings);
+    // All-or-nothing on purpose: if any new key fails, every action keeps its old key and nothing is saved,
+    // so settings.json and the registered keys always agree.
+    let (mut reg, mut unreg) = (|a, k: &str| register_global(&app, a, k), |k: &str| unregister_hotkey(&app, k));
+    let held: Vec<String> = old.global_bindings().into_iter().filter(|(a, _)| !changed.iter().any(|(c, ..)| c == a)).map(|(_, k)| k).collect();
+    swap_globals(&changed, &held, &mut reg, &mut unreg)?;
     let (no_vault, indexing) = (st.vault.lock().unwrap().is_none(), st.indexing.lock().unwrap().is_some());
     if needs_reopen(&old.notes_dir, &settings.notes_dir, no_vault, indexing) {
         let opened = match &settings.notes_dir {
@@ -199,14 +251,9 @@ pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings)
             }
         };
         if let Err(e) = opened {
-            if hotkey_changed {
-                unregister_hotkey(&app, &new_key);
-            }
+            revert_globals(&changed, &mut reg, &mut unreg); // old keys must be live again
             return Err(e);
         }
-    }
-    if hotkey_changed {
-        unregister_hotkey(&app, &old_key);
     }
     settings::save(&st.settings_path, &settings).map_err(err)?;
     *st.settings.lock().unwrap() = settings;
@@ -253,6 +300,64 @@ pub fn open_or_create(st: State<'_, AppState>, title: String) -> Res<NoteDoc> {
 pub fn save_note(st: State<'_, AppState>, path: String, text: String, base_hash: String) -> Res<SaveResult> {
     let fm = st.settings.lock().unwrap().write_front_matter;
     with_vault(&st, |v, id| v.save_note(&path, &text, &base_hash, id, fm))
+}
+
+#[tauri::command(async)]
+pub fn tasks(st: State<'_, AppState>, query: String, tags: Vec<String>, show_done: bool) -> Res<TaskView> {
+    with_vault(&st, |v, _| v.tasks(&query, &tags, show_done))
+}
+
+#[tauri::command(async)]
+pub fn toggle_task(st: State<'_, AppState>, path: String, line: usize, expected: String) -> Res<crate::vault::Toggled> {
+    let fm = st.settings.lock().unwrap().write_front_matter;
+    with_vault(&st, |v, id| v.toggle_task(&path, line, &expected, id, fm))
+}
+
+#[tauri::command(async)]
+pub fn capture_task(st: State<'_, AppState>, text: String) -> Res<String> {
+    let (fm, title) = { let s = st.settings.lock().unwrap(); (s.write_front_matter, settings::capture_title(&s, &crate::tasks::local_today())) };
+    with_vault(&st, |v, id| v.capture_task(&title, &text, id, fm))
+}
+
+#[derive(serde::Serialize)]
+pub struct CaptureTarget {
+    title: String,
+    /// The existing note capture_task would write to (an alias resolves to its note); None if it would create one.
+    path: Option<String>,
+}
+
+/// The note quick capture appends to (the field hint and the frontend's "is it open?" check).
+#[tauri::command(async)]
+pub fn capture_target_title(st: State<'_, AppState>) -> CaptureTarget {
+    let title = settings::capture_title(&st.settings.lock().unwrap(), &crate::tasks::local_today());
+    // best effort: no folder or indexing leaves path None and the frontend compares titles
+    let path = with_vault(&st, |v, _| v.find_note(&title)).ok().flatten();
+    CaptureTarget { title, path }
+}
+
+/// Capture finished or cancelled: if the shortcut showed velo, hide it again so the previous app is back in front.
+#[tauri::command]
+pub fn capture_done(app: AppHandle, st: State<'_, AppState>) {
+    if !st.capture_was_hidden.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    app.hide().ok();
+    #[cfg(not(target_os = "macos"))]
+    if let Some(w) = app.get_webview_window("main") {
+        w.hide().ok();
+    }
+}
+
+/// Dock badge: macOS only, a no-op elsewhere.
+#[tauri::command]
+pub fn set_badge(app: AppHandle, count: u32) {
+    #[cfg(target_os = "macos")]
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.set_badge_count(if count == 0 { None } else { Some(count as i64) });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, count);
 }
 
 #[tauri::command(async)]
@@ -443,5 +548,73 @@ mod tests {
         assert_eq!(got, id); assert_eq!(crypto::unwrap_identity(&bytes.unwrap(), "pw2").unwrap(), id);
         let (fresh, bytes) = resolve_identity(None, None, "pw3").unwrap();
         assert_eq!(crypto::unwrap_identity(&bytes.unwrap(), "pw3").unwrap(), fresh);
+    }
+}
+
+#[cfg(test)]
+mod global_tests {
+    use super::*;
+    #[test] fn changed_globals_lists_only_real_changes() {
+        let (a, mut b) = (Settings::default(), Settings::default());
+        assert!(changed_globals(&a, &b).is_empty());
+        b.shortcuts.insert("capture".into(), "Mod+KeyG".into());
+        b.shortcuts.insert("toggle_window".into(), "Mod+Shift+Space".into()); // same as default: unchanged
+        assert_eq!(changed_globals(&a, &b), vec![(GlobalAction::Capture, "Mod+Shift+Alt+KeyN".to_string(), "Mod+KeyG".to_string())]);
+    }
+    fn with(t: &str, c: &str) -> Settings {
+        let mut s = Settings::default();
+        s.shortcuts.insert("toggle_window".into(), t.into()); s.shortcuts.insert("capture".into(), c.into()); s
+    }
+    const T: &str = "Mod+Shift+Space";
+    const C: &str = "Mod+Shift+Alt+KeyN";
+    fn ch(a: GlobalAction, o: &str, n: &str) -> (GlobalAction, String, String) { (a, o.into(), n.into()) }
+    #[test] fn changed_globals_toggle_both_swap_none() {
+        use GlobalAction::*;
+        let d = Settings::default();
+        assert_eq!(changed_globals(&d, &with("Mod+KeyG", C)), vec![ch(ToggleWindow, T, "Mod+KeyG")]);
+        assert_eq!(changed_globals(&d, &with("Mod+KeyG", "Mod+KeyH")), vec![ch(ToggleWindow, T, "Mod+KeyG"), ch(Capture, C, "Mod+KeyH")]);
+        assert_eq!(changed_globals(&d, &with(C, T)), vec![ch(ToggleWindow, T, C), ch(Capture, C, T)]);
+        assert_eq!(changed_globals(&d, &with("none", C)), vec![ch(ToggleWindow, T, "none")]);
+        assert_eq!(changed_globals(&with("none", C), &d), vec![ch(ToggleWindow, "none", T)]);
+    }
+    /// Runs swap_globals with a fake OS that rejects registering a held key or `bad`; returns (log, result, held keys).
+    fn run(changed: &[(GlobalAction, String, String)], bad: &str) -> (Vec<String>, Result<(), String>, Vec<String>) { run_held(changed, &[], bad) }
+    fn run_held(changed: &[(GlobalAction, String, String)], keep: &[String], bad: &str) -> (Vec<String>, Result<(), String>, Vec<String>) {
+        use std::cell::RefCell;
+        let held = RefCell::new(vec![T.to_string(), C.to_string()]);
+        let log = RefCell::new(vec![]);
+        let r = swap_globals(
+            changed,
+            keep,
+            &mut |_, k| {
+                log.borrow_mut().push(format!("+{k}"));
+                if k == bad || held.borrow().iter().any(|h| h == k) { return Err(format!("taken {k}")); }
+                held.borrow_mut().push(k.into()); Ok(())
+            },
+            &mut |k| { log.borrow_mut().push(format!("-{k}")); held.borrow_mut().retain(|h| h != k); },
+        );
+        (log.into_inner(), r, held.into_inner())
+    }
+    #[test] fn swap_releases_old_before_registering_new() {
+        use GlobalAction::*;
+        let (log, r, held) = run(&[ch(ToggleWindow, T, C), ch(Capture, C, T)], "");
+        assert!(r.is_ok());
+        assert_eq!(log, vec![format!("-{T}"), format!("-{C}"), format!("+{C}"), format!("+{T}")]);
+        assert_eq!(held, vec![C.to_string(), T.to_string()]);
+    }
+    #[test] fn failed_swap_rolls_back_to_old_keys() {
+        use GlobalAction::*;
+        let (log, r, held) = run(&[ch(ToggleWindow, T, "Mod+KeyG"), ch(Capture, C, "Mod+KeyH")], "Mod+KeyH");
+        assert!(r.is_err());
+        // release old, register G, H fails, release G, re-register old T and C
+        assert_eq!(log, vec![format!("-{T}"), format!("-{C}"), "+Mod+KeyG".into(), "+Mod+KeyH".into(), "-Mod+KeyG".into(), format!("+{T}"), format!("+{C}")]);
+        assert_eq!(held, vec![T.to_string(), C.to_string()]);
+    }
+    #[test] fn swap_keeps_a_key_another_action_holds() {
+        // upgrade: toggle_window was saved on capture's new default, so capture never got it; remapping capture must not free it
+        let (log, r, held) = run_held(&[ch(GlobalAction::Capture, C, "Mod+KeyG")], &[C.to_string()], "");
+        assert!(r.is_ok());
+        assert_eq!(log, vec!["+Mod+KeyG".to_string()]);
+        assert!(held.contains(&C.to_string()));
     }
 }

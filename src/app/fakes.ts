@@ -1,6 +1,6 @@
 // Test fakes for the controller: in-memory backend, editor, preview and UI port. Tests only.
 import { vi } from "vitest";
-import type { Hit, NoteDoc, NoteMeta, Page, RenameResult, RevisionInfo, Settings, TagCount } from "../api";
+import type { Hit, NoteDoc, NoteMeta, Page, RenameResult, RevisionInfo, Settings, TagCount, TaskView } from "../api";
 import type { Editor } from "../editor";
 import type { Preview } from "../preview";
 import type { Api } from "./controller";
@@ -27,7 +27,7 @@ export function fakeApi(notes: Record<string, string> = {}) {
     if (!(title in notes)) throw "not-found";
     return { path, title, text: notes[title], hash: "h", encrypted: false, meta: noMeta };
   };
-  const settings: Settings = { notes_dir: "/n", layout: "vertical", font_size: 14, sort: "modified", editor_style: "rich", theme: "system", header_labels: false, shortcuts: {}, write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true };
+  const settings: Settings = { notes_dir: "/n", layout: "vertical", font_size: 14, sort: "modified", editor_style: "rich", theme: "system", header_labels: false, shortcuts: {}, write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox", inbox_title: "Inbox" };
   const api = {
     getSettings: vi.fn(async () => ({ ...settings })),
     setSettings: vi.fn(async (_s: Settings) => {}),
@@ -44,6 +44,12 @@ export function fakeApi(notes: Record<string, string> = {}) {
       return docOf(`/n/${title}.md`);
     }),
     saveNote: vi.fn(),
+    tasks: vi.fn(async (_q: string, _t: string[], _d: boolean): Promise<TaskView> => ({ overdue: [], today: [], upcoming: [], no_date: [], done: [], due_count: 0 })),
+    toggleTask: vi.fn(async (_p: string, line: number, line_text: string) => ({ line, line_text })),
+    captureTask: vi.fn(async (_t: string) => "/n/Inbox.md"),
+    captureTargetTitle: vi.fn(async (): Promise<{ title: string; path: string | null }> => ({ title: "Inbox", path: "Inbox" in notes ? "/n/Inbox.md" : null })),
+    captureDone: vi.fn(async () => {}),
+    setBadge: vi.fn(async (_c: number) => {}),
     renameNote: vi.fn(async (_p: string, _t: string, _r: boolean): Promise<RenameResult> => { throw "unset"; }),
     backlinkCount: vi.fn(async () => 0),
     lockNote: vi.fn(async (_p: string): Promise<string> => { throw "unset"; }),
@@ -113,6 +119,13 @@ export class FakeEditor implements Editor {
   }
   refreshLinks = vi.fn();
   toggleTask = vi.fn(() => false);
+  revealed: number[] = [];
+  revealLine(line: number) { this.revealed.push(line); }
+  appended: string[] = [];
+  appendLine(text: string) {
+    this.appended.push(text);
+    return this.path !== null && !this.suspended;
+  }
 }
 
 export class FakePreview implements Preview {
