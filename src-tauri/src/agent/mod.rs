@@ -1,5 +1,6 @@
 //! Agent access: the headless `velo --mcp` MCP server (stdio).
 pub mod app_ops;
+pub mod client;
 pub mod listener;
 pub mod ops;
 pub mod paths;
@@ -28,7 +29,7 @@ pub fn run_headless() -> i32 {
     }
 }
 
-/// Wraps `tools::call` with the `agent_access` switch, re-read from `settings_path` on every call. The vault (direct
+/// Wraps `tools::call` with the `agent_access` switch and app-or-direct routing, re-read from `settings_path` on every call. The vault (direct
 /// mode) opens on the first tool call, with its index in `data_dir` as the app keeps it, and reopens if the notes
 /// folder changes.
 fn gate(settings_path: PathBuf, data_dir: PathBuf) -> impl Fn(&str, Value) -> Result<Value, String> + Send + Sync + 'static {
@@ -40,6 +41,10 @@ fn gate(settings_path: PathBuf, data_dir: PathBuf) -> impl Fn(&str, Value) -> Re
         }
         if !tools::TOOL_SPECS.iter().any(|t| t.name == name) {
             return Err("unknown tool".into());
+        }
+        if let Some(r) = client::forward(&data_dir, name, &args) {
+            *ops.lock().unwrap_or_else(|e| e.into_inner()) = None; // the app owns the index while it runs
+            return r;
         }
         let dir = s.notes_dir.ok_or("No notes folder set in velo")?;
         let mut ops = ops.lock().unwrap_or_else(|e| e.into_inner());
@@ -85,5 +90,76 @@ mod tests {
         let hits = call("search_notes", serde_json::json!({})).unwrap();
         assert_eq!(hits["notes"].as_array().unwrap().iter().map(|n| n["title"].as_str().unwrap()).collect::<Vec<_>>(), vec!["b"]);
         assert!(std::fs::read_dir(tmp.path().join("data")).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with("index-")));
+    }
+
+    /// Fake app: answers every request with `{"ok": {"fake": name}}` when the token matches. Returns the data dir setup.
+    fn fake_app(data: &std::path::Path, pid: u32, listen: bool) {
+        use std::io::{BufRead, BufReader, Write};
+        std::fs::create_dir_all(data).unwrap();
+        let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = l.local_addr().unwrap().port();
+        std::fs::write(data.join("agent.json"), serde_json::json!({"port": port, "token": "tok", "pid": pid}).to_string()).unwrap();
+        if !listen { return; }
+        std::thread::spawn(move || for c in l.incoming().flatten() {
+            let mut r = BufReader::new(c.try_clone().unwrap()); let mut line = String::new();
+            while r.read_line(&mut line).unwrap_or(0) > 0 {
+                let q: Value = serde_json::from_str(&line).unwrap(); line.clear();
+                let rep = if q["token"] == "tok" { serde_json::json!({"ok": {"fake": q["name"]}}) } else { serde_json::json!({"err": "unauthorized"}) };
+                writeln!(&c, "{rep}").unwrap();
+            }
+        });
+    }
+    fn setup(access: bool) -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap(); let notes = tmp.path().join("notes"); std::fs::create_dir(&notes).unwrap();
+        let p = tmp.path().join("settings.json");
+        std::fs::write(&p, serde_json::json!({"agent_access": access, "notes_dir": notes}).to_string()).unwrap();
+        let data = tmp.path().join("data"); (tmp, p, data, notes)
+    }
+    fn dead_pid() -> u32 { let mut c = std::process::Command::new("true").spawn().unwrap(); c.wait().unwrap(); c.id() }
+
+    #[test] fn forwards_when_app_alive() {
+        let (_t, p, data, notes) = setup(true); fake_app(&data, std::process::id(), true);
+        let call = gate(p, data.clone());
+        assert_eq!(call("list_tags", serde_json::json!({})), Ok(serde_json::json!({"fake": "list_tags"})));
+        assert!(!std::fs::read_dir(&data).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with("index-")), "no direct vault");
+        drop(notes);
+    }
+    #[test] fn busy_when_pid_alive_but_unreachable() {
+        let (_t, p, data, notes) = setup(true); fake_app(&data, std::process::id(), false); // listener dropped: port closed
+        std::fs::write(notes.join("a.md"), "x").unwrap();
+        let call = gate(p, data.clone());
+        let args = serde_json::json!({"title": "a", "text": "y", "summary": "s"});
+        let t = std::time::Instant::now();
+        assert_eq!(call("append_to_note", args), Err("velo is busy, retry".to_string()));
+        assert!(t.elapsed() >= std::time::Duration::from_secs(2));
+        assert_eq!(std::fs::read_to_string(notes.join("a.md")).unwrap(), "x");
+    }
+    #[test] fn busy_on_token_mismatch() {
+        let (_t, p, data, _n) = setup(true); fake_app(&data, std::process::id(), true);
+        let j: Value = serde_json::from_slice(&std::fs::read(data.join("agent.json")).unwrap()).unwrap();
+        std::fs::write(data.join("agent.json"), serde_json::json!({"port": j["port"], "token": "stale", "pid": j["pid"]}).to_string()).unwrap();
+        assert_eq!(gate(p, data)("list_tags", serde_json::json!({})), Err("velo is busy, retry".to_string()));
+    }
+    #[test] fn direct_when_pid_dead_stale_file() {
+        let (_t, p, data, notes) = setup(true); std::fs::write(notes.join("a.md"), "#t").unwrap();
+        fake_app(&data, dead_pid(), true);
+        assert_eq!(gate(p, data)("list_tags", serde_json::json!({})), Ok(serde_json::json!({"tags": [{"tag": "t", "count": 1}]})));
+    }
+    #[test] fn switches_mode_between_calls() {
+        let (_t, p, data, notes) = setup(true); std::fs::write(notes.join("a.md"), "#t").unwrap();
+        let call = gate(p, data.clone());
+        let direct = serde_json::json!({"tags": [{"tag": "t", "count": 1}]});
+        assert_eq!(call("list_tags", serde_json::json!({})), Ok(direct.clone()));
+        fake_app(&data, std::process::id(), true); // velo starts
+        assert_eq!(call("list_tags", serde_json::json!({})), Ok(serde_json::json!({"fake": "list_tags"})));
+        std::fs::remove_file(data.join("agent.json")).unwrap(); // velo quits
+        assert_eq!(call("list_tags", serde_json::json!({})), Ok(direct));
+    }
+    #[test] fn refuses_when_turned_off_mid_session() {
+        let (_t, p, data, _n) = setup(true); fake_app(&data, std::process::id(), true);
+        let call = gate(p.clone(), data);
+        assert!(call("list_tags", serde_json::json!({})).is_ok());
+        std::fs::write(&p, r#"{"agent_access":false}"#).unwrap();
+        assert_eq!(call("list_tags", serde_json::json!({})), Err(OFF.to_string()));
     }
 }

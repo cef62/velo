@@ -5894,6 +5894,7 @@ dependencies = [
  "chrono",
  "getrandom 0.3.4",
  "keyring",
+ "libc",
  "notify",
  "notify-debouncer-full",
  "rmcp",
