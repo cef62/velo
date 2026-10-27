@@ -2,7 +2,7 @@ use crate::names::NoteFile;
 use crate::frontmatter::{self, FrontMatter};
 use crate::tasks::parse_tasks;
 use crate::text::{extract_links, extract_tags, fold};
-use rusqlite::{Connection, params, params_from_iter};
+use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -147,7 +147,7 @@ impl Index {
         // journal_mode returns a row, so read it instead of executing.
         let _: String = db.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
         db.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON;")?;
-        // Older indexes lack tags, dates or aliases: drop them so the vault's reconcile reindexes every note.
+        // Older indexes lack tags, dates, aliases or tasks: drop them so the vault's reconcile reindexes every note.
         // DROP, not DELETE: deleting every FTS5 row one by one took ~1 min at 10k notes.
         if db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? < 4 {
             db.execute_batch("DROP TABLE IF EXISTS tasks; DROP TABLE IF EXISTS notes_fts; DROP TABLE IF EXISTS notes; DROP TABLE IF EXISTS links; DROP TABLE IF EXISTS tags; DROP TABLE IF EXISTS aliases; PRAGMA user_version=4;")?;
@@ -349,8 +349,8 @@ impl Index {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    pub fn title_modified(&self, path: &str) -> Option<(String, i64)> {
-        self.db.query_row("SELECT title, modified FROM notes WHERE path=?", [path], |r| Ok((r.get(0)?, r.get(1)?))).ok()
+    pub fn title_modified(&self, path: &str) -> anyhow::Result<Option<(String, i64)>> {
+        Ok(self.db.query_row("SELECT title, modified FROM notes WHERE path=?", [path], |r| Ok((r.get(0)?, r.get(1)?))).optional()?)
     }
 
     pub fn find_title(&self, title: &str) -> anyhow::Result<Option<String>> {

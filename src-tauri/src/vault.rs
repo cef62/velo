@@ -168,7 +168,7 @@ impl Vault {
         let mut rows = self.index.task_rows(tags)?;
         let wanted: Vec<String> = tags.iter().map(|t| fold(t)).collect();
         for (path, plain) in &self.unlocked {
-            let Some((title, modified)) = self.index.title_modified(path) else { continue };
+            let Some((title, modified)) = self.index.title_modified(path)? else { continue };
             let have = all_tags(frontmatter::body(plain), frontmatter::parse(plain).as_ref());
             if !wanted.iter().all(|w| have.iter().any(|(h, _)| h == w)) {
                 continue;

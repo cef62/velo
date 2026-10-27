@@ -126,7 +126,7 @@ pub fn group_tasks(rows: Vec<TaskRow>, query: &str, show_done: bool, today: &str
         let item = |r: TaskRow| TaskItem { path: r.path, title: r.title, line: r.line, text: r.text, due: r.due, done: r.done, done_on: r.done_on, line_text: r.line_text };
         let bucket = if r.done {
             match (&r.done_on, &cutoff) {
-                (Some(d), Some(c)) if show_done && d >= c => &mut v.done,
+                (Some(d), Some(c)) if show_done && d > c => &mut v.done,
                 _ => continue,
             }
         } else {
@@ -192,7 +192,7 @@ mod tests {
     #[test]
     fn show_done_only_last_7_days() {
         let done = |t: &str, d: &str| TaskRow { done: true, done_on: Some(d.into()), ..row("n", t, None, 1) };
-        let rows = || vec![done("recent", "2026-10-21"), done("old", "2026-10-19"), TaskRow { done: true, ..row("n", "undated", None, 1) }];
+        let rows = || vec![done("recent", "2026-10-21"), done("old", "2026-10-19"), done("edge", "2026-10-20"), TaskRow { done: true, ..row("n", "undated", None, 1) }];
         assert_eq!(texts(&group_tasks(rows(), "", true, "2026-10-27").done), ["recent"]);
         assert!(group_tasks(rows(), "", false, "2026-10-27").done.is_empty());
     }
