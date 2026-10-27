@@ -41,4 +41,6 @@ Every PR gets an adversarial review before merge, on top of CI. The reviewer's j
 
 Versions are managed with [Changesets](https://github.com/changesets/changesets): merging a PR with a changeset makes the bot open (or update) a **Version Packages** PR; merging that PR bumps the version, writes `CHANGELOG.md`, tags `vX.Y.Z` and dispatches `build-release.yml`. Never edit versions or create tags by hand.
 
+Releases are **immutable** once published (the repository has release immutability on): a published release's assets and its tag can't be changed, re-uploaded or deleted. `build-release.yml` therefore does all asset work on a draft and publishes only when `latest.json` lists every platform. If a platform job fails, re-run it while the release is still a draft (`gh run rerun <run-id> --failed`). A broken published release is never fixed in place: ship a new patch version.
+
 Release builds sign the updater artifacts with the key in the repository secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; the public key is in `src-tauri/tauri.conf.json`. Never lose or commit the private key: installed apps only accept updates signed with it.
