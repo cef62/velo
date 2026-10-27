@@ -5,7 +5,7 @@ use crate::names::{note_path, parse_note_file};
 use crate::settings::{self, Settings};
 use crate::store::SaveResult;
 use crate::tasks::TaskView;
-use crate::vault::{NoteDoc, Vault};
+use crate::vault::{NoteDoc, Toggled, Vault};
 use anyhow::anyhow;
 use std::path::{Path, PathBuf};
 
@@ -26,6 +26,12 @@ pub trait NoteOps {
     /// Returns the new path.
     fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<String>;
     fn trash(&mut self, path: &str, summary: &str) -> anyhow::Result<()>;
+    /// Flips the task at `line` (checked against `expected`); snapshots first.
+    fn toggle_task(&mut self, path: &str, line: usize, expected: &str, summary: &str) -> anyhow::Result<Toggled>;
+    /// Appends `- [ ] text` to the plain note `title` (created if missing); returns its path.
+    fn capture_task(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<String>;
+    /// The plain note `title`, created empty (no template) if missing.
+    fn open_or_create(&mut self, title: &str) -> anyhow::Result<NoteDoc>;
     fn settings(&self) -> Settings;
     /// Tags of one plain note (for search results).
     fn note_tags(&self, path: &str) -> anyhow::Result<Vec<String>>;
@@ -47,10 +53,10 @@ fn plain(path: &str) -> anyhow::Result<&str> {
 }
 
 pub struct DirectOps {
-    vault: Vault,
+    pub(crate) vault: Vault,
     settings_path: PathBuf,
     /// Real OS Trash; tests swap it for a plain remove.
-    remove: fn(&Path) -> std::io::Result<()>,
+    pub(crate) remove: fn(&Path) -> std::io::Result<()>,
 }
 
 impl DirectOps {
@@ -152,6 +158,36 @@ impl NoteOps for DirectOps {
         let path = plain(path)?;
         self.vault.agent_snapshot(path, summary)?;
         self.vault.delete_note_with(path, self.remove)
+    }
+
+    fn toggle_task(&mut self, path: &str, line: usize, expected: &str, summary: &str) -> anyhow::Result<Toggled> {
+        let path = plain(path)?;
+        self.vault.agent_snapshot(path, summary)?;
+        let wfm = self.settings().write_front_matter;
+        self.vault.toggle_task(path, line, expected, None, wfm)
+    }
+
+    fn capture_task(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<String> {
+        let wfm = self.settings().write_front_matter;
+        match self.vault.find_note(title)? {
+            Some(p) if locked(&p) => return Err(anyhow!("not found")),
+            Some(p) => self.vault.agent_snapshot(&p, summary)?,
+            None => {}
+        }
+        let existed = self.vault.find_note(title)?.is_some();
+        let path = self.vault.capture_task(title, text, None, wfm)?;
+        if !existed {
+            self.vault.agent_snapshot(&path, summary)?; // a created note's first revision is its created text
+        }
+        Ok(path)
+    }
+
+    fn open_or_create(&mut self, title: &str) -> anyhow::Result<NoteDoc> {
+        if self.vault.find_note(title)?.is_some_and(|p| locked(&p)) {
+            return Err(anyhow!("not found"));
+        }
+        let wfm = self.settings().write_front_matter;
+        self.vault.open_or_create(title, None, wfm)
     }
 
     fn settings(&self) -> Settings {

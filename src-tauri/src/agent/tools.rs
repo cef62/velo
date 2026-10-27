@@ -65,6 +65,36 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
         description: concat!("Remove tags from up to 200 notes (`titles`): from the front-matter `tags:` list and exact inline #tag words (never inside code or links). Each note is its own write; the result lists `changed`, `unchanged` or `failed` with a reason per title.", conventions!()),
         input_schema: r#"{"type":"object","properties":{"titles":{"type":"array","items":{"type":"string"},"maxItems":200},"tags":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}},"required":["titles","tags","summary"]}"#,
     },
+    ToolSpec {
+        name: "list_tasks",
+        description: "The Tasks view: open tasks from all notes grouped as overdue, today, upcoming, no_date (and done = ticked in the last 7 days when `show_done`), plus due_count (overdue + today). `query` filters task or note text, `tags` keeps notes having every tag. Each task has title (note), text, due, line, line_text (pass line and line_text to set_task_done).",
+        input_schema: r#"{"type":"object","properties":{"query":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"show_done":{"type":"boolean"}}}"#,
+    },
+    ToolSpec {
+        name: "add_task",
+        description: concat!("Add a `- [ ] text` task line. Without `title` it goes to velo's capture target (the Inbox or today's daily note, per the user's setting); the note is created if missing. `due` (YYYY-MM-DD) adds ` 📅 due`. Returns the note title.", conventions!()),
+        input_schema: r#"{"type":"object","properties":{"text":{"type":"string"},"title":{"type":"string"},"due":{"type":"string","pattern":"^\\d{4}-\\d{2}-\\d{2}$"},"summary":{"type":"string"}},"required":["text","summary"]}"#,
+    },
+    ToolSpec {
+        name: "set_task_done",
+        description: concat!("Tick (`done` true) or untick a task in a note, with velo's ✅ date handling. Pass `line` and `line_text` from list_tasks or read_note; if the line changed since, it fails with task-moved. Returns `unchanged` when the task is already in that state.", conventions!()),
+        input_schema: r#"{"type":"object","properties":{"title":{"type":"string"},"line":{"type":"integer","minimum":0},"line_text":{"type":"string"},"done":{"type":"boolean"},"summary":{"type":"string"}},"required":["title","line","line_text","done","summary"]}"#,
+    },
+    ToolSpec {
+        name: "rename_note",
+        description: concat!("Rename a note. With `rewrite_links` true, [[links]] to it in other notes are updated. Returns the new title.", conventions!()),
+        input_schema: r#"{"type":"object","properties":{"title":{"type":"string"},"new_title":{"type":"string"},"rewrite_links":{"type":"boolean"},"summary":{"type":"string"}},"required":["title","new_title","rewrite_links","summary"]}"#,
+    },
+    ToolSpec {
+        name: "move_to_trash",
+        description: concat!("Move a note to the OS Trash (recoverable there; nothing is deleted permanently). Its revisions are kept.", conventions!()),
+        input_schema: r#"{"type":"object","properties":{"title":{"type":"string"},"summary":{"type":"string"}},"required":["title","summary"]}"#,
+    },
+    ToolSpec {
+        name: "daily_note",
+        description: "The daily note for a date (`date` YYYY-MM-DD, default today, local time): title, text and whether this call created it (empty, no template).",
+        input_schema: r#"{"type":"object","properties":{"date":{"type":"string","pattern":"^\\d{4}-\\d{2}-\\d{2}$"}}}"#,
+    },
 ];
 
 fn arg<'a>(a: &'a Value, k: &str) -> Result<&'a str, String> {
@@ -92,6 +122,14 @@ fn path_of(ops: &dyn NoteOps, a: &Value) -> Result<String, String> {
     ops.find(arg(a, "title")?).map_err(err)?.ok_or_else(|| "not found".to_string())
 }
 
+/// `d` if it is a real `YYYY-MM-DD` date.
+fn valid_date(d: &str) -> Result<&str, String> {
+    match chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d") {
+        Ok(n) if n.format("%Y-%m-%d").to_string() == d => Ok(d),
+        _ => Err(format!("invalid date: {d} (expected YYYY-MM-DD)")),
+    }
+}
+
 /// Occurrences of `pat` in `text`, overlapping ones included ("aa" occurs twice in "aaa"); 0 for an empty `pat`.
 fn occurrences(text: &str, pat: &str) -> usize {
     let Some(step) = pat.chars().next().map(char::len_utf8) else { return 0 };
@@ -104,7 +142,7 @@ fn occurrences(text: &str, pat: &str) -> usize {
 }
 
 pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String> {
-    let is_write = matches!(name, "create_note" | "append_to_note" | "edit_note" | "replace_note" | "add_tags" | "remove_tags");
+    let is_write = matches!(name, "create_note" | "append_to_note" | "edit_note" | "replace_note" | "add_tags" | "remove_tags" | "add_task" | "set_task_done" | "rename_note" | "move_to_trash");
     let summary = if is_write {
         let s = a.get("summary").and_then(Value::as_str).unwrap_or("");
         if s.trim().is_empty() {
@@ -166,6 +204,52 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
             }
             let hash = ops.write(&path, text, &doc.hash, summary).map_err(err)?;
             Ok(json!({"title": doc.title, "hash": hash}))
+        }
+        "list_tasks" => {
+            let v = ops.tasks(a.get("query").and_then(Value::as_str).unwrap_or(""), &strings(&a, "tags"), a.get("show_done").and_then(Value::as_bool).unwrap_or(false)).map_err(err)?;
+            serde_json::to_value(v).map_err(|e| e.to_string())
+        }
+        "add_task" => {
+            let mut text = arg(&a, "text")?.trim().to_string();
+            if let Some(d) = a.get("due").and_then(Value::as_str) {
+                text = format!("{text} 📅 {}", valid_date(d)?);
+            }
+            let title = match a.get("title").and_then(Value::as_str) {
+                Some(t) => t.to_string(),
+                None => crate::settings::capture_title(&ops.settings(), &crate::tasks::local_today()),
+            };
+            let path = ops.capture_task(&title, &text, summary).map_err(err)?;
+            Ok(json!({"title": crate::names::parse_note_file(std::path::Path::new(&path)).map_or(title, |n| n.title)}))
+        }
+        "set_task_done" => {
+            let (line, expected, done) = (uint(&a, "line", usize::MAX), arg(&a, "line_text")?, a.get("done").and_then(Value::as_bool).ok_or("missing done")?);
+            let path = path_of(ops, &a)?;
+            let doc = ops.read(&path).map_err(err)?;
+            let Some(t) = crate::tasks::parse_tasks(&doc.text).into_iter().find(|t| t.line == line && t.line_text == expected) else { return Err("task-moved".into()) };
+            if t.done == done {
+                return Ok(json!({"title": doc.title, "status": "unchanged", "line": line, "line_text": t.line_text}));
+            }
+            let r = ops.toggle_task(&path, line, expected, summary).map_err(err)?;
+            Ok(json!({"title": doc.title, "status": "changed", "line": r.line, "line_text": r.line_text}))
+        }
+        "rename_note" => {
+            let rewrite = a.get("rewrite_links").and_then(Value::as_bool).ok_or("missing rewrite_links")?;
+            let new = ops.rename(&path_of(ops, &a)?, arg(&a, "new_title")?, rewrite, summary).map_err(err)?;
+            Ok(json!({"title": crate::names::parse_note_file(std::path::Path::new(&new)).map_or(new, |n| n.title)}))
+        }
+        "move_to_trash" => {
+            let path = path_of(ops, &a)?;
+            ops.trash(&path, summary).map_err(err)?;
+            Ok(json!({"title": arg(&a, "title")?, "trashed": true}))
+        }
+        "daily_note" => {
+            let date = match a.get("date").and_then(Value::as_str) {
+                Some(d) => valid_date(d)?.to_string(),
+                None => crate::tasks::local_today(),
+            };
+            let created = ops.find(&date).map_err(err)?.is_none();
+            let doc = ops.open_or_create(&date).map_err(err)?;
+            Ok(json!({"title": doc.title, "text": doc.text, "created": created}))
         }
         "add_tags" | "remove_tags" => bulk_tags(ops, name == "add_tags", &a, summary),
         _ => Err("unknown tool".into()),
@@ -438,5 +522,96 @@ mod tests {
         let e = call(&mut ops, "add_tags", json!({"titles": titles, "tags": ["t"], "summary": "t"})).unwrap_err();
         assert!(e.contains("200"), "{e}");
         assert_eq!(read(&dir, "a.md"), "one");
+    }
+
+    fn task_ops(files: &[(&str, &str)]) -> (DirectOps, PathBuf) {
+        let (mut o, d) = vault(files);
+        o.remove = |p| std::fs::remove_file(p);
+        (o, d)
+    }
+
+    #[test] fn list_tasks_excludes_locked() {
+        let (mut ops, _) = task_ops(&[("a.md", "- [ ] open one"), ("s.md.age", "- [ ] secret")]);
+        let r = call(&mut ops, "list_tasks", json!({})).unwrap();
+        assert_eq!(r["no_date"].as_array().unwrap().len(), 1);
+        assert_eq!(r["no_date"][0]["title"], "a");
+        assert_eq!(r["no_date"][0]["line_text"], "- [ ] open one");
+        assert_eq!(r["no_date"][0]["line"], 0);
+    }
+
+    #[test] fn add_task_to_capture_target_and_due() {
+        let (mut ops, dir) = task_ops(&[]);
+        let r = call(&mut ops, "add_task", json!({"text": "buy milk", "due": "2030-01-02", "summary": "s"})).unwrap();
+        assert_eq!(r["title"], "Inbox");
+        assert!(read(&dir, "Inbox.md").ends_with("- [ ] buy milk 📅 2030-01-02\n"), "{}", read(&dir, "Inbox.md"));
+        call(&mut ops, "add_task", json!({"text": "two", "title": "Other", "summary": "s"})).unwrap();
+        assert!(read(&dir, "Other.md").contains("- [ ] two"));
+        let (mut ops, dir) = task_ops(&[("Daily.md.age", "x")]);
+        std::fs::write(ops.dir().join("../settings.json"), "").ok();
+        assert_eq!(call(&mut ops, "add_task", json!({"text": "t", "title": "Daily", "summary": "s"})), Err("not found".to_string()));
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    }
+
+    #[test] fn add_task_rejects_bad_due() {
+        let (mut ops, dir) = task_ops(&[]);
+        for d in ["2030-02-30", "tomorrow", "2030-1-2", "2030-01-02x"] {
+            let e = call(&mut ops, "add_task", json!({"text": "t", "due": d, "summary": "s"})).unwrap_err();
+            assert!(e.contains("invalid date"), "{d}: {e}");
+        }
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+    }
+
+    #[test] fn set_task_done_idempotent() {
+        let (mut ops, dir) = task_ops(&[("a.md", "intro\n- [ ] do it")]);
+        let line = std::cell::Cell::new(1); // a tick may stamp front matter and shift the line
+        let args = |done: bool, lt: &str| json!({"title": "a", "line": line.get(), "line_text": lt, "done": done, "summary": "s"});
+        assert_eq!(call(&mut ops, "set_task_done", args(false, "- [ ] do it")).unwrap()["status"], "unchanged");
+        assert_eq!(read(&dir, "a.md"), "intro\n- [ ] do it");
+        let r = call(&mut ops, "set_task_done", args(true, "- [ ] do it")).unwrap();
+        assert_eq!(r["status"], "changed");
+        assert!(read(&dir, "a.md").contains("- [x] do it ✅"), "{}", read(&dir, "a.md"));
+        let lt = r["line_text"].as_str().unwrap().to_string();
+        line.set(r["line"].as_u64().unwrap());
+        assert_eq!(call(&mut ops, "set_task_done", args(true, &lt)).unwrap()["status"], "unchanged");
+        assert_eq!(call(&mut ops, "set_task_done", args(false, &lt)).unwrap()["status"], "changed");
+        assert!(read(&dir, "a.md").contains("- [ ] do it"));
+    }
+
+    #[test] fn set_task_done_line_moved_fails() {
+        let (mut ops, dir) = task_ops(&[("a.md", "x\n- [ ] do it")]);
+        for (line, lt) in [(0, "- [ ] do it"), (1, "- [ ] other"), (9, "- [ ] do it")] {
+            assert_eq!(call(&mut ops, "set_task_done", json!({"title": "a", "line": line, "line_text": lt, "done": true, "summary": "s"})), Err("task-moved".to_string()));
+        }
+        assert_eq!(read(&dir, "a.md"), "x\n- [ ] do it");
+    }
+
+    #[test] fn rename_rewrites_links() {
+        let (mut ops, dir) = task_ops(&[("a.md", "x"), ("b.md", "see [[a]]")]);
+        let r = call(&mut ops, "rename_note", json!({"title": "a", "new_title": "z", "rewrite_links": true, "summary": "s"})).unwrap();
+        assert_eq!(r["title"], "z");
+        assert!(dir.join("z.md").exists() && !dir.join("a.md").exists());
+        assert_eq!(read(&dir, "b.md"), "see [[z]]");
+        assert_eq!(call(&mut ops, "rename_note", json!({"title": "a", "new_title": "q", "rewrite_links": true, "summary": "s"})), Err("not found".to_string()));
+    }
+
+    #[test] fn trash_moves_out_and_keeps_revisions() {
+        let (mut ops, dir) = task_ops(&[("a.md", "bye"), ("s.md.age", "x")]);
+        let p = ops.find("a").unwrap().unwrap();
+        call(&mut ops, "move_to_trash", json!({"title": "a", "summary": "cleanup"})).unwrap();
+        assert!(!dir.join("a.md").exists());
+        assert_eq!(ops.vault.list_revisions(&p).unwrap()[0].summary.as_deref(), Some("cleanup"));
+        assert_eq!(call(&mut ops, "move_to_trash", json!({"title": "s", "summary": "c"})), Err("not found".to_string()));
+        assert!(dir.join("s.md.age").exists());
+    }
+
+    #[test] fn daily_note_creates_today() {
+        let (mut ops, dir) = task_ops(&[]);
+        let today = crate::tasks::local_today();
+        let r = call(&mut ops, "daily_note", json!({})).unwrap();
+        assert_eq!((r["title"].as_str(), r["created"].as_bool()), (Some(today.as_str()), Some(true)));
+        assert!(dir.join(format!("{today}.md")).exists());
+        assert_eq!(call(&mut ops, "daily_note", json!({})).unwrap()["created"], false);
+        assert_eq!(call(&mut ops, "daily_note", json!({"date": "2031-05-06"})).unwrap()["title"], "2031-05-06");
+        assert!(call(&mut ops, "daily_note", json!({"date": "2031-13-06"})).unwrap_err().contains("invalid date"));
     }
 }
