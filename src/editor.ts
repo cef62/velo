@@ -4,7 +4,7 @@ import { writingSetup } from "./editortheme";
 import { refreshRich, richMarkdown, type RichOpts } from "./richmd";
 import { TASK_ITEM } from "./preview";
 import { SaveController } from "./saver";
-import { frontMatterHide, replaceAll } from "./fmhide";
+import { frontMatterHide, replaceAll, undoHistory } from "./fmhide";
 import { stampChange } from "./frontmatter";
 import { openNote, saveNote, type NoteDoc, type NoteMeta } from "./api";
 
@@ -69,11 +69,13 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
   const editable = new Compartment(); // read-only until a note is loaded (no path to save to)
   const rich = new Compartment();
   const fmHide = new Compartment();
+  const undo = undoHistory();
 
   const view = new EditorView({
     parent: host,
     extensions: [
       writingSetup(),
+      undo.extension,
       rich.of([]),
       fmHide.of(frontMatterHide(true)),
       editable.of(EditorView.editable.of(false)),
@@ -92,6 +94,7 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     loading = true;
     // Caret to the top; a hidden front matter moves it past the block.
     view.dispatch(replaceAll(view.state.doc, text));
+    for (const spec of undo.reset) view.dispatch(spec);
     loading = false;
   };
 

@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { Compartment, EditorSelection, EditorState, type Transaction } from "@codemirror/state";
 import { history, redo, undo } from "@codemirror/commands";
-import { frontMatterHide, replaceAll } from "./fmhide";
+import { frontMatterHide, replaceAll, undoHistory } from "./fmhide";
 import { stampChange } from "./frontmatter";
 
 const FM = "---\ncreated: 1\n---\n"; // 19 chars
@@ -71,4 +71,18 @@ test("shown: a stamp keeps the caret on the front-matter line being edited", () 
   s = s.update({ changes, selection: s.selection.map(changes, 1) }).state;
   expect(s.doc.toString()).toBe(block + "body");
   expect(s.selection.main.head).toBe(caret);
+});
+
+test("a load empties the undo history: undo never brings back the previous note", () => {
+  const h = undoHistory();
+  let s = EditorState.create({ doc: "note A", extensions: [h.extension] });
+  const run = (cmd: typeof undo) => cmd({ state: s, dispatch: (tr: Transaction) => void (s = tr.state) });
+  s = s.update({ changes: { from: 6, insert: "!" }, userEvent: "input.type" }).state;
+  s = s.update(replaceAll(s.doc, "note B")).state; // load B
+  for (const spec of h.reset) s = s.update(spec).state;
+  expect(run(undo)).toBe(false);
+  expect(s.doc.toString()).toBe("note B");
+  s = s.update({ changes: { from: 6, insert: "?" }, userEvent: "input.type" }).state;
+  expect(run(undo)).toBe(true); // edits after the load still undo
+  expect(s.doc.toString()).toBe("note B");
 });

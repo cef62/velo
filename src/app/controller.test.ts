@@ -221,6 +221,38 @@ test("opening a locked note with no key anywhere shows the copy-identity error a
   expect(calls.some((x) => x[0] === "passphrase")).toBe(false);
 });
 
+test("a locked first hit while typing shows the error but never the passphrase dialog", async () => {
+  const { c, api, store, calls } = setup();
+  api.openNote.mockRejectedValueOnce("locked");
+  api.hasIdentity.mockResolvedValue(false);
+  await c.show(P("A"), "auto");
+  expect(store.get().err).toBe("Note is locked");
+  expect(calls.some((x) => x[0] === "passphrase")).toBe(false);
+});
+
+test("quick settings toggles don't write back each other's stale copy", async () => {
+  const { c, api } = setup();
+  let saved = await api.getSettings();
+  api.getSettings.mockImplementation(async () => ({ ...saved }));
+  api.setSettings.mockImplementation(async (s) => {
+    await settle();
+    saved = s;
+  });
+  await Promise.all([c.toggleInfo(), c.toggleSort()]);
+  expect(saved).toMatchObject({ info_panel: true, sort: "title" });
+});
+
+test("a slow auto-show doesn't replace the note Enter just opened", async () => {
+  const { c, api, store } = setup();
+  const d = deferred<ReturnType<typeof api.openNote> extends Promise<infer T> ? T : never>();
+  api.openNote.mockImplementationOnce(() => d.promise);
+  const auto = c.show(P("A"), "auto");
+  await c.openTitle("B", "enter");
+  d.resolve({ path: P("A"), title: "A", text: "a", hash: "h", encrypted: false, meta: noMeta });
+  await auto;
+  expect(store.get().openPath).toBe(P("B"));
+});
+
 const key = (code: string, mods: { meta?: boolean; shift?: boolean } = {}, where: Partial<KeyEventLike> = {}): KeyEventLike => ({
   key: code.replace(/^Key/, "").toLowerCase(),
   code,

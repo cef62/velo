@@ -49,6 +49,7 @@ export class Controller {
   protected readonly newShow = latest();
   protected searchSeq = 0;
   protected searching: Promise<void> = Promise.resolve(); // latest list reset, awaited by Enter so it never acts on stale rows
+  protected settingsQueue: Promise<unknown> = Promise.resolve();
 
   // Wikilinks, tags and links act the same in the preview and in rich edit.
   readonly links: RichOpts = {
@@ -245,12 +246,20 @@ export class Controller {
     }
   }
 
+  /** Settings read-modify-writes run one at a time: two quick toggles must not write back each other's stale copy. */
+  protected updateSettings(f: (cur: Settings) => Promise<void>): Promise<void> {
+    const run = this.settingsQueue.then(async () => f(await this.api.getSettings()));
+    this.settingsQueue = run.catch(() => {});
+    return run;
+  }
+
   async toggleInfo() {
     try {
-      const cur = await this.api.getSettings();
-      const next = !cur.info_panel;
-      await this.api.setSettings({ ...cur, info_panel: next });
-      this.store.set({ infoOpen: next });
+      await this.updateSettings(async (cur) => {
+        const next = !cur.info_panel;
+        await this.api.setSettings({ ...cur, info_panel: next });
+        this.store.set({ infoOpen: next });
+      });
       void this.loadInfo();
     } catch (e) {
       this.setErr(errText(e));
@@ -294,7 +303,7 @@ export class Controller {
       this.history.loaded(doc.path, how);
     } catch (e) {
       if (how === "nav" && e === "not-found") return "missing";
-      if (e === "locked" && !retried) {
+      if (e === "locked" && !retried && how !== "auto") { // never pop the dialog up while typing in search
         const ok = await this.promptPassphrase({ trigger: "open", context: null });
         if (ok) return this.show(path, how, true);
         if (ok === null) return how !== "nav"; // no key on this computer: keep the copy-identity error
@@ -435,12 +444,14 @@ export class Controller {
       this.setErr(BUSY_MSG);
       return false;
     }
+    const current = this.newShow(); // a pending auto-show must not replace this note when its reply lands later
     try {
       if (!(await this.editor.flush())) return false;
       // The title cache is the "existed before" signal (open_or_create returns a plain NoteDoc). A stale cache only
       // mislabels an empty/external note, which the empty-body rule below still opens in edit mode.
       const created = !this.titles.has(fold(title));
       const doc = await this.api.openOrCreate(title);
+      if (!current()) return true;
       if (!this.editor.load(doc)) return false;
       this.loadedDoc(doc);
       this.setErr("");
@@ -714,10 +725,11 @@ export class Controller {
 
   async toggleLayout() {
     try {
-      const cur = await this.api.getSettings();
-      const next = { ...cur, layout: cur.layout === "horizontal" ? ("vertical" as const) : ("horizontal" as const) };
-      await this.api.setSettings(next);
-      this.applyLook(next);
+      await this.updateSettings(async (cur) => {
+        const next = { ...cur, layout: cur.layout === "horizontal" ? ("vertical" as const) : ("horizontal" as const) };
+        await this.api.setSettings(next);
+        this.applyLook(next);
+      });
     } catch (e) {
       this.setErr(errText(e));
     }
@@ -725,10 +737,11 @@ export class Controller {
 
   async toggleStyle() {
     try {
-      const cur = await this.api.getSettings();
-      const next = cur.editor_style === "plain" ? "rich" : "plain";
-      await this.api.setSettings({ ...cur, editor_style: next });
-      this.store.set({ editorStyle: next });
+      await this.updateSettings(async (cur) => {
+        const next = cur.editor_style === "plain" ? "rich" : "plain";
+        await this.api.setSettings({ ...cur, editor_style: next });
+        this.store.set({ editorStyle: next });
+      });
       this.syncStyle();
     } catch (e) {
       this.setErr(errText(e));
@@ -737,10 +750,11 @@ export class Controller {
 
   async toggleFrontMatter() {
     try {
-      const cur = await this.api.getSettings();
-      const next = !cur.show_front_matter;
-      await this.api.setSettings({ ...cur, show_front_matter: next });
-      this.store.set({ showFrontMatter: next });
+      await this.updateSettings(async (cur) => {
+        const next = !cur.show_front_matter;
+        await this.api.setSettings({ ...cur, show_front_matter: next });
+        this.store.set({ showFrontMatter: next });
+      });
       this.syncStyle();
     } catch (e) {
       this.setErr(errText(e));
@@ -778,10 +792,11 @@ export class Controller {
 
   async toggleSort() {
     try {
-      const cur = await this.api.getSettings();
-      const next = cur.sort === "title" ? "modified" : "title";
-      await this.api.setSettings({ ...cur, sort: next });
-      this.store.set({ sort: next });
+      await this.updateSettings(async (cur) => {
+        const next = cur.sort === "title" ? "modified" : "title";
+        await this.api.setSettings({ ...cur, sort: next });
+        this.store.set({ sort: next });
+      });
       await this.resort();
     } catch (e) {
       this.setErr(errText(e));
@@ -806,7 +821,7 @@ export class Controller {
   async saveSettings(next: Settings): Promise<string | null> {
     const cur = this.store.get().settings ?? (await this.api.getSettings());
     try {
-      await this.api.setSettings(next); // on hotkey registration failure this throws and the old hotkey stays
+      await this.updateSettings(() => this.api.setSettings(next)); // on hotkey registration failure this throws and the old hotkey stays
     } catch (err) {
       return err === "not-found" ? "Folder not found" : String(err);
     }
@@ -827,7 +842,7 @@ export class Controller {
     try {
       const dir = await this.ui.chooseDirectory();
       if (typeof dir !== "string") return;
-      await this.api.setSettings({ ...(await this.api.getSettings()), notes_dir: dir });
+      await this.updateSettings((cur) => this.api.setSettings({ ...cur, notes_dir: dir }));
       this.store.set({ phase: "ready" });
       await this.runSearch(true);
       void this.refreshTitles();

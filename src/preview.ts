@@ -153,7 +153,7 @@ export function mountPreview(
     else {
       const href = a.getAttribute("href") ?? "";
       // in-note anchors (footnote [1] and its ↩ back-link) scroll the preview; never navigate the window
-      if (href.startsWith("#")) el.querySelector(`[id="${CSS.escape(decodeURIComponent(href.slice(1)))}"]`)?.scrollIntoView({ block: "center" });
+      if (href.startsWith("#")) el.querySelector(`[id="${CSS.escape(safeDecode(href.slice(1)))}"]`)?.scrollIntoView({ block: "center" });
       else {
         const url = externalUrl(href);
         if (url) opts.openExternal(url);
@@ -174,4 +174,13 @@ export function mountPreview(
       timer = setTimeout(draw, 150);
     },
   };
+}
+
+/** decodeURIComponent, or the raw text when it isn't valid percent-encoding ("#50%"). */
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
 }

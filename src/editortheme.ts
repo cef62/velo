@@ -1,6 +1,6 @@
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView, ViewPlugin, drawSelection, dropCursor, highlightSpecialChars, keymap } from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { defaultKeymap, historyKeymap } from "@codemirror/commands";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
@@ -54,8 +54,7 @@ export function writingSetup(): Extension[] {
     return { destroy: () => (darkMq?.removeEventListener("change", onChange), themeAttr.disconnect()) };
   });
   return [
-    highlightSpecialChars(),
-    history(),
+    highlightSpecialChars(), // undo history: the editor's own undoHistory() slot
     drawSelection(),
     dropCursor(),
     EditorState.allowMultipleSelections.of(true),

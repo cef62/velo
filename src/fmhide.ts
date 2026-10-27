@@ -1,10 +1,18 @@
-import { EditorSelection, EditorState, StateField, Transaction, type Extension, type Text } from "@codemirror/state";
+import { Compartment, EditorSelection, EditorState, StateField, Transaction, type Extension, type Text } from "@codemirror/state";
+import { history } from "@codemirror/commands";
 import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
 import { frontMatterRange } from "./frontmatter";
 
 /** frontMatterRange of a CodeMirror doc, reading only the first lines (a block closes within 200). */
 export function docFrontMatter(doc: Text) {
   return frontMatterRange(doc.sliceString(0, doc.line(Math.min(doc.lines, 201)).to));
+}
+
+/** Undo history in a slot a note load can empty: an undo must never bring back the previous note's text
+ *  (it would be autosaved into the open note). Dispatch `reset` as separate transactions after the load. */
+export function undoHistory() {
+  const slot = new Compartment();
+  return { extension: slot.of(history()), reset: [{ effects: slot.reconfigure([]) }, { effects: slot.reconfigure(history()) }] };
 }
 
 /** Replace the whole doc with the caret at the top; a hidden front matter's caret guard then moves it past the block. */
