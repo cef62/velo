@@ -85,6 +85,8 @@ Rust backend in `src-tauri` (Tauri 2); UI in `src` with React 19, Park UI v1 (Ar
 
 velo generates one age X25519 identity. It is kept in the OS keychain (so locked notes open without a prompt on this machine) and a passphrase-wrapped copy is stored in `.velo/identity.age` (so you can unlock on another machine, or recover). Each locked note is age-encrypted to that identity as `Title.md.age`.
 
+Lock all (⌥⌘E) forgets the decrypted notes and the key until you enter your passphrase again; quitting and relaunching unlocks from the keychain as usual.
+
 Decrypt outside velo with the [`age` CLI](https://github.com/FiloSottile/age):
 
 ```sh
@@ -97,9 +99,9 @@ On Linux the keychain needs a Secret Service provider such as gnome-keyring (or 
 
 ## Unsigned builds
 
-Release builds are not signed or notarized.
+Release builds are not notarized: on macOS they carry only an ad-hoc signature, on Windows none.
 
-- macOS: right-click the app, choose Open, then confirm. Or run `xattr -dr com.apple.quarantine /Applications/velo.app`.
+- macOS: open the app once, then in System Settings › Privacy & Security click "Open Anyway". Or run `xattr -dr com.apple.quarantine /Applications/velo.app`.
 - Windows: on the SmartScreen dialog click "More info", then "Run anyway".
 
 ## Known limitations
