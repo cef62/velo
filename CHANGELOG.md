@@ -1,5 +1,11 @@
 # velo
 
+## 0.7.0
+
+### Minor Changes
+
+- 37c08f8: Added a Tasks view listing every open task across notes with due and done dates, quick capture from anywhere, a daily note, and new task-list notes.
+
 ## 0.6.1
 
 ### Patch Changes
