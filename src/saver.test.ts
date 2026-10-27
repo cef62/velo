@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { SaveController } from "./saver";
 import { latest } from "./latest";
+import { noMeta } from "./app/fakes";
+import { stampChange } from "./frontmatter";
 
-const doc = { path: "a.md", title: "a", text: "base", hash: "h0", encrypted: false };
+const doc = { path: "a.md", title: "a", text: "base", hash: "h0", encrypted: false, meta: noMeta };
 let text = "";
 const mk = (over: Partial<ConstructorParameters<typeof SaveController>[0]> = {}) => {
   const d = {
-    saveNote: vi.fn(async () => ({ kind: "saved" as const, hash: "h1" })),
+    saveNote: vi.fn(async () => ({ kind: "saved" as const, hash: "h1", front_matter: null, meta: noMeta })),
     openNote: vi.fn(async () => ({ ...doc, text: "disk", hash: "hd" })),
     getText: () => text,
     setText: (t: string) => void (text = t),
@@ -60,7 +62,7 @@ test("conflict without late edit loads disk version", async () => {
 });
 
 test("save rejection: stays dirty, error surfaced, retries", async () => {
-  const saveNote = vi.fn().mockRejectedValueOnce("locked").mockResolvedValue({ kind: "saved", hash: "h1" });
+  const saveNote = vi.fn().mockRejectedValueOnce("locked").mockResolvedValue({ kind: "saved", hash: "h1", front_matter: null, meta: noMeta });
   const { c, d } = mk({ saveNote });
   type(c, "x");
   await vi.advanceTimersByTimeAsync(500);
@@ -233,7 +235,7 @@ test("onSaving true during save, false after (also on rejection)", async () => {
   const seen: boolean[] = [];
   let fail!: (e: unknown) => void;
   const saveNote = vi.fn()
-    .mockImplementationOnce(async () => { expect(seen).toEqual([true]); return { kind: "saved" as const, hash: "h1" }; })
+    .mockImplementationOnce(async () => { expect(seen).toEqual([true]); return { kind: "saved" as const, hash: "h1", front_matter: null, meta: noMeta }; })
     .mockImplementationOnce(() => new Promise((_, rej) => (fail = rej)));
   const { c } = mk({ saveNote, onSaving: (on: boolean) => void seen.push(on) });
   type(c, "x");
@@ -246,4 +248,57 @@ test("onSaving true during save, false after (also on rejection)", async () => {
   fail("disk full");
   expect(await f).toBe(false);
   expect(seen).toEqual([true, false, true, false]);
+});
+
+// The editor side of applyFrontMatter: splice without calling edit() (a non-user change).
+const applyFm = (block: string, sent: string | null) => {
+  const c = stampChange(text, block, sent);
+  if (c) text = text.slice(0, c.from) + c.insert + text.slice(c.to);
+};
+const FM = "---\ncreated: 1\nmodified: 2\n---\n";
+
+test("stamp applies only to an unchanged block, late body edits kept", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const saveNote = vi.fn()
+    .mockImplementationOnce(async () => { await gate; return { kind: "saved" as const, hash: "h1", front_matter: FM, meta: noMeta }; })
+    .mockImplementation(async () => ({ kind: "saved" as const, hash: "h2", front_matter: null, meta: noMeta }));
+  const onMeta = vi.fn();
+  const { c } = mk({ saveNote, applyFrontMatter: applyFm, onMeta });
+  type(c, "body");
+  const p = c.flush();
+  type(c, "body+late");
+  release();
+  await p;
+  expect(text).toBe(FM + "body+late"); // block inserted, late keystrokes kept
+  expect(onMeta).toHaveBeenCalledWith(noMeta);
+  expect(c.isDirty()).toBe(true);
+  await c.flush();
+  expect(saveNote).toHaveBeenLastCalledWith("a.md", FM + "body+late", "h1");
+
+  // block edited during the save: the stamp is skipped, the edit stays dirty
+  let release2!: () => void;
+  const gate2 = new Promise<void>((r) => (release2 = r));
+  saveNote.mockImplementationOnce(async () => { await gate2; return { kind: "saved" as const, hash: "h3", front_matter: FM.replace("2", "3"), meta: noMeta }; });
+  type(c, FM + "more");
+  const p2 = c.flush();
+  type(c, FM.replace("created: 1", "created: 0") + "more");
+  release2();
+  await p2;
+  expect(text).toBe(FM.replace("created: 1", "created: 0") + "more");
+  expect(c.isDirty()).toBe(true);
+});
+
+test("stamp application doesn't mark dirty or trigger another save", async () => {
+  const saveNote = vi.fn(async () => ({ kind: "saved" as const, hash: "h1", front_matter: FM, meta: noMeta }));
+  const { c } = mk({ saveNote, applyFrontMatter: applyFm });
+  type(c, "x");
+  await vi.advanceTimersByTimeAsync(500);
+  expect(text).toBe(FM + "x");
+  expect(c.isDirty()).toBe(false);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(saveNote).toHaveBeenCalledTimes(1);
+  type(c, FM + "xy");
+  await vi.advanceTimersByTimeAsync(500);
+  expect(saveNote).toHaveBeenLastCalledWith("a.md", FM + "xy", "h1"); // base hash from the save result
 });

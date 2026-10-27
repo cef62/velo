@@ -20,8 +20,15 @@ pub fn hash(bytes: &[u8]) -> String {
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum SaveResult {
-    Saved { hash: String },
+    /// `front_matter` (the stamped block) and `meta` are filled in by the vault.
+    Saved { hash: String, front_matter: Option<String>, meta: crate::vault::NoteMeta },
     Conflict { conflict_path: String, disk_hash: String },
+}
+
+/// Epoch-ms modification and birth times (0 when the platform has none) and size.
+pub fn meta_of(md: &std::fs::Metadata) -> Meta {
+    let ms = |t: io::Result<std::time::SystemTime>| t.ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as i64);
+    Meta { mtime: ms(md.modified()), size: md.len(), birth: ms(md.created()) }
 }
 
 pub struct Store {
@@ -44,12 +51,7 @@ impl Store {
             if !md.is_file() {
                 continue;
             }
-            let mtime = md
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map_or(0, |d| d.as_millis() as i64);
-            out.push((path, note, Meta { mtime, size: md.len() }));
+            out.push((path, note, meta_of(&md)));
         }
         Ok(out)
     }
@@ -61,7 +63,10 @@ impl Store {
     pub fn write_atomic(&self, path: &Path, bytes: &[u8]) -> io::Result<String> {
         let name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
         let tmp = path.with_file_name(format!(".{name}.tmp"));
-        let res = std::fs::write(&tmp, bytes).and_then(|_| std::fs::rename(&tmp, path));
+        // sync before the rename: after a power cut the note is either the old or the new version, never empty
+        let res = std::fs::File::create(&tmp)
+            .and_then(|mut f| io::Write::write_all(&mut f, bytes).and_then(|_| f.sync_all()))
+            .and_then(|_| std::fs::rename(&tmp, path));
         if let Err(e) = res {
             let _ = std::fs::remove_file(&tmp);
             return Err(e);
@@ -90,9 +95,9 @@ impl Store {
                     disk_hash: hash(&disk),
                 })
             }
-            Ok(_) => Ok(SaveResult::Saved { hash: self.write_atomic(path, bytes)? }),
+            Ok(_) => Ok(SaveResult::Saved { hash: self.write_atomic(path, bytes)?, front_matter: None, meta: Default::default() }),
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                Ok(SaveResult::Saved { hash: self.write_atomic(path, bytes)? })
+                Ok(SaveResult::Saved { hash: self.write_atomic(path, bytes)?, front_matter: None, meta: Default::default() })
             }
             Err(e) => Err(e),
         }

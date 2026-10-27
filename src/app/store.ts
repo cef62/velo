@@ -1,4 +1,4 @@
-import type { Settings, TagCount } from "../api";
+import type { NoteMeta, RevisionInfo, Settings, TagCount } from "../api";
 import { resolve, type Action } from "../shortcuts";
 
 /** Minimal observable state: React reads it through useSyncExternalStore, the controller writes it. */
@@ -23,6 +23,17 @@ export function createStore<T>(init: T): Store<T> {
     },
   };
 }
+
+/** Note info panel data for the open note; backlinks/revisions load only while the panel is open. */
+export interface InfoState {
+  meta: NoteMeta | null;
+  words: number;
+  tags: string[]; // front-matter tags merged with body #tags
+  backlinks: number | null;
+  revisions: RevisionInfo[] | null;
+  preview: { id: string; text: string } | null;
+}
+export const noInfo: InfoState = { meta: null, words: 0, tags: [], backlinks: null, revisions: null, preview: null };
 
 export interface AppState {
   phase: "loading" | "setup" | "ready"; // setup = no notes folder
@@ -49,6 +60,10 @@ export interface AppState {
   theme: "system" | "light" | "dark";
   fontSize: number;
   headerLabels: boolean;
+  writeFrontMatter: boolean;
+  showFrontMatter: boolean;
+  infoOpen: boolean;
+  info: InfoState;
   sort: "modified" | "title";
   keys: Record<Action, string>;
   isMac: boolean;
@@ -84,6 +99,10 @@ export const initialState = (isMac: boolean): AppState => ({
   theme: "system",
   fontSize: 14,
   headerLabels: false,
+  writeFrontMatter: true,
+  showFrontMatter: false,
+  infoOpen: false,
+  info: noInfo,
   sort: "modified",
   keys: resolve(undefined, isMac),
   isMac,

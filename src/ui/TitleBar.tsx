@@ -1,10 +1,11 @@
-import { TriangleAlert } from "lucide-react";
+import { Info, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { css } from "styled-system/css";
 import { titleBar } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
-import { Button, Kbd, Spinner } from "@/components/ui";
+import { Button, IconButton, Kbd, Spinner, Tooltip } from "@/components/ui";
+import { formatBinding, NONE } from "../shortcuts";
 import { useStore } from "./useStore";
 
 const c = titleBar();
@@ -39,6 +40,7 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
   useEffect(() => {
     if (s.renaming) input.current?.select();
   }, [s.renaming]);
+  const b = s.keys.toggle_info === NONE ? "" : ` (${formatBinding(s.keys.toggle_info, s.isMac)})`;
   const bar = { ...c, root: `${c.root} ${root}` };
 
   return (
@@ -96,6 +98,13 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
           Saving…
         </span>
       ) : null}
+      {s.openPath && (
+        <Tooltip content={`Note info${b}`} openDelay={500}>
+          <IconButton className={css({ "&[aria-pressed=true]": { bg: "velo.accentSubtleHover", color: "velo.accentText" } })} variant="plain" size="sm" aria-label="Note info" aria-pressed={s.infoOpen} marginLeft="auto" onClick={() => void controller.toggleInfo()}>
+            <Info size={16} aria-hidden />
+          </IconButton>
+        </Tooltip>
+      )}
     </div>
   );
 }

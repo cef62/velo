@@ -1,4 +1,5 @@
 use crate::names::NoteFile;
+use crate::frontmatter::{self, FrontMatter};
 use crate::text::{extract_links, extract_tags, fold};
 use rusqlite::{Connection, params, params_from_iter};
 use serde::{Deserialize, Serialize};
@@ -39,6 +40,32 @@ pub struct Meta {
     /// milliseconds
     pub mtime: i64,
     pub size: u64,
+    /// File birth time in ms; 0 when the platform has none.
+    pub birth: i64,
+}
+
+/// Effective `(created, created_src, modified, modified_src)`: front matter wins, else file times
+/// (created = min(birth, mtime)).
+pub fn effective_dates(fm: Option<&FrontMatter>, m: &Meta) -> (i64, &'static str, i64, &'static str) {
+    let file_created = if m.birth > 0 { m.birth.min(m.mtime) } else { m.mtime };
+    let (c, cs) = fm.and_then(|f| f.created).map_or((file_created, "file"), |d| (d.timestamp_millis(), "frontmatter"));
+    let (md, ms) = fm.and_then(|f| f.modified).map_or((m.mtime, "file"), |d| (d.timestamp_millis(), "frontmatter"));
+    (c, cs, md, ms)
+}
+
+/// Body `#tags` plus front-matter `tags:` (one leading `#` stripped, invalid text ignored), same fold/display rules.
+pub fn all_tags(body: &str, fm: Option<&FrontMatter>) -> Vec<(String, String)> {
+    let mut out = extract_tags(body);
+    let mut seen: HashSet<String> = out.iter().map(|(f, _)| f.clone()).collect();
+    for raw in fm.map_or(&[][..], |f| &f.tags[..]) {
+        let t = raw.trim();
+        let t = t.strip_prefix('#').unwrap_or(t);
+        let valid = t.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '/')) && t.chars().any(char::is_alphabetic);
+        if valid && seen.insert(fold(t)) {
+            out.push((fold(t), t.to_string()));
+        }
+    }
+    out
 }
 
 pub struct Index {
@@ -47,17 +74,29 @@ pub struct Index {
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS notes(path TEXT PRIMARY KEY, title TEXT NOT NULL, title_folded TEXT NOT NULL,
-  mtime INTEGER NOT NULL, size INTEGER NOT NULL, encrypted INTEGER NOT NULL, preview TEXT NOT NULL);
+  mtime INTEGER NOT NULL, size INTEGER NOT NULL, encrypted INTEGER NOT NULL, preview TEXT NOT NULL,
+  created INTEGER NOT NULL, created_src TEXT NOT NULL, modified INTEGER NOT NULL, modified_src TEXT NOT NULL);
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(path UNINDEXED, body, tokenize="trigram remove_diacritics 1");
 CREATE TABLE IF NOT EXISTS links(src TEXT NOT NULL, dst_folded TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tags(path TEXT NOT NULL, tag_folded TEXT NOT NULL, tag_display TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS aliases(path TEXT NOT NULL, alias_folded TEXT NOT NULL, alias_display TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS aliases_alias ON aliases(alias_folded);
+CREATE INDEX IF NOT EXISTS aliases_path ON aliases(path);
 CREATE INDEX IF NOT EXISTS tags_tag ON tags(tag_folded);
 CREATE INDEX IF NOT EXISTS tags_path ON tags(path);
-CREATE INDEX IF NOT EXISTS notes_mtime ON notes(mtime);
+CREATE INDEX IF NOT EXISTS notes_modified ON notes(modified);
 CREATE INDEX IF NOT EXISTS notes_title ON notes(title_folded);
 CREATE INDEX IF NOT EXISTS links_dst ON links(dst_folded);
 CREATE INDEX IF NOT EXISTS links_src ON links(src);
 "#;
+
+const DELETES: [&str; 5] = [
+    "DELETE FROM notes_fts WHERE rowid=(SELECT rowid FROM notes WHERE path=?1)",
+    "DELETE FROM notes WHERE path=?1",
+    "DELETE FROM links WHERE src=?1",
+    "DELETE FROM tags WHERE path=?1",
+    "DELETE FROM aliases WHERE path=?1",
+];
 
 fn preview(title: &str, body: &str) -> String {
     let rest = match body.split_once('\n') {
@@ -91,10 +130,10 @@ impl Index {
         // journal_mode returns a row, so read it instead of executing.
         let _: String = db.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
         db.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON;")?;
-        // Older indexes lack tags: drop them so the vault's reconcile reindexes every note.
+        // Older indexes lack tags, dates or aliases: drop them so the vault's reconcile reindexes every note.
         // DROP, not DELETE: deleting every FTS5 row one by one took ~1 min at 10k notes.
-        if db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? < 2 {
-            db.execute_batch("DROP TABLE IF EXISTS notes_fts; DROP TABLE IF EXISTS notes; DROP TABLE IF EXISTS links; DROP TABLE IF EXISTS tags; PRAGMA user_version=2;")?;
+        if db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? < 3 {
+            db.execute_batch("DROP TABLE IF EXISTS notes_fts; DROP TABLE IF EXISTS notes; DROP TABLE IF EXISTS links; DROP TABLE IF EXISTS tags; DROP TABLE IF EXISTS aliases; PRAGMA user_version=3;")?;
         }
         db.execute_batch(SCHEMA)?;
         // FTS5 deletes otherwise leave old segments (all trigrams) in notes_fts_data.
@@ -110,21 +149,25 @@ impl Index {
 
     pub fn known(&self) -> anyhow::Result<HashMap<String, Meta>> {
         let mut st = self.db.prepare("SELECT path, mtime, size FROM notes")?;
-        let rows = st.query_map([], |r| Ok((r.get(0)?, Meta { mtime: r.get(1)?, size: r.get::<_, i64>(2)? as u64 })))?;
+        let rows = st.query_map([], |r| Ok((r.get(0)?, Meta { mtime: r.get(1)?, size: r.get::<_, i64>(2)? as u64, birth: 0 })))?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
     pub fn upsert(&mut self, path: &str, nf: &NoteFile, meta: &Meta, body: Option<&str>) -> anyhow::Result<()> {
         let tx = self.db.transaction()?;
-        for sql in ["DELETE FROM notes_fts WHERE rowid=(SELECT rowid FROM notes WHERE path=?1)", "DELETE FROM notes WHERE path=?1", "DELETE FROM links WHERE src=?1", "DELETE FROM tags WHERE path=?1"] {
+        for sql in DELETES {
             tx.execute(sql, [path])?;
         }
+        // Locked notes: plaintext (and so front matter) never reaches SQLite; file dates only.
         let body = if nf.encrypted { None } else { body };
+        let fm = body.and_then(frontmatter::parse);
+        let text = body.map(frontmatter::body);
+        let (created, created_src, modified, modified_src) = effective_dates(fm.as_ref(), meta);
         tx.execute(
-            "INSERT INTO notes(path,title,title_folded,mtime,size,encrypted,preview) VALUES(?,?,?,?,?,?,?)",
-            params![path, nf.title, fold(&nf.title), meta.mtime, meta.size as i64, nf.encrypted, body.map(|b| preview(&nf.title, b)).unwrap_or_default()],
+            "INSERT INTO notes(path,title,title_folded,mtime,size,encrypted,preview,created,created_src,modified,modified_src) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            params![path, nf.title, fold(&nf.title), meta.mtime, meta.size as i64, nf.encrypted, text.map(|b| preview(&nf.title, b)).unwrap_or_default(), created, created_src, modified, modified_src],
         )?;
-        if let Some(b) = body {
+        if let Some(b) = text {
             // FTS rowid == notes.rowid so deletes and joins are rowid lookups, not scans.
             let rowid = tx.last_insert_rowid();
             tx.execute("INSERT INTO notes_fts(rowid, path, body) VALUES(?,?,?)", params![rowid, path, b])?;
@@ -132,8 +175,14 @@ impl Index {
             for d in dsts {
                 tx.execute("INSERT INTO links(src,dst_folded) VALUES(?,?)", params![path, d])?;
             }
-            for (f, d) in extract_tags(b) {
+            for (f, d) in all_tags(b, fm.as_ref()) {
                 tx.execute("INSERT INTO tags(path,tag_folded,tag_display) VALUES(?,?,?)", params![path, f, d])?;
+            }
+            let mut seen = HashSet::new();
+            for a in fm.iter().flat_map(|f| &f.aliases) {
+                if seen.insert(fold(a)) {
+                    tx.execute("INSERT INTO aliases(path,alias_folded,alias_display) VALUES(?,?,?)", params![path, fold(a), a])?;
+                }
             }
         }
         Ok(tx.commit()?)
@@ -141,7 +190,7 @@ impl Index {
 
     pub fn remove(&mut self, path: &str) -> anyhow::Result<()> {
         let tx = self.db.transaction()?;
-        for sql in ["DELETE FROM notes_fts WHERE rowid=(SELECT rowid FROM notes WHERE path=?1)", "DELETE FROM notes WHERE path=?1", "DELETE FROM links WHERE src=?1", "DELETE FROM tags WHERE path=?1"] {
+        for sql in DELETES {
             tx.execute(sql, [path])?;
         }
         Ok(tx.commit()?)
@@ -151,21 +200,26 @@ impl Index {
         let folded = fold(query);
         let terms: Vec<&str> = folded.split_whitespace().collect();
         let order = match sort {
-            Sort::Modified => "mtime DESC, path ASC",
+            Sort::Modified => "modified DESC, path ASC",
             Sort::Title => "title_folded ASC, path ASC",
         };
         let tags: Vec<String> = tags.iter().map(|t| fold(t)).collect();
         let tag_cond = |p: &str| tags.iter().map(|_| format!(" AND EXISTS (SELECT 1 FROM tags t WHERE t.path = {p}path AND t.tag_folded = ?)")).collect::<String>();
-        let cols = "path, title, preview, mtime, encrypted, title_folded, rowid";
+        let cols = "path, title, preview, modified, encrypted, title_folded, rowid";
         let esc: Vec<String> = terms.iter().map(|t| like_escape(t)).collect();
         let (union, args, long): (String, Vec<String>, Vec<usize>) = if terms.is_empty() {
             (format!("SELECT {cols}, 0 AS grp FROM notes WHERE 1{}", tag_cond("notes.")), tags.clone(), vec![])
         } else {
-            let cond = |p: &str, ts: &[usize]| ts.iter().map(|_| format!("{p}title_folded LIKE '%' || ? || '%' ESCAPE '\\'")).collect::<Vec<_>>().join(" AND ");
+            // Title or any alias matches every term in `ts`; takes the terms' args twice (title, then alias).
+            let cond = |p: &str, ts: &[usize]| {
+                let like = |c: &str| ts.iter().map(|_| format!("{c} LIKE '%' || ? || '%' ESCAPE '\\'")).collect::<Vec<_>>().join(" AND ");
+                format!("(({}) OR EXISTS (SELECT 1 FROM aliases a WHERE a.path = {p}path AND {}))", like(&format!("{p}title_folded")), like("a.alias_folded"))
+            };
             let all: Vec<usize> = (0..terms.len()).collect();
             // Group 0: title matches.
-            let mut sql = format!("SELECT {cols}, 0 AS grp FROM notes WHERE {}{}", cond("", &all), tag_cond("notes."));
+            let mut sql = format!("SELECT {cols}, 0 AS grp FROM notes WHERE {}{}", cond("notes.", &all), tag_cond("notes."));
             let mut args = esc.clone();
+            args.extend(esc.iter().cloned());
             args.extend(tags.iter().cloned());
             let (long, short): (Vec<usize>, Vec<usize>) = all.iter().partition(|&&i| terms[i].chars().count() >= 3);
             if !long.is_empty() {
@@ -173,13 +227,14 @@ impl Index {
                 let m = long.iter().map(|&i| format!("\"{}\"", terms[i].replace('"', "\"\""))).collect::<Vec<_>>().join(" ");
                 let short_cond: String = short.iter().map(|&i| format!(" AND {}", cond("n.", &[i]))).collect();
                 sql += &format!(
-                    " UNION ALL SELECT n.path, n.title, n.preview, n.mtime, n.encrypted, n.title_folded, n.rowid, 1 AS grp \
+                    " UNION ALL SELECT n.path, n.title, n.preview, n.modified, n.encrypted, n.title_folded, n.rowid, 1 AS grp \
                      FROM notes_fts JOIN notes n ON n.rowid = notes_fts.rowid WHERE notes_fts MATCH ?{short_cond} AND NOT ({}){}",
                     cond("n.", &all),
                     tag_cond("n.")
                 );
                 args.push(m);
-                args.extend(short.iter().map(|&i| esc[i].clone()));
+                args.extend(short.iter().flat_map(|&i| [esc[i].clone(), esc[i].clone()]));
+                args.extend(esc.iter().cloned());
                 args.extend(esc.iter().cloned());
                 args.extend(tags.iter().cloned());
             }
@@ -191,7 +246,7 @@ impl Index {
             if !terms.is_empty() || !tags.is_empty() {
             let wanted: Vec<&str> = tags.iter().map(String::as_str).collect();
             for (path, plain) in unlocked {
-                let row = self.db.query_row("SELECT title, title_folded, mtime FROM notes WHERE path=?", [path], |r| {
+                let row = self.db.query_row("SELECT title, title_folded, modified FROM notes WHERE path=?", [path], |r| {
                     Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
                 });
                 let Ok((title, tf, mtime)) = row else { continue };
@@ -199,10 +254,12 @@ impl Index {
                 if tags.is_empty() && terms.iter().all(|t| tf.contains(t)) {
                     continue; // already a group 0 title hit
                 }
-                let pf = fold(plain);
-                let have: Vec<String> = if wanted.is_empty() { vec![] } else { extract_tags(plain).into_iter().map(|(f, _)| f).collect() }; // only needed under a tag filter
+                let plain_body = frontmatter::body(plain);
+                let fm = frontmatter::parse(plain);
+                let pf = fold(plain_body);
+                let have: Vec<String> = if wanted.is_empty() { vec![] } else { all_tags(plain_body, fm.as_ref()).into_iter().map(|(f, _)| f).collect() }; // only needed under a tag filter
                 if wanted.iter().all(|w| have.iter().any(|h| h == w)) && terms.iter().all(|t| tf.contains(t) || pf.contains(t)) {
-                    g2.push((tf, path.clone(), mtime, Hit { path: path.clone(), title, snippet: plain.chars().take(120).collect(), mtime, encrypted: true }));
+                    g2.push((tf, path.clone(), mtime, Hit { path: path.clone(), title, snippet: plain_body.chars().take(120).collect(), mtime, encrypted: true }));
                 }
             }
         }
@@ -259,12 +316,12 @@ impl Index {
     }
 
     pub fn find_title(&self, title: &str) -> anyhow::Result<Option<String>> {
-        let mut st = self.db.prepare("SELECT path FROM notes WHERE title_folded=? LIMIT 1")?;
+        let mut st = self.db.prepare("SELECT path FROM notes WHERE title_folded=?1 UNION ALL SELECT path FROM aliases WHERE alias_folded=?1 LIMIT 1")?;
         Ok(st.query_map([fold(title)], |r| r.get(0))?.next().transpose()?)
     }
 
     pub fn titles(&self) -> anyhow::Result<Vec<String>> {
-        let mut st = self.db.prepare("SELECT title FROM notes")?;
+        let mut st = self.db.prepare("SELECT title FROM notes UNION ALL SELECT alias_display FROM aliases")?;
         Ok(st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?)
     }
 
@@ -285,7 +342,7 @@ mod tests {
         for (p, body, m) in notes {
             let title = p.strip_suffix(".md").unwrap_or(p).to_string();
             let nf = NoteFile { title, encrypted: false };
-            i.upsert(p, &nf, &Meta { mtime: *m, size: body.len() as u64 }, Some(body)).unwrap();
+            i.upsert(p, &nf, &Meta { mtime: *m, size: body.len() as u64, birth: 0 }, Some(body)).unwrap();
         }
         i
     }
@@ -328,7 +385,7 @@ mod tests {
         assert_eq!(p, vec!["apple", "éclair", "Zeta"]); }
     #[test] fn unlocked_body_matches_appended_last() {
         let mut i = idx(&[("secret a.md", "", 1), ("secret b.md", "", 2)]);
-        i.upsert("e.md.age", &NoteFile { title: "e".into(), encrypted: true }, &Meta { mtime: 99, size: 1 }, None).unwrap();
+        i.upsert("e.md.age", &NoteFile { title: "e".into(), encrypted: true }, &Meta { mtime: 99, size: 1, birth: 0 }, None).unwrap();
         let u = HashMap::from([("e.md.age".to_string(), "my secret".to_string())]);
         for sort in [Sort::Modified, Sort::Title] {
             assert_eq!(paths(&i, "secret", sort, 0, 10, &u).last().unwrap(), "e.md.age");
@@ -356,7 +413,7 @@ mod tests {
         assert_eq!(i.search_page("100%", Sort::Modified, 0, 10, &[], &HashMap::new()).unwrap().hits.len(), 1);
         assert_eq!(i.search_page("_", Sort::Modified, 0, 10, &[], &HashMap::new()).unwrap().hits.len(), 0); }
     #[test] fn encrypted_body_not_indexed_unless_unlocked() {
-        let mut i = idx(&[]); i.upsert("s.md.age", &NoteFile { title: "s".into(), encrypted: true }, &Meta { mtime: 1, size: 1 }, None).unwrap();
+        let mut i = idx(&[]); i.upsert("s.md.age", &NoteFile { title: "s".into(), encrypted: true }, &Meta { mtime: 1, size: 1, birth: 0 }, None).unwrap();
         assert!(i.search_page("secretword", Sort::Modified, 0, 10, &[], &HashMap::new()).unwrap().hits.is_empty());
         let u = HashMap::from([("s.md.age".to_string(), "the secretword".to_string())]);
         assert_eq!(i.search_page("secretword", Sort::Modified, 0, 10, &[], &u).unwrap().hits[0].path, "s.md.age"); }
@@ -364,7 +421,7 @@ mod tests {
         assert_eq!(i.backlinks("target note").unwrap(), vec!["a.md"]);
         assert_eq!(i.find_title("TARGET NOTE").unwrap().as_deref(), Some("Target Note.md")); }
     #[test] fn titles_lists_all_incl_encrypted() { let mut i = idx(&[("a.md", "", 1), ("B c.md", "", 2)]);
-        i.upsert("s.md.age", &NoteFile { title: "s".into(), encrypted: true }, &Meta { mtime: 1, size: 1 }, None).unwrap();
+        i.upsert("s.md.age", &NoteFile { title: "s".into(), encrypted: true }, &Meta { mtime: 1, size: 1, birth: 0 }, None).unwrap();
         let mut t = i.titles().unwrap(); t.sort();
         assert_eq!(t, vec!["B c", "a", "s"]); }
     #[test] fn tags_listed_with_counts_and_filter_is_and() {
@@ -380,7 +437,7 @@ mod tests {
     }
     #[test] fn unlocked_note_matches_tag_filter_in_memory() {
         let mut i = idx(&[]);
-        i.upsert("e.md.age", &NoteFile { title: "e".into(), encrypted: true }, &Meta { mtime: 1, size: 1 }, None).unwrap();
+        i.upsert("e.md.age", &NoteFile { title: "e".into(), encrypted: true }, &Meta { mtime: 1, size: 1, birth: 0 }, None).unwrap();
         let u = HashMap::from([("e.md.age".to_string(), "x #Sec".to_string())]);
         assert!(i.tags().unwrap().is_empty());
         for q in ["", "x"] {
@@ -403,8 +460,8 @@ mod tests {
     }
     #[test] fn total_includes_unlocked_locked_notes() {
         let mut i = idx(&[("secret a.md", "", 1), ("secret b.md", "", 2)]);
-        i.upsert("e.md.age", &NoteFile { title: "secret e".into(), encrypted: true }, &Meta { mtime: 99, size: 1 }, None).unwrap();
-        i.upsert("f.md.age", &NoteFile { title: "f".into(), encrypted: true }, &Meta { mtime: 98, size: 1 }, None).unwrap();
+        i.upsert("e.md.age", &NoteFile { title: "secret e".into(), encrypted: true }, &Meta { mtime: 99, size: 1, birth: 0 }, None).unwrap();
+        i.upsert("f.md.age", &NoteFile { title: "f".into(), encrypted: true }, &Meta { mtime: 98, size: 1, birth: 0 }, None).unwrap();
         let u = HashMap::from([("e.md.age".to_string(), "my secret".to_string()), ("f.md.age".to_string(), "my secret".to_string())]);
         for lim in [1, 2, 10] { assert_eq!(i.search_page("secret", Sort::Title, 0, lim, &[], &u).unwrap().total, 4, "{lim}"); }
         assert_eq!(i.search_page("secret", Sort::Title, 0, 10, &[], &HashMap::new()).unwrap().total, 3);
@@ -412,17 +469,61 @@ mod tests {
     #[test] fn schema_upgrade_reindexes() {
         let dir = tempfile::tempdir().unwrap(); let db = dir.path().join("i.db");
         let mut i = Index::open(&db).unwrap();
-        i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1 }, Some("#x")).unwrap(); drop(i);
-        Connection::open(&db).unwrap().execute_batch("PRAGMA user_version=1").unwrap();
+        i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("#x")).unwrap(); drop(i);
+        Connection::open(&db).unwrap().execute_batch("PRAGMA user_version=2").unwrap();
         let i = Index::open(&db).unwrap(); assert!(i.known().unwrap().is_empty()); assert!(i.tags().unwrap().is_empty());
-        assert_eq!(i.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
-        let mut i = i; i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1 }, Some("#x")).unwrap(); drop(i);
+        assert_eq!(i.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 3);
+        let mut i = i; i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("#x")).unwrap(); drop(i);
         assert_eq!(Index::open(&db).unwrap().known().unwrap().len(), 1);
     }
     #[test] fn remove_clears_all_tables() { let mut i = idx(&[("a.md", "see [[B]] zebra", 1)]); i.remove("a.md").unwrap();
         assert!(i.search_page("zebra", Sort::Modified, 0, 10, &[], &HashMap::new()).unwrap().hits.is_empty()); assert!(i.backlinks("b").unwrap().is_empty()); }
     #[test] fn upsert_replaces_and_remove_drops_tags() { let mut i = idx(&[("a.md", "#one", 1)]);
-        i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 2, size: 1 }, Some("#two")).unwrap();
+        i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 2, size: 1, birth: 0 }, Some("#two")).unwrap();
         assert_eq!(i.tags().unwrap()[0].tag, "two"); assert_eq!(i.tags().unwrap().len(), 1);
         i.remove("a.md").unwrap(); assert!(i.tags().unwrap().is_empty()); }
+    const FM: &str = "---\ncreated: 2020-01-02T03:04:05+00:00\nmodified: 2021-06-07T08:09:10+00:00\ntags: [Work, \"#Idea\"]\naliases: [Nick, Other]\n---\nbody zebra\n";
+    fn row(i: &Index, p: &str) -> (i64, String, i64, String) {
+        i.db.query_row("SELECT created, created_src, modified, modified_src FROM notes WHERE path=?", [p], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap()
+    }
+    #[test] fn frontmatter_dates_win_and_file_fallback() {
+        let mut i = idx(&[("a.md", FM, 5000), ("b.md", "plain", 7000)]);
+        assert_eq!(row(&i, "a.md"), (1577934245000, "frontmatter".into(), 1623053350000, "frontmatter".into()));
+        assert_eq!(row(&i, "b.md"), (7000, "file".into(), 7000, "file".into()));
+        // birth earlier than mtime wins; later birth is ignored
+        let nf = NoteFile { title: "b".into(), encrypted: false };
+        i.upsert("b.md", &nf, &Meta { mtime: 7000, size: 1, birth: 100 }, Some("x")).unwrap(); assert_eq!(row(&i, "b.md").0, 100);
+        i.upsert("b.md", &nf, &Meta { mtime: 7000, size: 1, birth: 9000 }, Some("x")).unwrap(); assert_eq!(row(&i, "b.md").0, 7000);
+    }
+    #[test] fn frontmatter_not_searchable_and_not_in_snippet() {
+        let i = idx(&[("a.md", FM, 1)]);
+        assert!(i.search_page("2020-01-02", Sort::Modified, 0, 10, &[], &HashMap::new()).unwrap().hits.is_empty());
+        let h = &i.search_page("", Sort::Modified, 0, 10, &[], &HashMap::new()).unwrap().hits[0];
+        assert_eq!(h.snippet, "body zebra\n"); assert_eq!(h.mtime, 1623053350000);
+        let h = &i.search_page("zebra", Sort::Modified, 0, 10, &[], &HashMap::new()).unwrap().hits[0];
+        assert_eq!(h.snippet, "body zebra");
+    }
+    #[test] fn frontmatter_tags_merge() {
+        let i = idx(&[("a.md", &format!("{FM}#work #more"), 1)]);
+        assert_eq!(i.tags().unwrap().iter().map(|t| t.tag.as_str()).collect::<Vec<_>>(), vec!["Idea", "more", "work"]);
+    }
+    #[test] fn aliases_count_as_titles() {
+        let i = idx(&[("a.md", FM, 1), ("b.md", "x", 2)]);
+        assert_eq!(i.find_title("NICK").unwrap().as_deref(), Some("a.md"));
+        assert!(i.titles().unwrap().contains(&"Nick".to_string()));
+        let h = i.search_page("nic", Sort::Modified, 0, 10, &[], &HashMap::new()).unwrap();
+        assert_eq!(h.hits.iter().map(|h| h.path.as_str()).collect::<Vec<_>>(), vec!["a.md"]);
+        let j = idx(&[("c.md", "nick nick", 9), ("a.md", FM, 1)]);
+        assert_eq!(paths(&j, "nick", Sort::Modified, 0, 10, &HashMap::new()), vec!["a.md", "c.md"]);
+    }
+    #[test] fn recent_sort_uses_effective_modified() {
+        let i = idx(&[("old.md", FM, 99999999999999), ("new.md", "x", 1623053350001)]);
+        assert_eq!(paths(&i, "", Sort::Modified, 0, 10, &HashMap::new()), vec!["new.md", "old.md"]);
+    }
+    #[test] fn locked_note_gets_file_dates_only() {
+        let mut i = idx(&[]);
+        i.upsert("e.md.age", &NoteFile { title: "e".into(), encrypted: true }, &Meta { mtime: 5, size: 1, birth: 0 }, Some(FM)).unwrap();
+        assert_eq!(row(&i, "e.md.age"), (5, "file".into(), 5, "file".into()));
+        assert!(i.titles().unwrap().iter().all(|t| t != "Nick"));
+    }
 }

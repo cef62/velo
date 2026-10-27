@@ -24,7 +24,7 @@ fn search_p95_under_50ms() {
         }
         let nf = parse_note_file(&p).unwrap();
         let body = std::fs::read_to_string(&p).unwrap();
-        let meta = Meta { mtime: n, size: body.len() as u64 };
+        let meta = Meta { mtime: n, size: body.len() as u64, birth: 0 };
         idx.upsert(p.file_name().unwrap().to_str().unwrap(), &nf, &meta, Some(&body)).unwrap();
         n += 1;
     }

@@ -1,7 +1,9 @@
 pub mod commands;
 pub mod crypto;
+pub mod frontmatter;
 pub mod index;
 pub mod names;
+pub mod revisions;
 pub mod settings;
 pub mod store;
 pub mod text;
@@ -64,6 +66,7 @@ pub fn run() {
                 // gated from the start so an early UI query sees "indexing", not "no-folder"
                 indexing: Mutex::new(dir.is_some().then_some((0, 0))),
                 open_gen: Default::default(),
+                locked: Default::default(),
                 settings_path,
                 data_dir,
             });
@@ -97,6 +100,9 @@ pub fn run() {
             commands::unlock_note,
             commands::lock_all,
             commands::delete_note,
+            commands::list_revisions,
+            commands::read_revision,
+            commands::snapshot_text,
             commands::has_identity,
             commands::setup_passphrase,
             commands::identity_file_exists,

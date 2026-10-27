@@ -59,3 +59,14 @@ test("GitHub alerts, tables, strikethrough, autolinks, footnotes", () => {
   expect(out).toContain('<a href="https://x.y">https://x.y</a>');
   expect(out).toContain('class="footnotes"');
 });
+
+test("front matter is stripped before rendering", () => {
+  const out = renderMarkdown("---\ncreated: 2026-10-27\ntags: [a]\n---\n# Hi", () => true);
+  expect(out).not.toContain("created");
+  expect(out).not.toContain("<hr>");
+  expect(out).toContain("<h1>Hi</h1>");
+});
+
+test("task lines still count the stripped front matter", () => {
+  expect(renderMarkdown("---\na: 1\n---\n- [ ] t", () => true)).toContain('data-line="3"');
+});

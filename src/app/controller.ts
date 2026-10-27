@@ -11,12 +11,13 @@ import { latest } from "../latest";
 import { History } from "../history";
 import { errText } from "../errtext";
 import { enterAction, fold, moveSelection } from "../search";
-import { pruneSelection, toggleTag } from "../tags";
+import { extractTags, pruneSelection, toggleTag } from "../tags";
+import { stripFrontMatter, wordCount } from "../frontmatter";
 import { formatBinding, matches, resolve, type Action } from "../shortcuts";
 import { isMenuKey, linkFor, menuModel, type MenuAction } from "../contextmenu";
 import { isLockedPath } from "../passphrase";
 import type { MenuSpec, UiPort } from "./ports";
-import type { AppState, Store } from "./store";
+import { noInfo, type AppState, type Store } from "./store";
 
 export type Api = typeof ApiModule;
 
@@ -48,6 +49,7 @@ export class Controller {
   protected readonly newShow = latest();
   protected searchSeq = 0;
   protected searching: Promise<void> = Promise.resolve(); // latest list reset, awaited by Enter so it never acts on stale rows
+  protected settingsQueue: Promise<unknown> = Promise.resolve();
 
   // Wikilinks, tags and links act the same in the preview and in rich edit.
   readonly links: RichOpts = {
@@ -84,6 +86,11 @@ export class Controller {
       onSaved: () => this.scheduleTagRefresh(),
       onConflict: (p) => this.store.set({ conflict: p }),
       onSaving: (on) => this.store.set({ saving: on }),
+      onMeta: (m) => {
+        this.store.set((s) => ({ info: { ...s.info, meta: m } }));
+        this.textInfo();
+        void this.loadInfo();
+      },
     };
   }
 
@@ -103,6 +110,7 @@ export class Controller {
     this.editor = ed;
     const s = this.store.get();
     ed.setRich(s.editorStyle === "rich");
+    ed.setShowFrontMatter(s.showFrontMatter);
     ed.setReadOnly(s.indexing !== null);
   }
 
@@ -153,6 +161,7 @@ export class Controller {
 
   protected syncStyle() {
     this.editor?.setRich(this.store.get().editorStyle === "rich");
+    this.editor?.setShowFrontMatter(this.store.get().showFrontMatter);
   }
 
   async start() {
@@ -165,6 +174,9 @@ export class Controller {
       sort: s.sort ?? "modified", // before the first search, which pages with it
       editorStyle: s.editor_style === "plain" ? "plain" : "rich",
       headerLabels: s.header_labels === true,
+      writeFrontMatter: s.write_front_matter !== false,
+      showFrontMatter: s.show_front_matter === true,
+      infoOpen: s.info_panel === true,
     });
     this.syncStyle();
     if (!s.notes_dir) this.store.set({ phase: "setup" });
@@ -205,12 +217,69 @@ export class Controller {
 
   /** The note is now in the editor: title, path and lock state follow it; the conflict banner belongs to the previous note. */
   protected loadedDoc(doc: NoteDoc) {
-    this.store.set({ title: doc.title, openPath: doc.path, encrypted: doc.encrypted, conflict: null });
+    this.store.set({ title: doc.title, openPath: doc.path, encrypted: doc.encrypted, conflict: null, info: { ...noInfo, meta: doc.meta } });
+    this.textInfo();
+    void this.loadInfo();
+  }
+
+  /** Word count and merged tags from the editor text (on load and save, not per keystroke). */
+  protected textInfo() {
+    const text = this.editor.getText();
+    this.store.set((s) => {
+      const seen = new Set<string>();
+      const tags = [...(s.info.meta?.tags ?? []), ...extractTags(stripFrontMatter(text))].filter((t) => !seen.has(fold(t)) && seen.add(fold(t)));
+      return { info: { ...s.info, words: wordCount(text), tags } };
+    });
+  }
+
+  protected readonly infoReq = latest();
+  /** Backlinks and revisions for the open note; no backend calls while the panel is closed. */
+  async loadInfo() {
+    const { infoOpen, openPath, title } = this.store.get();
+    if (!infoOpen || !openPath) return;
+    const fresh = this.infoReq();
+    try {
+      const [backlinks, revisions] = await Promise.all([this.api.backlinkCount(title), this.api.listRevisions(openPath)]);
+      if (fresh() && this.store.get().openPath === openPath) this.store.set((s) => ({ info: { ...s.info, backlinks, revisions } }));
+    } catch (e) {
+      if (e !== "locked") console.error("info load failed", e);
+    }
+  }
+
+  /** Settings read-modify-writes run one at a time: two quick toggles must not write back each other's stale copy. */
+  protected updateSettings(f: (cur: Settings) => Promise<void>): Promise<void> {
+    const run = this.settingsQueue.then(async () => f(await this.api.getSettings()));
+    this.settingsQueue = run.catch(() => {});
+    return run;
+  }
+
+  async toggleInfo() {
+    try {
+      await this.updateSettings(async (cur) => {
+        const next = !cur.info_panel;
+        await this.api.setSettings({ ...cur, info_panel: next });
+        this.store.set({ infoOpen: next });
+      });
+      void this.loadInfo();
+    } catch (e) {
+      this.setErr(errText(e));
+    }
+  }
+
+  async selectRevision(id: string) {
+    const path = this.store.get().openPath;
+    if (!path) return;
+    try {
+      const text = await this.api.readRevision(path, id);
+      if (this.store.get().openPath === path) this.store.set((s) => ({ info: { ...s.info, preview: { id, text } } }));
+    } catch (e) {
+      this.setErr(errText(e));
+    }
   }
 
   /** The editor holds no note any more (deleted, or locked away by Lock all). */
   protected closedDoc() {
-    this.store.set({ title: "", openPath: null, encrypted: false, conflict: null });
+    this.store.set({ title: "", openPath: null, encrypted: false, conflict: null, info: noInfo });
   }
 
   /**
@@ -234,7 +303,7 @@ export class Controller {
       this.history.loaded(doc.path, how);
     } catch (e) {
       if (how === "nav" && e === "not-found") return "missing";
-      if (e === "locked" && !retried) {
+      if (e === "locked" && !retried && how !== "auto") { // never pop the dialog up while typing in search
         const ok = await this.promptPassphrase({ trigger: "open", context: null });
         if (ok) return this.show(path, how, true);
         if (ok === null) return how !== "nav"; // no key on this computer: keep the copy-identity error
@@ -375,12 +444,14 @@ export class Controller {
       this.setErr(BUSY_MSG);
       return false;
     }
+    const current = this.newShow(); // a pending auto-show must not replace this note when its reply lands later
     try {
       if (!(await this.editor.flush())) return false;
       // The title cache is the "existed before" signal (open_or_create returns a plain NoteDoc). A stale cache only
       // mislabels an empty/external note, which the empty-body rule below still opens in edit mode.
       const created = !this.titles.has(fold(title));
       const doc = await this.api.openOrCreate(title);
+      if (!current()) return true;
       if (!this.editor.load(doc)) return false;
       this.loadedDoc(doc);
       this.setErr("");
@@ -654,10 +725,11 @@ export class Controller {
 
   async toggleLayout() {
     try {
-      const cur = await this.api.getSettings();
-      const next = { ...cur, layout: cur.layout === "horizontal" ? ("vertical" as const) : ("horizontal" as const) };
-      await this.api.setSettings(next);
-      this.applyLook(next);
+      await this.updateSettings(async (cur) => {
+        const next = { ...cur, layout: cur.layout === "horizontal" ? ("vertical" as const) : ("horizontal" as const) };
+        await this.api.setSettings(next);
+        this.applyLook(next);
+      });
     } catch (e) {
       this.setErr(errText(e));
     }
@@ -665,11 +737,54 @@ export class Controller {
 
   async toggleStyle() {
     try {
-      const cur = await this.api.getSettings();
-      const next = cur.editor_style === "plain" ? "rich" : "plain";
-      await this.api.setSettings({ ...cur, editor_style: next });
-      this.store.set({ editorStyle: next });
+      await this.updateSettings(async (cur) => {
+        const next = cur.editor_style === "plain" ? "rich" : "plain";
+        await this.api.setSettings({ ...cur, editor_style: next });
+        this.store.set({ editorStyle: next });
+      });
       this.syncStyle();
+    } catch (e) {
+      this.setErr(errText(e));
+    }
+  }
+
+  async toggleFrontMatter() {
+    try {
+      await this.updateSettings(async (cur) => {
+        const next = !cur.show_front_matter;
+        await this.api.setSettings({ ...cur, show_front_matter: next });
+        this.store.set({ showFrontMatter: next });
+      });
+      this.syncStyle();
+    } catch (e) {
+      this.setErr(errText(e));
+    }
+  }
+
+  /** Replace the open note with revision `id` as a user edit, after confirming and snapshotting the current text. */
+  async restoreRevision(id: string) {
+    if (this.busy) return this.setErr(BUSY_MSG); // lock hand-off: the editor is suspended, the file is moving
+    const path = this.editor.currentPath();
+    if (!path || !(await this.editor.flush())) return;
+    try {
+      const ts = this.store.get().info.revisions?.find((r) => r.id === id)?.ts;
+      const when = ts === undefined ? "earlier" : new Date(ts).toLocaleString();
+      if (!(await this.ui.confirm(`Replace the note with this version from ${when}? The current text is kept as a revision.`, { title: "Restore revision", okLabel: "Restore" }))) return;
+      if (this.busy) return this.setErr(BUSY_MSG);
+      const text = await this.api.readRevision(path, id);
+      // Snapshot what the editor holds right before the replace; again if keys were typed meanwhile.
+      // A failed snapshot aborts: the current text must stay recoverable.
+      let cur;
+      do {
+        cur = this.editor.getText();
+        await this.api.snapshotText(path, cur);
+      } while (this.editor.getText() !== cur);
+      if (this.busy) return this.setErr(BUSY_MSG);
+      if (this.editor.currentPath() === path) {
+        this.editor.replaceText(text);
+        this.store.set((s) => ({ info: { ...s.info, preview: null } }));
+        void this.loadInfo(); // the snapshot above is a new revision
+      }
     } catch (e) {
       this.setErr(errText(e));
     }
@@ -677,10 +792,11 @@ export class Controller {
 
   async toggleSort() {
     try {
-      const cur = await this.api.getSettings();
-      const next = cur.sort === "title" ? "modified" : "title";
-      await this.api.setSettings({ ...cur, sort: next });
-      this.store.set({ sort: next });
+      await this.updateSettings(async (cur) => {
+        const next = cur.sort === "title" ? "modified" : "title";
+        await this.api.setSettings({ ...cur, sort: next });
+        this.store.set({ sort: next });
+      });
       await this.resort();
     } catch (e) {
       this.setErr(errText(e));
@@ -705,12 +821,12 @@ export class Controller {
   async saveSettings(next: Settings): Promise<string | null> {
     const cur = this.store.get().settings ?? (await this.api.getSettings());
     try {
-      await this.api.setSettings(next); // on hotkey registration failure this throws and the old hotkey stays
+      await this.updateSettings(() => this.api.setSettings(next)); // on hotkey registration failure this throws and the old hotkey stays
     } catch (err) {
       return err === "not-found" ? "Folder not found" : String(err);
     }
     this.applyLook(next);
-    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, headerLabels: next.header_labels, settings: null });
+    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, headerLabels: next.header_labels, writeFrontMatter: next.write_front_matter, showFrontMatter: next.show_front_matter, infoOpen: next.info_panel, settings: null });
     this.preview?.refresh(); // watermark shows the binding
     this.syncStyle();
     if (next.notes_dir !== cur.notes_dir) {
@@ -726,7 +842,7 @@ export class Controller {
     try {
       const dir = await this.ui.chooseDirectory();
       if (typeof dir !== "string") return;
-      await this.api.setSettings({ ...(await this.api.getSettings()), notes_dir: dir });
+      await this.updateSettings((cur) => this.api.setSettings({ ...cur, notes_dir: dir }));
       this.store.set({ phase: "ready" });
       await this.runSearch(true);
       void this.refreshTitles();
@@ -781,6 +897,8 @@ export class Controller {
   }
 
   protected readonly actions: Record<Exclude<Action, "toggle_window">, () => void> = {
+    toggle_info: () => void this.toggleInfo(),
+    toggle_front_matter: () => void this.toggleFrontMatter(),
     focus_search: () => this.focusSearch(),
     toggle_preview: () => this.togglePreview(),
     rename: () => this.startRename(),
@@ -828,7 +946,11 @@ export class Controller {
     void this.refreshTitles();
     void this.refreshTags();
     const open = this.editor.currentPath();
-    if (open && paths.includes(open)) this.editor.onExternalChange(open);
+    if (open && paths.includes(open)) {
+      // The reload replaces the editor text: keep the old one as a revision (a dirty editor conflicts instead).
+      if (!this.editor.isDirty()) await this.api.snapshotText(open, this.editor.getText()).catch((e) => console.warn("snapshot before reload failed:", e));
+      this.editor.onExternalChange(open);
+    }
   }
 
   onIndexProgress(done: number, total: number) {

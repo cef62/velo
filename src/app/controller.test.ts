@@ -1,18 +1,18 @@
 import { expect, test } from "vitest";
 import type { Page } from "../api";
 import { Controller, type KeyEventLike } from "./controller";
-import { FakeEditor, FakePreview, deferred, fakeApi, fakeUi, hit, settle } from "./fakes";
+import { FakeEditor, FakePreview, deferred, fakeApi, fakeUi, hit, noMeta, settle } from "./fakes";
 import { createStore, initialState } from "./store";
 
 function setup(notes: Record<string, string> = { A: "a", B: "b", C: "c" }) {
   const { api } = fakeApi(notes);
-  const { ui, calls, menus } = fakeUi();
+  const { ui, calls, menus, answers } = fakeUi();
   const store = createStore(initialState(true));
   const c = new Controller(store, api, ui, { isMac: true, platform: "mac" });
   const editor = new FakeEditor();
   c.attachEditor(editor);
   c.attachPreview(new FakePreview());
-  return { c, api, ui, calls, store, editor, notes, menus };
+  return { c, api, ui, calls, store, editor, notes, menus, answers };
 }
 const P = (t: string) => `/n/${t}.md`;
 
@@ -153,7 +153,7 @@ test("lock hand-off busy refuses show", async () => {
   expect(editor.suspended).toBe(true);
   expect(await c.show(P("B"))).toBe(false);
   expect(store.get().err).toBe("Busy — try again in a moment");
-  api.openNote.mockResolvedValueOnce({ path: "/n/A.age", title: "A", text: "a", hash: "h", encrypted: true });
+  api.openNote.mockResolvedValueOnce({ path: "/n/A.age", title: "A", text: "a", hash: "h", encrypted: true, meta: noMeta });
   d.resolve("/n/A.age");
   await locking;
   expect(editor.path).toBe("/n/A.age");
@@ -219,6 +219,38 @@ test("opening a locked note with no key anywhere shows the copy-identity error a
     "This note was locked with a velo key that isn't on this computer. Copy `.velo/identity.age` from the other computer into this notes folder.",
   );
   expect(calls.some((x) => x[0] === "passphrase")).toBe(false);
+});
+
+test("a locked first hit while typing shows the error but never the passphrase dialog", async () => {
+  const { c, api, store, calls } = setup();
+  api.openNote.mockRejectedValueOnce("locked");
+  api.hasIdentity.mockResolvedValue(false);
+  await c.show(P("A"), "auto");
+  expect(store.get().err).toBe("Note is locked");
+  expect(calls.some((x) => x[0] === "passphrase")).toBe(false);
+});
+
+test("quick settings toggles don't write back each other's stale copy", async () => {
+  const { c, api } = setup();
+  let saved = await api.getSettings();
+  api.getSettings.mockImplementation(async () => ({ ...saved }));
+  api.setSettings.mockImplementation(async (s) => {
+    await settle();
+    saved = s;
+  });
+  await Promise.all([c.toggleInfo(), c.toggleSort()]);
+  expect(saved).toMatchObject({ info_panel: true, sort: "title" });
+});
+
+test("a slow auto-show doesn't replace the note Enter just opened", async () => {
+  const { c, api, store } = setup();
+  const d = deferred<ReturnType<typeof api.openNote> extends Promise<infer T> ? T : never>();
+  api.openNote.mockImplementationOnce(() => d.promise);
+  const auto = c.show(P("A"), "auto");
+  await c.openTitle("B", "enter");
+  d.resolve({ path: P("A"), title: "A", text: "a", hash: "h", encrypted: false, meta: noMeta });
+  await auto;
+  expect(store.get().openPath).toBe(P("B"));
 });
 
 const key = (code: string, mods: { meta?: boolean; shift?: boolean } = {}, where: Partial<KeyEventLike> = {}): KeyEventLike => ({
@@ -301,7 +333,7 @@ test("rename commits through flush, backlinks confirm and reload", async () => {
   expect(store.get().renaming).toBe(true);
   api.backlinkCount.mockResolvedValueOnce(2);
   api.renameNote.mockResolvedValueOnce({ path: P("Z"), rewritten: 2 });
-  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false });
+  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta });
   await c.commitRename("  Z ");
   expect(calls).toContainEqual(["confirm", "Update 2 links to the new title?", { title: "Rename", kind: "info" }]);
   expect(api.renameNote).toHaveBeenCalledWith(P("A"), "Z", true);
@@ -333,4 +365,111 @@ test("listReset bumps on a fresh result set, not on refresh or paging", async ()
   c.setQuery("a");
   await settle();
   expect(store.get().listReset).toBeGreaterThan(r);
+});
+
+test("external change snapshots the old text before reload", async () => {
+  const { c, api, editor } = setup();
+  await c.runSearch(true);
+  await settle(); // A open
+  editor.text = "old A";
+  await c.onNotesChanged([P("A")]);
+  expect(api.snapshotText).toHaveBeenCalledWith(P("A"), "old A");
+  expect(api.snapshotText.mock.invocationCallOrder[0]).toBeLessThan(editor.onExternalChange.mock.invocationCallOrder[0]);
+  // a dirty editor goes the conflict way: no snapshot of unsaved text; a snapshot failure still reloads
+  editor.dirty = true;
+  await c.onNotesChanged([P("A")]);
+  expect(api.snapshotText).toHaveBeenCalledTimes(1);
+  editor.dirty = false;
+  api.snapshotText.mockRejectedValueOnce("locked");
+  await c.onNotesChanged([P("A")]);
+  expect(editor.onExternalChange).toHaveBeenCalledTimes(3);
+});
+
+test("restore snapshots current text then replaces it as an edit", async () => {
+  const { c, api, editor } = setup();
+  await c.runSearch(true);
+  await settle();
+  editor.text = "now";
+  api.readRevision.mockResolvedValueOnce("then");
+  await c.restoreRevision("42");
+  expect(editor.flush).toHaveBeenCalled();
+  expect(api.readRevision).toHaveBeenCalledWith(P("A"), "42");
+  expect(api.snapshotText).toHaveBeenCalledWith(P("A"), "now");
+  expect(editor.text).toBe("then");
+  expect(editor.dirty).toBe(true);
+});
+
+test("toggle_front_matter persists", async () => {
+  const { c, api, store, editor } = setup();
+  await c.start();
+  expect(editor.showFrontMatter).toBe(false);
+  store.set({ keys: { ...store.get().keys, toggle_front_matter: "Mod+KeyJ" } });
+  expect(c.onKeyDown(key("KeyJ", { meta: true }))).toBe(true);
+  await settle();
+  expect(api.setSettings).toHaveBeenCalledWith(expect.objectContaining({ show_front_matter: true }));
+  expect(store.get().showFrontMatter).toBe(true);
+  expect(editor.showFrontMatter).toBe(true);
+});
+
+test("restore snapshots keys typed during the revision read, and refuses while busy", async () => {
+  const { c, api, editor, store } = setup();
+  await c.runSearch(true);
+  await settle();
+  editor.text = "now";
+  const rev = deferred<string>();
+  api.readRevision.mockReturnValueOnce(rev.promise);
+  const p = c.restoreRevision("42");
+  await settle();
+  editor.text = "now+typed";
+  rev.resolve("then");
+  await p;
+  expect(api.snapshotText).toHaveBeenLastCalledWith(P("A"), "now+typed");
+  expect(editor.text).toBe("then");
+
+  c.busy = true;
+  await c.restoreRevision("42");
+  expect(store.get().err).toBe("Busy — try again in a moment");
+  expect(api.readRevision).toHaveBeenCalledTimes(1);
+});
+
+test("info loads only while open", async () => {
+  const { c, api, store } = setup();
+  await c.runSearch(true);
+  await settle();
+  expect(api.listRevisions).not.toHaveBeenCalled();
+  expect(api.backlinkCount).not.toHaveBeenCalled();
+  api.listRevisions.mockResolvedValue([{ id: "1", ts: 5, size: 1 }]);
+  api.backlinkCount.mockResolvedValue(3);
+  await c.toggleInfo();
+  await settle();
+  expect(api.setSettings).toHaveBeenCalledWith(expect.objectContaining({ info_panel: true }));
+  expect(store.get().info.backlinks).toBe(3);
+  expect(store.get().info.revisions).toEqual([{ id: "1", ts: 5, size: 1 }]);
+});
+
+test("meta updates after save", async () => {
+  const { c, store, editor } = setup({ A: "one two three" });
+  store.set({ infoOpen: true });
+  await c.runSearch(true);
+  await settle();
+  expect(store.get().info.words).toBe(3);
+  editor.text = "---\nx: 1\n---\nfour words in #tag";
+  c.editorOpts().onMeta({ ...noMeta, modified: 9, modified_src: "frontmatter", tags: ["fm"] });
+  await settle();
+  expect(store.get().info.meta?.modified).toBe(9);
+  expect(store.get().info.words).toBe(4);
+  expect(store.get().info.tags).toEqual(["fm", "tag"]);
+});
+
+test("restore asks for confirmation and does nothing when declined", async () => {
+  const { c, api, editor, calls, answers } = setup();
+  await c.runSearch(true);
+  await settle();
+  editor.text = "now";
+  answers.confirm = false;
+  await c.restoreRevision("42");
+  expect(calls.find((x) => x[0] === "confirm")?.[2]).toEqual({ title: "Restore revision", okLabel: "Restore" });
+  expect(String(calls.find((x) => x[0] === "confirm")?.[1])).toMatch(/^Replace the note with this version from .+\? The current text is kept as a revision\.$/);
+  expect(api.readRevision).not.toHaveBeenCalled();
+  expect(editor.text).toBe("now");
 });

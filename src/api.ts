@@ -1,10 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type Hit = { path: string; title: string; snippet: string; mtime: number; encrypted: boolean };
-export type NoteDoc = { path: string; title: string; text: string; hash: string; encrypted: boolean };
-export type SaveResult = { kind: "saved"; hash: string } | { kind: "conflict"; conflict_path: string; disk_hash: string };
+export type NoteMeta = { created: number; created_src: "frontmatter" | "file"; modified: number; modified_src: "frontmatter" | "file"; tags: string[]; aliases: string[] };
+export type NoteDoc = { path: string; title: string; text: string; hash: string; encrypted: boolean; meta: NoteMeta };
+export type SaveResult = { kind: "saved"; hash: string; front_matter: string | null; meta: NoteMeta } | { kind: "conflict"; conflict_path: string; disk_hash: string };
 export type RenameResult = { path: string; rewritten: number };
-export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; header_labels: boolean; shortcuts: Record<string, string> };
+export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; header_labels: boolean; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean };
 
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<void>("set_settings", { settings });
@@ -22,6 +23,10 @@ export const lockNote = (path: string) => invoke<string>("lock_note", { path });
 export const unlockNote = (path: string) => invoke<string>("unlock_note", { path });
 export const lockAll = () => invoke<void>("lock_all");
 export const deleteNote = (path: string) => invoke<void>("delete_note", { path });
+export type RevisionInfo = { id: string; ts: number; size: number };
+export const listRevisions = (path: string) => invoke<RevisionInfo[]>("list_revisions", { path });
+export const readRevision = (path: string, id: string) => invoke<string>("read_revision", { path, id });
+export const snapshotText = (path: string, text: string) => invoke<void>("snapshot_text", { path, text });
 export const hasIdentity = () => invoke<boolean>("has_identity");
 export const setupPassphrase = (passphrase: string) => invoke<string | null>("setup_passphrase", { passphrase });
 export const identityFileExists = () => invoke<boolean>("identity_file_exists");

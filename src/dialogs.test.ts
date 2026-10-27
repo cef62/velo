@@ -3,7 +3,7 @@ import { isLockedPath, passphraseDialogMode, passphraseError } from "./passphras
 import { DEFAULTS } from "./shortcuts";
 import { clampFont, fixedKeyRefusal, recorderStep, toSettings } from "./settingsform";
 
-const base = { notes_dir: "/n", layout: "vertical" as const, font_size: 14, sort: "modified" as const, editor_style: "rich" as const, theme: "system" as const, header_labels: false, shortcuts: { toggle_window: "Mod+KeyA", rename: "Mod+KeyR" } };
+const base = { notes_dir: "/n", layout: "vertical" as const, font_size: 14, sort: "modified" as const, editor_style: "rich" as const, theme: "system" as const, header_labels: false, write_front_matter: true, show_front_matter: false, info_panel: false, shortcuts: { toggle_window: "Mod+KeyA", rename: "Mod+KeyR" } };
 
 test("dialog wording follows identity file", () => {
   expect(passphraseDialogMode(true)).toEqual({ title: "Enter your velo passphrase", confirm: false });
@@ -34,9 +34,9 @@ test("font clamps to 10-32, junk falls back", () => {
 });
 
 test("form to settings", () => {
-  const f = { layout: "horizontal", fontSize: "40", sort: "title", theme: "dark", headerLabels: true, shortcuts: { ...base.shortcuts, rename: "Mod+KeyB" } as never };
-  expect(toSettings(base, f)).toEqual({ ...base, shortcuts: f.shortcuts, layout: "horizontal", font_size: 32, sort: "title", theme: "dark", header_labels: true });
-  expect(toSettings(base, { ...f, layout: "bogus", fontSize: "12", sort: "bogus", theme: "bogus" })).toEqual({ ...base, shortcuts: f.shortcuts, font_size: 12, header_labels: true });
+  const f = { layout: "horizontal", fontSize: "40", sort: "title", theme: "dark", headerLabels: true, writeFrontMatter: false, shortcuts: { ...base.shortcuts, rename: "Mod+KeyB" } as never };
+  expect(toSettings(base, f)).toEqual({ ...base, shortcuts: f.shortcuts, layout: "horizontal", font_size: 32, sort: "title", theme: "dark", header_labels: true, write_front_matter: false });
+  expect(toSettings(base, { ...f, layout: "bogus", fontSize: "12", sort: "bogus", theme: "bogus" })).toEqual({ ...base, shortcuts: f.shortcuts, font_size: 12, header_labels: true, write_front_matter: false });
 });
 
 test("recorder refuses fixed keys", () => {

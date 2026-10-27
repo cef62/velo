@@ -2,6 +2,7 @@ import { syntaxTree } from "@codemirror/language";
 import { StateEffect, type EditorState, type Extension, type Range } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
 import { readTag } from "./tags";
+import { docFrontMatter } from "./fmhide";
 import { externalUrl } from "./preview";
 
 // Rich edit: the text stays plain markdown; marks (#, **, >, [ ](url), [[ ]]) are hidden except on the lines the
@@ -47,6 +48,8 @@ const WIKILINK = /\[\[(.+?)\]\]/g; // same as the preview: up to the first ]], t
 /** Decorations for `ranges` (default: whole doc). Exported for tests. */
 export function buildDecorations(state: EditorState, opts: Pick<RichOpts, "exists">, ranges: readonly { from: number; to: number }[] = [{ from: 0, to: state.doc.length }]): DecorationSet {
   const doc = state.doc;
+  const fm = docFrontMatter(doc); // front matter stays raw (hidden or shown)
+  if (fm) ranges = ranges.filter((r) => r.to > fm.to).map((r) => ({ from: Math.max(r.from, fm.to), to: r.to }));
   const active = new Set<number>();
   for (const r of state.selection.ranges) for (let l = doc.lineAt(r.from).number; l <= doc.lineAt(r.to).number; l++) active.add(l);
   const onActive = (pos: number) => active.has(doc.lineAt(pos).number);

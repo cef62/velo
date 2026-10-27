@@ -15,10 +15,14 @@ pub fn applies_to(vault_dir: &Path, watched: &Path) -> bool {
 
 /// Watches `dir` (non-recursive). Paths are rebuilt as `dir.join(file_name)` so they match
 /// `Store::list` even when the OS reports canonicalized paths; non-note files are dropped.
-pub fn spawn(dir: PathBuf, on_change: impl Fn(Vec<PathBuf>) + Send + 'static) -> Result<Watcher> {
+/// `None` means events were lost (watcher error, or the OS asked for a rescan): re-check the whole folder.
+pub fn spawn(dir: PathBuf, on_change: impl Fn(Option<Vec<PathBuf>>) + Send + 'static) -> Result<Watcher> {
     let base = dir.clone();
     let mut deb = new_debouncer(Duration::from_millis(300), None, move |res: notify_debouncer_full::DebounceEventResult| {
-        let Ok(events) = res else { return };
+        let Ok(events) = res else { return on_change(None) };
+        if events.iter().any(|e| e.event.need_rescan()) {
+            return on_change(None);
+        }
         let mut paths: Vec<PathBuf> = events
             .iter()
             .flat_map(|e| e.event.paths.iter())
@@ -29,7 +33,7 @@ pub fn spawn(dir: PathBuf, on_change: impl Fn(Vec<PathBuf>) + Send + 'static) ->
         paths.sort();
         paths.dedup();
         if !paths.is_empty() {
-            on_change(paths);
+            on_change(Some(paths));
         }
     })?;
     deb.watch(&dir, RecursiveMode::NonRecursive)?;
@@ -42,7 +46,7 @@ mod tests {
     use std::time::Duration;
     #[test] fn watcher_reports_external_write() {
         let tmp = tempfile::tempdir().unwrap(); let dir = tmp.path().to_path_buf();
-        let (tx, rx) = std::sync::mpsc::channel(); let _w = spawn(dir.clone(), move |p| { tx.send(p).ok(); }).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel(); let _w = spawn(dir.clone(), move |p| { tx.send(p.unwrap_or_default()).ok(); }).unwrap();
         std::thread::sleep(Duration::from_millis(200));
         std::fs::write(dir.join(".x.md.tmp"), "t").unwrap(); std::fs::write(dir.join("y.png"), "p").unwrap(); std::fs::write(dir.join("x.md"), "hi").unwrap();
         let mut got: Vec<PathBuf> = rx.recv_timeout(Duration::from_secs(3)).unwrap();

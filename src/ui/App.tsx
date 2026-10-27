@@ -15,6 +15,7 @@ import { TagPanel } from "./TagPanel";
 import { FilterLine } from "./FilterLine";
 import { FirstRun } from "./FirstRun";
 import { SettingsDialog } from "./SettingsDialog";
+import { InfoPanel } from "./InfoPanel";
 import { PassphraseDialog } from "./PassphraseDialog";
 
 // Layout per design README: vertical = header / list / divider / note; horizontal = header over [list | divider | note].
@@ -32,6 +33,7 @@ const app = css({
     gridTemplateRows: "auto minmax(0, 1fr)",
   },
 });
+const pane = css({ flex: "1", minH: "0", minW: "0", display: "flex" });
 const note = css({ flex: "1", minH: "0", minW: "0", display: "flex", flexDirection: "column", position: "relative" });
 // Header, tag panel and filter line stack as one block; in the horizontal grid it spans both columns.
 const top = css({ flex: "none", minW: "0", "[data-layout=horizontal] &": { gridColumn: "1 / -1" } });
@@ -56,6 +58,7 @@ export function App({ controller, store }: { controller: Controller; store: Stor
       </div>
       <NoteList controller={controller} store={store} />
       <Divider store={store} app={root} />
+      <div className={pane}>
       <section className={note}>
         <TitleBar controller={controller} store={store} />
         <ConflictBanner controller={controller} store={store} />
@@ -65,6 +68,8 @@ export function App({ controller, store }: { controller: Controller; store: Stor
         {/* the editor stays mounted under the first-run screen */}
         <FirstRun controller={controller} store={store} />
       </section>
+      <InfoPanel controller={controller} store={store} />
+      </div>
       <SettingsDialog controller={controller} store={store} />
       <PassphraseDialog />
     </div>

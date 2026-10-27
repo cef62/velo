@@ -1,10 +1,12 @@
-import { Compartment } from "@codemirror/state";
+import { Annotation, Compartment, Transaction } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { writingSetup } from "./editortheme";
 import { refreshRich, richMarkdown, type RichOpts } from "./richmd";
 import { TASK_ITEM } from "./preview";
 import { SaveController } from "./saver";
-import { openNote, saveNote, type NoteDoc } from "./api";
+import { frontMatterHide, replaceAll, undoHistory } from "./fmhide";
+import { stampChange } from "./frontmatter";
+import { openNote, saveNote, type NoteDoc, type NoteMeta } from "./api";
 
 export interface Editor {
   /** false = refused because of unsaved edits. */
@@ -29,6 +31,10 @@ export interface Editor {
   getText(): string;
   /** Rich edit (marks hidden off the cursor line) or plain markdown. */
   setRich(on: boolean): void;
+  /** Show the front-matter block, or hide it (atomic, caret kept after it). */
+  setShowFrontMatter(on: boolean): void;
+  /** Replace the whole text as a user edit (dirty, autosaved): restoring a revision. */
+  replaceText(text: string): void;
   /** Re-check wikilink targets after the note titles changed. */
   refreshLinks(): void;
   /** Flip "[ ]" / "[x]" of the task item on this 0-based line (from the preview); false if not editable or not a task. */
@@ -45,8 +51,13 @@ export type EditorOpts = {
   onConflict?: (conflictPath: string) => void;
   /** A save request is in flight (true) or finished (false). */
   onSaving?: (on: boolean) => void;
+  /** Effective dates/tags/aliases after a successful save of the open note. */
+  onMeta?: (meta: NoteMeta) => void;
   rich?: RichOpts;
 };
+
+// Marks the stamped-dates change of a save: not a user edit (no dirty, no new save).
+const stamped = Annotation.define<boolean>();
 
 export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
   const host = document.createElement("div");
@@ -57,18 +68,22 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
   let loading = false;
   const editable = new Compartment(); // read-only until a note is loaded (no path to save to)
   const rich = new Compartment();
+  const fmHide = new Compartment();
+  const undo = undoHistory();
 
   const view = new EditorView({
     parent: host,
     extensions: [
       writingSetup(),
+      undo.extension,
       rich.of([]),
+      fmHide.of(frontMatterHide(true)),
       editable.of(EditorView.editable.of(false)),
       keymap.of([{ key: "Escape", run: () => (opts.onEscape?.(), true) }]),
       EditorView.updateListener.of((u) => {
         if (!u.docChanged) return;
         opts.onChange?.(); // also fires on load so the preview follows note switches
-        if (loading) return;
+        if (loading || u.transactions.some((t) => t.annotation(stamped))) return;
         opts.onEdit?.(); // user edits only (not loads)
         ctrl.edit();
       }),
@@ -77,7 +92,9 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
 
   const setText = (text: string) => {
     loading = true;
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+    // Caret to the top; a hidden front matter moves it past the block.
+    view.dispatch(replaceAll(view.state.doc, text));
+    for (const spec of undo.reset) view.dispatch(spec);
     loading = false;
   };
 
@@ -90,6 +107,14 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     onSaving: (on) => opts.onSaving?.(on),
     onError: (m) => opts.onError?.(m),
     onSaved: () => opts.onSaved?.(),
+    onMeta: (m) => opts.onMeta?.(m),
+    applyFrontMatter(block, sentBlock) {
+      const c = stampChange(view.state.doc.toString(), block, sentBlock);
+      if (!c) return;
+      const changes = view.state.changes(c);
+      // assoc 1: a caret at 0 (empty note) ends up after an inserted block, on the same body character
+      view.dispatch({ changes, selection: view.state.selection.map(changes, 1), annotations: [stamped.of(true), Transaction.addToHistory.of(false)] });
+    },
   });
 
   let wantEditable = false; // what load/suspend/resume/unload asked for
@@ -135,6 +160,11 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     focus: () => view.focus(),
     getText: () => view.state.doc.toString(),
     setRich: (on) => view.dispatch({ effects: rich.reconfigure(on && opts.rich ? richMarkdown(opts.rich) : []) }),
+    setShowFrontMatter(on) {
+      view.dispatch({ effects: fmHide.reconfigure(frontMatterHide(!on)) });
+      if (!on) view.dispatch({ selection: view.state.selection }); // re-run the caret guard: off the hidden block
+    },
+    replaceText: (text) => view.dispatch(replaceAll(view.state.doc, text)), // restore: never leave the caret before a hidden block
     refreshLinks: () => view.dispatch({ effects: refreshRich.of(null) }),
     toggleTask(line) {
       const doc = view.state.doc;
