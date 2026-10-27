@@ -9,6 +9,7 @@ import { PreviewHost } from "./PreviewHost";
 import { NoteList } from "./NoteList";
 import { TitleBar } from "./TitleBar";
 import { ConflictBanner } from "./ConflictBanner";
+import { UpdateBanner } from "./UpdateBanner";
 import { PreviewStrip } from "./PreviewStrip";
 import { Divider } from "./Divider";
 import { TagPanel } from "./TagPanel";
@@ -61,6 +62,7 @@ export function App({ controller, store }: { controller: Controller; store: Stor
       <div className={pane}>
       <section className={note}>
         <TitleBar controller={controller} store={store} />
+        <UpdateBanner controller={controller} store={store} />
         <ConflictBanner controller={controller} store={store} />
         <PreviewStrip store={store} />
         <EditorHost controller={controller} />

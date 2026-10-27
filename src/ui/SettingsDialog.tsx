@@ -58,6 +58,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
     fontSize: String(cur.font_size),
     headerLabels: cur.header_labels === true,
     writeFrontMatter: cur.write_front_matter !== false,
+    autoUpdateCheck: cur.auto_update_check !== false,
     shortcuts: resolve(cur.shortcuts, isMac),
   }));
   const set = (p: Partial<typeof d>) => setD((x) => ({ ...x, ...p }));
@@ -65,6 +66,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
   const [recording, setRecording] = useState<Action | null>(null);
   const [recMsg, setRecMsg] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
+  const [updateMsg, setUpdateMsg] = useState(""); // the dialog covers the update banner: show the result here
   const [saving, setSaving] = useState(false);
 
   const conflicts = conflictsOf(d.shortcuts);
@@ -170,6 +172,18 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
               <Checkbox.Label>Add created/modified dates to notes (front matter)</Checkbox.Label>
               <Checkbox.HiddenInput />
             </Checkbox.Root>
+          </div>
+          <div className={frow}>
+            <span className={flab}>Updates</span>
+            <div className={css({ display: "flex", alignItems: "center", gap: "3" })}>
+              <Checkbox.Root checked={d.autoUpdateCheck} onCheckedChange={(x) => set({ autoUpdateCheck: x.checked === true })} size="sm">
+                <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                <Checkbox.Label>Check for updates daily</Checkbox.Label>
+                <Checkbox.HiddenInput />
+              </Checkbox.Root>
+              <Button variant="outline" size="xs" disabled={updateMsg === "Checking…"} onClick={async () => { setUpdateMsg("Checking…"); setUpdateMsg(await controller.checkUpdates()); }}>Check now</Button>
+              <span className={help} role="status">{updateMsg}</span>
+            </div>
           </div>
           <div className={frow}>
             <span className={flab} id="set-sort">Sort</span>

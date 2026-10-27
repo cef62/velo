@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 
 export type Hit = { path: string; title: string; snippet: string; mtime: number; encrypted: boolean };
 export type NoteMeta = { created: number; created_src: "frontmatter" | "file"; modified: number; modified_src: "frontmatter" | "file"; tags: string[]; aliases: string[] };
 export type NoteDoc = { path: string; title: string; text: string; hash: string; encrypted: boolean; meta: NoteMeta };
 export type SaveResult = { kind: "saved"; hash: string; front_matter: string | null; meta: NoteMeta } | { kind: "conflict"; conflict_path: string; disk_hash: string };
 export type RenameResult = { path: string; rewritten: number };
-export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; header_labels: boolean; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean };
+export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; header_labels: boolean; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean };
 
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<void>("set_settings", { settings });
@@ -31,3 +32,8 @@ export const hasIdentity = () => invoke<boolean>("has_identity");
 export const setupPassphrase = (passphrase: string) => invoke<string | null>("setup_passphrase", { passphrase });
 export const identityFileExists = () => invoke<boolean>("identity_file_exists");
 export const indexStatus = () => invoke<[number, number] | null>("index_status");
+/** null = up to date. */
+export const checkUpdate = () => invoke<{ version: string } | null>("check_update");
+/** Downloads, installs and relaunches; resolves only on failure paths (rejects with the reason). */
+export const installUpdate = () => invoke<void>("install_update");
+export const appVersion = getVersion;

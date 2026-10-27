@@ -22,6 +22,7 @@ import { noInfo, type AppState, type Store } from "./store";
 export type Api = typeof ApiModule;
 
 const BUSY_MSG = "Busy — try again in a moment";
+const UPDATE_BUSY = "An update check or install is already running"; // update.rs BUSY
 const NO_KEY_MSG =
   "This note was locked with a velo key that isn't on this computer. Copy `.velo/identity.age` from the other computer into this notes folder.";
 
@@ -50,6 +51,7 @@ export class Controller {
   protected searchSeq = 0;
   protected searching: Promise<void> = Promise.resolve(); // latest list reset, awaited by Enter so it never acts on stale rows
   protected settingsQueue: Promise<unknown> = Promise.resolve();
+  protected installing = false;
 
   // Wikilinks, tags and links act the same in the preview and in rich edit.
   readonly links: RichOpts = {
@@ -512,7 +514,7 @@ export class Controller {
    * it is rebound to the new path, so no autosave/blur/watcher save can recreate the old path.
    */
   async toggleLock() {
-    if (this.busy) return;
+    if (this.busy) return this.setErr(BUSY_MSG);
     const path = this.editor.currentPath();
     if (!path) return;
     this.busy = true;
@@ -608,7 +610,7 @@ export class Controller {
   }
 
   async lockEverything() {
-    if (this.busy) return;
+    if (this.busy) return this.setErr(BUSY_MSG);
     this.busy = true;
     try {
       const path = this.editor.currentPath();
@@ -653,6 +655,12 @@ export class Controller {
     const { path, old } = from;
     const title = input?.trim() ?? "";
     if (!title || title === old) return this.editor.focus();
+    if (this.busy) {
+      this.setErr(BUSY_MSG);
+      return this.editor.focus();
+    }
+    this.busy = true; // its editor.load would end an update install's suspension
+    let renamed = false;
     try {
       if (!(await this.editor.flush())) return this.editor.focus();
       const n = await this.api.backlinkCount(old);
@@ -665,10 +673,15 @@ export class Controller {
       this.store.set({ title });
       this.setErr("");
       this.history.loaded(r.path, "explicit");
-      await this.runSearch(false);
-      void this.refreshTags();
+      renamed = true;
     } catch (e) {
       this.setErr(e === "already-exists" ? "A note with that title exists" : errText(e));
+    } finally {
+      this.busy = false;
+    }
+    if (renamed) {
+      await this.runSearch(false);
+      void this.refreshTags();
     }
     this.editor.focus();
   }
@@ -889,6 +902,64 @@ export class Controller {
 
   dismissConflict() {
     this.store.set({ conflict: null });
+  }
+
+  /** The background check found a new version (the backend announces each version once). */
+  onUpdateAvailable(version: string) {
+    if (this.store.get().update?.status !== "installing") this.store.set({ update: { version, status: "available" } });
+  }
+
+  /** Manual check (app menu, Settings): the result shows in the update banner, and is returned as one line for Settings. */
+  async checkUpdates(): Promise<string> {
+    if (this.store.get().update?.status === "installing") return "Installing…";
+    try {
+      const found = await this.api.checkUpdate();
+      if (found) {
+        this.store.set({ update: { version: found.version, status: "available" } });
+        return `velo ${found.version} is available`;
+      }
+      const version = await this.api.appVersion();
+      this.store.set({ update: { version, status: "current" } });
+      return `velo is up to date (${version})`;
+    } catch (e) {
+      if (e === UPDATE_BUSY) return "Already checking…"; // a repeat click, or the daily check: its result arrives on its own
+      this.setErr(errText(e));
+      return errText(e);
+    }
+  }
+
+  /** Save, freeze the editor, then install; the backend relaunches velo. On failure the editor comes back. */
+  async installUpdate() {
+    const u = this.store.get().update;
+    if (u?.status !== "available" || this.installing) return; // a repeat click
+    if (this.busy) return this.setErr(BUSY_MSG);
+    this.busy = this.installing = true;
+    try {
+      if (!(await this.editor.flush())) return; // the save error stays visible; nothing is lost
+      this.newShow(); // a note reply still on its way must not load (load ends the suspension)
+      this.editor.suspend(); // the relaunch skips the close flow: no edit may start now
+      this.store.set({ update: { ...u, status: "installing" } });
+      await this.api.installUpdate();
+    } catch (e) {
+      this.editor.resume();
+      if (e === UPDATE_BUSY) {
+        this.store.set({ update: u }); // the daily check is running; the update is still there
+        this.setErr("Checking for updates — try again in a moment");
+      } else {
+        this.store.set({ update: null }); // the backend dropped it; the next check announces it again
+        this.setErr(`Update failed: ${errText(e)}`);
+      }
+    } finally {
+      this.busy = this.installing = false;
+    }
+  }
+
+  dismissUpdate() {
+    if (this.store.get().update?.status !== "installing") this.store.set({ update: null });
+  }
+
+  openReleaseNotes(version: string) {
+    void this.ui.openUrl(`https://github.com/cef62/velo/releases/tag/v${version}`).catch((e) => this.setErr(String(e)));
   }
 
   /** Title-bar Retry after a save error. */

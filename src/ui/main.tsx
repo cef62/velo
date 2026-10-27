@@ -57,6 +57,8 @@ void listen("focus-search", () => controller.focusSearch());
 void listen<{ done: number; total: number }>("index-progress", (ev) => controller.onIndexProgress(ev.payload.done, ev.payload.total));
 void listen("index-done", () => void controller.onIndexDone());
 void listen<{ message: string }>("index-error", (ev) => controller.onIndexError(ev.payload.message));
+void listen<{ version: string }>("update-available", (ev) => controller.onUpdateAvailable(ev.payload.version));
+void listen("check-updates", () => void controller.checkUpdates());
 
 window.addEventListener("blur", () => controller.onBlur());
 void getCurrentWindow().onCloseRequested(async (e) => {

@@ -29,6 +29,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
@@ -39,6 +40,14 @@
     ],
     "macOS": {
       "signingIdentity": "-"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM2RDZDOTUxNDI5RDNCNTEKUldSUk81MUNVY25XTmg2ZXhjTTdvck9JVS83RGtGNGxHWHVNeXI5VUVtYmNjRDZDbEIxaEVGWCsK",
+      "endpoints": ["https://github.com/cef62/velo/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" },
+      "requireSignedVersion": true
     }
   }
 }

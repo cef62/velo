@@ -253,6 +253,142 @@ test("a slow auto-show doesn't replace the note Enter just opened", async () => 
   expect(store.get().openPath).toBe(P("B"));
 });
 
+test("update install saves, freezes the editor, then installs", async () => {
+  const { c, api, store, editor } = setup();
+  c.onUpdateAvailable("0.6.1");
+  await c.installUpdate();
+  expect(editor.flush).toHaveBeenCalled();
+  expect(editor.suspended).toBe(true);
+  expect(api.installUpdate).toHaveBeenCalled();
+  expect(store.get().update).toEqual({ version: "0.6.1", status: "installing" });
+});
+
+test("update install refused by a failed save installs nothing", async () => {
+  const { c, api, store, editor } = setup();
+  c.onUpdateAvailable("0.6.1");
+  editor.flushResult = false;
+  await c.installUpdate();
+  expect(api.installUpdate).not.toHaveBeenCalled();
+  expect(store.get().update?.status).toBe("available");
+});
+
+test("a failed update install gives the editor back and says why", async () => {
+  const { c, api, store, editor } = setup();
+  api.installUpdate.mockRejectedValueOnce("signature mismatch");
+  c.onUpdateAvailable("0.6.1");
+  await c.installUpdate();
+  expect(editor.suspended).toBe(false);
+  expect(store.get().update).toBeNull();
+  expect(store.get().err).toBe("Update failed: signature mismatch");
+});
+
+test("manual update check: up to date names the current version", async () => {
+  const { c, api, store } = setup();
+  await c.checkUpdates();
+  expect(store.get().update).toEqual({ version: "0.6.0", status: "current" });
+  api.checkUpdate.mockResolvedValueOnce({ version: "0.6.1" });
+  await c.checkUpdates();
+  expect(store.get().update).toEqual({ version: "0.6.1", status: "available" });
+});
+
+test("a rename in flight blocks the update install (its reload would unfreeze the editor)", async () => {
+  const { c, api, store, editor } = setup();
+  await c.runSearch(true);
+  await settle();
+  const renamed = deferred<{ path: string; rewritten: number }>();
+  api.renameNote.mockImplementationOnce(() => renamed.promise);
+  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta });
+  c.startRename();
+  const rename = c.commitRename("Z");
+  await settle();
+  c.onUpdateAvailable("0.6.1");
+  await c.installUpdate();
+  expect(api.installUpdate).not.toHaveBeenCalled();
+  expect(store.get().err).toBe("Busy — try again in a moment");
+  renamed.resolve({ path: P("Z"), rewritten: 0 });
+  await rename;
+  expect(editor.suspended).toBe(false);
+  expect(store.get().update?.status).toBe("available");
+});
+
+test("a rename committed during the update install is refused", async () => {
+  const { c, api, store } = setup();
+  await c.runSearch(true);
+  await settle();
+  api.installUpdate.mockImplementationOnce(() => new Promise(() => {})); // relaunching
+  c.onUpdateAvailable("0.6.1");
+  void c.installUpdate();
+  await settle();
+  c.startRename();
+  await c.commitRename("Z");
+  expect(api.renameNote).not.toHaveBeenCalled();
+  expect(store.get().err).toBe("Busy — try again in a moment");
+});
+
+test("repeat clicks on Install or Check now are quiet", async () => {
+  const { c, api, store } = setup();
+  api.installUpdate.mockImplementationOnce(() => new Promise(() => {}));
+  c.onUpdateAvailable("0.6.1");
+  void c.installUpdate();
+  await c.installUpdate();
+  expect(api.installUpdate).toHaveBeenCalledTimes(1);
+  expect(store.get().err).toBe("");
+  const { c: c2, api: api2, store: store2 } = setup();
+  api2.checkUpdate.mockRejectedValueOnce("An update check or install is already running");
+  expect(await c2.checkUpdates()).toBe("Already checking…");
+  expect(store2.get().err).toBe("");
+});
+
+test("an install refused because the daily check is running keeps the banner", async () => {
+  const { c, api, store, editor } = setup();
+  api.installUpdate.mockRejectedValueOnce("An update check or install is already running");
+  c.onUpdateAvailable("0.6.1");
+  await c.installUpdate();
+  expect(editor.suspended).toBe(false);
+  expect(store.get().update).toEqual({ version: "0.6.1", status: "available" });
+  expect(store.get().err).toBe("Checking for updates — try again in a moment");
+});
+
+test("manual check returns its result as a line for Settings", async () => {
+  const { c, api } = setup();
+  expect(await c.checkUpdates()).toBe("velo is up to date (0.6.0)");
+  api.checkUpdate.mockResolvedValueOnce({ version: "0.6.1" });
+  expect(await c.checkUpdates()).toBe("velo 0.6.1 is available");
+  api.checkUpdate.mockRejectedValueOnce("offline");
+  expect(await c.checkUpdates()).toBe("offline");
+});
+
+test("Lock and Lock all during an update install say busy instead of doing nothing", async () => {
+  const { c, api, store } = setup();
+  await c.runSearch(true);
+  await settle();
+  api.installUpdate.mockImplementationOnce(() => new Promise(() => {}));
+  c.onUpdateAvailable("0.6.1");
+  void c.installUpdate();
+  await settle();
+  await c.lockEverything();
+  expect(api.lockAll).not.toHaveBeenCalled();
+  expect(store.get().err).toBe("Busy — try again in a moment");
+  store.set({ err: "" });
+  await c.toggleLock();
+  expect(store.get().err).toBe("Busy — try again in a moment");
+});
+
+test("a note reply arriving during the update install doesn't unfreeze the editor", async () => {
+  const { c, api, store, editor } = setup();
+  const d = deferred<ReturnType<typeof api.openNote> extends Promise<infer T> ? T : never>();
+  api.openNote.mockImplementationOnce(() => d.promise);
+  api.installUpdate.mockImplementationOnce(() => new Promise(() => {}));
+  const auto = c.show(P("A"), "auto");
+  c.onUpdateAvailable("0.6.1");
+  void c.installUpdate();
+  await settle();
+  d.resolve({ path: P("A"), title: "A", text: "a", hash: "h", encrypted: false, meta: noMeta });
+  await auto;
+  expect(editor.suspended).toBe(true);
+  expect(store.get().openPath).toBeNull();
+});
+
 const key = (code: string, mods: { meta?: boolean; shift?: boolean } = {}, where: Partial<KeyEventLike> = {}): KeyEventLike => ({
   key: code.replace(/^Key/, "").toLowerCase(),
   code,

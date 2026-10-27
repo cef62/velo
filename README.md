@@ -104,6 +104,10 @@ Release builds are not notarized: on macOS they carry only an ad-hoc signature, 
 - macOS: open the app once, then in System Settings › Privacy & Security click "Open Anyway". Or run `xattr -dr com.apple.quarantine /Applications/velo.app`.
 - Windows: on the SmartScreen dialog click "More info", then "Run anyway".
 
+## Updates
+
+velo checks GitHub for a new release 30 seconds after launch and then once a day. When one is out, a banner offers **Install and restart**: velo saves your note, installs the update and relaunches. Check by hand from **velo → Check for Updates…** (macOS) or **Settings → Updates → Check now**; turn the daily check off in Settings. Updates are verified against velo's signing key before they install. On Linux, in-app updates are meant for the AppImage; if one fails on a .deb or .rpm install, download the new version from the Releases page. Versions before 0.6.0 have no updater: install 0.6.0 by hand once.
+
 ## Known limitations
 
 - Quitting from the Dock or at logout bypasses the unsaved-edits prompt; edits are autosaved within about 0.5 s. Cmd+Q (and closing the window) asks first.
@@ -117,7 +121,7 @@ pnpm install
 pnpm tauri dev          # run the app
 pnpm test               # frontend tests
 cd src-tauri && cargo test
-pnpm tauri build        # release bundles
+pnpm build:app          # release bundles, signed for the updater with ~/.tauri/velo.key
 ```
 
 Performance test (10k notes, release build only):
@@ -127,7 +131,9 @@ node scripts/seed.mjs 10000 fixtures/notes
 cd src-tauri && cargo test --release --test perf -- --ignored --nocapture
 ```
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`, which tests and builds all platforms into a draft GitHub release.
+Pushing a `v*` tag runs `.github/workflows/build-release.yml`, which tests and builds all platforms into a GitHub release.
+
+Release builds also produce updater artifacts (`.sig` files and `latest.json`) signed with a minisign key stored in the repository secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; the matching public key lives in `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`. `pnpm tauri build` refuses to run without the private key; `pnpm build:app` (macOS/Linux shell) reads it and its password from `~/.tauri/velo.key` and `~/.tauri/velo.password`. Forks need their own keypair (`pnpm tauri signer generate`). Never lose or commit the private key: installed apps only accept updates signed with it.
 
 ## License
 
@@ -140,4 +146,4 @@ Versions are managed with [Changesets](https://github.com/changesets/changesets)
 - Every user-visible change ships with a changeset in the same commit or PR: `pnpm changeset`, pick `patch` or `minor`, and write one past-tense sentence from the user's point of view.
 - `pnpm version-packages` applies pending changesets (bumps `package.json`, writes `CHANGELOG.md`) and mirrors the version into `src-tauri/tauri.conf.json`.
 - `pnpm release:tag` creates the `vX.Y.Z` git tag.
-- On GitHub: `ci.yml` builds and tests every PR and `main`. `release.yml` (Changesets action) opens a "Version Packages" PR while changesets are pending; merging it tags `vX.Y.Z` and dispatches `build-release.yml`, which builds macOS (arm64 + x64), Linux and Windows into a draft GitHub Release.
+- On GitHub: `ci.yml` builds and tests every PR and `main`. `release.yml` (Changesets action) opens a "Version Packages" PR while changesets are pending; merging it tags `vX.Y.Z` and dispatches `build-release.yml`, which builds macOS (arm64 + x64), Linux and Windows one after the other into a draft GitHub Release and publishes it once `latest.json` lists all four platforms.
