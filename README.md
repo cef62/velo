@@ -106,7 +106,7 @@ Release builds are not notarized: on macOS they carry only an ad-hoc signature, 
 
 ## Updates
 
-velo checks GitHub for a new release 30 seconds after launch and then once a day. When one is out, a banner offers **Install and restart**: velo saves your note, installs the update and relaunches. Check by hand from **velo → Check for Updates…** (macOS) or **Settings → Updates → Check now**; turn the daily check off in Settings. Updates are verified against velo's signing key before they install. On Linux, in-app updates are meant for the AppImage; if one fails on a .deb or .rpm install, download the new version from the Releases page. Versions before 0.6.0 have no updater: install 0.6.0 by hand once.
+velo checks GitHub for a new release 30 seconds after launch and then once a day. When one is out, a banner offers **Install and restart**: velo saves your note, installs the update and relaunches. Check by hand from **velo → Check for Updates…** (macOS) or **Settings → Updates → Check now**; turn the daily check off in Settings. Updates are verified against velo's signing key before they install. On Linux, in-app updates work for the AppImage, .deb and .rpm (the .deb and .rpm installs ask for your password); if one fails, download the new version from the Releases page. Versions before 0.6.0 have no updater: install 0.6.0 by hand once.
 
 ## Known limitations
 

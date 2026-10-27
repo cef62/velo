@@ -110,7 +110,7 @@ jobs:
           releaseId: ${{ needs.create-release.outputs.id }}
           # With releaseId set the action creates nothing, but it still takes latest.json's `notes` from releaseBody.
           releaseBody: ${{ needs.create-release.outputs.notes }}
-          includeUpdaterJson: true
+          uploadUpdaterJson: true
           args: ${{ matrix.args }}
 
   publish:
