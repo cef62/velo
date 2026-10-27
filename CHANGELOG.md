@@ -1,5 +1,15 @@
 # velo
 
+## 0.5.0
+
+### Minor Changes
+
+- 5f4fa32: Added created and modified dates that velo stores in a front-matter block inside each note so they travel through sync and git, kept 30 days of local revisions that you can preview and restore, and added a note info panel (⌘I) that showed the dates, word count, backlinks, tags, aliases and revisions of the open note; `aliases:` also worked as note titles.
+
+### Patch Changes
+
+- 4712589: Fixed the macOS DMG being reported as damaged on other Macs, ⌘Z after switching notes bringing back the previous note's text, and Lock all leaving locked notes readable. velo also stopped losing notes from the list when iCloud evicts or a sync client holds a file, kept up with large syncs and changes made while indexing, synced every save to disk, removed plaintext revisions of notes locked on another computer, stopped asking for the passphrase while you type in search, and rewrote links to the title a renamed note actually got.
+
 ## 0.4.0
 
 ### Minor Changes
