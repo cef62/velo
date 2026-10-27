@@ -5,7 +5,7 @@
 use crate::commands::AppState;
 use serde::Serialize;
 use std::sync::{Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
@@ -73,10 +73,10 @@ pub fn spawn_checker(app: AppHandle) {
                     eprintln!("velo: update check failed: {e}");
                 }
             }
-            // Short naps instead of one long sleep: a laptop asleep for a day would otherwise
-            // push the next check a day further out.
-            let due = std::time::Instant::now() + CHECK_INTERVAL;
-            while std::time::Instant::now() < due {
+            // Wall-clock deadline, re-read after short naps: `Instant` and thread sleeps stop while
+            // the machine sleeps (macOS, Linux), so a laptop would otherwise check every ~week.
+            let due = SystemTime::now() + CHECK_INTERVAL;
+            while SystemTime::now() < due {
                 std::thread::sleep(WAKE_POLL);
             }
         }
@@ -99,13 +99,14 @@ pub async fn check(app: &AppHandle, manual: bool) -> Result<Option<UpdateInfo>, 
     let update = result.map_err(|e| e.to_string())?;
     let info = update.as_ref().map(|u| UpdateInfo { version: u.version.clone() });
     st.available = update;
-    if let Some(i) = &info
-        && !manual
-        && should_notify(&i.version, st.notified.as_deref())
-    {
+    if let Some(i) = &info {
+        // A manual check showed the banner itself; the background check must not re-show a dismissed one.
+        let announce = !manual && should_notify(&i.version, st.notified.as_deref());
         st.notified = Some(i.version.clone());
         drop(st);
-        app.emit("update-available", i).ok();
+        if announce {
+            app.emit("update-available", i).ok();
+        }
     }
     Ok(info)
 }
@@ -127,7 +128,9 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
     let mut st = state(app);
     st.busy = false;
     if let Err(e) = result {
-        st.available = None; // the next check re-arms it
+        // The next check finds the version again and announces it again.
+        st.available = None;
+        st.notified = None;
         return Err(e.to_string());
     }
     drop(st);

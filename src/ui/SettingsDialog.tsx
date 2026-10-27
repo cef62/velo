@@ -66,6 +66,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
   const [recording, setRecording] = useState<Action | null>(null);
   const [recMsg, setRecMsg] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
+  const [updateMsg, setUpdateMsg] = useState(""); // the dialog covers the update banner: show the result here
   const [saving, setSaving] = useState(false);
 
   const conflicts = conflictsOf(d.shortcuts);
@@ -180,7 +181,8 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
                 <Checkbox.Label>Check for updates daily</Checkbox.Label>
                 <Checkbox.HiddenInput />
               </Checkbox.Root>
-              <Button variant="outline" size="xs" onClick={() => void controller.checkUpdates()}>Check now</Button>
+              <Button variant="outline" size="xs" disabled={updateMsg === "Checking…"} onClick={async () => { setUpdateMsg("Checking…"); setUpdateMsg(await controller.checkUpdates()); }}>Check now</Button>
+              <span className={help} role="status">{updateMsg}</span>
             </div>
           </div>
           <div className={frow}>
