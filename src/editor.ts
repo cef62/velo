@@ -4,7 +4,7 @@ import { writingSetup } from "./editortheme";
 import { refreshRich, richMarkdown, type RichOpts } from "./richmd";
 import { TASK_ITEM } from "./preview";
 import { SaveController } from "./saver";
-import { frontMatterHide } from "./fmhide";
+import { frontMatterHide, replaceAll } from "./fmhide";
 import { stampChange } from "./frontmatter";
 import { openNote, saveNote, type NoteDoc, type NoteMeta } from "./api";
 
@@ -91,7 +91,7 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
   const setText = (text: string) => {
     loading = true;
     // Caret to the top; a hidden front matter moves it past the block.
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, selection: { anchor: 0 } });
+    view.dispatch(replaceAll(view.state.doc, text));
     loading = false;
   };
 
@@ -161,7 +161,7 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       view.dispatch({ effects: fmHide.reconfigure(frontMatterHide(!on)) });
       if (!on) view.dispatch({ selection: view.state.selection }); // re-run the caret guard: off the hidden block
     },
-    replaceText: (text) => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } }),
+    replaceText: (text) => view.dispatch(replaceAll(view.state.doc, text)), // restore: never leave the caret before a hidden block
     refreshLinks: () => view.dispatch({ effects: refreshRich.of(null) }),
     toggleTask(line) {
       const doc = view.state.doc;

@@ -38,7 +38,7 @@ describe("strip and count", () => {
 describe("stampChange", () => {
   const B = "---\nmodified: 2\n---\n";
   it("replaces an unchanged block, inserts when none was sent", () => {
-    expect(stampChange("---\nmodified: 1\n---\nbody", B, "---\nmodified: 1\n---\n")).toEqual({ from: 0, to: 20, insert: B });
+    expect(stampChange("---\nmodified: 1\n---\nbody", B, "---\nmodified: 1\n---\n")).toEqual({ from: 14, to: 15, insert: "2" }); // only the differing part
     expect(stampChange("body", B, null)).toEqual({ from: 0, to: 0, insert: B });
   });
   it("skips when the block changed meanwhile or already matches", () => {

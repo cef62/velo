@@ -82,8 +82,8 @@ pub fn parse_date(v: &str) -> Option<DateTime<FixedOffset>> {
     let v = unquote(v);
     if let Ok(d) = DateTime::parse_from_rfc3339(v) { return Some(d); }
     let naive = NaiveDate::parse_from_str(v, "%Y-%m-%d").ok().and_then(|d| d.and_hms_opt(0, 0, 0))
-        .or_else(|| NaiveDateTime::parse_from_str(v, "%Y-%m-%d %H:%M:%S").ok())
-        .or_else(|| NaiveDateTime::parse_from_str(v, "%Y-%m-%d %H:%M").ok())?;
+        // local date-times; the `T` forms are what Obsidian's "Date & time" property writes
+        .or_else(|| ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"].iter().find_map(|f| NaiveDateTime::parse_from_str(v, f).ok()))?;
     // Earliest for ambiguous (DST fall-back) times; None inside a spring-forward gap.
     naive.and_local_timezone(Local).earliest().map(|d| d.fixed_offset())
 }
@@ -162,7 +162,11 @@ mod tests {
         let d = parse_date("\"2023-01-05 14:30\"").unwrap();
         assert_eq!(d.with_timezone(&Local).format("%F %T").to_string(), "2023-01-05 14:30:00");
         assert!(parse_date("2023-01-05 14:30:59").is_some());
-        for j in ["", "junk", "2023-13-01", "yesterday", "2023-01-05 25:00"] { assert!(parse_date(j).is_none(), "{j}"); }
+        let d = parse_date("2024-01-05T14:30").unwrap(); // Obsidian "Date & time": local, no offset
+        assert_eq!(d.with_timezone(&Local).format("%F %T").to_string(), "2024-01-05 14:30:00");
+        let d = parse_date("2024-01-05T14:30:07").unwrap();
+        assert_eq!(d.with_timezone(&Local).format("%F %T").to_string(), "2024-01-05 14:30:07");
+        for j in ["", "junk", "2023-13-01", "yesterday", "2023-01-05 25:00", "2023-01-05T25:00"] { assert!(parse_date(j).is_none(), "{j}"); }
     }
 
     #[test]

@@ -84,7 +84,7 @@ Requested by Matteo: "One way or another I want to know when a note was created 
   - `ext` = `md`, or `md.age` for locked notes, which store the ciphertext bytes exactly as written. Never plaintext.
   - Never inside the notes folder.
 - **When (my call):**
-  - On save, when the newest snapshot of that note is older than **10 minutes**, or none exists. The snapshot is of the *new* content just written.
+  - On save, when the newest snapshot of that note is older than **10 minutes**, or none exists. The snapshot is of the file's bytes *before* the write, exactly as they were on disk (ciphertext for a locked note), so the state before an editing session is kept; nothing is snapshotted when the file didn't exist before (or was empty), or when the save became a conflict copy. (Owner ruling M5; this replaces the earlier "snapshot of the new content".)
   - Before an external change replaces the editor content (watcher reload): the old content.
   - Before a restore: the current content.
   - Identical content to the newest snapshot (same hash) is skipped.

@@ -212,16 +212,18 @@ impl Vault {
         } else {
             text.as_bytes().to_vec()
         };
+        let before = std::fs::read(p).ok(); // the version this save replaces, for the revision snapshot
         let mut res = self.store.save(p, &bytes, base_hash)?;
         let target = match &res {
             SaveResult::Saved { .. } => p.to_path_buf(),
             SaveResult::Conflict { conflict_path, .. } => PathBuf::from(conflict_path),
         };
         self.reindex(&target, (!encrypted).then_some(text))?;
-        // a failed snapshot must never fail a save that already hit the disk; conflicts snapshot the conflict copy
-        if let Some(nt) = parse_note_file(&target) {
+        // Snapshot the bytes this save replaced, as they were on disk (ciphertext when locked); a conflict replaced nothing.
+        // A failed snapshot must never fail a save that already hit the disk.
+        if let (SaveResult::Saved { .. }, Some(before)) = (&res, before.filter(|b| !b.is_empty())) {
             self.revisions.maybe_prune(now_ms());
-            self.revisions.snapshot_bytes(&nt.title, &bytes, encrypted, now_ms(), true).ok();
+            self.revisions.snapshot_bytes(&nf.title, &before, encrypted, now_ms(), true).ok();
         }
         if encrypted {
             self.unlocked.insert(s(&target), text.to_string());
@@ -609,10 +611,44 @@ mod tests {
         let f = frontmatter::parse(&c).unwrap();
         assert!(f.created.is_some() && f.modified.is_some() && c.ends_with("mine"), "{c:?}");
     }
+    #[test] fn first_save_of_existing_note_snapshots_previous_content() {
+        let (dir, db) = setup();
+        std::fs::write(dir.join("e.md"), "before velo").unwrap();
+        std::fs::write(dir.join("c.md"), "external").unwrap();
+        let mut v = Vault::open(dir.clone(), &db, None).unwrap();
+        let p = s(&dir.join("e.md"));
+        v.save_note(&p, "edited", &stat_hash(&p), None, true).unwrap();
+        let r = v.list_revisions(&p).unwrap();
+        assert_eq!(r.len(), 1);
+        assert_eq!(v.read_revision(&p, &r[0].id, None).unwrap(), "before velo");
+        // a conflict replaces nothing on disk: no snapshot
+        let c = s(&dir.join("c.md"));
+        assert!(matches!(v.save_note(&c, "mine", "stale", None, true).unwrap(), SaveResult::Conflict { .. }));
+        assert!(v.list_revisions(&c).unwrap().is_empty());
+        // a new (empty) note has nothing to keep
+        let d = v.open_or_create("n", None, false).unwrap();
+        v.save_note(&d.path, "new note", &d.hash, None, false).unwrap();
+        assert!(v.list_revisions(&d.path).unwrap().is_empty());
+    }
+    #[test] fn locked_note_pre_write_snapshot_is_ciphertext() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = Vault::open(dir, &db, Some(&id)).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
+        std::fs::write(&d.path, "oldsecret").unwrap();
+        let p = v.lock_note(&d.path, &id).unwrap();
+        let disk = std::fs::read(&p).unwrap();
+        v.save_note(&p, "newsecret", &hash(&disk), Some(&id), true).unwrap();
+        let r = v.list_revisions(&p).unwrap();
+        assert_eq!(r.len(), 1);
+        assert!(r[0].id.ends_with(".md.age"));
+        let (raw, enc) = v.revisions.read("s", &r[0].id).unwrap();
+        assert!(enc && raw == disk, "snapshot must be the exact pre-write ciphertext");
+        assert_eq!(v.read_revision(&p, &r[0].id, Some(&id)).unwrap(), "oldsecret");
+    }
     #[test] fn lock_reencrypts_snapshots_and_snapshot_text_encrypts() {
         let (dir, db) = setup(); let id = crypto::new_identity();
         let mut v = Vault::open(dir.clone(), &db, Some(&id)).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
-        v.save_note(&d.path, "plainsecret", &d.hash, None, false).unwrap();
+        std::fs::write(&d.path, "plainsecret").unwrap();
+        v.save_note(&d.path, "later", &stat_hash(&d.path), None, false).unwrap(); // snapshots the pre-write "plainsecret"
         let root = db.parent().unwrap().join("revisions");
         let files = |root: &Path| -> Vec<String> {
             let mut out = vec![];

@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 import { Compartment, EditorSelection, EditorState, type Transaction } from "@codemirror/state";
 import { history, redo, undo } from "@codemirror/commands";
-import { frontMatterHide } from "./fmhide";
+import { frontMatterHide, replaceAll } from "./fmhide";
+import { stampChange } from "./frontmatter";
 
 const FM = "---\ncreated: 1\n---\n"; // 19 chars
 const mk = (hidden: boolean, doc = FM + "body") => EditorState.create({ doc, extensions: frontMatterHide(hidden) });
@@ -48,4 +49,26 @@ test("hidden: undo works, also for a block edit made while shown", () => {
   expect(s.doc.toString()).toBe(FM + "body");
   expect(run(redo)).toBe(true);
   expect(s.doc.toString()).toBe("---\nzcreated: 1\n---\nbody");
+});
+
+test("hidden: after a full replace (load, restore) typing lands after the block", () => {
+  let s = mk(true, "old");
+  s = s.update(replaceAll(s.doc, FM + "restored")).state;
+  expect(s.selection.main.head).toBe(FM.length);
+  const at = s.selection.main.head;
+  s = s.update({ changes: { from: at, insert: "x" }, userEvent: "input.type" }).state;
+  expect(s.doc.toString()).toBe(FM + "xrestored");
+});
+
+test("shown: a stamp keeps the caret on the front-matter line being edited", () => {
+  const sent = "---\ntags: [a, b]\nmodified: 2026-01-01T00:00:00+00:00\n---\n";
+  const block = "---\ntags: [a, b]\nmodified: 2026-10-27T09:00:00+00:00\n---\n";
+  let s = mk(false, sent + "body");
+  const caret = sent.indexOf("b]"); // inside the tags line
+  s = s.update({ selection: EditorSelection.cursor(caret) }).state;
+  const c = stampChange(s.doc.toString(), block, sent)!;
+  const changes = s.changes(c);
+  s = s.update({ changes, selection: s.selection.map(changes, 1) }).state;
+  expect(s.doc.toString()).toBe(block + "body");
+  expect(s.selection.main.head).toBe(caret);
 });

@@ -7,6 +7,11 @@ export function docFrontMatter(doc: Text) {
   return frontMatterRange(doc.sliceString(0, doc.line(Math.min(doc.lines, 201)).to));
 }
 
+/** Replace the whole doc with the caret at the top; a hidden front matter's caret guard then moves it past the block. */
+export function replaceAll(doc: Text, text: string) {
+  return { changes: { from: 0, to: doc.length, insert: text }, selection: { anchor: 0 } };
+}
+
 const shownTheme = EditorView.theme({
   // Shown raw: undo markdown styling (the closing --- would otherwise make a setext heading).
   ".cm-fm, .cm-fm span": { fontSize: "0.86em", fontWeight: "400", color: "var(--colors-velo-fg-muted)", fontFamily: '"JetBrains Mono Variable", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace' },

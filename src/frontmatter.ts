@@ -25,12 +25,18 @@ export function wordCount(text: string): number {
 }
 
 /**
- * The change that applies a save's stamped `block` to the editor's `current` text: it replaces the current block
- * (or inserts at 0 when none was sent). null = skip: the user changed the block during the save, or nothing to do.
+ * The change that applies a save's stamped `block` to the editor's `current` text: it rewrites only the part of the
+ * current block that differs (or inserts at 0 when none was sent), so a caret elsewhere in a shown block stays put.
+ * null = skip: the user changed the block during the save, or nothing to do.
  */
-export function stampChange(current: string, block: string, sentBlock: string | null): { from: 0; to: number; insert: string } | null {
+export function stampChange(current: string, block: string, sentBlock: string | null): { from: number; to: number; insert: string } | null {
   const r = frontMatterRange(current);
   const cur = r ? current.slice(0, r.to) : null;
   if (cur !== sentBlock || cur === block) return null;
-  return { from: 0, to: r?.to ?? 0, insert: block };
+  const old = cur ?? "";
+  let pre = 0;
+  while (pre < old.length && pre < block.length && old[pre] === block[pre]) pre++;
+  let suf = 0;
+  while (suf < old.length - pre && suf < block.length - pre && old[old.length - 1 - suf] === block[block.length - 1 - suf]) suf++;
+  return { from: pre, to: old.length - suf, insert: block.slice(pre, block.length - suf) };
 }
