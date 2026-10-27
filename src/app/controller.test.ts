@@ -1004,7 +1004,7 @@ test("clicking into the open note during capture keeps that note open; the kept 
   await settle();
   expect(api.search.mock.calls.length).toBe(n + 1);
   expect(store.get().openPath).toBe(P("X"));
-  expect(store.get().sel).toBe(-1); // X is not listed for "milk": no selection
+  expect(store.get().sel).toBe(0); // X is not listed for "milk": row 0 highlighted, not opened
 });
 
 test("back to Notes after a Tasks filter never changes the open note", async () => {
@@ -1019,5 +1019,42 @@ test("back to Notes after a Tasks filter never changes the open note", async () 
   await settle();
   expect(store.get().openPath).toBe(P("X"));
   expect(api.openNote).toHaveBeenCalledTimes(1);
-  expect(store.get().sel).toBe(-1);
+  expect(store.get().sel).toBe(0); // row 0 highlighted, not opened
+});
+
+test("back to Notes, Enter opens the listed match (never creates a stray note), even before the refresh lands", async () => {
+  const { c, api, store } = setup({ Groceries: "a", X: "x" });
+  await c.show(P("X"));
+  c.setPaneMode("tasks");
+  await settle();
+  c.setQuery("groc");
+  await settle();
+  const d = deferred<Page>();
+  api.search.mockImplementationOnce(() => d.promise);
+  c.setPaneMode("notes");
+  const entered = c.enter(); // the refresh is still in flight
+  d.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
+  await entered;
+  await settle();
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+  expect(store.get().openPath).toBe(P("Groceries"));
+});
+
+test("a pruned tag filter never changes the open note, in Notes or Tasks mode", async () => {
+  for (const mode of ["notes", "tasks"] as const) {
+    const { c, api, store } = setup({ Groceries: "a", X: "x" });
+    await c.show(P("X"));
+    c.setPaneMode(mode);
+    api.listTags.mockResolvedValue([{ tag: "work", count: 1 }]);
+    c.setTags(["work"]);
+    await c.refreshTags();
+    await settle();
+    api.search.mockImplementation(async () => ({ hits: [hit("Groceries")], has_more: false, total: 1 }));
+    api.listTags.mockResolvedValue([]); // the last #work went away
+    await c.refreshTags(true);
+    await settle();
+    expect(store.get().selectedTags).toEqual([]);
+    expect(store.get().openPath).toBe(P("X"));
+    expect(api.openNote).toHaveBeenCalledTimes(1);
+  }
 });

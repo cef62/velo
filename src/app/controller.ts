@@ -322,7 +322,7 @@ export class Controller {
     this.store.set({ capture: null, ...(keep ? {} : { query: this.captureQuery }) });
     // the kept text lists like a search, but never opens a hit: focus went to the open note (or a note just opened)
     if (keep && this.store.get().paneMode === "tasks") this.filterChanged(false);
-    else if (keep) void this.resort();
+    else if (keep) void this.runSearch(true, "highlight");
     else if (captured !== undefined) void this.runSearch(false); // the target's row moved; the list is otherwise unchanged
     if (hide) void this.api.captureDone().catch((e) => console.error("capture done failed", e));
   }
@@ -477,7 +477,7 @@ export class Controller {
     return p;
   }
 
-  /** keepOpen: after a reset, stay on the open note when it is in the new first page instead of opening row 0. "highlight": and with no note open, highlight row 0 without opening it. */
+  /** keepOpen: after a reset, stay on the open note when it is in the new first page instead of opening row 0. "highlight": never open anything; select the open note's row if listed, else highlight row 0 (Enter opens it). */
   protected async doSearch(selectFirst: boolean, keepOpen: boolean | "highlight") {
     const seq = ++this.searchSeq;
     const r = this.results;
@@ -487,8 +487,8 @@ export class Controller {
       this.listChanged(selectFirst);
       if (selectFirst) {
         if (keepOpen && r.indexOf(this.editor.currentPath() ?? "") >= 0) this.selectOpen();
-        else if (keepOpen === "highlight" && this.editor.currentPath() === null) {
-          this.store.set({ sel: r.count ? 0 : -1 }); // nothing open: highlight row 0, don't open it
+        else if (keepOpen === "highlight") {
+          this.store.set({ sel: r.count ? 0 : -1 }); // highlight row 0, don't open it
         } else void this.select(r.count ? 0 : -1, "auto");
       } else this.selectOpen();
     } catch (e) {
@@ -837,7 +837,7 @@ export class Controller {
     if (m === "tasks") void this.loadTasks();
     else if (this.listStale) {
       this.listStale = false;
-      void this.resort(); // switching modes never changes the open note: its row is selected if listed, else none
+      void this.runSearch(true, "highlight"); // switching modes never changes the open note
     }
   }
 
@@ -950,7 +950,7 @@ export class Controller {
     const kept = pruneSelection(selected, tags);
     const pruned = kept.length !== selected.length;
     this.store.set({ tags, selectedTags: kept });
-    if (pruned) void this.runSearch(true, "highlight");
+    if (pruned) this.filterChanged("highlight");
     else if (inPlace && kept.length) void this.runSearch(false);
   }
 
