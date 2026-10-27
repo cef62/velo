@@ -1,6 +1,6 @@
 // Test fakes for the controller: in-memory backend, editor, preview and UI port. Tests only.
 import { vi } from "vitest";
-import type { Hit, NoteDoc, NoteMeta, Page, RenameResult, RevisionInfo, Settings, TagCount } from "../api";
+import type { Hit, NoteDoc, NoteMeta, Page, RenameResult, RevisionInfo, Settings, TagCount, TaskView } from "../api";
 import type { Editor } from "../editor";
 import type { Preview } from "../preview";
 import type { Api } from "./controller";
@@ -44,6 +44,10 @@ export function fakeApi(notes: Record<string, string> = {}) {
       return docOf(`/n/${title}.md`);
     }),
     saveNote: vi.fn(),
+    tasks: vi.fn(async (_q: string, _t: string[], _d: boolean): Promise<TaskView> => ({ overdue: [], today: [], upcoming: [], no_date: [], done: [], due_count: 0 })),
+    toggleTask: vi.fn(async (_p: string, _l: number, _e: string) => {}),
+    captureTask: vi.fn(async (_t: string) => "/n/Inbox.md"),
+    setBadge: vi.fn(async (_c: number) => {}),
     renameNote: vi.fn(async (_p: string, _t: string, _r: boolean): Promise<RenameResult> => { throw "unset"; }),
     backlinkCount: vi.fn(async () => 0),
     lockNote: vi.fn(async (_p: string): Promise<string> => { throw "unset"; }),

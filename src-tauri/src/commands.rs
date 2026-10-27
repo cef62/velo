@@ -3,6 +3,7 @@ use crate::index::{Page, Sort, TagCount};
 use crate::revisions::RevisionInfo;
 use crate::settings::{self, Settings};
 use crate::store::{self, SaveResult};
+use crate::tasks::TaskView;
 use crate::vault::{NoteDoc, RenameResult, Vault};
 use crate::watch;
 use std::path::{Path, PathBuf};
@@ -253,6 +254,34 @@ pub fn open_or_create(st: State<'_, AppState>, title: String) -> Res<NoteDoc> {
 pub fn save_note(st: State<'_, AppState>, path: String, text: String, base_hash: String) -> Res<SaveResult> {
     let fm = st.settings.lock().unwrap().write_front_matter;
     with_vault(&st, |v, id| v.save_note(&path, &text, &base_hash, id, fm))
+}
+
+#[tauri::command(async)]
+pub fn tasks(st: State<'_, AppState>, query: String, tags: Vec<String>, show_done: bool) -> Res<TaskView> {
+    with_vault(&st, |v, _| v.tasks(&query, &tags, show_done))
+}
+
+#[tauri::command(async)]
+pub fn toggle_task(st: State<'_, AppState>, path: String, line: usize, expected: String) -> Res<()> {
+    let fm = st.settings.lock().unwrap().write_front_matter;
+    with_vault(&st, |v, id| v.toggle_task(&path, line, &expected, id, fm))
+}
+
+#[tauri::command(async)]
+pub fn capture_task(st: State<'_, AppState>, text: String) -> Res<String> {
+    let fm = st.settings.lock().unwrap().write_front_matter;
+    with_vault(&st, |v, id| v.capture_task("Inbox", &text, id, fm))
+}
+
+/// Dock badge: macOS only, a no-op elsewhere.
+#[tauri::command]
+pub fn set_badge(app: AppHandle, count: u32) {
+    #[cfg(target_os = "macos")]
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.set_badge_count(if count == 0 { None } else { Some(count as i64) });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, count);
 }
 
 #[tauri::command(async)]
