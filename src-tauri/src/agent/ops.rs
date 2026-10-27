@@ -56,6 +56,11 @@ impl DirectOps {
         Ok(DirectOps { vault: Vault::open_with_progress(dir, db_path, None, &mut |_, _| {})?, settings_path })
     }
 
+    /// Catch up with outside changes since the last call (mtime/size diff, as the app does after missed events).
+    pub fn rescan(&mut self) {
+        self.vault.rescan(None);
+    }
+
     pub fn dir(&self) -> &Path {
         &self.vault.store.dir
     }

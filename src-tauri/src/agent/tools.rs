@@ -82,6 +82,17 @@ fn path_of(ops: &dyn NoteOps, a: &Value) -> Result<String, String> {
     ops.find(arg(a, "title")?).map_err(err)?.ok_or_else(|| "not found".to_string())
 }
 
+/// Occurrences of `pat` in `text`, overlapping ones included ("aa" occurs twice in "aaa"); 0 for an empty `pat`.
+fn occurrences(text: &str, pat: &str) -> usize {
+    let Some(step) = pat.chars().next().map(char::len_utf8) else { return 0 };
+    let (mut n, mut at) = (0, 0);
+    while let Some(i) = text[at..].find(pat) {
+        n += 1;
+        at += i + step;
+    }
+    n
+}
+
 pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String> {
     let is_write = matches!(name, "create_note" | "append_to_note" | "edit_note" | "replace_note");
     let summary = if is_write {
@@ -129,7 +140,7 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
             let (old, new) = (arg(&a, "old_text")?, arg(&a, "new_text")?);
             let path = path_of(ops, &a)?;
             let doc = ops.read(&path).map_err(err)?;
-            let n = if old.is_empty() { 0 } else { doc.text.matches(old).count() };
+            let n = occurrences(&doc.text, old);
             if n != 1 {
                 return Err(format!("old_text must occur exactly once in the note; it occurs {n} times. Nothing was changed."));
             }
@@ -210,14 +221,21 @@ mod tests {
         let (mut ops, dir) = vault(&[("a.md", "one two two")]);
         let edit = |ops: &mut DirectOps, old: &str| call(ops, "edit_note", json!({"title": "a", "old_text": old, "new_text": "three", "summary": "test"}));
         let e0 = edit(&mut ops, "four").unwrap_err();
-        assert!(e0.contains('0'), "{e0}");
+        assert!(e0.contains("occurs 0 times"), "{e0}");
         let e2 = edit(&mut ops, "two").unwrap_err();
-        assert!(e2.contains('2'), "{e2}");
+        assert!(e2.contains("occurs 2 times"), "{e2}");
         assert_eq!(std::fs::read_to_string(dir.join("a.md")).unwrap(), "one two two");
         let r = edit(&mut ops, "one").unwrap();
         let bytes = std::fs::read(dir.join("a.md")).unwrap();
         assert!(String::from_utf8_lossy(&bytes).ends_with("three two two"));
         assert_eq!(r["hash"], crate::store::hash(&bytes));
+    }
+
+    #[test] fn edit_note_counts_overlapping_matches() {
+        let (mut ops, dir) = vault(&[("a.md", "aaa")]);
+        let e = call(&mut ops, "edit_note", json!({"title": "a", "old_text": "aa", "new_text": "b", "summary": "test"})).unwrap_err();
+        assert!(e.contains("occurs 2 times"), "{e}");
+        assert_eq!(std::fs::read_to_string(dir.join("a.md")).unwrap(), "aaa");
     }
 
     #[test] fn replace_note_needs_current_hash() {

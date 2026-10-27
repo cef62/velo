@@ -48,7 +48,9 @@ fn gate(settings_path: PathBuf, data_dir: PathBuf) -> impl Fn(&str, Value) -> Re
             let db = data_dir.join(format!("index-{}.sqlite", crate::store::hash(dir.to_string_lossy().as_bytes())));
             *ops = Some(DirectOps::open(dir, &db, settings_path.clone()).map_err(|e| e.to_string())?);
         }
-        tools::call(ops.as_mut().expect("opened above"), name, args)
+        let ops = ops.as_mut().expect("opened above");
+        ops.rescan();
+        tools::call(ops, name, args)
     }
 }
 
@@ -74,6 +76,12 @@ mod tests {
         std::fs::write(notes.join("a.md"), "#t").unwrap();
         std::fs::write(&p, serde_json::json!({"agent_access": true, "notes_dir": notes}).to_string()).unwrap();
         assert_eq!(call("list_tags", serde_json::json!({})), Ok(serde_json::json!({"tags": [{"tag": "t", "count": 1}]})));
+        // outside changes after the vault opened are seen on the next call
+        std::fs::write(notes.join("b.md"), "late").unwrap();
+        assert_eq!(call("read_note", serde_json::json!({"title": "b"})).unwrap()["text"], "late");
+        std::fs::remove_file(notes.join("a.md")).unwrap();
+        let hits = call("search_notes", serde_json::json!({})).unwrap();
+        assert_eq!(hits["notes"].as_array().unwrap().iter().map(|n| n["title"].as_str().unwrap()).collect::<Vec<_>>(), vec!["b"]);
         assert!(std::fs::read_dir(tmp.path().join("data")).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with("index-")));
     }
 }
