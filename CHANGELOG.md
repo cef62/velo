@@ -1,5 +1,11 @@
 # velo
 
+## 0.6.1
+
+### Patch Changes
+
+- 83b9ec7: Documented that in-app updates also worked for the Linux .deb and .rpm packages, which asked for your password to install.
+
 ## 0.6.0
 
 ### Minor Changes
