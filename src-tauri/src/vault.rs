@@ -446,6 +446,30 @@ impl Vault {
         Ok(())
     }
 
+    /// Agent undo trail: an unthrottled snapshot of the note's current on-disk bytes, with the agent's summary.
+    /// Plain notes only; the agent never reaches a locked one.
+    pub fn agent_snapshot(&mut self, path: &str, summary: &str) -> anyhow::Result<()> {
+        let nf = self.note(Path::new(path))?;
+        if nf.encrypted || note_path(&self.store.dir, &nf.title, true).exists() {
+            return Err(anyhow!("locked"));
+        }
+        let bytes = std::fs::read(path)?;
+        if !bytes.is_empty() { // an empty file has nothing to keep
+            self.revisions.snapshot_agent(&nf.title, &bytes, false, now_ms(), summary)?;
+        }
+        Ok(())
+    }
+
+    /// First revision of a note the agent just created: its created text, with the summary.
+    pub fn agent_snapshot_text(&mut self, path: &str, text: &str, summary: &str) -> anyhow::Result<()> {
+        let nf = self.note(Path::new(path))?;
+        if nf.encrypted || note_path(&self.store.dir, &nf.title, true).exists() {
+            return Err(anyhow!("locked"));
+        }
+        self.revisions.snapshot_agent(&nf.title, text.as_bytes(), false, now_ms(), summary)?;
+        Ok(())
+    }
+
     pub fn lock_all(&mut self) {
         self.unlocked.clear();
     }

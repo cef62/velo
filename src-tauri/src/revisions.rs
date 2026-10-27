@@ -32,6 +32,15 @@ pub struct RevisionInfo {
     /// epoch ms
     pub ts: i64,
     pub size: u64,
+    /// agent write summary, from the `<ms>.json` sidecar
+    pub summary: Option<String>,
+    pub agent: bool,
+}
+
+#[derive(Serialize, serde::Deserialize)]
+struct Sidecar {
+    summary: String,
+    agent: bool,
 }
 
 pub struct Revisions {
@@ -58,7 +67,12 @@ impl Revisions {
             .flatten()
             .filter_map(|e| {
                 let id = e.file_name().to_string_lossy().into_owned();
-                Some(RevisionInfo { ts: ts_of(&id)?, id, size: e.metadata().ok()?.len() })
+                if !(id.ends_with(".md") || id.ends_with(".md.age")) {
+                    return None; // sidecars are never snapshots
+                }
+                let ts = ts_of(&id)?;
+                let side = std::fs::read(self.dir(title).join(format!("{ts}.json"))).ok().and_then(|b| serde_json::from_slice::<Sidecar>(&b).ok());
+                Some(RevisionInfo { ts, id, size: e.metadata().ok()?.len(), agent: side.is_some(), summary: side.map(|s| s.summary) })
             })
             .collect();
         v.sort_by(|a, b| b.ts.cmp(&a.ts));
@@ -80,6 +94,21 @@ impl Revisions {
         std::fs::create_dir_all(&dir)?;
         std::fs::write(dir.join(format!("{now_ms}.{}", if encrypted { "md.age" } else { "md" })), bytes)?;
         Ok(true)
+    }
+
+    /// An agent's pre-write snapshot: never throttled or skipped, with its summary in a `<ms>.json` sidecar.
+    /// Same-ms ids bump by 1 ms. Returns the snapshot id.
+    pub fn snapshot_agent(&self, title: &str, bytes: &[u8], encrypted: bool, now_ms: i64, summary: &str) -> io::Result<String> {
+        let dir = self.dir(title);
+        std::fs::create_dir_all(&dir)?;
+        let mut ms = now_ms;
+        while dir.join(format!("{ms}.md")).exists() || dir.join(format!("{ms}.md.age")).exists() {
+            ms += 1;
+        }
+        let id = format!("{ms}.{}", if encrypted { "md.age" } else { "md" });
+        std::fs::write(dir.join(&id), bytes)?;
+        std::fs::write(dir.join(format!("{ms}.json")), serde_json::to_vec(&Sidecar { summary: summary.into(), agent: true })?)?;
+        Ok(id)
     }
 
     pub fn read(&self, title: &str, id: &str) -> io::Result<(Vec<u8>, bool)> {
@@ -114,7 +143,7 @@ impl Revisions {
         for e in rd.flatten() {
             let p = e.path();
             if p.extension().is_some_and(|x| x == "md") {
-                std::fs::write(p.with_extension("md.age"), encrypt(&std::fs::read(&p)?)?)?;
+                std::fs::write(p.with_extension("md.age"), encrypt(&std::fs::read(&p)?)?)?; // the .json sidecar stays plain
                 std::fs::remove_file(&p)?;
             }
         }
@@ -127,6 +156,7 @@ impl Revisions {
         for e in rd.flatten() {
             if e.path().extension().is_some_and(|x| x == "md") {
                 std::fs::remove_file(e.path())?;
+                std::fs::remove_file(e.path().with_extension("json")).ok();
             }
         }
         Ok(())
@@ -204,5 +234,38 @@ mod tests {
         r.encrypt_all("n", |b| Ok(b.iter().rev().cloned().collect())).unwrap();
         assert_eq!(r.list("n")[0].id, "10.md.age");
         assert_eq!(r.read("n", "10.md.age").unwrap().0, b"terces");
+    }
+    #[test] fn agent_snapshot_ignores_throttle_and_stores_summary() {
+        let r = rev();
+        r.snapshot_agent("n", b"a", false, 1000, "first").unwrap();
+        r.snapshot_agent("n", b"b", false, 2000, "second").unwrap();
+        let l = r.list("n");
+        assert_eq!(l.len(), 2);
+        assert_eq!((l[0].summary.as_deref(), l[0].agent), (Some("second"), true));
+        assert_eq!(l[1].summary.as_deref(), Some("first"));
+        r.snapshot_bytes("n", b"c", false, 3000, false).unwrap();
+        assert_eq!((r.list("n")[0].summary.clone(), r.list("n")[0].agent), (None, false));
+    }
+    #[test] fn same_ms_bumps() {
+        let r = rev();
+        assert_eq!(r.snapshot_agent("n", b"a", false, 5, "x").unwrap(), "5.md");
+        assert_eq!(r.snapshot_agent("n", b"a", false, 5, "y").unwrap(), "6.md");
+        assert_eq!(r.list("n").len(), 2);
+    }
+    #[test] fn sidecar_follows_rename_prune_encrypt() {
+        let r = rev();
+        let now = 100 * 86_400_000;
+        r.snapshot_agent("old", b"a", false, 10, "why").unwrap();
+        r.rename("old", "new");
+        assert_eq!(r.list("new")[0].summary.as_deref(), Some("why"));
+        r.encrypt_all("new", |b| Ok(b.to_vec())).unwrap();
+        let l = r.list("new");
+        assert_eq!((l.len(), l[0].id.as_str(), l[0].summary.as_deref()), (1, "10.md.age", Some("why")));
+        assert!(r.dir("new").join("10.json").exists());
+        r.prune(now);
+        assert!(!r.dir("new").exists(), "pair pruned, dir gone");
+        r.snapshot_agent("p", b"a", false, 10, "z").unwrap();
+        r.remove_plain("p").unwrap();
+        assert!(!r.dir("p").join("10.json").exists());
     }
 }

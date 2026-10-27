@@ -61,6 +61,14 @@ impl DirectOps {
         self.vault.rescan(None);
     }
 
+    fn save(&mut self, path: &str, text: &str, base_hash: &str) -> anyhow::Result<String> {
+        let wfm = self.settings().write_front_matter;
+        match self.vault.save_note(path, text, base_hash, None, wfm)? {
+            SaveResult::Saved { hash, .. } => Ok(hash),
+            SaveResult::Conflict { conflict_path, .. } => Err(anyhow!("conflict: saved to {}", title_of(&conflict_path))),
+        }
+    }
+
     pub fn dir(&self) -> &Path {
         &self.vault.store.dir
     }
@@ -75,13 +83,11 @@ impl NoteOps for DirectOps {
         self.vault.open_note(plain(path)?, None)
     }
 
-    fn write(&mut self, path: &str, new_text: &str, base_hash: &str, _summary: &str) -> anyhow::Result<String> {
-        // Task 3 takes the agent snapshot (with `summary`) here, before the save.
-        let wfm = self.settings().write_front_matter;
-        match self.vault.save_note(plain(path)?, new_text, base_hash, None, wfm)? {
-            SaveResult::Saved { hash, .. } => Ok(hash),
-            SaveResult::Conflict { conflict_path, .. } => Err(anyhow!("conflict: saved to {}", title_of(&conflict_path))),
-        }
+    fn write(&mut self, path: &str, new_text: &str, base_hash: &str, summary: &str) -> anyhow::Result<String> {
+        let path = plain(path)?;
+        // a conflicting save leaves one extra identical snapshot: harmless
+        self.vault.agent_snapshot(path, summary)?;
+        self.save(path, new_text, base_hash)
     }
 
     fn create(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<NoteDoc> {
@@ -94,8 +100,10 @@ impl NoteOps for DirectOps {
             return Err(anyhow!("a note with that title already exists"));
         }
         let doc = self.vault.open_or_create(title, None, self.settings().write_front_matter)?;
-        self.write(&doc.path, text, &doc.hash, summary)?;
-        self.read(&doc.path)
+        self.save(&doc.path, text, &doc.hash)?; // the new stub is not snapshotted: the created text is the first revision
+        let doc = self.read(&doc.path)?;
+        self.vault.agent_snapshot_text(&doc.path, &doc.text, summary)?;
+        Ok(doc)
     }
 
     fn search(&self, query: &str, tags: &[String], offset: usize) -> anyhow::Result<Page> {
@@ -132,12 +140,16 @@ impl NoteOps for DirectOps {
         Ok(v)
     }
 
-    fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, _summary: &str) -> anyhow::Result<String> {
-        Ok(self.vault.rename_note(plain(path)?, new_title, rewrite_links)?.path)
+    fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<String> {
+        let path = plain(path)?;
+        self.vault.agent_snapshot(path, summary)?;
+        Ok(self.vault.rename_note(path, new_title, rewrite_links)?.path)
     }
 
-    fn trash(&mut self, path: &str, _summary: &str) -> anyhow::Result<()> {
-        self.vault.delete_note(plain(path)?)
+    fn trash(&mut self, path: &str, summary: &str) -> anyhow::Result<()> {
+        let path = plain(path)?;
+        self.vault.agent_snapshot(path, summary)?;
+        self.vault.delete_note(path)
     }
 
     fn settings(&self) -> Settings {
@@ -150,5 +162,48 @@ impl NoteOps for DirectOps {
 
     fn backlinks(&self, title: &str) -> anyhow::Result<Vec<String>> {
         Ok(self.vault.index.backlinks(title)?.iter().filter(|p| !locked(p)).map(|p| title_of(p)).collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ops() -> (DirectOps, PathBuf) {
+        let t = tempfile::tempdir().unwrap().keep();
+        let dir = t.join("notes");
+        std::fs::create_dir_all(&dir).unwrap();
+        (DirectOps::open(dir.clone(), &t.join("i.sqlite"), t.join("settings.json")).unwrap(), dir)
+    }
+
+    #[test] fn created_note_has_first_revision() {
+        let (mut o, _) = ops();
+        let d = o.create("Fresh", "hello", "made it").unwrap();
+        let r = o.vault.list_revisions(&d.path).unwrap();
+        // save_note's own throttled snapshot of the empty front-matter stub may sit below it
+        assert_eq!((r[0].summary.as_deref(), r[0].agent), (Some("made it"), true));
+        assert!(o.vault.read_revision(&d.path, &r[0].id, None).unwrap().contains("hello"));
+    }
+    #[test] fn agent_write_snapshots_previous_text_with_summary() {
+        let (mut o, _) = ops();
+        let d = o.create("W", "v1", "c").unwrap();
+        let h = o.write(&d.path, "v2", &d.hash, "edit one").unwrap();
+        o.write(&d.path, "v3", &h, "edit two").unwrap();
+        let r = o.vault.list_revisions(&d.path).unwrap();
+        assert_eq!(r.iter().filter_map(|x| x.summary.as_deref()).collect::<Vec<_>>(), ["edit two", "edit one", "c"]);
+    }
+    #[test] fn trash_keeps_revisions_with_summary() {
+        let (mut o, dir) = ops();
+        let d = o.create("T", "bye", "c").unwrap();
+        o.vault.agent_snapshot(&d.path, "trashed").unwrap();
+        o.vault.delete_note_with(&d.path, |p| std::fs::remove_file(p)).unwrap(); // real trash would hit the OS Trash
+        assert!(!dir.join("T.md").exists());
+        let r = o.vault.list_revisions(&d.path).unwrap();
+        assert_eq!(r[0].summary.as_deref(), Some("trashed"));
+    }
+    #[test] fn agent_snapshot_refuses_locked() {
+        let (mut o, dir) = ops();
+        let p = dir.join("L.md.age").to_string_lossy().into_owned();
+        assert!(o.vault.agent_snapshot(&p, "x").is_err());
     }
 }

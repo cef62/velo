@@ -575,13 +575,13 @@ test("info loads only while open", async () => {
   await settle();
   expect(api.listRevisions).not.toHaveBeenCalled();
   expect(api.backlinkCount).not.toHaveBeenCalled();
-  api.listRevisions.mockResolvedValue([{ id: "1", ts: 5, size: 1 }]);
+  api.listRevisions.mockResolvedValue([{ id: "1", ts: 5, size: 1, agent: false }]);
   api.backlinkCount.mockResolvedValue(3);
   await c.toggleInfo();
   await settle();
   expect(api.setSettings).toHaveBeenCalledWith(expect.objectContaining({ info_panel: true }));
   expect(store.get().info.backlinks).toBe(3);
-  expect(store.get().info.revisions).toEqual([{ id: "1", ts: 5, size: 1 }]);
+  expect(store.get().info.revisions).toEqual([{ id: "1", ts: 5, size: 1, agent: false }]);
 });
 
 test("meta updates after save", async () => {

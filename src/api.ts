@@ -35,7 +35,7 @@ export const lockNote = (path: string) => invoke<string>("lock_note", { path });
 export const unlockNote = (path: string) => invoke<string>("unlock_note", { path });
 export const lockAll = () => invoke<void>("lock_all");
 export const deleteNote = (path: string) => invoke<void>("delete_note", { path });
-export type RevisionInfo = { id: string; ts: number; size: number };
+export type RevisionInfo = { id: string; ts: number; size: number; summary?: string | null; agent: boolean };
 export const listRevisions = (path: string) => invoke<RevisionInfo[]>("list_revisions", { path });
 export const readRevision = (path: string, id: string) => invoke<string>("read_revision", { path, id });
 export const snapshotText = (path: string, text: string) => invoke<void>("snapshot_text", { path, text });
