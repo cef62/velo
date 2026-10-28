@@ -201,6 +201,23 @@ pub fn mark_running(data_dir: &Path) -> std::io::Result<()> {
     write_private(&data_dir.join("agent.json"), json!({"pid": std::process::id()}).to_string().as_bytes())
 }
 
+/// Startup with access on: the listener; else the pid-only marker (`mark_running`); else access saved off (`s` too);
+/// else an error, so the app does not run with headless free to write beside it.
+pub fn start_or_fence(data_dir: &Path, settings_path: &Path, s: &mut crate::settings::Settings, start: impl FnOnce() -> anyhow::Result<ListenerHandle>) -> anyhow::Result<Option<ListenerHandle>> {
+    let e = match start() {
+        Ok(l) => return Ok(Some(l)),
+        Err(e) => e,
+    };
+    eprintln!("velo: agent access listener not started: {e}");
+    if mark_running(data_dir).is_ok() {
+        return Ok(None);
+    }
+    s.agent_access = false;
+    crate::settings::save(settings_path, s).map_err(|e2| anyhow::anyhow!("agent access is on but velo can't start it, mark itself running or turn it off: {e}; {e2}"))?;
+    eprintln!("velo: agent access turned off");
+    Ok(None)
+}
+
 /// Normal quit: removes `mark_running`'s marker if it is this process's (a crash leaves it, with a dead pid).
 pub fn unmark_running(data_dir: &Path) {
     let file = data_dir.join("agent.json");
@@ -375,6 +392,25 @@ mod tests {
         unmark_running(t.path());
         assert!(f.exists());
         h.stop();
+    }
+
+    /// Startup with access on must leave headless a sign that the app runs (listener file or marker); failing both,
+    /// access is saved off; failing that too, startup fails rather than leave two writers.
+    #[test] fn startup_fences_headless_or_fails() {
+        let t = tempfile::tempdir().unwrap();
+        let sp = t.path().join("settings.json");
+        let mut s = crate::settings::Settings { agent_access: true, ..Default::default() };
+        let l = start_or_fence(t.path(), &sp, &mut s, || serve(t.path(), echo())).unwrap();
+        assert!(l.is_some() && s.agent_access);
+        l.unwrap().stop();
+        // agent.json can't be written (its temp path is a directory): no listener, no marker
+        std::fs::create_dir(t.path().join("agent.json.tmp")).unwrap();
+        assert!(start_or_fence(t.path(), &sp, &mut s, || serve(t.path(), echo())).unwrap().is_none());
+        assert!(!t.path().join("agent.json").exists());
+        assert!(!s.agent_access && !crate::settings::load(&sp).agent_access, "saved off");
+        // settings can't be saved either: fail
+        let mut s = crate::settings::Settings { agent_access: true, ..Default::default() };
+        assert!(start_or_fence(t.path(), t.path(), &mut s, || serve(t.path(), echo())).is_err());
     }
 
     #[test] fn toggling_access_off_stops_listener_and_removes_file() {

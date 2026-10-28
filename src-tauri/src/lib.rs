@@ -95,13 +95,14 @@ pub fn run() {
                 }
             }
             app.manage(agent::listener::AgentState::default());
-            if app.state::<commands::AppState>().settings.lock().unwrap().agent_access {
-                let started = agent::listener::start(h.clone()).map(|l| *app.state::<agent::listener::AgentState>().listener.lock().unwrap() = Some(l));
-                if let Err(e) = started {
-                    eprintln!("velo: agent access listener not started: {e}");
-                    agent::listener::mark_running(&app.state::<commands::AppState>().data_dir).ok();
-                }
+            let st = app.state::<commands::AppState>();
+            let mut s = st.settings.lock().unwrap();
+            if s.agent_access {
+                // never two writers: fails setup if headless can't be told the app runs nor access turned off
+                let l = agent::listener::start_or_fence(&st.data_dir, &st.settings_path, &mut s, || agent::listener::start(h.clone()))?;
+                *app.state::<agent::listener::AgentState>().listener.lock().unwrap() = l;
             }
+            drop(s);
             app.manage(Mutex::new(update::UpdateState::default()));
             update::spawn_checker(h.clone());
             Ok(())
