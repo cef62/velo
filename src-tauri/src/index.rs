@@ -168,15 +168,29 @@ impl Index {
         }
         db.execute_batch(SCHEMA)?;
         let index = Index { db };
-        // Stored off: a bulk re-index was interrupted (crash, quit), so deleted text may sit in the FTS segments.
-        index.end_bulk()?;
+        if index.bulk_off() {
+            // a bulk re-index was interrupted (crash, kill), or runs in another process: deleted text may sit in the
+            // FTS segments. A failure (disk full) must not keep the vault closed: the next lock retries.
+            index.finish_bulk();
+        } else {
+            index.end_bulk()?; // turns secure-delete on in a new index
+        }
         Ok(index)
     }
 
     /// Before a bulk re-index: FTS5 'secure-delete' made replacing a note's row cost ~13 ms (it rewrites the leaves of
     /// every trigram of the old body: 135 s for 10k notes). Stored in the index, so a crash leaves it off for `end_bulk`.
+    /// Writes are cut too (10k notes, chunks of 100: 2.2-3 GB; main 0.65 GB): FTS merging is off (the closing rebuild
+    /// throws merged segments away), and so are this connection's WAL autocheckpoints (each copied pages that later
+    /// chunks rewrite again: ~1 GB). The WAL grows instead (~270 MB with the app's chunks of 700); `end_bulk` checkpoints it once.
     pub fn begin_bulk(&self) -> anyhow::Result<()> {
-        Ok(self.db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 0);")?)
+        self.autocheckpoint(0)?;
+        Ok(self.db.execute_batch(
+            "BEGIN IMMEDIATE; INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 0); INSERT INTO notes_fts(notes_fts, rank) VALUES('automerge', 0); INSERT INTO notes_fts(notes_fts, rank) VALUES('crisismerge', 1000); COMMIT;",
+        ).inspect_err(|_| {
+            _ = self.db.execute_batch("ROLLBACK");
+            _ = self.autocheckpoint(1000);
+        })?)
     }
 
     /// Turn FTS5 'secure-delete' on (FTS5 deletes otherwise leave old segments, all trigrams, in notes_fts_data). If it
@@ -185,10 +199,12 @@ impl Index {
     /// One write transaction, so a failed rebuild (disk full) leaves it off for the next open, and no other connection
     /// can turn it off between the read and the write.
     pub fn end_bulk(&self) -> anyhow::Result<()> {
+        self.autocheckpoint(1000)?; // SQLite's default
         self.db.execute_batch("BEGIN IMMEDIATE")?;
         let off = (|| -> anyhow::Result<bool> {
             let off = self.db.query_row("SELECT v FROM notes_fts_config WHERE k='secure-delete'", [], |r| r.get::<_, i64>(0)).optional()? == Some(0);
-            self.db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1);")?;
+            // FTS5's default merge settings, as before `begin_bulk`
+            self.db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1); INSERT INTO notes_fts(notes_fts, rank) VALUES('automerge', 4); INSERT INTO notes_fts(notes_fts, rank) VALUES('crisismerge', 16);")?;
             if off {
                 self.db.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild');")?;
             }
@@ -203,7 +219,23 @@ impl Index {
         Ok(())
     }
 
-    fn bulk_running(&self) -> bool {
+    /// `end_bulk` if a bulk left secure-delete off (interrupted, failed, or still running in another process); a
+    /// failure is logged and retried by the next lock or open.
+    pub fn finish_bulk(&self) {
+        self.autocheckpoint(1000).ok(); // another connection may have ended this connection's bulk
+        if self.bulk_off() && let Err(e) = self.end_bulk() {
+            let msg = format!("velo: erasing deleted text from the search index failed, retried at the next lock: {e}");
+            crate::log::line(&msg);
+            eprintln!("{msg}"); // `velo --mcp` direct mode has no velo.log
+        }
+    }
+
+    fn autocheckpoint(&self, pages: i64) -> anyhow::Result<()> {
+        self.db.query_row(&format!("PRAGMA wal_autocheckpoint={pages}"), [], |_| Ok(()))?;
+        Ok(())
+    }
+
+    fn bulk_off(&self) -> bool {
         self.db.query_row("SELECT v = 0 FROM notes_fts_config WHERE k='secure-delete'", [], |r| r.get(0)).unwrap_or(false)
     }
 
@@ -457,9 +489,7 @@ impl Index {
 /// A bulk cut short (the app switched vaults mid-rescan) ends here, not at this index's next open, which may never come.
 impl Drop for Index {
     fn drop(&mut self) {
-        if self.bulk_running() {
-            self.end_bulk().ok();
-        }
+        self.finish_bulk();
     }
 }
 

@@ -143,14 +143,16 @@ fn apply_watch(st: &AppState, base: &Path, batch: Option<Vec<PathBuf>>) -> Vec<S
         },
     };
     let mut changed = Vec::new();
-    for chunk in paths.chunks(100) {
+    // A bulk's chunks are bigger, so fewer commits rewrite the same pages (10k notes, with `begin_bulk`'s settings:
+    // 0.84-0.97 GB written with 100, 0.52-0.63 GB with 700, main 0.65 GB), each held ~0.4 s; a watcher batch stays at 100.
+    for chunk in paths.chunks(if bulk { 700 } else { 100 }) {
         let Some(c) = with(&mut |v| v.apply_fs_changes(chunk, id.as_deref())) else { break };
         changed.extend(c);
     }
     if bulk {
         // a vault switch mid-rescan dropped it: `Index`'s drop ended the bulk
         with(&mut |v| {
-            v.index.end_bulk().ok(); // shortcut: a failure (disk full) is retried only when the vault closes or reopens; add a retry if that matters
+            v.index.finish_bulk(); // a failure (disk full) is retried by the next lock, or at close or open
             vec![]
         });
     }

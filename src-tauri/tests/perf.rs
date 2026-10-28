@@ -127,7 +127,7 @@ fn search_times(v: &velo_lib::vault::Vault) -> (f64, f64, f64) {
 }
 
 /// Rescan after every note changed on disk (a `git checkout` or sync): re-indexes notes already in the index, which
-/// replaces their rows. Runs it as the app does (stale paths, a bulk re-index in chunks of 100 with the vault mutex
+/// replaces their rows. Runs it as the app does (stale paths, a bulk re-index in chunks of 700 with the vault mutex
 /// released between them), printing the longest hold, then search times and the cost of locking one note.
 #[cfg(target_os = "macos")]
 #[test]
@@ -159,7 +159,7 @@ fn reindex_existing_notes() {
         assert!(replaced >= velo_lib::vault::BULK, "no fixture notes in {src}");
         v.index.begin_bulk().unwrap();
         let mut longest = t.elapsed().as_secs_f64();
-        for chunk in paths.chunks(100) {
+        for chunk in paths.chunks(700) {
             let c = Instant::now();
             v.apply_fs_changes(chunk, None);
             longest = longest.max(c.elapsed().as_secs_f64());
@@ -170,7 +170,7 @@ fn reindex_existing_notes() {
         let mb = (bytes_written() - before) as f64 / 1e6;
         let wal = std::fs::metadata(format!("{}-wal", db.display())).map_or(0, |m| m.len());
         println!(
-            "round {round}: rescan of {} notes in chunks of 100: {:.1} s, {mb:.0} MB written, longest chunk {:.0} ms, end_bulk {:.0} ms, WAL {:.1} MB, index {:.0} MB",
+            "round {round}: rescan of {} notes in chunks of 700: {:.1} s, {mb:.0} MB written, longest chunk {:.0} ms, end_bulk {:.0} ms, WAL {:.1} MB, index {:.0} MB",
             paths.len(), t.elapsed().as_secs_f64(), longest * 1000.0, end * 1000.0, wal as f64 / 1e6, std::fs::metadata(&db).unwrap().len() as f64 / 1e6
         );
         let (p50, p95, max) = search_times(&v);
