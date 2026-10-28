@@ -38,7 +38,7 @@ The agent gets this through an MCP server that exposes most of velo's capabiliti
 - **Forwarding when velo is open:** each request goes to the running app, which performs it.
   - Writes to the note open in the editor then go through the editor, the same one-writer rule as Tasks and capture.
   - Transport **(my call):** a loopback TCP listener on `127.0.0.1` with a random port. The running app writes the port and a random 32-byte token to `<app data>/agent.json`, readable only by the user (mode 0600).
-  - The headless process sends the token with every request. Anything without it is rejected.
+  - The headless process sends the token as the first line of every connection, before any request. Anything without it is rejected, and the connection is closed.
   - The listener exists only while agent access is on and the app is running. It binds only to 127.0.0.1, never to other interfaces.
 - **Direct when velo is closed:** the headless process opens the notes folder and the index itself.
   - It uses the same vault code as the app: the save path with front-matter stamping, revisions and conflict detection, the index, and the Trash.

@@ -27,7 +27,7 @@ export function fakeApi(notes: Record<string, string> = {}) {
     if (!(title in notes)) throw "not-found";
     return { path, title, text: notes[title], hash: "h", encrypted: false, meta: noMeta };
   };
-  const settings: Settings = { notes_dir: "/n", layout: "vertical", font_size: 14, sort: "modified", editor_style: "rich", theme: "system", header_labels: false, shortcuts: {}, write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox", inbox_title: "Inbox" };
+  const settings: Settings = { notes_dir: "/n", layout: "vertical", font_size: 14, sort: "modified", editor_style: "rich", theme: "system", header_labels: false, shortcuts: {}, write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox", inbox_title: "Inbox", agent_access: false };
   const api = {
     getSettings: vi.fn(async () => ({ ...settings })),
     setSettings: vi.fn(async (_s: Settings) => {}),
@@ -60,8 +60,12 @@ export function fakeApi(notes: Record<string, string> = {}) {
     setupPassphrase: vi.fn(async () => null),
     identityFileExists: vi.fn(async () => true),
     snapshotText: vi.fn(async (_p: string, _t: string) => {}),
+    snapshotAgent: vi.fn(async (_p: string, _s: string) => {}),
+    agentWriteDone: vi.fn(async (_id: number, _r: unknown) => {}),
+    agentWriteClaim: vi.fn(async (_id: number) => true),
     listRevisions: vi.fn(async (_p: string): Promise<RevisionInfo[]> => []),
     readRevision: vi.fn(async (_p: string, _id: string): Promise<string> => { throw "unset"; }),
+    agentSetupCommand: vi.fn(async () => "claude mcp add velo -- /velo --mcp"),
     checkUpdate: vi.fn(async (): Promise<{ version: string } | null> => null),
     installUpdate: vi.fn(async () => {}),
     appVersion: vi.fn(async () => "0.6.0"),
@@ -121,6 +125,14 @@ export class FakeEditor implements Editor {
   toggleTask = vi.fn(() => false);
   revealed: number[] = [];
   revealLine(line: number) { this.revealed.push(line); }
+  changes: { from: number; to: number; insert: string }[] = [];
+  applyChange(c: { from: number; to: number; insert: string }) {
+    if (this.path === null || this.suspended || this.readOnly) return false;
+    this.changes.push(c);
+    this.text = this.text.slice(0, c.from) + c.insert + this.text.slice(c.to);
+    this.dirty = true;
+    return true;
+  }
   appended: string[] = [];
   appendLine(text: string) {
     this.appended.push(text);

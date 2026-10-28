@@ -575,13 +575,13 @@ test("info loads only while open", async () => {
   await settle();
   expect(api.listRevisions).not.toHaveBeenCalled();
   expect(api.backlinkCount).not.toHaveBeenCalled();
-  api.listRevisions.mockResolvedValue([{ id: "1", ts: 5, size: 1 }]);
+  api.listRevisions.mockResolvedValue([{ id: "1", ts: 5, size: 1, agent: false }]);
   api.backlinkCount.mockResolvedValue(3);
   await c.toggleInfo();
   await settle();
   expect(api.setSettings).toHaveBeenCalledWith(expect.objectContaining({ info_panel: true }));
   expect(store.get().info.backlinks).toBe(3);
-  expect(store.get().info.revisions).toEqual([{ id: "1", ts: 5, size: 1 }]);
+  expect(store.get().info.revisions).toEqual([{ id: "1", ts: 5, size: 1, agent: false }]);
 });
 
 test("meta updates after save", async () => {
@@ -1159,4 +1159,205 @@ test("Lock all drops the undo payload and a tasks reply that was in flight", asy
   await settle();
   expect(store.get().taskView?.no_date).toEqual([]);
   expect(store.get().dueCount).toBe(0);
+});
+
+test("agent write to the open note goes through the editor and replies with the hash", async () => {
+  const { c, api, editor } = setup({ A: "hello world" });
+  await c.show(P("A"));
+  const atSnapshot: string[] = [];
+  api.snapshotAgent.mockImplementation(async () => void atSnapshot.push(editor.text));
+  await c.onAgentWrite({ id: 7, path: P("A"), kind: "replace", insert: "hello there world", base: "h", summary: "s" });
+  expect(editor.changes).toEqual([{ from: 6, to: 6, insert: "there " }]); // only the changed span: a small undo step
+  expect(editor.text).toBe("hello there world");
+  expect(api.snapshotAgent).toHaveBeenCalledWith(P("A"), "s");
+  expect(atSnapshot).toEqual(["hello world"]); // snapshot of the text before the change
+  expect(editor.flush).toHaveBeenCalled();
+  expect(api.agentWriteDone).toHaveBeenCalledWith(7, { hash: "h" });
+});
+
+test("agent append to the open note uses appendLine", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 1, path: P("A"), kind: "append", insert: "- [ ] milk", summary: "s" });
+  expect(editor.appended).toEqual(["- [ ] milk"]);
+  expect(api.agentWriteDone).toHaveBeenCalledWith(1, { hash: "h" });
+});
+
+test("agent write refused when the editor is read-only", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  editor.readOnly = true;
+  await c.onAgentWrite({ id: 2, path: P("A"), kind: "replace", insert: "b", base: "h", summary: "s" });
+  expect(editor.text).toBe("a");
+  expect(api.agentWriteDone).toHaveBeenCalledWith(2, "refused");
+});
+
+test("agent write refused while busy", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  c.busy = true;
+  await c.onAgentWrite({ id: 3, path: P("A"), kind: "replace", insert: "b", base: "h", summary: "s" });
+  expect(editor.text).toBe("a");
+  expect(api.agentWriteDone).toHaveBeenCalledWith(3, "refused");
+});
+
+test("agent write gets not-open for another note", async () => {
+  const { c, api, editor } = setup({ A: "a", B: "b" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 4, path: P("B"), kind: "replace", insert: "x", base: "h", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(4, "not-open");
+  expect(api.snapshotAgent).not.toHaveBeenCalled();
+  expect(editor.text).toBe("a");
+});
+
+test("agent write conflicts when the saved note moved on from its base", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 5, path: P("A"), kind: "replace", insert: "b", base: "stale", summary: "s" });
+  expect(editor.text).toBe("a");
+  expect(api.agentWriteDone).toHaveBeenCalledWith(5, "conflict");
+});
+
+test("agent write conflicts when the user typed during the round trip", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  api.openNote.mockImplementationOnce(async (path: string) => {
+    editor.text = "a typed";
+    editor.dirty = true;
+    return { path, title: "A", text: "a", hash: "h", encrypted: false, meta: noMeta };
+  });
+  await c.onAgentWrite({ id: 6, path: P("A"), kind: "replace", insert: "b", base: "h", summary: "s" });
+  expect(editor.text).toBe("a typed"); // the keystroke survives
+  expect(api.agentWriteDone).toHaveBeenCalledWith(6, "conflict");
+});
+
+test("agent write the backend gave up on (claim refused) changes nothing and sends no reply", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  api.agentWriteClaim.mockResolvedValueOnce(false);
+  await c.onAgentWrite({ id: 8, path: P("A"), kind: "append", insert: "- [ ] late", summary: "s" });
+  expect(editor.appended).toEqual([]);
+  expect(api.snapshotAgent).not.toHaveBeenCalled();
+  expect(api.agentWriteDone).not.toHaveBeenCalled();
+});
+
+test("agent write conflicts when an autosave left the editor newer than its read", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  editor.text = "a saved later"; // clean, but not what the agent's text was computed from
+  await c.onAgentWrite({ id: 9, path: P("A"), kind: "replace", insert: "b", base: "h", summary: "s" });
+  expect(editor.text).toBe("a saved later");
+  expect(api.snapshotAgent).not.toHaveBeenCalled(); // no agent revision for a refused write
+  expect(api.agentWriteDone).toHaveBeenCalledWith(9, "conflict");
+});
+
+test("two interleaved agent writes: the second, based on the old text, conflicts", async () => {
+  const { c, api, editor, notes } = setup({ A: "hello world" });
+  await c.show(P("A"));
+  api.openNote.mockImplementation(async (path: string) => ({ path, title: "A", text: notes.A, hash: `h:${notes.A}`, encrypted: false, meta: noMeta }));
+  editor.flush.mockImplementation(async () => ((notes.A = editor.text), (editor.dirty = false), true));
+  const one = c.onAgentWrite({ id: 1, path: P("A"), kind: "replace", insert: "hello there world", base: "h:hello world", summary: "s" });
+  const two = c.onAgentWrite({ id: 2, path: P("A"), kind: "replace", insert: "hello world!", base: "h:hello world", summary: "s" });
+  await Promise.all([one, two]);
+  expect(editor.text).toBe("hello there world");
+  expect(api.agentWriteDone).toHaveBeenCalledWith(1, { hash: "h:hello there world" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(2, "conflict");
+});
+
+test("agent trash of the open note saves and closes it first", async () => {
+  const { c, api, editor, store } = setup({ A: "a" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 3, path: P("A"), kind: "trash", summary: "s" });
+  expect(editor.flush).toHaveBeenCalled();
+  expect(editor.currentPath()).toBe(null);
+  expect(store.get().openPath).toBe(null);
+  expect(api.agentWriteDone).toHaveBeenCalledWith(3, "closed");
+});
+
+test("agent trash refused when the open note can't be saved", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  editor.dirty = true;
+  editor.flushResult = false;
+  await c.onAgentWrite({ id: 4, path: P("A"), kind: "trash", summary: "s" });
+  expect(editor.currentPath()).toBe(P("A"));
+  expect(api.agentWriteDone).toHaveBeenCalledWith(4, "refused");
+});
+
+test("agent rename freezes the open note, then follows it to the new path", async () => {
+  const { c, api, editor, store, notes } = setup({ A: "a" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 5, path: P("A"), kind: "rename", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(5, "ready");
+  expect(editor.suspended).toBe(true);
+  expect(c.busy).toBe(true);
+  notes.B = notes.A; // the backend renamed A.md to B.md
+  delete notes.A;
+  await c.onAgentWrite({ id: 6, path: P("A"), kind: "renamed", to: P("B") });
+  expect(editor.currentPath()).toBe(P("B"));
+  expect(store.get().openPath).toBe(P("B"));
+  expect(store.get().title).toBe("B");
+  expect(c.busy).toBe(false);
+  expect(api.agentWriteDone).toHaveBeenCalledWith(6, "ok");
+});
+
+test("agent rename that failed unfreezes the note where it was", async () => {
+  const { c, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 5, path: P("A"), kind: "rename", summary: "s" });
+  await c.onAgentWrite({ id: 6, path: P("A"), kind: "renamed", to: null });
+  expect(editor.suspended).toBe(false);
+  expect(editor.currentPath()).toBe(P("A"));
+  expect(c.busy).toBe(false);
+});
+
+test("agent flush before a link rewrite saves the open note, or refuses", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 1, path: "", kind: "flush", paths: [P("B")] });
+  expect(api.agentWriteDone).toHaveBeenLastCalledWith(1, "not-open");
+  await c.onAgentWrite({ id: 2, path: "", kind: "flush", paths: [P("A")] });
+  expect(api.agentWriteDone).toHaveBeenLastCalledWith(2, "flushed");
+  editor.dirty = true;
+  editor.flushResult = false;
+  await c.onAgentWrite({ id: 3, path: "", kind: "flush", paths: [P("A")] });
+  expect(api.agentWriteDone).toHaveBeenLastCalledWith(3, "refused");
+});
+
+test("agent write applied but not saved replies unsaved, never a retryable status", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  editor.flush.mockResolvedValueOnce(true).mockResolvedValueOnce(false); // saved before, not after the apply
+  await c.onAgentWrite({ id: 10, path: P("A"), kind: "append", insert: "- [ ] once", summary: "s" });
+  expect(editor.appended).toEqual(["- [ ] once"]);
+  expect(api.agentWriteDone).toHaveBeenCalledWith(10, "unsaved");
+});
+
+test("agent write applied, then the hash read fails: unsaved, not refused", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  const open = api.openNote.getMockImplementation()!;
+  api.openNote.mockImplementationOnce(open).mockRejectedValueOnce(new Error("io"));
+  await c.onAgentWrite({ id: 11, path: P("A"), kind: "append", insert: "- [ ] once", summary: "s" });
+  expect(editor.appended).toEqual(["- [ ] once"]);
+  expect(api.agentWriteDone).toHaveBeenCalledWith(11, "unsaved");
+});
+
+test("notes-changed for the open note during an agent rename takes no snapshot and no reload", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 5, path: P("A"), kind: "rename", summary: "s" });
+  await c.onNotesChanged([P("A")]);
+  expect(api.snapshotText).not.toHaveBeenCalled();
+  expect(editor.onExternalChange).not.toHaveBeenCalled();
+});
+
+test("agent renamed: a failing history update still unfreezes the editor", async () => {
+  const { c, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 5, path: P("A"), kind: "rename", summary: "s" });
+  (c as unknown as { history: { rename: () => void } }).history.rename = () => { throw new Error("boom"); };
+  await c.onAgentWrite({ id: 6, path: P("A"), kind: "renamed", to: P("B") });
+  expect(editor.suspended && editor.currentPath() !== null).toBe(false);
+  expect(c.busy).toBe(false);
 });

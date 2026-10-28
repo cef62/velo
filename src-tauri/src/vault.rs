@@ -13,6 +13,25 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// `text` with the task on `line` (0-based) flipped, if that line still reads `expected`; and the flipped line.
+pub fn toggled_text(text: &str, line: usize, expected: &str) -> anyhow::Result<(String, String)> {
+    let moved = || anyhow!("task-moved");
+    let mut lines: Vec<&str> = text.split('\n').collect();
+    let cur = *lines.get(line).ok_or_else(moved)?;
+    // parse_tasks skips fenced code, which toggle_line alone would not
+    if cur.strip_suffix('\r').unwrap_or(cur) != expected || !parse_tasks(text).iter().any(|t| t.line == line) {
+        return Err(moved());
+    }
+    let new = toggle_line(cur, &local_today()).ok_or_else(moved)?;
+    lines[line] = &new;
+    Ok((lines.join("\n"), new.strip_suffix('\r').unwrap_or(&new).to_string()))
+}
+
+/// Lines in `text`'s front-matter block (0 without one).
+pub fn fm_lines(t: &str) -> usize {
+    frontmatter::parse(t).map_or(0, |f| t[..f.end].matches('\n').count())
+}
+
 /// Where a toggled task is in the text as saved (after front-matter stamping): what undo sends back.
 #[derive(Serialize, Debug, PartialEq)]
 pub struct Toggled {
@@ -86,7 +105,7 @@ fn parse(p: &Path) -> anyhow::Result<NoteFile> {
 
 /// macOS uses NSFileManager instead of the crate's Finder default, which drives Finder over AppleScript
 /// (Automation permission prompt; denying it would break every later delete).
-fn move_to_trash(p: &Path) -> std::io::Result<()> {
+pub(crate) fn move_to_trash(p: &Path) -> std::io::Result<()> {
     #[allow(unused_mut)]
     let mut ctx = trash::TrashContext::default();
     #[cfg(target_os = "macos")]
@@ -237,24 +256,11 @@ impl Vault {
     }
 
     fn toggle_in(&mut self, doc: NoteDoc, line: usize, expected: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<Toggled> {
-        let moved = || anyhow!("task-moved");
-        let mut lines: Vec<&str> = doc.text.split('\n').collect();
-        let cur = *lines.get(line).ok_or_else(moved)?;
-        // parse_tasks skips fenced code, which toggle_line alone would not
-        if cur.strip_suffix('\r').unwrap_or(cur) != expected || !parse_tasks(&doc.text).iter().any(|t| t.line == line) {
-            return Err(moved());
-        }
-        let new = toggle_line(cur, &local_today()).ok_or_else(moved)?;
-        lines[line] = &new;
-        let text = lines.join("\n");
-        let fm_lines = |t: &str| frontmatter::parse(t).map_or(0, |f| t[..f.end].matches('\n').count());
+        let (text, line_text) = toggled_text(&doc.text, line, expected)?;
         match self.save_note(&doc.path, &text, &doc.hash, identity, write_fm)? {
             // stamping may replace or prepend the front-matter block: shift the line by its change in height
-            SaveResult::Saved { front_matter, .. } => Ok(Toggled {
-                line: line - fm_lines(&text) + front_matter.as_deref().map_or(fm_lines(&text), fm_lines),
-                line_text: new.strip_suffix('\r').unwrap_or(&new).to_string(),
-            }),
-            SaveResult::Conflict { .. } => Err(moved()), // disk changed since we read it
+            SaveResult::Saved { front_matter, .. } => Ok(Toggled { line: line - fm_lines(&text) + front_matter.as_deref().map_or(fm_lines(&text), fm_lines), line_text }),
+            SaveResult::Conflict { .. } => Err(anyhow!("task-moved")), // disk changed since we read it
         }
     }
 
@@ -342,7 +348,8 @@ impl Vault {
         if rewrite_links_too {
             for src in self.index.backlinks(&old.title).unwrap_or_default() {
                 let sp = Path::new(&src);
-                if parse_note_file(sp).is_none_or(|n| n.encrypted) {
+                // a plain twin of a locked note is locked too (save_note refuses it the same way)
+                if parse_note_file(sp).is_none_or(|n| n.encrypted || note_path(&self.store.dir, &n.title, true).exists()) {
                     continue;
                 }
                 let Ok(bytes) = self.store.read(sp) else { continue };
@@ -443,6 +450,30 @@ impl Vault {
             return Ok(());
         }
         self.revisions.snapshot_bytes(&nf.title, &crypto::encrypt(id, text.as_bytes())?, true, now_ms(), false)?;
+        Ok(())
+    }
+
+    /// Agent undo trail: an unthrottled snapshot of the note's current on-disk bytes, with the agent's summary.
+    /// Plain notes only; the agent never reaches a locked one.
+    pub fn agent_snapshot(&mut self, path: &str, summary: &str) -> anyhow::Result<()> {
+        let nf = self.note(Path::new(path))?;
+        if nf.encrypted || note_path(&self.store.dir, &nf.title, true).exists() {
+            return Err(anyhow!("locked"));
+        }
+        let bytes = std::fs::read(path)?;
+        if !bytes.is_empty() { // an empty file has nothing to keep
+            self.revisions.snapshot_agent(&nf.title, &bytes, false, now_ms(), summary)?;
+        }
+        Ok(())
+    }
+
+    /// First revision of a note the agent just created: its created text, with the summary.
+    pub fn agent_snapshot_text(&mut self, path: &str, text: &str, summary: &str) -> anyhow::Result<()> {
+        let nf = self.note(Path::new(path))?;
+        if nf.encrypted || note_path(&self.store.dir, &nf.title, true).exists() {
+            return Err(anyhow!("locked"));
+        }
+        self.revisions.snapshot_agent(&nf.title, text.as_bytes(), false, now_ms(), summary)?;
         Ok(())
     }
 

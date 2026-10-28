@@ -1,8 +1,9 @@
 import { css } from "styled-system/css";
 import { tagChip } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
+import type { RevisionInfo } from "../api";
 import type { AppState, Store } from "../app/store";
-import { Button, Checkbox, Tooltip } from "@/components/ui";
+import { Badge, Button, Checkbox, Tooltip } from "@/components/ui";
 import { fold } from "../search";
 import { useStore } from "./useStore";
 
@@ -17,6 +18,7 @@ const list = css({ display: "flex", flexDirection: "column", gap: "0.5", listSty
 const rev = css({ w: "full", textAlign: "left", px: "2", py: "1", borderRadius: "l2", cursor: "pointer", display: "flex", justifyContent: "space-between", _hover: { bg: "velo.subtle" }, "&[aria-pressed=true]": { bg: "velo.accentSubtleHover", color: "velo.accentText" } });
 const preview = css({ mt: "2", maxH: "180px", overflow: "auto", p: "2", borderRadius: "l2", bg: "velo.canvas", borderWidth: "1px", borderColor: "velo.border", whiteSpace: "pre-wrap", fontSize: "uiXs", m: "0" });
 
+export const revisionLabel = (r: RevisionInfo) => ({ summary: r.summary ?? null, agent: r.agent });
 const abs = (ms: number) => new Date(ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [["year", 31536e6], ["month", 2592e6], ["day", 864e5], ["hour", 36e5], ["minute", 6e4]];
 function rel(ms: number): string {
@@ -80,8 +82,11 @@ export function InfoPanel({ controller, store }: { controller: Controller; store
               {info.revisions?.map((r) => (
                 <li key={r.id}>
                   <button type="button" className={rev} aria-pressed={info.preview?.id === r.id} title={abs(r.ts)} onClick={() => void controller.selectRevision(r.id)}>
-                    <span>{rel(r.ts)}</span>
-                    <span className={muted}>{abs(r.ts)}</span>
+                    <span>
+                      {rel(r.ts)}
+                      {revisionLabel(r).summary && <span className={css({ display: "block", color: "velo.fgMuted", fontSize: "uiXs" })}>{revisionLabel(r).summary}</span>}
+                    </span>
+                    <span className={muted}>{revisionLabel(r).agent && <Badge size="sm" mr="1.5">agent</Badge>}{abs(r.ts)}</span>
                   </button>
                 </li>
               ))}

@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod commands;
 pub mod crypto;
 pub mod frontmatter;
@@ -93,6 +94,13 @@ pub fn run() {
                     eprintln!("velo: {action:?} hotkey not registered: {e}");
                 }
             }
+            app.manage(agent::listener::AgentState::default());
+            if app.state::<commands::AppState>().settings.lock().unwrap().agent_access {
+                let started = agent::listener::start(h.clone()).map(|l| *app.state::<agent::listener::AgentState>().listener.lock().unwrap() = Some(l));
+                if let Err(e) = started {
+                    eprintln!("velo: agent access listener not started: {e}");
+                }
+            }
             app.manage(Mutex::new(update::UpdateState::default()));
             update::spawn_checker(h.clone());
             Ok(())
@@ -119,15 +127,27 @@ pub fn run() {
             commands::unlock_note,
             commands::lock_all,
             commands::delete_note,
+            commands::snapshot_agent,
+            commands::agent_write_claim,
+            commands::agent_write_done,
             commands::list_revisions,
             commands::read_revision,
             commands::snapshot_text,
             commands::has_identity,
+            commands::agent_setup_command,
             commands::setup_passphrase,
             commands::identity_file_exists,
             update::check_update,
             update::install_update,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running velo");
+        .build(tauri::generate_context!())
+        .expect("error while running velo")
+        .run(|app, ev| {
+            if let tauri::RunEvent::Exit = ev
+                && let Some(agent) = app.try_state::<agent::listener::AgentState>()
+                && let Some(l) = agent.listener.lock().unwrap().take()
+            {
+                l.stop(); // deletes agent.json: the headless server goes direct again
+            }
+        });
 }

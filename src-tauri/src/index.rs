@@ -363,6 +363,12 @@ impl Index {
         Ok(st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?)
     }
 
+    /// Display spellings of one note's tags (front matter and inline).
+    pub fn tags_of(&self, path: &str) -> anyhow::Result<Vec<String>> {
+        let mut st = self.db.prepare("SELECT tag_display FROM tags WHERE path=?")?;
+        Ok(st.query_map([path], |r| r.get(0))?.collect::<Result<_, _>>()?)
+    }
+
     pub fn backlinks(&self, title: &str) -> anyhow::Result<Vec<String>> {
         let mut st = self.db.prepare("SELECT DISTINCT src FROM links WHERE dst_folded=? ORDER BY src")?;
         Ok(st.query_map([fold(title)], |r| r.get(0))?.collect::<Result<_, _>>()?)
