@@ -1469,20 +1469,6 @@ test("capture into the open Inbox whose save lands in a conflict copy says so (#
   expect(store.get().err).toBe("Saved to a conflict copy — check Inbox");
 });
 
-test("a capture retry with corrected text replaces the unsaved line instead of adding a second (#8)", async () => {
-  const { c, editor, store } = setup({ Inbox: "", B: "b" });
-  await c.show(P("Inbox"));
-  await c.startCapture();
-  c.setQuery("buy mlik");
-  editor.flushResult = false;
-  await c.submitCapture("buy mlik");
-  c.setQuery("buy milk");
-  editor.flushResult = true;
-  await c.submitCapture("buy milk");
-  expect(editor.text).toBe("- [ ] buy milk");
-  expect(store.get().capture).toBeNull();
-});
-
 test("Enter in Tasks mode waits for the task load in flight (#8)", async () => {
   const { c, api, store } = setup({ A: "- [ ] a", B: "- [ ] b" });
   api.tasks.mockResolvedValue({ ...view(0), no_date: [task("A", 0, "- [ ] a")] });
@@ -1707,21 +1693,6 @@ test("a capture retry never edits a line it did not write: after a conflict relo
   }
 });
 
-test("a task load started before a tick never restores the unticked row (#15 Copilot)", async () => {
-  const { c, api, editor, store } = setup({ A: "- [ ] x" });
-  api.tasks.mockResolvedValue({ ...view(0), no_date: [task("A", 0, "- [ ] x")] });
-  await c.loadTasks();
-  await c.show(P("A"));
-  const d = deferred<TaskView>();
-  api.tasks.mockImplementationOnce(() => d.promise);
-  const loading = c.loadTasks(); // e.g. a watcher refresh, still in flight
-  editor.toggleTask.mockImplementation(() => ((editor.text = "- [x] x ✅ 2026-10-27"), true));
-  await c.tickTask(store.get().taskView!.no_date[0]);
-  d.resolve({ ...view(0), no_date: [task("A", 0, "- [ ] x")] }); // read before the tick was saved
-  await loading;
-  expect(store.get().taskView!.no_date[0].done).toBe(true);
-});
-
 test("a backend tick still reloads the view after the optimistic patch (#15 Copilot)", async () => {
   const { c, api, store } = setup({ A: "a", B: "- [ ] y" });
   api.tasks.mockResolvedValue({ ...view(0), no_date: [task("B", 0, "- [ ] y")] });
@@ -1734,26 +1705,6 @@ test("a backend tick still reloads the view after the optimistic patch (#15 Copi
   await settle();
   expect(store.get().taskView!.no_date).toEqual([]);
   expect(store.get().taskView!.done).toHaveLength(1);
-});
-
-test("the saver's own retry saves the capture line and restamps the front matter: Enter never duplicates it (#15 r5 M1)", async () => {
-  for (const retry of ["buy milk", "buy mlik"]) {
-    const { c, editor, store } = setup({ Inbox: "---\nmodified: 1\n---\n- [ ] old", B: "b" });
-    await c.show(P("Inbox"));
-    await c.startCapture();
-    c.setQuery("buy mlik");
-    editor.flushResult = false;
-    await c.submitCapture("buy mlik");
-    expect(store.get().capture?.err).toMatch(/wasn't saved/);
-    editor.text = editor.text.replace("modified: 1", "modified: 2"); // the saver's 1 s retry landed and restamped the block
-    c.editorOpts().onSaved();
-    expect(store.get().capture?.err, retry).toBe(""); // saved: the field no longer asks for a retry
-    c.setQuery(retry);
-    editor.flushResult = true;
-    await c.submitCapture(retry);
-    expect(editor.text, retry).toBe(`---\nmodified: 2\n---\n- [ ] old\n- [ ] ${retry}`);
-    expect(store.get().capture, retry).toBeNull();
-  }
 });
 
 test("a tick through the editor never drops a filter load in flight (#15 r5 m1)", async () => {
@@ -1773,30 +1724,49 @@ test("a tick through the editor never drops a filter load in flight (#15 r5 m1)"
   expect(store.get().openPath).toBe(P("B"));
 });
 
-test("an editor tick stays shown over every reply read before its save, and the patch ends once the save lands (#15 r5 m1)", async () => {
-  const { c, api, editor, store } = setup({ A: "- [ ] x" });
-  const before = { ...view(0), no_date: [task("A", 0, "- [ ] x")] };
-  api.tasks.mockResolvedValue(before);
-  await c.loadTasks();
-  await c.show(P("A"));
-  editor.toggleTask.mockImplementation(() => ((editor.text = "- [x] x ✅ 2026-10-27"), true));
-  await c.tickTask(store.get().taskView!.no_date[0]);
-  await c.loadTasks(); // a reload before the save landed still reads the unticked line
-  expect(store.get().taskView!.no_date[0].done).toBe(true);
-  c.editorOpts().onSaved(); // the save landed
-  await c.loadTasks(); // the index now says unticked again (the user unticked it in the editor meanwhile): believe it
-  expect(store.get().taskView!.no_date[0].done).toBe(false);
+test("a corrected capture after a failed save is a new capture: the earlier line stays and is saved with the note (#8)", async () => {
+  const { c, editor, store } = setup({ Inbox: "", B: "b" });
+  await c.show(P("Inbox"));
+  await c.startCapture();
+  c.setQuery("buy mlik");
+  editor.flushResult = false;
+  await c.submitCapture("buy mlik");
+  c.setQuery("buy milk");
+  editor.flushResult = true;
+  await c.submitCapture("buy milk");
+  expect(editor.text).toBe("- [ ] buy mlik\n- [ ] buy milk"); // no line edited or replaced
+  expect(store.get().capture).toBeNull();
 });
 
-test("a tick then an untick through the editor before the save: a pre-save reply shows the row unticked (#15 r5 m1)", async () => {
-  const { c, api, editor, store } = setup({ A: "- [ ] x" });
-  api.tasks.mockResolvedValue({ ...view(0), no_date: [task("A", 0, "- [ ] x")] });
-  await c.loadTasks();
-  await c.show(P("A"));
-  editor.toggleTask.mockImplementation(() => ((editor.text = editor.text.startsWith("- [ ]") ? "- [x] x ✅ 2026-10-27" : "- [ ] x"), true));
-  await c.tickTask(store.get().taskView!.no_date[0]);
-  await c.tickTask(store.get().taskView!.no_date[0]);
-  expect(store.get().taskView!.no_date[0]).toMatchObject({ done: false, line_text: "- [ ] x" });
-  await c.loadTasks(); // read before the save landed
-  expect(store.get().taskView!.no_date[0]).toMatchObject({ done: false, line_text: "- [ ] x" });
+test("the saver's own retry saved the capture line (front matter restamped): a same-text Enter closes without a duplicate (#15 simplification)", async () => {
+  const { c, editor, store, api } = setup({ Inbox: "---\nmodified: 1\n---\n- [ ] buy milk", B: "b" }); // an older identical task
+  await c.show(P("Inbox"));
+  await c.startCapture();
+  c.setQuery("buy milk");
+  editor.flushResult = false;
+  await c.submitCapture("buy milk");
+  expect(store.get().capture?.err).toMatch(/wasn't saved/);
+  editor.text = editor.text.replace("modified: 1", "modified: 2"); // the saver's 1 s retry landed and restamped the block
+  editor.flushResult = true;
+  await c.submitCapture("buy milk");
+  expect(editor.text).toBe("---\nmodified: 2\n---\n- [ ] buy milk\n- [ ] buy milk"); // the older task and this capture, once each
+  expect(editor.appended).toEqual(["- [ ] buy milk"]);
+  expect(store.get().capture).toBeNull();
+  expect(api.captureDone).toHaveBeenLastCalledWith(true);
+});
+
+test("filter results are never replaced by an older load's reply (#15 simplification)", async () => {
+  const { c, api, store } = setup({ A: "- [ ] a", B: "- [ ] b" });
+  c.setPaneMode("tasks");
+  await settle();
+  const d1 = deferred<TaskView>();
+  const d2 = deferred<TaskView>();
+  api.tasks.mockImplementation(async (q) => (q === "a" ? d1.promise : q === "b" ? d2.promise : view(0)));
+  c.setQuery("a");
+  c.setQuery("b");
+  d2.resolve({ ...view(0), no_date: [task("B", 0, "- [ ] b")] });
+  await settle();
+  d1.resolve({ ...view(0), no_date: [task("A", 0, "- [ ] a")] });
+  await settle();
+  expect(store.get().taskView!.no_date.map((t) => t.path)).toEqual([P("B")]);
 });

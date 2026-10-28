@@ -1,5 +1,5 @@
 import type * as ApiModule from "../api";
-import type { AgentReply, AgentWrite, Hit, NoteDoc, Settings, TagCount, TaskItem, TaskView } from "../api";
+import type { AgentReply, AgentWrite, Hit, NoteDoc, Settings, TagCount, TaskItem } from "../api";
 // Types only: editor.ts loads editortheme.ts, which touches `window` at import time (tests run in node).
 import type { Editor, EditorOpts } from "../editor";
 import type { Preview } from "../preview";
@@ -88,12 +88,7 @@ export class Controller {
       onError: (m) => this.store.set({ err: m ? errText(m) : "", errFromSave: !!m }),
       onChange: () => this.preview?.refresh(), // also fires on load, maybe before the preview is attached
       onEdit: () => this.history.edited(this.editor.currentPath()),
-      onSaved: () => {
-        // the saver's own retry saved a capture line Enter would otherwise retry: the field stops asking (Enter just closes)
-        if (this.ownedCapture() && !this.editor.isDirty()) this.failCapture("");
-        this.tickSaved();
-        this.scheduleTagRefresh();
-      },
+      onSaved: () => this.scheduleTagRefresh(),
       onConflict: (p) => this.store.set({ conflict: p }),
       onSaving: (on) => this.store.set({ saving: on }),
       onMeta: (m) => {
@@ -241,17 +236,8 @@ export class Controller {
   protected captureSession = 0; // bumped when capture mode ends: a late submit result belongs to an old session
   protected capturePending = false; // a submit is in flight: another Enter would append the task twice
   protected keptCapture = false;
-  protected captureAppended: { path: string; text: string; body: string } | null = null; // in the editor (`body`: its text right after), its save failed: a retry only re-saves
-
-  /**
-   * The line a failed capture save left in the editor, while it is still ours: the note body is exactly as the append left
-   * it (a save's restamped front matter aside). A conflict reload, typing or an external reload drops the claim, so a
-   * retry never edits a line this capture did not write.
-   */
-  protected ownedCapture() {
-    const a = this.captureAppended;
-    return a && this.editor.currentPath() === a.path && stripFrontMatter(this.editor.getText()) === a.body ? a : null;
-  }
+  // A capture whose save into the open note failed: `before` = copies of its line in the note before the append.
+  protected captureUnsaved: { path: string; text: string; before: number } | null = null;
   // One writer per note across awaits: a backend write waits for note loads in flight (the load decides the editor's
   // note), and a load waits for backend writes in flight (else its reply holds pre-write text and hash).
   protected readonly pendingLoads = new Set<Promise<unknown>>();
@@ -310,18 +296,19 @@ export class Controller {
       // the path the backend would write (an alias resolves to its note); no note yet: compare titles
       if (openPath && this.editor.currentPath() === openPath && (path ? path === openPath : fold(title) === fold(target))) {
         // not editable: read-only while indexing (the gate) or suspended mid lock hand-off
-        const cur = this.editor.getText();
-        const a = this.ownedCapture();
-        if (a?.text !== t) {
-          const line = "- [ ] " + t;
-          // the body ends with our line (ownedCapture): a corrected retry replaces exactly that tail
-          const ok = a ? this.editor.applyChange({ from: cur.length - ("- [ ] " + a.text).length, to: cur.length, insert: line }) : this.editor.appendLine(line);
-          if (!ok) return this.failCapture(indexing ? errText("indexing") : `${target} can't be edited right now`);
-          this.captureAppended = { path: openPath, text: t, body: stripFrontMatter(this.editor.getText()) };
-        }
+        // A retry never edits a line: if the earlier append is still in the note (unsaved, or saved by the saver's own
+        // retry) the flush below saves it or finds it saved; if it went (a conflict reload) it is appended once more.
+        // Other text is a new capture; an earlier unsaved line stays in the note and is saved with it.
+        const line = "- [ ] " + t;
+        const u = this.captureUnsaved?.path === openPath && this.captureUnsaved.text === t ? this.captureUnsaved : null;
+        const before = u?.before ?? copies(this.editor.getText(), line);
+        if (copies(this.editor.getText(), line) <= before && !this.editor.appendLine(line)) return this.failCapture(indexing ? errText("indexing") : `${target} can't be edited right now`);
         const conflict = this.store.get().conflict;
-        if (!(await this.editor.flush())) return live() ? this.failCapture(`${target} wasn't saved — Enter retries the save`) : undefined;
-        this.captureAppended = null;
+        if (!(await this.editor.flush())) {
+          this.captureUnsaved = { path: openPath, text: t, before };
+          return live() ? this.failCapture(`${target} wasn't saved — Enter retries the save`) : undefined;
+        }
+        this.captureUnsaved = null;
         // the saver put the text in a conflict copy and reloaded the note without the line: same outcome as the backend's "conflict"
         if (this.store.get().conflict !== conflict && this.store.get().conflict !== null) return this.capturedToConflict(live(), text, target);
         return live() ? this.endCapture(true, text) : undefined;
@@ -371,7 +358,7 @@ export class Controller {
     const keep = q !== captured && q.trim() !== "";
     this.captureSession++;
     this.keptCapture = keep;
-    this.captureAppended = null;
+    this.captureUnsaved = null;
     this.store.set({ capture: null, ...(keep ? {} : { query: this.captureQuery }) });
     // the kept text lists like a search, but never opens a hit: focus went to the open note (or a note just opened)
     // Tasks always reload: a load during capture mode (watcher, backend write) filtered by the capture text
@@ -821,7 +808,6 @@ export class Controller {
       }
       // decrypted task text must not come back: drop the rows, the undo payload and any tasks reply in flight
       clearTimeout(this.undoTimer);
-      this.tickPatches = []; // they hold task lines too
       this.store.set({ taskView: null, tickUndo: null });
       void this.loadTasks(); // a new request: older replies are stale
       if (path && isLockedPath(path)) {
@@ -939,13 +925,11 @@ export class Controller {
     this.tasksDay = localToday();
     const { query, selectedTags, showDone } = this.store.get();
     const fresh = this.newTasksReq();
-    const gen = ++this.tasksGen;
     try {
-      const v = this.withTicks(await this.api.tasks(query, selectedTags, showDone), gen);
+      const v = await this.api.tasks(query, selectedTags, showDone);
       // the badge must not change while typing a search: count from an unfiltered view
       const due = query.trim() || selectedTags.length ? (await this.api.tasks("", [], false)).due_count : v.due_count;
       if (!fresh()) return;
-      this.tickPatches = this.tickPatches.filter((p) => gen < p.until); // this load saw the tick's write: its patch is done
       this.store.set({ taskView: v, dueCount: due });
       await this.api.setBadge(due);
     } catch (e) {
@@ -965,35 +949,13 @@ export class Controller {
     if (!r) return;
     // the row shows the tick now, not after the reload (the editor path waits for its save and a 300 ms debounce)
     const next = r === "editor" ? { line: item.line, line_text: this.editor.getText().split("\n")[item.line]?.replace(/\r$/, "") ?? item.line_text } : r;
-    // a backend write has landed, so loads from now on see it; an editor tick is seen only once its save lands (tickSaved)
-    this.tickPatches.push({ path: item.path, line: item.line, line_text: item.line_text, next: { ...next, done: !item.done }, until: r === "editor" ? Infinity : this.tasksGen + 1 });
-    this.store.set(({ taskView: v }) => (v ? { taskView: this.withTicks(v, -1) } : {}));
+    // once: the next task reply replaces it (an editor tick's reload follows its save, so the row may flicker until then)
+    const patch = (ts: TaskItem[]) => ts.map((t) => (t.path === item.path && t.line === item.line ? { ...t, ...next, done: !item.done } : t));
+    this.store.set(({ taskView: v }) => (v ? { taskView: { ...v, overdue: patch(v.overdue), today: patch(v.today), upcoming: patch(v.upcoming), no_date: patch(v.no_date), done: patch(v.done) } } : {}));
     if (r === "editor") return; // through the editor, ⌘Z undoes it; its save's onSaved reloads the view
     clearTimeout(this.undoTimer);
     this.store.set({ tickUndo: { path: item.path, line: r.line, lineText: r.line_text, unticked: item.done } });
     this.undoTimer = setTimeout(() => this.store.set({ tickUndo: null }), UNDO_MS);
-  }
-
-  // Optimistic ticks: shown over every task reply read before the tick's write landed (`gen < until`), so neither a
-  // pre-tick load nor a filter change brings the old row back; no load is dropped for it.
-  protected tasksGen = 0; // numbers each task load in start order
-  protected tickPatches: { path: string; line: number; line_text: string; next: Partial<TaskItem>; until: number }[] = [];
-
-  /** `v` with the ticks a load numbered `gen` cannot have seen (-1: all of them); rows match on the pre-tick line. */
-  protected withTicks(v: TaskView, gen: number): TaskView {
-    const ps = this.tickPatches.filter((p) => gen === -1 || gen < p.until);
-    if (!ps.length) return v;
-    // in order, so a tick then an untick of the same row chain back to where they started
-    const one = (t: TaskItem) => ps.reduce((r, q) => (q.path === r.path && q.line === r.line && q.line_text === r.line_text ? { ...r, ...q.next } : r), t);
-    const p = (ts: TaskItem[]) => ts.map(one);
-    return { ...v, overdue: p(v.overdue), today: p(v.today), upcoming: p(v.upcoming), no_date: p(v.no_date), done: p(v.done) };
-  }
-
-  /** The open note saved clean: its editor ticks are on disk, so loads from now on see them. */
-  protected tickSaved() {
-    const path = this.editor.currentPath();
-    if (this.editor.isDirty()) return;
-    for (const p of this.tickPatches) if (p.until === Infinity && p.path === path) p.until = this.tasksGen + 1;
   }
 
   async undoTick() {
@@ -1526,6 +1488,9 @@ export class Controller {
     void this.runSearch(false); // no vault -> shows the setup screen
   }
 }
+
+/** How many lines of `text` read exactly `line`. */
+const copies = (text: string, line: string) => text.split("\n").filter((l) => l.replace(/\r$/, "") === line).length;
 
 /** Awaits the latest of a promise that can be replaced while awaited (a newer load drops the older one's reply). */
 async function settled(latest: () => Promise<unknown>) {
