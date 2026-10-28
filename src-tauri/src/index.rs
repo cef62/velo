@@ -181,10 +181,12 @@ impl Index {
     /// Before a bulk re-index: FTS5 'secure-delete' made replacing a note's row cost ~13 ms (it rewrites the leaves of
     /// every trigram of the old body: 135 s for 10k notes). Stored in the index, so a crash leaves it off for `end_bulk`.
     /// Writes are cut too (10k notes, chunks of 100: 2.2-3 GB; main 0.65 GB): FTS merging is off (the closing rebuild
-    /// throws merged segments away), and so are this connection's WAL autocheckpoints (each copied pages that later
-    /// chunks rewrite again: ~1 GB). The WAL grows instead (~270 MB with the app's chunks of 700); `end_bulk` checkpoints it once.
+    /// throws merged segments away), and this connection's WAL autocheckpoint waits for 16000 pages instead of 1000
+    /// (each checkpoint copies pages that later chunks rewrite again). 64 MB caps the WAL: unbounded it reached ~300 MB,
+    /// enough to fill a nearly full disk; the cap costs ~0.1 GB per 10k-note bulk.
     pub fn begin_bulk(&self) -> anyhow::Result<()> {
-        self.autocheckpoint(0)?;
+        anyhow::ensure!(self.room_for_bulk(), "too little free disk space for a bulk re-index");
+        self.autocheckpoint(16000)?;
         Ok(self.db.execute_batch(
             "BEGIN IMMEDIATE; INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 0); INSERT INTO notes_fts(notes_fts, rank) VALUES('automerge', 0); INSERT INTO notes_fts(notes_fts, rank) VALUES('crisismerge', 1000); COMMIT;",
         ).inspect_err(|_| {
@@ -206,6 +208,8 @@ impl Index {
             // FTS5's default merge settings, as before `begin_bulk`
             self.db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1); INSERT INTO notes_fts(notes_fts, rank) VALUES('automerge', 4); INSERT INTO notes_fts(notes_fts, rank) VALUES('crisismerge', 16);")?;
             if off {
+                // a rebuild that runs out of space mid-way would only eat the space a lock needs
+                anyhow::ensure!(self.room_for_bulk(), "too little free disk space to rebuild the search index");
                 self.db.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild');")?;
             }
             Ok(off)
@@ -230,12 +234,21 @@ impl Index {
         }
     }
 
+    /// Space for a bulk: its WAL (64 MB cap), then the rebuild's (about the index) and the checkpoint growing the file.
+    /// Without it, a bulk could fill the disk, and a lock's checkpoint would then fail and keep plaintext in the WAL.
+    fn room_for_bulk(&self) -> bool {
+        let Some(path) = self.db.path().map(Path::new) else { return true };
+        let need = (64 << 20) + 2 * std::fs::metadata(path).map_or(0, |m| m.len());
+        free_space(path.parent().unwrap_or(path)).is_none_or(|free| free >= need)
+    }
+
     fn autocheckpoint(&self, pages: i64) -> anyhow::Result<()> {
         self.db.query_row(&format!("PRAGMA wal_autocheckpoint={pages}"), [], |_| Ok(()))?;
         Ok(())
     }
 
-    fn bulk_off(&self) -> bool {
+    /// FTS secure-delete is stored off: a bulk runs (here or in another process) or was cut short.
+    pub fn bulk_off(&self) -> bool {
         self.db.query_row("SELECT v = 0 FROM notes_fts_config WHERE k='secure-delete'", [], |r| r.get(0)).unwrap_or(false)
     }
 
@@ -316,9 +329,25 @@ impl Index {
     }
 
     pub fn remove(&mut self, path: &str) -> anyhow::Result<()> {
+        self.remove_with(path, false)
+    }
+
+    /// `remove` of text that must be erased now (a note being locked): FTS secure-delete is on for this delete even
+    /// mid-bulk, and goes back off in the same transaction, so the bulk's own leftovers stay marked for `end_bulk`.
+    pub fn remove_erasing(&mut self, path: &str) -> anyhow::Result<()> {
+        self.remove_with(path, self.bulk_off())
+    }
+
+    fn remove_with(&mut self, path: &str, secure: bool) -> anyhow::Result<()> {
         let tx = self.db.savepoint()?;
+        if secure {
+            tx.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1);")?;
+        }
         for sql in DELETES {
             tx.execute(sql, [path])?;
+        }
+        if secure {
+            tx.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 0);")?;
         }
         Ok(tx.commit()?)
     }
@@ -484,6 +513,20 @@ impl Index {
         let mut st = self.db.prepare("SELECT DISTINCT src FROM links WHERE dst_folded=? ORDER BY src")?;
         Ok(st.query_map([fold(title)], |r| r.get(0))?.collect::<Result<_, _>>()?)
     }
+}
+
+#[cfg(unix)]
+fn free_space(dir: &Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
+    let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
+    (unsafe { libc::statvfs(c.as_ptr(), &mut s) } == 0).then(|| s.f_bavail as u64 * s.f_frsize as u64)
+}
+
+// shortcut: no free-space check on Windows (bulks always run), add GetDiskFreeSpaceExW if full disks show up there
+#[cfg(not(unix))]
+fn free_space(_: &Path) -> Option<u64> {
+    None
 }
 
 /// A bulk cut short (the app switched vaults mid-rescan) ends here, not at this index's next open, which may never come.

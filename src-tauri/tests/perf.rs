@@ -148,7 +148,8 @@ fn reindex_existing_notes() {
     let (p50, p95, max) = search_times(&v);
     println!("search after cold build: p50 {p50:.1} ms, p95 {p95:.1} ms, max {max:.1} ms");
     let mut paths = vec![];
-    for round in 1..=3 {
+    // round 4: a note is locked before chunk 2 (its rebuild ends the bulk; the next chunk starts it again)
+    for round in 1..=4 {
         let t = std::time::SystemTime::now() + std::time::Duration::from_secs(60 * round);
         for e in std::fs::read_dir(&dir).unwrap() {
             std::fs::File::options().append(true).open(e.unwrap().path()).unwrap().set_modified(t).unwrap();
@@ -158,11 +159,18 @@ fn reindex_existing_notes() {
         (paths, replaced) = v.stale_paths().unwrap();
         assert!(replaced >= velo_lib::vault::BULK, "no fixture notes in {src}");
         v.index.begin_bulk().unwrap();
-        let mut longest = t.elapsed().as_secs_f64();
-        for chunk in paths.chunks(700) {
+        let (mut longest, mut peak_wal, mut lock_ms) = (t.elapsed().as_secs_f64(), 0, 0.0);
+        let wal_size = || std::fs::metadata(format!("{}-wal", db.display())).map_or(0, |m| m.len());
+        for (i, chunk) in paths.chunks(700).enumerate() {
+            if round == 4 && i == 2 {
+                let c = Instant::now();
+                v.lock_note(&paths[0].to_string_lossy(), &velo_lib::crypto::new_identity()).unwrap();
+                lock_ms = c.elapsed().as_secs_f64() * 1000.0;
+            }
             let c = Instant::now();
-            v.apply_fs_changes(chunk, None);
+            v.apply_bulk_chunk(chunk, None);
             longest = longest.max(c.elapsed().as_secs_f64());
+            peak_wal = peak_wal.max(wal_size());
         }
         let c = Instant::now();
         v.index.end_bulk().unwrap();
@@ -170,13 +178,13 @@ fn reindex_existing_notes() {
         let mb = (bytes_written() - before) as f64 / 1e6;
         let wal = std::fs::metadata(format!("{}-wal", db.display())).map_or(0, |m| m.len());
         println!(
-            "round {round}: rescan of {} notes in chunks of 700: {:.1} s, {mb:.0} MB written, longest chunk {:.0} ms, end_bulk {:.0} ms, WAL {:.1} MB, index {:.0} MB",
-            paths.len(), t.elapsed().as_secs_f64(), longest * 1000.0, end * 1000.0, wal as f64 / 1e6, std::fs::metadata(&db).unwrap().len() as f64 / 1e6
+            "round {round}: rescan of {} notes in chunks of 700: {:.1} s, {mb:.0} MB written, longest chunk {:.0} ms, end_bulk {:.0} ms, lock mid-bulk {lock_ms:.0} ms, peak WAL {:.0} MB, WAL after {:.1} MB, index {:.0} MB",
+            paths.len(), t.elapsed().as_secs_f64(), longest * 1000.0, end * 1000.0, peak_wal as f64 / 1e6, wal as f64 / 1e6, std::fs::metadata(&db).unwrap().len() as f64 / 1e6
         );
         let (p50, p95, max) = search_times(&v);
         println!("round {round}: search after re-index: p50 {p50:.1} ms, p95 {p95:.1} ms, max {max:.1} ms");
     }
     let (before, t) = (bytes_written(), Instant::now());
-    v.lock_note(&paths[0].to_string_lossy(), &velo_lib::crypto::new_identity()).unwrap();
+    v.lock_note(&paths[1].to_string_lossy(), &velo_lib::crypto::new_identity()).unwrap();
     println!("lock one note: {:.0} ms, {:.1} MB written", t.elapsed().as_secs_f64() * 1000.0, (bytes_written() - before) as f64 / 1e6);
 }
