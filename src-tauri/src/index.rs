@@ -69,8 +69,9 @@ pub fn all_tags(body: &str, fm: Option<&FrontMatter>) -> Vec<(String, String)> {
     out
 }
 
-/// Bump to rebuild every index once (5: `Tags:` / `tags :` / `Aliases:` front-matter keys are read).
-const SCHEMA_VERSION: i64 = 5;
+/// Bump to rebuild every index once (5: `Tags:` / `tags :` / `Aliases:` front-matter keys are read; 6: task code fences
+/// close only on a matching fence, and a due/done date needs a boundary).
+const SCHEMA_VERSION: i64 = 6;
 
 pub struct Index {
     db: Connection,
@@ -539,7 +540,7 @@ mod tests {
         assert_eq!(i.task_rows(&["Work".into()]).unwrap().len(), 1);
         assert_eq!(i.task_rows(&[]).unwrap().len(), 2);
     }
-    #[test] fn schema_v3_db_is_rebuilt_as_v4() {
+    #[test] fn schema_v3_db_is_rebuilt() {
         let dir = tempfile::tempdir().unwrap(); let db = dir.path().join("i.db");
         let mut i = Index::open(&db).unwrap();
         i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("- [ ] t")).unwrap(); drop(i);
@@ -556,6 +557,15 @@ mod tests {
         i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("x")).unwrap(); drop(i);
         Connection::open(&db).unwrap().execute_batch("PRAGMA user_version=4").unwrap();
         assert!(Index::open(&db).unwrap().known().unwrap().is_empty());
+    }
+    /// v6: task rows parsed by v5 used the old fence and date rules.
+    #[test] fn schema_v5_db_is_rebuilt() {
+        let dir = tempfile::tempdir().unwrap(); let db = dir.path().join("i.db");
+        let mut i = Index::open(&db).unwrap();
+        i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("- [ ] t")).unwrap(); drop(i);
+        Connection::open(&db).unwrap().execute_batch("PRAGMA user_version=5").unwrap();
+        let i = Index::open(&db).unwrap(); assert!(i.known().unwrap().is_empty(), "reconcile reparses every note");
+        assert_eq!(i.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
     }
     #[test] fn a_write_by_a_build_without_tasks_rebuilds_the_index() {
         let dir = tempfile::tempdir().unwrap(); let db = dir.path().join("i.db");
