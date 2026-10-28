@@ -62,6 +62,10 @@ impl ListenerHandle {
 
 /// Starts the listener over the app's state: each request runs one MCP tool on `AppOps`.
 pub fn start(app: AppHandle) -> anyhow::Result<ListenerHandle> {
+    // no 0600 agent.json there, and `velo --mcp` refuses to run: the Settings switch stays off with this message
+    if cfg!(not(unix)) {
+        anyhow::bail!("Agent access is not supported on Windows yet");
+    }
     let dir = app.state::<AppState>().data_dir.clone();
     serve(&dir, Arc::new(move |name: &str, args: Value| {
         let st = app.state::<AppState>();
@@ -195,7 +199,8 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     r
 }
 
-#[cfg(test)]
+// the listener never starts on Windows (see `start`), and these tests lean on Unix socket behaviour
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use serde_json::json;

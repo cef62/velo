@@ -61,7 +61,8 @@ fn gate(settings_path: PathBuf, data_dir: PathBuf) -> impl Fn(&str, Value) -> Re
     }
 }
 
-#[cfg(test)]
+// `velo --mcp` refuses to run on Windows, and these tests use Unix processes and sockets
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

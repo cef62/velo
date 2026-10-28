@@ -7,9 +7,17 @@ use std::time::{Duration, Instant};
 
 pub(crate) const BUSY: &str = "velo is busy, retry";
 
+#[cfg(unix)]
 pub fn pid_alive(pid: u32) -> bool {
     // EPERM still means the process exists
     unsafe { libc::kill(pid as i32, 0) == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM) }
+}
+
+/// Agent access is macOS/Linux only (`velo --mcp` exits before forwarding on Windows); if it ever got here, assume a
+/// running app: busy, never a second writer.
+#[cfg(not(unix))]
+pub fn pid_alive(_pid: u32) -> bool {
+    true
 }
 
 pub(crate) const NO_ANSWER: &str = "velo did not answer; the change may have been applied — read the note before retrying";
