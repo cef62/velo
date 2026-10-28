@@ -69,8 +69,9 @@ pub fn all_tags(body: &str, fm: Option<&FrontMatter>) -> Vec<(String, String)> {
     out
 }
 
-/// Bump to rebuild every index once (5: `Tags:` / `tags :` / `Aliases:` front-matter keys are read).
-const SCHEMA_VERSION: i64 = 5;
+/// Bump to rebuild every index once (5: `Tags:` / `tags :` / `Aliases:` front-matter keys are read; 6: task code fences
+/// close only on a matching fence, and a due/done date needs a boundary).
+const SCHEMA_VERSION: i64 = 6;
 
 pub struct Index {
     db: Connection,
@@ -94,6 +95,8 @@ CREATE INDEX IF NOT EXISTS links_dst ON links(dst_folded);
 CREATE INDEX IF NOT EXISTS links_src ON links(src);
 CREATE TABLE IF NOT EXISTS tasks(path TEXT NOT NULL, line INTEGER NOT NULL, text TEXT NOT NULL, done INTEGER NOT NULL, due TEXT, done_on TEXT, line_text TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS tasks_path ON tasks(path);
+CREATE TABLE IF NOT EXISTS tasks_stale(path TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS notes_written AFTER INSERT ON notes BEGIN INSERT INTO tasks_stale(path) VALUES(new.path); END;
 "#;
 
 const DELETES: [&str; 6] = [
@@ -153,8 +156,12 @@ impl Index {
         // Older indexes lack tags, dates, aliases or tasks, or parsed front matter differently: drop them so the
         // vault's reconcile reindexes every note.
         // DROP, not DELETE: deleting every FTS5 row one by one took ~1 min at 10k notes.
-        if db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? < SCHEMA_VERSION {
-            db.execute_batch(&format!("DROP TABLE IF EXISTS tasks; DROP TABLE IF EXISTS notes_fts; DROP TABLE IF EXISTS notes; DROP TABLE IF EXISTS links; DROP TABLE IF EXISTS tags; DROP TABLE IF EXISTS aliases; PRAGMA user_version={SCHEMA_VERSION};"))?;
+        // A build without tasks (pre-0.7, after a downgrade) keeps this index but never updates `tasks`; the trigger in
+        // SCHEMA marks its note writes in `tasks_stale` (this build's upsert clears its own marks), so rebuild then too.
+        let old = db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? < SCHEMA_VERSION;
+        db.execute_batch("CREATE TABLE IF NOT EXISTS tasks_stale(path TEXT NOT NULL);")?;
+        if old || db.query_row("SELECT EXISTS(SELECT 1 FROM tasks_stale)", [], |r| r.get::<_, bool>(0))? {
+            db.execute_batch(&format!("DROP TABLE IF EXISTS tasks_stale; DROP TABLE IF EXISTS tasks; DROP TABLE IF EXISTS notes_fts; DROP TABLE IF EXISTS notes; DROP TABLE IF EXISTS links; DROP TABLE IF EXISTS tags; DROP TABLE IF EXISTS aliases; PRAGMA user_version={SCHEMA_VERSION};"))?;
         }
         db.execute_batch(SCHEMA)?;
         // FTS5 deletes otherwise leave old segments (all trigrams) in notes_fts_data.
@@ -210,6 +217,7 @@ impl Index {
                 }
             }
         }
+        tx.execute("DELETE FROM tasks_stale WHERE path=?1", [path])?; // our own insert: tasks are current
         Ok(tx.commit()?)
     }
 
@@ -532,7 +540,7 @@ mod tests {
         assert_eq!(i.task_rows(&["Work".into()]).unwrap().len(), 1);
         assert_eq!(i.task_rows(&[]).unwrap().len(), 2);
     }
-    #[test] fn schema_v3_db_is_rebuilt_as_v4() {
+    #[test] fn schema_v3_db_is_rebuilt() {
         let dir = tempfile::tempdir().unwrap(); let db = dir.path().join("i.db");
         let mut i = Index::open(&db).unwrap();
         i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("- [ ] t")).unwrap(); drop(i);
@@ -549,6 +557,26 @@ mod tests {
         i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("x")).unwrap(); drop(i);
         Connection::open(&db).unwrap().execute_batch("PRAGMA user_version=4").unwrap();
         assert!(Index::open(&db).unwrap().known().unwrap().is_empty());
+    }
+    /// v6: task rows parsed by v5 used the old fence and date rules.
+    #[test] fn schema_v5_db_is_rebuilt() {
+        let dir = tempfile::tempdir().unwrap(); let db = dir.path().join("i.db");
+        let mut i = Index::open(&db).unwrap();
+        i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("- [ ] t")).unwrap(); drop(i);
+        Connection::open(&db).unwrap().execute_batch("PRAGMA user_version=5").unwrap();
+        let i = Index::open(&db).unwrap(); assert!(i.known().unwrap().is_empty(), "reconcile reparses every note");
+        assert_eq!(i.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+    }
+    #[test] fn a_write_by_a_build_without_tasks_rebuilds_the_index() {
+        let dir = tempfile::tempdir().unwrap(); let db = dir.path().join("i.db");
+        let nf = NoteFile { title: "a".into(), encrypted: false };
+        let mut i = Index::open(&db).unwrap();
+        i.upsert("a.md", &nf, &Meta { mtime: 1, size: 1, birth: 0 }, Some("- [ ] t")).unwrap(); drop(i);
+        assert_eq!(Index::open(&db).unwrap().known().unwrap().len(), 1, "this build's own writes keep the index");
+        // a pre-0.7 build edits the note: same deletes and insert as its upsert, tasks untouched
+        Connection::open(&db).unwrap().execute_batch("DELETE FROM notes WHERE path='a.md'; INSERT INTO notes(path,title,title_folded,mtime,size,encrypted,preview,created,created_src,modified,modified_src) VALUES('a.md','a','a',2,1,0,'',2,'file',2,'file');").unwrap();
+        let i = Index::open(&db).unwrap();
+        assert!(i.known().unwrap().is_empty() && i.task_rows(&[]).unwrap().is_empty(), "rebuilt: reconcile reindexes every note");
     }
     #[test] fn schema_upgrade_reindexes() {
         let dir = tempfile::tempdir().unwrap(); let db = dir.path().join("i.db");

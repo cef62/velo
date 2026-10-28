@@ -1,9 +1,12 @@
+import { memo, useMemo } from "react";
 import { css } from "styled-system/css";
+import { searchMatch } from "styled-system/recipes";
 import type { TaskItem } from "../api";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { Badge, Button, Checkbox } from "@/components/ui";
 import { renderInline } from "../preview";
+import { highlightRanges, markHtml } from "../highlight";
 import { HighlightedText } from "./HighlightedText";
 import { useStore } from "./useStore";
 
@@ -53,15 +56,21 @@ const GROUPS = [
   ["done", "Done"],
 ] as const;
 
-export function TaskList({ controller, store }: { controller: Controller; store: Store<AppState> }) {
-  const view = useStore(store, (s) => s.taskView);
-  const query = useStore(store, (s) => s.query);
-  const showDone = useStore(store, (s) => s.showDone);
-  const undo = useStore(store, (s) => s.tickUndo);
+type RowProps = { t: TaskItem; overdue: boolean; query: string; controller: Controller };
 
-  const item = (t: TaskItem, overdue: boolean) => (
+const marks = (t: TaskItem, q: string) => JSON.stringify([highlightRanges(t.text, q), highlightRanges(t.title, q)]);
+// Every reload brings new objects and every keystroke a new query: compare what the row shows, so only rows that change re-render.
+// shortcut: marks are compared on the raw markdown, so a match only in rendered text (an entity like &copy;) can show late; compare rendered HTML if that matters.
+const sameRow = (a: RowProps, b: RowProps) =>
+  a.overdue === b.overdue && a.controller === b.controller &&
+  (["path", "line", "line_text", "text", "title", "due", "done"] as const).every((k) => a.t[k] === b.t[k]) &&
+  (a.query === b.query || marks(a.t, a.query) === marks(b.t, b.query));
+
+const TaskRow = memo(function TaskRow({ t, overdue, query, controller }: RowProps) {
+  // renderInline escapes HTML (markdown-it, html: false), as the preview does; markHtml re-escapes what it touches
+  const html = useMemo(() => markHtml(renderInline(t.text), query, searchMatch()), [t.text, query]);
+  return (
     <div
-      key={`${t.path}:${t.line}`}
       role="listitem"
       tabIndex={0}
       className={row}
@@ -78,8 +87,7 @@ export function TaskList({ controller, store }: { controller: Controller; store:
         </Checkbox.Control>
         <Checkbox.HiddenInput aria-label={t.text} />
       </Checkbox.Root>
-      {/* renderInline escapes HTML (markdown-it, html: false), as the preview does */}
-      <span className={text} dangerouslySetInnerHTML={{ __html: renderInline(t.text) }} />
+      <span className={text} dangerouslySetInnerHTML={{ __html: html }} />
       <span className={note}><HighlightedText text={t.title} query={query} /></span>
       {t.due && (
         <Badge size="sm" variant="subtle" colorPalette={overdue ? "red" : "gray"} flex="none">
@@ -88,6 +96,13 @@ export function TaskList({ controller, store }: { controller: Controller; store:
       )}
     </div>
   );
+}, sameRow);
+
+export function TaskList({ controller, store }: { controller: Controller; store: Store<AppState> }) {
+  const view = useStore(store, (s) => s.taskView);
+  const query = useStore(store, (s) => s.query);
+  const showDone = useStore(store, (s) => s.showDone);
+  const undo = useStore(store, (s) => s.tickUndo);
 
   const groups = view ? GROUPS.filter(([k]) => view[k].length) : [];
   return (
@@ -97,7 +112,7 @@ export function TaskList({ controller, store }: { controller: Controller; store:
         {groups.map(([k, label]) => (
           <div key={k} role="group" aria-label={label}>
             <div className={header}>{label}</div>
-            {view![k].map((t) => item(t, k === "overdue"))}
+            {view![k].map((t) => <TaskRow key={`${t.path}:${t.line}`} t={t} overdue={k === "overdue"} query={query} controller={controller} />)}
           </div>
         ))}
       </div>

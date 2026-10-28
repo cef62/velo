@@ -2,10 +2,11 @@ import type { Text } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { TASK_ITEM } from "./preview";
 
+/** Same rule as Rust `iso`: a real date, not followed by another letter or digit (`2026-10-271` is no date). */
 const isoDate = (s: string) => {
   const d = s.slice(0, 10);
   const t = new Date(`${d}T00:00:00Z`);
-  return /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(+t) && t.toISOString().slice(0, 10) === d;
+  return /^\d{4}-\d{2}-\d{2}(?![\p{L}\p{N}])/u.test(s) && !isNaN(+t) && t.toISOString().slice(0, 10) === d;
 };
 
 /** Literal port of Rust `strip`: removes every `<marker><date>` plus the whitespace before it. */

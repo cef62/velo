@@ -236,7 +236,8 @@ export class Controller {
   protected captureSession = 0; // bumped when capture mode ends: a late submit result belongs to an old session
   protected capturePending = false; // a submit is in flight: another Enter would append the task twice
   protected keptCapture = false;
-  protected captureAppended: { path: string; text: string } | null = null; // in the editor, its save failed: a retry only re-saves
+  // A capture whose save into the open note failed: `before` = copies of its line in the note before the append.
+  protected captureUnsaved: { path: string; text: string; before: number } | null = null;
   // One writer per note across awaits: a backend write waits for note loads in flight (the load decides the editor's
   // note), and a load waits for backend writes in flight (else its reply holds pre-write text and hash).
   protected readonly pendingLoads = new Set<Promise<unknown>>();
@@ -295,24 +296,28 @@ export class Controller {
       // the path the backend would write (an alias resolves to its note); no note yet: compare titles
       if (openPath && this.editor.currentPath() === openPath && (path ? path === openPath : fold(title) === fold(target))) {
         // not editable: read-only while indexing (the gate) or suspended mid lock hand-off
-        const a = this.captureAppended;
-        if (!(a && a.path === openPath && a.text === t)) {
-          if (!this.editor.appendLine("- [ ] " + t)) return this.failCapture(indexing ? errText("indexing") : `${target} can't be edited right now`);
-          this.captureAppended = { path: openPath, text: t };
+        // A retry never edits a line: if the earlier append is still in the note (unsaved, or saved by the saver's own
+        // retry) the flush below saves it or finds it saved; if it went (a conflict reload) it is appended once more.
+        // Other text is a new capture; an earlier unsaved line stays in the note and is saved with it.
+        const line = "- [ ] " + t;
+        const u = this.captureUnsaved?.path === openPath && this.captureUnsaved.text === t ? this.captureUnsaved : null;
+        const before = u?.before ?? copies(this.editor.getText(), line);
+        if (copies(this.editor.getText(), line) <= before && !this.editor.appendLine(line)) return this.failCapture(indexing ? errText("indexing") : `${target} can't be edited right now`);
+        const conflict = this.store.get().conflict;
+        if (!(await this.editor.flush())) {
+          this.captureUnsaved = { path: openPath, text: t, before };
+          return live() ? this.failCapture(`${target} wasn't saved — Enter retries the save`) : undefined;
         }
-        if (!(await this.editor.flush())) return live() ? this.failCapture(`${target} wasn't saved — Enter retries the save`) : undefined;
-        this.captureAppended = null;
+        this.captureUnsaved = null;
+        // the saver put the text in a conflict copy and reloaded the note without the line: same outcome as the backend's "conflict"
+        if (this.store.get().conflict !== conflict && this.store.get().conflict !== null) return this.capturedToConflict(live(), text, target);
         return live() ? this.endCapture(true, text) : undefined;
       }
       try {
         await this.track(this.pendingWrites, this.api.captureTask(t));
       } catch (e) {
         if (e === "empty") return live() && this.endCapture(true);
-        if (e === "conflict") {
-          // the line is in the conflict copy: re-sending would add it twice
-          if (live()) this.endCapture(true, text);
-          return this.setErr(`Saved to a conflict copy — check ${target}`);
-        }
+        if (e === "conflict") return this.capturedToConflict(live(), text, target);
         const msg = e === "locked" ? `${target} is locked` : errText(e);
         return live() ? this.failCapture(msg) : this.setErr(msg); // after a blur the text is already the search query
       }
@@ -322,6 +327,12 @@ export class Controller {
     } finally {
       this.capturePending = false;
     }
+  }
+
+  /** The line is in a conflict copy: re-sending would add it twice. */
+  protected capturedToConflict(live: boolean, text: string, target: string) {
+    if (live) this.endCapture(true, text);
+    this.setErr(`Saved to a conflict copy — check ${target}`);
   }
 
   protected failCapture(err: string) {
@@ -347,13 +358,14 @@ export class Controller {
     const keep = q !== captured && q.trim() !== "";
     this.captureSession++;
     this.keptCapture = keep;
-    this.captureAppended = null;
+    this.captureUnsaved = null;
     this.store.set({ capture: null, ...(keep ? {} : { query: this.captureQuery }) });
     // the kept text lists like a search, but never opens a hit: focus went to the open note (or a note just opened)
-    if (keep && this.store.get().paneMode === "tasks") this.filterChanged(false);
+    // Tasks always reload: a load during capture mode (watcher, backend write) filtered by the capture text
+    if (this.store.get().paneMode === "tasks") this.filterChanged(false);
     else if (keep) void this.runSearch(true, "highlight");
     else if (captured !== undefined) void this.runSearch(false); // the target's row moved; the list is otherwise unchanged
-    if (hide) void this.api.captureDone().catch((e) => console.error("capture done failed", e));
+    void this.api.captureDone(hide).catch((e) => console.error("capture done failed", e)); // ends the backend's session even when velo stays shown
   }
 
   /** The note is now in the editor: title, path and lock state follow it; the conflict banner belongs to the previous note. */
@@ -501,17 +513,23 @@ export class Controller {
 
   /** true = fresh first page (new query/folder/sort), selecting its first row; false = reload the loaded range in place. */
   runSearch(selectFirst: boolean, keepOpen: boolean | "highlight" = false): Promise<void> {
+    // a refresh supersedes a fresh first page still in flight: it inherits that page's row-0 rule, or the new query's
+    // first match would never be selected and Enter would create a note while it is listed
+    if (!selectFirst && this.pendingFirst !== null) [selectFirst, keepOpen] = [true, this.pendingFirst];
     const p = this.doSearch(selectFirst, keepOpen);
     if (selectFirst) this.searching = p;
     return p;
   }
 
   /** keepOpen: after a reset, stay on the open note when it is in the new first page instead of opening row 0. "highlight": never open anything; select the open note's row if listed, else highlight row 0 (Enter opens it). */
+  protected pendingFirst: boolean | "highlight" | null = null; // keepOpen of a fresh first page not landed yet
   protected async doSearch(selectFirst: boolean, keepOpen: boolean | "highlight") {
     const seq = ++this.searchSeq;
     const r = this.results;
+    const highlighted = this.highlighted();
+    if (selectFirst) this.pendingFirst = keepOpen;
     try {
-      await (selectFirst ? r.reset() : r.refresh());
+      await (selectFirst ? r.reset() : r.refresh()).finally(() => seq === this.searchSeq && (this.pendingFirst = null));
       if (seq !== this.searchSeq) return;
       this.listChanged(selectFirst);
       if (selectFirst) {
@@ -519,7 +537,7 @@ export class Controller {
         else if (keepOpen === "highlight") {
           this.store.set({ sel: r.count ? 0 : -1 }); // highlight row 0, don't open it
         } else void this.select(r.count ? 0 : -1, "auto");
-      } else this.selectOpen();
+      } else this.reselect(highlighted);
     } catch (e) {
       if (e === "no-folder") this.store.set({ phase: "setup" });
       else if (e !== "indexing") console.error("search failed", e);
@@ -528,15 +546,34 @@ export class Controller {
 
   /** Sort changed: fresh first page from the top, keeping the open note selected if it is loaded. */
   protected async resort() {
+    // a typed query's first page is in flight: keep its row-0 rule (it pages with the new sort), but never leave the open note
+    // when it is listed (a note just created by openTitle)
+    if (this.pendingFirst !== null) return this.runSearch(true, this.pendingFirst || true);
     const seq = ++this.searchSeq;
+    const highlighted = this.highlighted();
     try {
-      await this.results.reset();
+      await this.results.reset().finally(() => seq === this.searchSeq && (this.pendingFirst = null));
       if (seq !== this.searchSeq) return;
       this.listChanged(true);
-      this.selectOpen();
+      this.reselect(highlighted);
     } catch (e) {
       if (e !== "indexing") console.error("search failed", e);
     }
+  }
+
+  /** The path of a highlighted row that is not the open note (row 0 after a "highlight" reset), read before the rows change. */
+  protected highlighted(): string | null {
+    const p = this.results.get(this.store.get().sel)?.path;
+    return p && p !== this.editor.currentPath() ? p : null;
+  }
+
+  /**
+   * After the rows changed: the open note's row, else the highlighted note's row (Enter opens it, never creates a note).
+   * By path, never by index: a row that moved or left must not leave the highlight on another note.
+   */
+  protected reselect(highlighted: string | null) {
+    const open = this.results.indexOf(this.editor.currentPath() ?? "");
+    this.store.set({ sel: open >= 0 ? open : highlighted ? this.results.indexOf(highlighted) : -1 });
   }
 
   /** Load pages until row `index` exists (the list scrolled near its end). */
@@ -567,12 +604,13 @@ export class Controller {
   async enter(force = false, checklist = false) {
     if (this.store.get().paneMode === "tasks") {
       // the field filters tasks here: Enter opens the first one shown, never creates a note
+      await settled(() => this.tasksLoading);
       const v = this.store.get().taskView;
       const first = v && [...v.overdue, ...v.today, ...v.upcoming, ...v.no_date, ...v.done][0];
       if (first) await this.openTask(first);
       return;
     }
-    await this.searching;
+    await settled(() => this.searching);
     const a = enterAction(this.store.get().query, this.results.loaded, this.results.get(this.store.get().sel), force);
     if (!a) return;
     try {
@@ -594,11 +632,9 @@ export class Controller {
     }
     const current = this.newShow(); // a pending auto-show must not replace this note when its reply lands later
     try {
-      // The title cache is the "existed before" signal (open_or_create returns a plain NoteDoc). A stale cache only
-      // mislabels an empty/external note, which the empty-body rule below still opens in edit mode.
-      let created = false;
-      const doc = await this.loading(() => ((created = !this.titles.has(fold(title))), this.api.openOrCreate(title)));
+      const doc = await this.loading(() => this.api.openOrCreate(title));
       if (!doc) return false;
+      const created = doc.created;
       if (!current()) return true;
       if (!this.editor.load(doc)) return false;
       this.loadedDoc(doc);
@@ -700,8 +736,7 @@ export class Controller {
         this.clearErr();
         this.history.loaded(np, "explicit");
       }
-      await this.runSearch(false);
-      this.selectOpen();
+      await this.runSearch(false); // reselects the open note's row (by path)
     } catch (e) {
       // The file moved but could not be reopened: stay read-only (never resume on the old path).
       this.setErr(`Note moved but could not be reopened (${e}); pick it from the list`);
@@ -881,7 +916,12 @@ export class Controller {
   protected readonly newTasksReq = latest();
   protected tasksDay = ""; // localToday() at the last load: groups and the due count depend on it
   /** Tasks for the view (filtered like the list) and the due count / Dock badge (unfiltered). */
-  async loadTasks() {
+  loadTasks(): Promise<void> {
+    return (this.tasksLoading = this.doLoadTasks());
+  }
+
+  protected tasksLoading: Promise<void> = Promise.resolve(); // latest task load, awaited by Enter in Tasks mode
+  protected async doLoadTasks() {
     this.tasksDay = localToday();
     const { query, selectedTags, showDone } = this.store.get();
     const fresh = this.newTasksReq();
@@ -906,7 +946,13 @@ export class Controller {
   /** Tick from the Tasks view; a backend tick offers undo for 5 s. */
   async tickTask(item: TaskItem) {
     const r = await this.flipTask(item.path, item.line, item.line_text);
-    if (!r || r === "editor") return; // through the editor, ⌘Z undoes it
+    if (!r) return;
+    // the row shows the tick now, not after the reload (the editor path waits for its save and a 300 ms debounce)
+    const next = r === "editor" ? { line: item.line, line_text: this.editor.getText().split("\n")[item.line]?.replace(/\r$/, "") ?? item.line_text } : r;
+    // once: the next task reply replaces it (an editor tick's reload follows its save, so the row may flicker until then)
+    const patch = (ts: TaskItem[]) => ts.map((t) => (t.path === item.path && t.line === item.line ? { ...t, ...next, done: !item.done } : t));
+    this.store.set(({ taskView: v }) => (v ? { taskView: { ...v, overdue: patch(v.overdue), today: patch(v.today), upcoming: patch(v.upcoming), no_date: patch(v.no_date), done: patch(v.done) } } : {}));
+    if (r === "editor") return; // through the editor, ⌘Z undoes it; its save's onSaved reloads the view
     clearTimeout(this.undoTimer);
     this.store.set({ tickUndo: { path: item.path, line: r.line, lineText: r.line_text, unticked: item.done } });
     this.undoTimer = setTimeout(() => this.store.set({ tickUndo: null }), UNDO_MS);
@@ -983,8 +1029,10 @@ export class Controller {
     const kept = pruneSelection(selected, tags);
     const pruned = kept.length !== selected.length;
     this.store.set({ tags, selectedTags: kept });
-    if (pruned) this.filterChanged("highlight");
-    else if (inPlace && kept.length) void this.runSearch(false);
+    if (pruned) {
+      this.filterChanged("highlight");
+      if (this.store.get().paneMode === "notes") void this.loadTasks(); // a load started with the pruned tag must not stay
+    } else if (inPlace && kept.length) void this.runSearch(false);
   }
 
   togglePreview() {
@@ -1438,6 +1486,17 @@ export class Controller {
     this.setIndexing(false);
     this.setErr(message);
     void this.runSearch(false); // no vault -> shows the setup screen
+  }
+}
+
+/** How many lines of `text` read exactly `line`. */
+const copies = (text: string, line: string) => text.split("\n").filter((l) => l.replace(/\r$/, "") === line).length;
+
+/** Awaits the latest of a promise that can be replaced while awaited (a newer load drops the older one's reply). */
+async function settled(latest: () => Promise<unknown>) {
+  for (let p = latest(); ; p = latest()) {
+    await p;
+    if (p === latest()) return;
   }
 }
 

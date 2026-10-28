@@ -40,15 +40,16 @@ export function fakeApi(notes: Record<string, string> = {}) {
     listTitles: vi.fn(async () => Object.keys(notes)),
     openNote: vi.fn(async (path: string) => docOf(path)),
     openOrCreate: vi.fn(async (title: string) => {
+      const created = !(title in notes);
       notes[title] ??= "";
-      return docOf(`/n/${title}.md`);
+      return { ...docOf(`/n/${title}.md`), created };
     }),
     saveNote: vi.fn(),
     tasks: vi.fn(async (_q: string, _t: string[], _d: boolean): Promise<TaskView> => ({ overdue: [], today: [], upcoming: [], no_date: [], done: [], due_count: 0 })),
     toggleTask: vi.fn(async (_p: string, line: number, line_text: string) => ({ line, line_text })),
     captureTask: vi.fn(async (_t: string) => "/n/Inbox.md"),
     captureTargetTitle: vi.fn(async (): Promise<{ title: string; path: string | null }> => ({ title: "Inbox", path: "Inbox" in notes ? "/n/Inbox.md" : null })),
-    captureDone: vi.fn(async () => {}),
+    captureDone: vi.fn(async (_hide: boolean) => {}),
     setBadge: vi.fn(async (_c: number) => {}),
     renameNote: vi.fn(async (_p: string, _t: string, _r: boolean): Promise<RenameResult> => { throw "unset"; }),
     backlinkCount: vi.fn(async () => 0),
@@ -137,7 +138,9 @@ export class FakeEditor implements Editor {
   appended: string[] = [];
   appendLine(text: string) {
     this.appended.push(text);
-    return this.path !== null && !this.suspended;
+    if (this.path === null || this.suspended) return false;
+    this.text += (this.text === "" || this.text.endsWith("\n") ? "" : "\n") + text;
+    return true;
   }
 }
 

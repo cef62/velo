@@ -240,18 +240,24 @@ impl Vault {
     }
 
     pub fn open_or_create(&mut self, title: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<NoteDoc> {
+        self.open_or_create_new(title, identity, write_fm).map(|(doc, _)| doc)
+    }
+
+    /// Like `open_or_create`; true = this call wrote the file.
+    pub fn open_or_create_new(&mut self, title: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<(NoteDoc, bool)> {
         if let Some(path) = self.find_note(title)? {
-            return self.open_note(&path, identity);
+            return Ok((self.open_note(&path, identity)?, false));
         }
         let p = note_path(&self.store.dir, title, false);
-        if !p.exists() {
+        let created = !p.exists();
+        if created {
             let now = chrono::Local::now().fixed_offset();
             let init = if write_fm { frontmatter::stamp("", now, now) } else { String::new() };
             self.store.write_atomic(&p, init.as_bytes())?;
         }
         let body = lossy(&self.store.read(&p)?);
         self.reindex(&p, Some(&body))?;
-        self.open_note(&s(&p), identity)
+        Ok((self.open_note(&s(&p), identity)?, created))
     }
 
     /// Tick or untick the task on `line` (0-based) if it still reads `expected`; saves through `save_note`.
@@ -606,6 +612,14 @@ mod tests {
         std::fs::write(dir.join("bin.txt"), [0xff, 0xfe, b'o', b'k', b'a', b'y']).unwrap();
         let before = std::fs::read(dir.join("bin.txt")).unwrap(); let v = open(dir.clone(), &db, None).unwrap();
         assert_eq!(v.search("bin", Sort::Modified, 0, &[]).unwrap().hits.len(), 1); assert_eq!(std::fs::read(dir.join("bin.txt")).unwrap(), before);
+    }
+    #[test] fn open_or_create_new_says_whether_it_made_the_file() {
+        let (dir, db) = setup();
+        std::fs::write(dir.join("a-b.md"), "").unwrap(); // empty, and "a/b" sanitises to it
+        let mut v = open(dir, &db, None).unwrap();
+        assert!(!v.open_or_create_new("a/b", None, false).unwrap().1);
+        assert!(v.open_or_create_new("fresh", None, false).unwrap().1);
+        assert!(!v.open_or_create_new("fresh", None, false).unwrap().1);
     }
     #[test] fn open_or_create_dedupes_case_insensitive() {
         let mut v = open_empty(); let a = v.open_or_create("Foo", None, false).unwrap();

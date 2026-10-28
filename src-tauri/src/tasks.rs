@@ -35,10 +35,22 @@ fn scan(line: &str) -> Option<(usize, bool)> {
     Some((line.len() - r.len() + 1, c != ' '))
 }
 
+/// A `YYYY-MM-DD` date at the start of `s`, not followed by another letter or digit (`2026-10-271` is no date).
 fn iso(s: &str) -> Option<&str> {
     let d = s.get(..10)?;
+    let shape = d.bytes().enumerate().all(|(i, b)| if i == 4 || i == 7 { b == b'-' } else { b.is_ascii_digit() });
+    if !shape || s[10..].starts_with(char::is_alphanumeric) { return None; }
     chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()?;
     Some(d)
+}
+
+/// A code-fence line: its char, its length, and the text after it.
+fn fence(line: &str) -> Option<(char, usize, &str)> {
+    let t = line.trim_start();
+    let c = t.chars().next().filter(|c| matches!(c, '`' | '~'))?;
+    let rest = t.trim_start_matches(c);
+    let n = t.len() - rest.len();
+    (n >= 3).then_some((c, n, rest))
 }
 
 /// Removes every `<marker><date>` (with the space before it); returns the rest and the first date.
@@ -62,15 +74,16 @@ fn strip(s: &str, marker: &str) -> (String, Option<String>) {
 pub fn parse_tasks(full_text: &str) -> Vec<TaskLine> {
     let start = frontmatter::parse(full_text).map_or(0, |f| f.end);
     let mut line = full_text[..start].matches('\n').count();
-    let mut fenced = false;
+    let mut open: Option<(char, usize)> = None; // the fence we are inside
     let mut out = vec![];
     for raw in full_text[start..].split('\n') {
         let l = raw.strip_suffix('\r').unwrap_or(raw);
-        let t = l.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") {
-            fenced = !fenced;
-        } else if !fenced {
-            if let Some((b, done)) = scan(l) {
+        match (open, fence(l)) {
+            // CommonMark: only the same char, at least as long, with nothing after it, closes a fence
+            (Some((c, n)), Some((c2, n2, rest))) if c == c2 && n2 >= n && rest.trim().is_empty() => open = None,
+            (Some(_), _) => {}
+            (None, Some((c, n, _))) => open = Some((c, n)),
+            (None, None) => if let Some((b, done)) = scan(l) {
                 let (rest, due) = strip(&l[b + 2..], "📅 ");
                 let (rest, done_on) = strip(&rest, "✅ ");
                 out.push(TaskLine { line, line_text: l.to_string(), text: rest.trim().to_string(), done, due, done_on });
@@ -202,6 +215,19 @@ mod tests {
         let rows = vec![row("Garden", "water", None, 1), row("Home", "buy Café beans", None, 1), row("Home", "other", None, 1)];
         assert_eq!(texts(&group_tasks(rows.clone(), "garden", false, "2026-10-27").no_date), ["water"]);
         assert_eq!(texts(&group_tasks(rows, "cafe", false, "2026-10-27").no_date), ["buy Café beans"]);
+    }
+
+    #[test]
+    fn fence_closes_only_on_same_char_and_at_least_its_length() {
+        let t = parse_tasks("````\n```\n- [ ] in code\n````\n- [ ] a\n~~~\n```\n- [ ] in code\n~~~\n- [ ] b\n```\n``` not a close\n- [ ] in code\n```\n- [ ] c\n");
+        assert_eq!(t.iter().map(|t| t.text.as_str()).collect::<Vec<_>>(), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn a_date_needs_a_boundary() {
+        let t = parse_tasks("- [ ] a 📅 2026-10-271\n- [ ] b 📅 2026-10-27, later\n");
+        assert_eq!((t[0].due.as_deref(), t[0].text.as_str()), (None, "a 📅 2026-10-271"));
+        assert_eq!(t[1].due.as_deref(), Some("2026-10-27"));
     }
 
     #[test]

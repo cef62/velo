@@ -746,7 +746,7 @@ test("capture into the open Inbox appends through the editor", async () => {
   await c.submitCapture("buy milk");
   expect(api.captureTask).not.toHaveBeenCalled();
   expect(editor.appended).toEqual(["- [ ] buy milk"]);
-  expect(api.captureDone).toHaveBeenCalled();
+  expect(api.captureDone).toHaveBeenCalledWith(true);
   expect(store.get().capture).toBeNull();
 });
 
@@ -757,7 +757,7 @@ test("capture into a closed note calls the backend", async () => {
   await c.submitCapture("buy milk");
   expect(api.captureTask).toHaveBeenCalledWith("buy milk");
   expect(editor.appended).toEqual([]);
-  expect(api.captureDone).toHaveBeenCalled();
+  expect(api.captureDone).toHaveBeenCalledWith(true);
   expect(store.get().capture).toBeNull();
 });
 
@@ -782,6 +782,7 @@ test("Esc and empty Enter leave capture mode and call captureDone", async () => 
   await c.submitCapture("  ");
   expect(store.get().capture).toBeNull();
   expect(api.captureDone).toHaveBeenCalledTimes(2);
+  expect(api.captureDone.mock.calls).toEqual([[true], [true]]);
   expect(api.captureTask).not.toHaveBeenCalled();
 });
 
@@ -795,7 +796,7 @@ test("capture mode does not search while typing; blur keeps the text as the quer
   expect(store.get().capture).toBeNull();
   expect(store.get().query).toBe("buy");
   expect(api.search.mock.calls.length).toBe(n + 1);
-  expect(api.captureDone).not.toHaveBeenCalled();
+  expect(api.captureDone.mock.calls).toEqual([[false]]); // the session ends, velo stays shown
 });
 
 test("a second Enter while a capture is in flight does nothing; text typed meanwhile survives", async () => {
@@ -825,7 +826,7 @@ test("a blur during an in-flight capture: success does not hide velo", async () 
   c.blurCapture();
   d.resolve("/n/Inbox.md");
   await p;
-  expect(api.captureDone).not.toHaveBeenCalled();
+  expect(api.captureDone.mock.calls).toEqual([[false]]);
   expect(store.get().capture).toBeNull();
 });
 
@@ -1435,4 +1436,337 @@ test("copyAgentSetup copies the command and returns the result for the Settings 
   api.agentSetupCommand.mockRejectedValueOnce("no exe path");
   expect(await c.copyAgentSetup()).toBe("no exe path");
   expect(store.get().err).toBe(""); // the dialog covers the banner: the error is shown in the dialog instead
+});
+
+test("a background refresh keeps the row-0 highlight, so Enter opens the listed match (#8)", async () => {
+  const { c, api, store } = setup({ Groceries: "a", X: "x" });
+  await c.show(P("X"));
+  c.setPaneMode("tasks");
+  await settle();
+  api.search.mockImplementation(async () => ({ hits: [hit("Groceries")], has_more: false, total: 1 }));
+  c.setQuery("groc");
+  await settle();
+  c.setPaneMode("notes");
+  await settle();
+  expect(store.get().sel).toBe(0);
+  await c.onNotesChanged([P("Other")]); // a sync touched another note
+  expect(store.get().sel).toBe(0);
+  await c.enter();
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+  expect(store.get().openPath).toBe(P("Groceries"));
+});
+
+test("capture into the open Inbox whose save lands in a conflict copy says so (#8)", async () => {
+  const { c, editor, store } = setup({ Inbox: "", B: "b" });
+  await c.show(P("Inbox"));
+  await c.startCapture();
+  c.setQuery("buy milk");
+  editor.flush.mockImplementationOnce(async () => {
+    c.editorOpts().onConflict("/n/Inbox (conflict).md"); // the saver wrote the text to a conflict copy and reloaded the disk text
+    return true;
+  });
+  await c.submitCapture("buy milk");
+  expect(store.get().err).toBe("Saved to a conflict copy — check Inbox");
+});
+
+test("Enter in Tasks mode waits for the task load in flight (#8)", async () => {
+  const { c, api, store } = setup({ A: "- [ ] a", B: "- [ ] b" });
+  api.tasks.mockResolvedValue({ ...view(0), no_date: [task("A", 0, "- [ ] a")] });
+  c.setPaneMode("tasks");
+  await settle();
+  const d = deferred<TaskView>();
+  api.tasks.mockImplementationOnce(() => d.promise);
+  c.setQuery("b");
+  const entered = c.enter();
+  d.resolve({ ...view(0), no_date: [task("B", 0, "- [ ] b")] });
+  await entered;
+  expect(store.get().openPath).toBe(P("B"));
+});
+
+test("Tasks reload with the restored query when capture mode ends (#8)", async () => {
+  for (const how of ["capture", "cancel"] as const) {
+    const { c, api, store } = setup();
+    api.tasks.mockImplementation(async (q) => ({ ...view(0), no_date: q === "q0" ? [task("A", 0, "- [ ] a")] : [] }));
+    c.setPaneMode("tasks");
+    c.setQuery("q0");
+    await settle();
+    await c.startCapture();
+    c.setQuery("buy milk");
+    await c.onNotesChanged([]); // a watcher refresh mid-capture reads the capture text
+    if (how === "capture") await c.submitCapture("buy milk");
+    else {
+      c.setQuery(""); // an emptied field brings the earlier search back
+      c.cancelCapture();
+    }
+    await settle();
+    expect(store.get().taskView?.no_date, how).toHaveLength(1);
+  }
+});
+
+test("pruning the last selected tag reloads the tasks without it (#8)", async () => {
+  const { c, api, store } = setup();
+  api.tasks.mockImplementation(async (_q, tags) => ({ ...view(0), no_date: tags.length ? [] : [task("A", 0, "- [ ] a")] }));
+  c.setTags(["work"]);
+  await settle();
+  api.listTags.mockResolvedValue([]); // the last #work went away
+  await c.onNotesChanged([]);
+  await settle();
+  expect(store.get().selectedTags).toEqual([]);
+  expect(store.get().taskView?.no_date).toHaveLength(1);
+});
+
+test("alt-enter never adds a checklist to an existing empty note the title cache missed (#8)", async () => {
+  const { c, editor } = setup({ B: "" });
+  await c.openTitle("B", "enter", true);
+  expect(editor.appended).toEqual([]);
+});
+
+test("a tick shows on the task row at once, before the reload (#8)", async () => {
+  const { c, api, editor, store } = setup({ A: "- [ ] x", B: "- [ ] y" });
+  api.tasks.mockResolvedValue({ ...view(0), no_date: [task("A", 0, "- [ ] x"), task("B", 0, "- [ ] y")] });
+  await c.loadTasks();
+  api.tasks.mockImplementation(() => new Promise(() => {})); // the reloads have not landed yet
+  await c.show(P("A"));
+  editor.toggleTask.mockImplementation(() => ((editor.text = "- [x] x ✅ 2026-10-27"), true));
+  await c.tickTask(store.get().taskView!.no_date[0]);
+  api.toggleTask.mockResolvedValueOnce({ line: 0, line_text: "- [x] y" });
+  await c.tickTask(store.get().taskView!.no_date[1]);
+  expect(store.get().taskView!.no_date.map((t) => [t.done, t.line_text])).toEqual([
+    [true, "- [x] x ✅ 2026-10-27"],
+    [true, "- [x] y"],
+  ]);
+});
+
+test("own edit removes the filtered tag: the list highlights nothing, never another note (#15 F1)", async () => {
+  const { c, api, store } = setup({ A: "a #work", B: "b #work", C: "c #work" });
+  api.listTags.mockResolvedValue([{ tag: "work", count: 3 }]);
+  api.search.mockImplementation(async () => ({ hits: [hit("A"), hit("B"), hit("C")], has_more: false, total: 3 }));
+  c.setTags(["work"]);
+  await settle();
+  await settle(); // A open, sel 0
+  api.search.mockImplementation(async () => ({ hits: [hit("B"), hit("C")], has_more: false, total: 2 }));
+  c.editorOpts().onSaved(); // the user deleted #work from A; autosave landed
+  await new Promise((r) => setTimeout(r, 350));
+  await settle();
+  expect([store.get().openPath, store.get().sel]).toEqual([P("A"), -1]);
+});
+
+test("a watcher refresh that drops the open note: arrows and Enter never act on the shifted row (#15 F1)", async () => {
+  for (const act of ["step", "enter"] as const) {
+    const { c, api, store } = setup();
+    await c.runSearch(true);
+    await settle(); // A open, sel 0
+    api.search.mockImplementation(async () => ({ hits: [hit("B"), hit("C")], has_more: false, total: 2 }));
+    await c.onNotesChanged([P("A")]);
+    expect(store.get().sel, act).toBe(-1);
+    if (act === "step") {
+      await c.step(1);
+      expect(store.get().openPath, act).toBe(P("B"));
+    } else {
+      await c.enter();
+      expect(store.get().openPath, act).toBe(P("A")); // empty query, nothing highlighted: nothing happens
+    }
+  }
+});
+
+test("a highlight follows its note through a refresh or a re-sort (#15 F1)", async () => {
+  const { c, api, store } = setup({ Groceries: "a", X: "x", Y: "y" });
+  await c.show(P("X"));
+  api.search.mockImplementation(async () => ({ hits: [hit("Groceries"), hit("Y")], has_more: false, total: 2 }));
+  c.setPaneMode("tasks");
+  c.setQuery("g");
+  await settle();
+  c.setPaneMode("notes");
+  await settle();
+  expect(store.get().sel).toBe(0); // Groceries highlighted, X open and not listed
+  api.search.mockImplementation(async () => ({ hits: [hit("Y"), hit("Groceries")], has_more: false, total: 2 }));
+  await c.onNotesChanged([]);
+  expect(store.get().sel).toBe(1);
+  api.search.mockImplementation(async () => ({ hits: [hit("Groceries"), hit("Y")], has_more: false, total: 2 }));
+  await c.toggleSort();
+  expect(store.get().sel).toBe(0);
+  await c.enter();
+  expect(store.get().openPath).toBe(P("Groceries"));
+});
+
+test("Enter in Tasks mode waits for every task load in flight, not only the first (#15 F2)", async () => {
+  const { c, api, store } = setup({ A: "- [ ] a", B: "- [ ] b" });
+  api.tasks.mockResolvedValue({ ...view(0), no_date: [task("A", 0, "- [ ] a")] });
+  c.setPaneMode("tasks");
+  await settle();
+  const d1 = deferred<TaskView>();
+  const d2 = deferred<TaskView>();
+  api.tasks.mockImplementationOnce(() => d1.promise).mockImplementation(async (q) => (q === "b" ? d2.promise : view(0)));
+  c.setQuery("b");
+  const entered = c.enter();
+  void c.loadTasks(); // a watcher or save refresh starts a newer load
+  d1.resolve({ ...view(0), no_date: [task("B", 0, "- [ ] b")] });
+  await settle();
+  d2.resolve({ ...view(0), no_date: [task("B", 0, "- [ ] b")] });
+  await entered;
+  expect(store.get().openPath).toBe(P("B"));
+});
+
+test("a refresh landing while a typed query's search is in flight keeps its first match, so Enter opens it (#15 N1)", async () => {
+  for (const how of ["typed", "pane switch"] as const) {
+    const { c, api, store } = setup({ Groceries: "g", X: "x", Y: "y" });
+    await c.show(P("X"));
+    if (how === "typed") {
+      await c.runSearch(true, true);
+      await settle();
+    } else {
+      c.setPaneMode("tasks");
+      c.setQuery("gro");
+      await settle();
+    }
+    const d1 = deferred<Page>();
+    const d2 = deferred<Page>();
+    api.search.mockImplementationOnce(() => d1.promise).mockImplementationOnce(() => d2.promise);
+    if (how === "typed") c.setQuery("gro");
+    else c.setPaneMode("notes"); // a "highlight" reset
+    const w = c.onNotesChanged([]); // the watcher refresh overtakes it
+    d1.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
+    d2.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
+    await w;
+    await settle();
+    await c.enter();
+    expect(api.openOrCreate, how).not.toHaveBeenCalled();
+    expect(store.get().openPath, how).toBe(P("Groceries"));
+  }
+});
+
+test("Notes-mode Enter waits for the refresh that overtook the typed search (#15 M1)", async () => {
+  const { c, api, store } = setup({ X: "x", Y: "y", Z: "z", Groceries: "g" });
+  await c.runSearch(true, true);
+  await settle();
+  await c.show(P("Z")); // e.g. a wikilink to a note not on the first page
+  store.set({ sel: -1 });
+  const d1 = deferred<Page>();
+  const d2 = deferred<Page>();
+  api.search.mockImplementationOnce(() => d1.promise).mockImplementationOnce(() => d2.promise);
+  c.setQuery("gro");
+  const entered = c.enter();
+  void c.onNotesChanged([]);
+  d1.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
+  await settle();
+  d2.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
+  await entered;
+  await settle();
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+  expect(store.get().openPath).toBe(P("Groceries"));
+});
+
+test("a sort toggle overtaking a typed search keeps its first match (#15 M2)", async () => {
+  const { c, api, store } = setup({ Groceries: "g", X: "x", Y: "y" });
+  await c.show(P("X"));
+  await c.runSearch(true, true);
+  await settle();
+  const d1 = deferred<Page>();
+  const d2 = deferred<Page>();
+  api.search.mockImplementationOnce(() => d1.promise).mockImplementationOnce(() => d2.promise);
+  c.setQuery("gro");
+  const sorted = c.toggleSort();
+  await settle();
+  d1.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
+  d2.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
+  await sorted;
+  await settle();
+  await c.enter();
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+  expect(store.get().openPath).toBe(P("Groceries"));
+});
+
+test("a capture retry never edits a line it did not write: after a conflict reload the older identical task stays (#15 Copilot)", async () => {
+  for (const retry of ["buy milk", "buy mlik"]) {
+    const { c, editor, store } = setup({ Inbox: "- [ ] buy mlik", B: "b" }); // the older task has the same text
+    await c.show(P("Inbox"));
+    await c.startCapture();
+    c.setQuery("buy mlik");
+    editor.flushResult = false;
+    await c.submitCapture("buy mlik");
+    editor.text = "- [ ] buy mlik"; // an autosave retry conflicted: the line went to a conflict copy, the editor reloaded the disk text
+    c.setQuery(retry);
+    editor.flushResult = true;
+    await c.submitCapture(retry);
+    expect(editor.text, retry).toBe(`- [ ] buy mlik\n- [ ] ${retry}`);
+    expect(store.get().capture, retry).toBeNull();
+  }
+});
+
+test("a backend tick still reloads the view after the optimistic patch (#15 Copilot)", async () => {
+  const { c, api, store } = setup({ A: "a", B: "- [ ] y" });
+  api.tasks.mockResolvedValue({ ...view(0), no_date: [task("B", 0, "- [ ] y")] });
+  await c.loadTasks();
+  api.toggleTask.mockResolvedValueOnce({ line: 0, line_text: "- [x] y ✅ 2026-10-27" });
+  const d = deferred<TaskView>();
+  api.tasks.mockImplementation(() => d.promise); // the reloads land after the tick returned
+  await c.tickTask(store.get().taskView!.no_date[0]);
+  d.resolve({ ...view(0), done: [{ ...task("B", 0, "- [x] y ✅ 2026-10-27"), done: true }] });
+  await settle();
+  expect(store.get().taskView!.no_date).toEqual([]);
+  expect(store.get().taskView!.done).toHaveLength(1);
+});
+
+test("a tick through the editor never drops a filter load in flight (#15 r5 m1)", async () => {
+  const { c, api, editor, store } = setup({ A: "- [ ] x", B: "- [ ] foo" });
+  c.setPaneMode("tasks");
+  api.tasks.mockResolvedValue({ ...view(0), no_date: [task("A", 0, "- [ ] x"), task("B", 0, "- [ ] foo")] });
+  await c.loadTasks();
+  await c.show(P("A"));
+  const d = deferred<TaskView>();
+  api.tasks.mockImplementationOnce(() => d.promise);
+  c.setQuery("foo");
+  editor.toggleTask.mockImplementation(() => ((editor.text = "- [x] x ✅ 2026-10-27"), true));
+  await c.tickTask(store.get().taskView!.no_date[0]);
+  d.resolve({ ...view(0), no_date: [task("B", 0, "- [ ] foo")] });
+  await c.enter();
+  expect(store.get().taskView!.no_date.map((t) => t.path)).toEqual([P("B")]);
+  expect(store.get().openPath).toBe(P("B"));
+});
+
+test("a corrected capture after a failed save is a new capture: the earlier line stays and is saved with the note (#8)", async () => {
+  const { c, editor, store } = setup({ Inbox: "", B: "b" });
+  await c.show(P("Inbox"));
+  await c.startCapture();
+  c.setQuery("buy mlik");
+  editor.flushResult = false;
+  await c.submitCapture("buy mlik");
+  c.setQuery("buy milk");
+  editor.flushResult = true;
+  await c.submitCapture("buy milk");
+  expect(editor.text).toBe("- [ ] buy mlik\n- [ ] buy milk"); // no line edited or replaced
+  expect(store.get().capture).toBeNull();
+});
+
+test("the saver's own retry saved the capture line (front matter restamped): a same-text Enter closes without a duplicate (#15 simplification)", async () => {
+  const { c, editor, store, api } = setup({ Inbox: "---\nmodified: 1\n---\n- [ ] buy milk", B: "b" }); // an older identical task
+  await c.show(P("Inbox"));
+  await c.startCapture();
+  c.setQuery("buy milk");
+  editor.flushResult = false;
+  await c.submitCapture("buy milk");
+  expect(store.get().capture?.err).toMatch(/wasn't saved/);
+  editor.text = editor.text.replace("modified: 1", "modified: 2"); // the saver's 1 s retry landed and restamped the block
+  editor.flushResult = true;
+  await c.submitCapture("buy milk");
+  expect(editor.text).toBe("---\nmodified: 2\n---\n- [ ] buy milk\n- [ ] buy milk"); // the older task and this capture, once each
+  expect(editor.appended).toEqual(["- [ ] buy milk"]);
+  expect(store.get().capture).toBeNull();
+  expect(api.captureDone).toHaveBeenLastCalledWith(true);
+});
+
+test("filter results are never replaced by an older load's reply (#15 simplification)", async () => {
+  const { c, api, store } = setup({ A: "- [ ] a", B: "- [ ] b" });
+  c.setPaneMode("tasks");
+  await settle();
+  const d1 = deferred<TaskView>();
+  const d2 = deferred<TaskView>();
+  api.tasks.mockImplementation(async (q) => (q === "a" ? d1.promise : q === "b" ? d2.promise : view(0)));
+  c.setQuery("a");
+  c.setQuery("b");
+  d2.resolve({ ...view(0), no_date: [task("B", 0, "- [ ] b")] });
+  await settle();
+  d1.resolve({ ...view(0), no_date: [task("A", 0, "- [ ] a")] });
+  await settle();
+  expect(store.get().taskView!.no_date.map((t) => t.path)).toEqual([P("B")]);
 });

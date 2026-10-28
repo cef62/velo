@@ -42,7 +42,12 @@ impl Default for Settings {
 }
 
 const DEFAULT_TOGGLE: &str = "Mod+Shift+Space";
-const DEFAULT_CAPTURE: &str = "Mod+Shift+Alt+KeyN";
+const DEFAULT_CAPTURE: &str = "Mod+Alt+Shift+KeyN"; // canonical modifier order, as the UI's DEFAULTS
+/// Every action id in the UI's `DEFAULTS` (src/shortcuts.ts); a saved id outside it (e.g. the old `next_note`) is ignored there.
+pub const ACTIONS: [&str; 19] = [
+    "focus_search", "toggle_preview", "rename", "toggle_lock", "lock_all", "settings", "toggle_sort", "back", "forward", "delete_note",
+    "toggle_tags", "toggle_rich", "toggle_layout", "toggle_window", "toggle_info", "toggle_front_matter", "toggle_tasks", "capture", "daily_note",
+];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GlobalAction { ToggleWindow, Capture }
@@ -57,7 +62,7 @@ impl Settings {
     pub fn global_bindings(&self) -> Vec<(GlobalAction, String)> {
         let get = |id: &str, d: &str| match self.shortcuts.get(id) {
             Some(k) => k.clone(),
-            None if self.shortcuts.values().any(|k| same_shortcut(k, d)) => "none".into(),
+            None if self.shortcuts.iter().any(|(a, k)| ACTIONS.contains(&a.as_str()) && same_shortcut(k, d)) => "none".into(),
             None => d.into(),
         };
         vec![(GlobalAction::ToggleWindow, get("toggle_window", DEFAULT_TOGGLE)), (GlobalAction::Capture, get("capture", DEFAULT_CAPTURE))]
@@ -240,7 +245,7 @@ mod tests {
 
     #[test] fn global_bindings_defaults_and_overrides() {
         let mut s = Settings::default();
-        assert_eq!(s.global_bindings(), vec![(GlobalAction::ToggleWindow, "Mod+Shift+Space".to_string()), (GlobalAction::Capture, "Mod+Shift+Alt+KeyN".to_string())]);
+        assert_eq!(s.global_bindings(), vec![(GlobalAction::ToggleWindow, "Mod+Shift+Space".to_string()), (GlobalAction::Capture, "Mod+Alt+Shift+KeyN".to_string())]);
         s.shortcuts.insert("capture".into(), "Mod+KeyG".into()); s.shortcuts.insert("toggle_window".into(), "none".into());
         assert_eq!(s.global_bindings(), vec![(GlobalAction::ToggleWindow, "none".to_string()), (GlobalAction::Capture, "Mod+KeyG".to_string())]);
     }
@@ -253,5 +258,10 @@ mod tests {
         let mut t = Settings::default();
         t.shortcuts.insert("capture".into(), "Mod+Shift+Space".into()); // capture saved on toggle_window's default
         assert_eq!(t.global_bindings()[0], (GlobalAction::ToggleWindow, "none".to_string()));
+    }
+    #[test] fn global_default_ignores_saved_ids_the_ui_does_not_know() {
+        let mut s = Settings::default();
+        s.shortcuts.insert("next_note".into(), "Mod+Alt+Shift+KeyN".into()); // obsolete action, still in an old full snapshot
+        assert_eq!(s.global_bindings()[1], (GlobalAction::Capture, "Mod+Alt+Shift+KeyN".to_string()));
     }
 }

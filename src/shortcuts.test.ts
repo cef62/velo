@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import settingsRs from "../src-tauri/src/settings.rs?raw";
 import { DEFAULTS, GLOBAL_ACTIONS, LABELS, overrides, eventToBinding, formatBinding, isAltGraph, matches, normalizeBinding, resolve, validateBinding } from "./shortcuts";
 
 const ev = (code: string, m: Partial<Record<"metaKey" | "ctrlKey" | "altKey" | "shiftKey", boolean>> = {}) =>
@@ -97,4 +98,11 @@ test("upgrade: a saved binding equal to a new default wins, the new action gets 
   const m = resolve({ toggle_sort: "Mod+Shift+KeyD", toggle_window: "Mod+Shift+Alt+KeyN", rename: "Mod+Shift+KeyX" });
   expect(m).toMatchObject({ toggle_sort: "Mod+Shift+KeyD", daily_note: "none", toggle_window: "Mod+Alt+Shift+KeyN", capture: "none", rename: "Mod+Shift+KeyX", toggle_tasks: "none" });
   expect(resolve({ toggle_sort: "Mod+Shift+KeyD", daily_note: "Mod+Shift+KeyD" }).daily_note).toBe("Mod+Shift+KeyD"); // both chosen: a real conflict, shown
+});
+
+test("the backend knows the same action ids and capture default (#8)", () => {
+  const ids = /pub const ACTIONS: \[&str; \d+\] = \[([^\]]*)\]/.exec(settingsRs)![1].match(/"(\w+)"/g)!.map((q) => q.slice(1, -1));
+  expect(ids.sort()).toEqual(Object.keys(DEFAULTS).sort());
+  expect(settingsRs).toContain(`const DEFAULT_CAPTURE: &str = "${DEFAULTS.capture}";`);
+  expect(settingsRs).toContain(`const DEFAULT_TOGGLE: &str = "${DEFAULTS.toggle_window}";`);
 });

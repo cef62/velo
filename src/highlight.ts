@@ -33,3 +33,27 @@ export function highlightRanges(text: string, query: string): [number, number][]
   }
   return merged;
 }
+
+const ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
+const UNESCAPES = Object.fromEntries(Object.entries(ESCAPES).map(([c, e]) => [e, c]));
+const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ESCAPES[c]);
+
+/** Wraps the query's matches in `<mark class={cls}>` inside markdown-it inline HTML (which escapes only &<>"), text only. */
+export function markHtml(html: string, query: string, cls: string): string {
+  return html
+    .split(/(<[^>]*>)/)
+    .map((seg, i) => {
+      if (i % 2) return seg; // a tag
+      const text = seg.replace(/&(amp|lt|gt|quot);/g, (e) => UNESCAPES[e]);
+      const ranges = highlightRanges(text, query);
+      if (!ranges.length) return seg;
+      let out = "";
+      let at = 0;
+      for (const [s, e] of ranges) {
+        out += escapeHtml(text.slice(at, s)) + `<mark class="${cls}">${escapeHtml(text.slice(s, e))}</mark>`;
+        at = e;
+      }
+      return out + escapeHtml(text.slice(at));
+    })
+    .join("");
+}
