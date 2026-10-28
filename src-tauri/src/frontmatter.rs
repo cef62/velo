@@ -53,6 +53,45 @@ fn key_rest<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     k.trim_end_matches([' ', '\t']).eq_ignore_ascii_case(key).then_some(rest)
 }
 
+/// Raw items as a flow list body; one that would not survive as a flow item (an unquoted block-list value with `,`,
+/// brackets, `#`, `:` or edge spaces) is quoted.
+fn flow_join(items: &[&str]) -> String {
+    let quoted = |i: &str| ['"', '\''].iter().any(|q| i.len() > 1 && i.starts_with(*q) && i.ends_with(*q));
+    let item = |i: &&str| {
+        if quoted(i) || !(i.contains([',', '[', ']', '#', ':']) || i.trim() != *i) {
+            i.to_string()
+        } else if i.contains('"') {
+            format!("'{i}'")
+        } else {
+            format!("\"{i}\"")
+        }
+    };
+    items.iter().map(item).collect::<Vec<_>>().join(", ")
+}
+
+/// The raw items of a flow list `a, "b, c", d]` (text after `[`), up to the first `]` outside quotes; a comma inside
+/// quotes belongs to its item.
+fn flow_items(f: &str) -> Vec<&str> {
+    let (mut out, mut start, mut quote) = (vec![], 0, None);
+    for (i, c) in f.char_indices() {
+        match (quote, c) {
+            (Some(q), _) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, ',' | ']') => {
+                out.push(f[start..i].trim());
+                start = i + 1;
+                if c == ']' {
+                    return out.into_iter().filter(|s| !s.is_empty()).collect();
+                }
+            }
+            _ => {}
+        }
+    }
+    out.push(f[start..].trim());
+    out.into_iter().filter(|s| !s.is_empty()).collect()
+}
+
 /// Flow lists, scalars or block lists under every `key:` row (any `key_rest` spelling), in order.
 fn list(inner: &str, key: &str) -> Vec<String> {
     let ls: Vec<&str> = lines(inner).collect();
@@ -61,7 +100,7 @@ fn list(inner: &str, key: &str) -> Vec<String> {
         let Some(v) = key_rest(l, key) else { continue };
         let v = v.trim();
         if let Some(f) = v.strip_prefix('[') {
-            items.extend(f.split(']').next().unwrap_or("").split(','));
+            items.extend(flow_items(f));
         } else if !v.is_empty() {
             items.push(v);
         } else {
@@ -140,7 +179,7 @@ fn tag_row<'a>(rows: &[&'a str], k: usize) -> Result<(Vec<&'a str>, usize, bool)
     Ok(if v.starts_with('[') {
         // only a single-line list with nothing after `]`
         if !v.ends_with(']') || v[1..v.len() - 1].contains(['[', ']', '#']) { return unsupported(); }
-        (v[1..v.len() - 1].split(',').map(str::trim).filter(|s| !s.is_empty()).collect(), k + 1, true)
+        (flow_items(&v[1..]), k + 1, true)
     } else if v == "~" || v == "null" {
         (vec![], k + 1, true) // YAML null: an empty list
     } else if !v.is_empty() {
@@ -193,7 +232,7 @@ pub fn set_tags(text: &str, add: &[String], remove: &[String], create_block: boo
         let mut folded = text[..first].to_string();
         for (i, r) in rows.iter().enumerate() {
             if i == k {
-                folded.push_str(&format!("{key} [{}]{eol}", items.join(", ")));
+                folded.push_str(&format!("{key} [{}]{eol}", flow_join(&items)));
             } else if !skip.iter().any(|&(a, b)| (a..b).contains(&i)) {
                 folded.push_str(r);
             }
@@ -213,7 +252,7 @@ pub fn set_tags(text: &str, add: &[String], remove: &[String], create_block: boo
     let mut out = String::new();
     if flow || (items.is_empty() && fresh.is_empty()) {
         items.extend(fresh);
-        out.push_str(&format!("{key} [{}]{eol}", items.join(", ")));
+        out.push_str(&format!("{key} [{}]{eol}", flow_join(&items)));
     } else {
         out.push_str(rows[k]);
         let indent: String = rows.get(k + 1).map_or("  ".into(), |l| l.chars().take_while(|c| *c == ' ').collect());
@@ -356,6 +395,18 @@ mod tests {
         assert_eq!(set_tags(t, &[], &["x".into()], false).unwrap().unwrap(), "---\nTags: [a]\nbody\n".replace("body", "---\nbody"));
         assert_eq!(set_tags(t, &["b".into()], &[], true).unwrap().unwrap(), "---\nTags: [a, x, b]\n---\nbody\n");
         assert!(set_tags("---\ntags: [a]\nTags: {x}\n---\n", &[], &["a".into()], false).is_err(), "any unsupported row refuses");
+    }
+
+    #[test]
+    fn quoted_flow_items_keep_their_commas() {
+        assert_eq!(parse("---\ntags: [\"a, b\", 'c,d', e]\n---\n").unwrap().tags, ["a, b", "c,d", "e"]);
+        let t = "---\nTags:\n  - \"a, b\"\ntags: [x]\n---\nb\n";
+        let out = set_tags(t, &["y".into()], &[], false).unwrap().unwrap();
+        assert_eq!(parse(&out).unwrap().tags, ["a, b", "x", "y"], "{out}");
+        let bare = set_tags("---\nTags:\n  - a, b\ntags: [x]\n---\n", &["y".into()], &[], false).unwrap().unwrap();
+        assert_eq!(parse(&bare).unwrap().tags, ["a, b", "x", "y"], "an unquoted block item is quoted when it moves into a flow list: {bare}");
+        let one = set_tags("---\ntags: [\"a, b\", c]\n---\n", &[], &["c".into()], false).unwrap().unwrap();
+        assert_eq!(one, "---\ntags: [\"a, b\"]\n---\n");
     }
 
     #[test]
