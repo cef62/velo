@@ -75,7 +75,15 @@ const SCHEMA_VERSION: i64 = 6;
 
 pub struct Index {
     db: Connection,
+    /// Last failed purge: watcher batches don't retry it for `PURGE_BACKOFF` (each try is a full FTS rebuild, and a
+    /// busy checkpoint waits 5 s).
+    purge_failed: std::cell::Cell<Option<std::time::Instant>>,
 }
+
+const PURGE_BACKOFF: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Clears the purge mark only if no delete bumped it since the purge read it (another connection may have).
+pub(crate) const CLEAR_PURGE: &str = "DELETE FROM purge_mark WHERE gen = ?1";
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS notes(path TEXT PRIMARY KEY, title TEXT NOT NULL, title_folded TEXT NOT NULL,
@@ -96,7 +104,7 @@ CREATE INDEX IF NOT EXISTS links_src ON links(src);
 CREATE TABLE IF NOT EXISTS tasks(path TEXT NOT NULL, line INTEGER NOT NULL, text TEXT NOT NULL, done INTEGER NOT NULL, due TEXT, done_on TEXT, line_text TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS tasks_path ON tasks(path);
 CREATE TABLE IF NOT EXISTS tasks_stale(path TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS purge_pending(one INTEGER PRIMARY KEY CHECK(one = 1));
+CREATE TABLE IF NOT EXISTS purge_mark(one INTEGER PRIMARY KEY CHECK(one = 1), gen INTEGER NOT NULL);
 CREATE TRIGGER IF NOT EXISTS notes_written AFTER INSERT ON notes BEGIN INSERT INTO tasks_stale(path) VALUES(new.path); END;
 "#;
 
@@ -170,9 +178,19 @@ impl Index {
         db.execute_batch(SCHEMA)?;
         // FTS5 'secure-delete' made re-indexing an existing note cost ~13 ms (it edits the leaves of every trigram of the
         // old body: 135 s for 10k notes); `purge` erases deleted text when it matters instead. Off also for indexes
-        // that stored it on.
-        db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 0);")?;
-        Ok(Index { db })
+        // that stored it on. Stored on means an older build (0.8.2) wrote here since we last ran: it may have locked a
+        // note whose earlier versions we left in the segments, so mark a purge in the same transaction.
+        let downgraded = db.query_row("SELECT v FROM notes_fts_config WHERE k='secure-delete'", [], |r| r.get::<_, i64>(0)).optional()?.unwrap_or(0) != 0;
+        let index = Index { db, purge_failed: Default::default() };
+        if downgraded {
+            index.db.execute_batch("BEGIN")?;
+            index.need_purge()?;
+        }
+        index.db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 0);")?;
+        if downgraded {
+            index.db.execute_batch("COMMIT")?;
+        }
+        Ok(index)
     }
 
     /// Fold the WAL into the main file and truncate it (no-op outside WAL mode).
@@ -182,9 +200,10 @@ impl Index {
     }
 
     /// Mark that deleted note text must be erased (`purge_pending`). Write it before, or in the same transaction
-    /// as, the delete: the mark survives a crash or a failed purge, so the erase is retried.
+    /// as, the delete: the mark survives a crash or a failed purge, so the erase is retried. Bumps a generation, so a
+    /// purge already running elsewhere doesn't clear a mark for a delete it didn't cover.
     pub fn need_purge(&self) -> anyhow::Result<()> {
-        self.db.execute("INSERT OR IGNORE INTO purge_pending(one) VALUES(1)", [])?;
+        self.db.execute("INSERT INTO purge_mark(one, gen) VALUES(1, 1) ON CONFLICT(one) DO UPDATE SET gen = gen + 1", [])?;
         Ok(())
     }
 
@@ -192,17 +211,27 @@ impl Index {
     /// until a merge, so 'rebuild' the FTS index from the remaining rows (secure_delete zeroes the freed pages), then
     /// truncate the WAL. Not 'optimize': it can keep delete markers (with their trigrams) when the structure has
     /// empty deepest levels, and failed 2 in 300 runs of the lock test. The mark is cleared only after all succeeded.
-    pub fn purge_pending(&self) -> anyhow::Result<()> {
-        if !self.db.query_row("SELECT EXISTS(SELECT 1 FROM purge_pending)", [], |r| r.get::<_, bool>(0))? {
+    /// `force` (open, a new lock) skips the backoff after a failure.
+    pub fn purge_pending(&self, force: bool) -> anyhow::Result<()> {
+        let Some(generation) = self.db.query_row("SELECT gen FROM purge_mark", [], |r| r.get::<_, i64>(0)).optional()? else {
+            return Ok(());
+        };
+        if !force && self.purge_failed.get().is_some_and(|t| t.elapsed() < PURGE_BACKOFF) {
             return Ok(());
         }
+        let r = self.purge(generation);
+        self.purge_failed.set(r.is_err().then(std::time::Instant::now));
+        r
+    }
+
+    fn purge(&self, generation: i64) -> anyhow::Result<()> {
         self.db.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')")?;
         // A reader (`velo --mcp` direct mode) pins old pages, so the checkpoint can't overwrite them: it waits up to
         // the busy timeout (5 s), then reports busy; keep the mark for the next trigger.
         if self.db.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get::<_, i64>(0))? != 0 {
             anyhow::bail!("checkpoint blocked by another connection");
         }
-        self.db.execute("DELETE FROM purge_pending", [])?;
+        self.db.execute(CLEAR_PURGE, [generation])?;
         Ok(())
     }
 

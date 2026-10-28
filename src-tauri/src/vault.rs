@@ -159,7 +159,7 @@ impl Vault {
             v.index.remove(g)?;
         }
         v.index.commit()?;
-        v.purge_pending(); // also one a crash or a failure left from an earlier session
+        v.purge_pending(true); // also one a crash or a failure left from an earlier session
         if total > 0 {
             v.index.checkpoint()?; // don't keep a bulk build's WAL for the whole session
         }
@@ -441,16 +441,18 @@ impl Vault {
         if to.exists() {
             return Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists).into());
         }
+        // Mark the erase before anything changes: a failure here fails the lock cleanly, and a crash or a failed purge
+        // later leaves the mark set, so it is retried.
+        self.index.need_purge()?;
         // first: on failure nothing else has changed, and no plaintext snapshot survives a lock
         self.revisions.encrypt_all(&nf.title, |b| crypto::encrypt(identity, b))?;
         let plain = self.store.read(from)?;
         self.store.write_atomic(&to, &crypto::encrypt(identity, &plain)?)?;
         std::fs::remove_file(from).context("removing plaintext note")?;
-        self.index.need_purge()?; // before the delete: a crash or a failed purge leaves it set, so it's retried
         self.index.remove(path)?;
         self.reindex(&to, None)?;
         // The note is locked whatever happens next; a failed erase stays marked and is retried (watcher, lock, open).
-        self.purge_pending();
+        self.purge_pending(true);
         self.unlocked.insert(s(&to), lossy(&plain));
         Ok(s(&to))
     }
@@ -569,14 +571,17 @@ impl Vault {
                 self.apply_chunk(chunk, identity, false, &mut changed);
             }
         }
-        self.purge_pending();
+        self.purge_pending(false);
         changed
     }
 
-    /// Run a marked purge; on failure log it and keep the mark for the next trigger.
-    fn purge_pending(&self) {
-        if let Err(e) = self.index.purge_pending() {
-            crate::log::line(&format!("erasing deleted note text from the index failed, will retry: {e}"));
+    /// Run a marked purge; on failure log it and keep the mark for the next trigger. `force` skips the backoff.
+    fn purge_pending(&self, force: bool) {
+        if let Err(e) = self.index.purge_pending(force) {
+            let msg = format!("erasing deleted note text from the index failed, will retry: {e}");
+            crate::log::line(&msg);
+            // `velo --mcp` direct mode has no velo.log (its rotation lock is per process); stderr is its client's log.
+            eprintln!("velo: {msg}");
         }
     }
 
@@ -1256,7 +1261,7 @@ mod tests {
         assert!(!trigram_on_disk(&db, &OLD), "plaintext survives reopen+rescan (rescan changed {also:?})");
     }
     fn purge_marked(v: &Vault) -> bool {
-        v.index.raw().query_row("SELECT EXISTS(SELECT 1 FROM purge_pending)", [], |x| x.get(0)).unwrap()
+        v.index.raw().query_row("SELECT EXISTS(SELECT 1 FROM purge_mark)", [], |x| x.get(0)).unwrap()
     }
     /// Makes the next purge fail: a reader pins the old pages, so the TRUNCATE checkpoint reports busy.
     fn block_purge(v: &Vault, db: &Path) -> rusqlite::Connection {
@@ -1295,7 +1300,7 @@ mod tests {
         assert!(!trigram_on_disk(&db, &OLD), "plaintext survives after watcher purge failure + reopen");
     }
     #[test] fn r1_reader_blocks_purge_checkpoint() {
-        let (mut v, _dir, db, p) = edited_note();
+        let (mut v, dir, db, p) = edited_note();
         let r = rusqlite::Connection::open(&db).unwrap();
         r.execute_batch("BEGIN").unwrap();
         let _: i64 = r.query_row("SELECT count(*) FROM notes_fts_data", [], |x| x.get(0)).unwrap();
@@ -1305,8 +1310,20 @@ mod tests {
         r.execute_batch("COMMIT").unwrap();
         drop(r);
         assert!(purge_marked(&v));
-        v.apply_fs_changes(&[], None);
+        drop(v);
+        let v = open(dir, &db, None).unwrap(); // retried at open
+        assert!(!purge_marked(&v));
         assert!(!trigram_on_disk(&db, &OLD), "plaintext on disk after the retry");
+    }
+    #[test] fn failed_purge_waits_out_the_backoff_in_watcher_batches() {
+        let (mut v, _dir, db, p) = edited_note();
+        let r = block_purge(&v, &db);
+        v.lock_note(&p, &crypto::new_identity()).unwrap(); // its purge fails
+        drop(r);
+        v.apply_fs_changes(&[], None);
+        assert!(purge_marked(&v), "a watcher batch retried within the backoff");
+        v.index.purge_pending(true).unwrap(); // open and a new lock still retry
+        assert!(!purge_marked(&v));
     }
 
     fn r1_dump(v: &Vault) -> Vec<String> {
@@ -1347,6 +1364,129 @@ mod tests {
         let db2 = tempfile::tempdir().unwrap().keep().join("cold.sqlite");
         let cold = open(dir.clone(), &db2, None).unwrap();
         let _ = a;
+        assert_eq!(r1_dump(&v), r1_dump(&cold));
+    }
+
+    /// Secret text from 4 CJK chars (3 UTF-8 bytes each): their byte patterns essentially never occur in SQLite binary data.
+    const CJK: [&str; 4] = ["龍", "鷹", "鬱", "齋"];
+    fn secret(seed: usize, n: usize) -> String {
+        let mut x = seed as u64 * 2654435761 + 7;
+        (0..n).map(|_| { x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); CJK[(x >> 33) as usize % 4] }).collect()
+    }
+    fn cjk_hits(db: &Path) -> Vec<(String, usize)> {
+        ["", "-wal", "-shm"].iter().map(|x| {
+            let b = std::fs::read(format!("{}{x}", db.display())).unwrap_or_default();
+            (x.to_string(), CJK.iter().map(|c| b.windows(3).filter(|w| *w == c.as_bytes()).count()).sum())
+        }).collect()
+    }
+    fn total(h: &[(String, usize)]) -> usize { h.iter().map(|x| x.1).sum() }
+
+    /// Q2: long realistic history (FTS secure-delete off, big bodies with overflow pages, deletes, re-creates), then a lock.
+    #[test] fn r2_long_history_then_lock_leaves_no_bytes() {
+        let (dir, db) = setup();
+        let filler = "lorem ipsum dolor sit amet ".repeat(120);
+        for i in 0..400 { std::fs::write(dir.join(format!("filler {i}.md")), format!("filler {i} {filler}")).unwrap(); }
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let d = v.open_or_create("s", None, false).unwrap();
+        for k in 0..40 {
+            let body = format!("version {k}\n- [ ] task {}\n{}\n{filler}", secret(k, 12), secret(k + 1000, 3000));
+            v.save_note(&d.path, &body, &stat_hash(&d.path), None, false).unwrap();
+            let fillers: Vec<PathBuf> = (0..60).map(|j| dir.join(format!("filler {}.md", (k * 60 + j) % 400))).collect();
+            for f in &fillers { std::fs::write(f, format!("edited {k} {filler}")).unwrap(); }
+            if k % 5 == 0 { for f in &fillers[..10] { std::fs::remove_file(f).unwrap(); } }
+            v.apply_fs_changes(&fillers, None);
+            if k % 5 == 0 { for f in &fillers[..10] { std::fs::write(f, format!("back {k}")).unwrap(); } v.apply_fs_changes(&fillers[..10], None); }
+        }
+        let before = cjk_hits(&db);
+        assert!(total(&before) > 0, "control: {before:?}");
+        let id = crypto::new_identity();
+        v.lock_note(&d.path, &id).unwrap();
+        let after = cjk_hits(&db);
+        drop(v);
+        let reopened = cjk_hits(&db);
+        eprintln!("before {before:?} after lock {after:?} after close {reopened:?}");
+        assert_eq!(total(&after), 0, "plaintext bytes after lock: {after:?}");
+        assert_eq!(total(&reopened), 0);
+    }
+    /// Q1: a mark cleared by connection A after its rebuild hides a delete that connection B committed after that rebuild.
+    #[test] fn r2_mark_clear_hides_newer_delete() {
+        let (mut v, dir, db, p) = edited_note();
+        let t = v.open_or_create("t", None, false).unwrap();
+        v.save_note(&t.path, &format!("t {}", secret(5, 200)), &stat_hash(&t.path), None, false).unwrap();
+        v.index.checkpoint().unwrap();
+        let id = crypto::new_identity();
+        // B: a second process (`velo --mcp` direct mode) on the same index
+        assert!(total(&cjk_hits(&db)) > 0, "control");
+        let mut b = open(dir.clone(), &db, None).unwrap();
+        // A locks s: lock_note's steps, then purge_pending's steps one by one
+        let to = dir.join("s.md.age");
+        std::fs::write(&to, crypto::encrypt(&id, &std::fs::read(&p).unwrap()).unwrap()).unwrap();
+        std::fs::remove_file(&p).unwrap();
+        v.index.need_purge().unwrap();
+        v.index.remove(&p).unwrap();
+        v.reindex(&to, None).unwrap();
+        let generation: i64 = v.index.raw().query_row("SELECT gen FROM purge_mark", [], |r| r.get(0)).unwrap();
+        v.index.raw().execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')").unwrap();
+        // B: t was locked on another machine and synced in; B's rescan marks (no-op: already set) and deletes
+        std::fs::write(dir.join("t.md.age"), crypto::encrypt(&id, b"x").unwrap()).unwrap();
+        std::fs::remove_file(&t.path).unwrap();
+        b.index.begin().unwrap(); // apply_chunk's steps for [t.md, t.md.age]
+        b.index.need_purge().unwrap();
+        b.index.remove(&t.path).unwrap();
+        b.reindex(&dir.join("t.md.age"), None).unwrap();
+        b.index.commit().unwrap();
+        // A: checkpoint + clear
+        assert_eq!(v.index.raw().query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        v.index.raw().execute(crate::index::CLEAR_PURGE, [generation]).unwrap(); // a no-op: B bumped the mark
+        // B: its own retry still finds the mark
+        b.index.purge_pending(true).unwrap();
+        drop(b);
+        drop(v);
+        let mut v = open(dir.clone(), &db, Some(&id)).unwrap();
+        v.rescan(Some(&id));
+        drop(v);
+        let h = cjk_hits(&db);
+        assert_eq!(total(&h), 0, "t's plaintext survives: {h:?}");
+    }
+    /// Q4: downgrade to 0.8.2 (FTS secure-delete on, no purge_pending), lock there, upgrade again.
+    #[test] fn r2_lock_in_082_after_pr_edits_is_never_erased() {
+        let (mut v, dir, db, p) = edited_note();
+        drop(v);
+        // 0.8.2's Index::open: secure-delete 1, ignores purge_pending; its lock_note: write .age, rm .md, remove, reindex, checkpoint
+        v = open(dir.clone(), &db, None).unwrap();
+        v.index.raw().execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1)").unwrap();
+        let id = crypto::new_identity();
+        let to = dir.join("s.md.age");
+        std::fs::write(&to, crypto::encrypt(&id, &std::fs::read(&p).unwrap()).unwrap()).unwrap();
+        std::fs::remove_file(&p).unwrap();
+        v.index.remove(&p).unwrap();
+        v.reindex(&to, None).unwrap();
+        v.index.checkpoint().unwrap();
+        drop(v);
+        // upgrade back to this PR
+        let mut v = open(dir.clone(), &db, Some(&id)).unwrap();
+        v.rescan(Some(&id));
+        let leaked = trigram_on_disk(&db, &OLD);
+        v.index.need_purge().unwrap(); // control: a forced purge erases them, so the hits are real FTS remnants
+        v.apply_fs_changes(&[], None);
+        eprintln!("leaked after upgrade: {leaked}; after forced purge: {}", trigram_on_disk(&db, &OLD));
+        drop(v);
+        assert!(!leaked, "older versions of the locked note survive downgrade-lock-upgrade");
+    }
+    /// Q5: after a purge (FTS rebuild), the index answers exactly like a cold build.
+    #[test] fn r2_rebuild_matches_cold_build() {
+        let (dir, db) = setup();
+        for i in 0..250 { std::fs::write(dir.join(format!("n{i}.md")), format!("---\naliases: [al{i}]\ntags: [t{}]\n---\n# n{i}\nalpha beta {i} #tag{} [[n{}]]\n- [ ] task {i} due:2026-01-0{}\n", i%7, i%5, (i+1)%250, i%9+1)).unwrap(); }
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        for i in 0..250 { std::fs::write(dir.join(format!("n{i}.md")), format!("---\ntags: [u{}]\n---\ngamma {i} #tg{} [[n{}]] zz\n- [x] task done {i}\n", i%3, i%4, (i+2)%250)).unwrap(); }
+        let ps: Vec<PathBuf> = (0..250).map(|i| dir.join(format!("n{i}.md"))).collect();
+        v.apply_fs_changes(&ps, None);
+        v.index.need_purge().unwrap();
+        v.apply_fs_changes(&[], None);
+        assert!(!purge_marked(&v));
+        v.index.raw().execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('integrity-check')").unwrap();
+        let db2 = tempfile::tempdir().unwrap().keep().join("cold.sqlite");
+        let cold = open(dir.clone(), &db2, None).unwrap();
         assert_eq!(r1_dump(&v), r1_dump(&cold));
     }
 }
