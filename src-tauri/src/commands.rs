@@ -163,13 +163,23 @@ pub fn toggle_window(app: &AppHandle) {
 pub fn capture_requested(app: &AppHandle) {
     let Some(w) = app.get_webview_window("main") else { return };
     let hidden = !(w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false));
-    app.state::<AppState>().capture_was_hidden.store(hidden, Ordering::SeqCst);
+    capture_shown(&app.state::<AppState>().capture_was_hidden, hidden);
     #[cfg(target_os = "macos")]
     app.show().ok();
     w.show().ok();
     w.unminimize().ok();
     w.set_focus().ok();
     app.emit("capture", ()).ok();
+}
+
+/// A repeat press finds velo in front (the first press showed it): the session still started hidden.
+fn capture_shown(was_hidden: &AtomicBool, hidden: bool) {
+    was_hidden.fetch_or(hidden, Ordering::SeqCst);
+}
+
+/// Ends the session (the flag never outlives it); true = hide velo again.
+fn capture_ended(was_hidden: &AtomicBool, hide: bool) -> bool {
+    was_hidden.swap(false, Ordering::SeqCst) && hide
 }
 
 /// `binding` is in velo format ("Mod+Shift+Space").
@@ -319,13 +329,21 @@ pub fn open_note(st: State<'_, AppState>, agent: State<'_, AgentState>, path: St
     with_vault(&st, |v, id| v.open_note(&path, id))
 }
 
+#[derive(serde::Serialize)]
+pub struct Opened {
+    #[serde(flatten)]
+    doc: NoteDoc,
+    /// the file did not exist before this call (⌥↩ adds a checklist only then)
+    created: bool,
+}
+
 #[tauri::command(async)]
-pub fn open_or_create(st: State<'_, AppState>, agent: State<'_, AgentState>, title: String) -> Res<NoteDoc> {
+pub fn open_or_create(st: State<'_, AppState>, agent: State<'_, AgentState>, title: String) -> Res<Opened> {
     if let Ok(Some(path)) = with_vault(&st, |v, _| v.find_note(&title)) {
         agent.editors.wait_free(&path, AGENT_HOLD_MAX);
     }
     let fm = st.settings.lock().unwrap().write_front_matter;
-    with_vault(&st, |v, id| v.open_or_create(&title, id, fm))
+    with_vault(&st, |v, id| v.open_or_create_new(&title, id, fm)).map(|(doc, created)| Opened { doc, created })
 }
 
 #[tauri::command(async)]
@@ -367,10 +385,10 @@ pub fn capture_target_title(st: State<'_, AppState>) -> CaptureTarget {
     CaptureTarget { title, path }
 }
 
-/// Capture finished or cancelled: if the shortcut showed velo, hide it again so the previous app is back in front.
+/// Capture mode ended. `hide` (Enter or Esc, not a blur): if the shortcut showed velo, hide it again so the previous app is back in front.
 #[tauri::command]
-pub fn capture_done(app: AppHandle, st: State<'_, AppState>) {
-    if !st.capture_was_hidden.swap(false, Ordering::SeqCst) {
+pub fn capture_done(app: AppHandle, st: State<'_, AppState>, hide: bool) {
+    if !capture_ended(&st.capture_was_hidden, hide) {
         return;
     }
     #[cfg(target_os = "macos")]
@@ -635,6 +653,16 @@ mod tests {
 #[cfg(test)]
 mod global_tests {
     use super::*;
+    #[test] fn a_second_capture_press_keeps_the_hidden_flag_until_the_session_ends() {
+        let f = AtomicBool::new(false);
+        capture_shown(&f, true); // velo was hidden
+        capture_shown(&f, false); // second press: velo is in front now
+        assert!(capture_ended(&f, true), "Enter hides velo again");
+        capture_shown(&f, true);
+        assert!(!capture_ended(&f, false), "a blur ends the session without hiding");
+        capture_shown(&f, false);
+        assert!(!capture_ended(&f, true), "the flag never outlives its session");
+    }
     #[test] fn changed_globals_lists_only_real_changes() {
         let (a, mut b) = (Settings::default(), Settings::default());
         assert!(changed_globals(&a, &b).is_empty());

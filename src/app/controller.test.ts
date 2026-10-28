@@ -746,7 +746,7 @@ test("capture into the open Inbox appends through the editor", async () => {
   await c.submitCapture("buy milk");
   expect(api.captureTask).not.toHaveBeenCalled();
   expect(editor.appended).toEqual(["- [ ] buy milk"]);
-  expect(api.captureDone).toHaveBeenCalled();
+  expect(api.captureDone).toHaveBeenCalledWith(true);
   expect(store.get().capture).toBeNull();
 });
 
@@ -757,7 +757,7 @@ test("capture into a closed note calls the backend", async () => {
   await c.submitCapture("buy milk");
   expect(api.captureTask).toHaveBeenCalledWith("buy milk");
   expect(editor.appended).toEqual([]);
-  expect(api.captureDone).toHaveBeenCalled();
+  expect(api.captureDone).toHaveBeenCalledWith(true);
   expect(store.get().capture).toBeNull();
 });
 
@@ -782,6 +782,7 @@ test("Esc and empty Enter leave capture mode and call captureDone", async () => 
   await c.submitCapture("  ");
   expect(store.get().capture).toBeNull();
   expect(api.captureDone).toHaveBeenCalledTimes(2);
+  expect(api.captureDone.mock.calls).toEqual([[true], [true]]);
   expect(api.captureTask).not.toHaveBeenCalled();
 });
 
@@ -795,7 +796,7 @@ test("capture mode does not search while typing; blur keeps the text as the quer
   expect(store.get().capture).toBeNull();
   expect(store.get().query).toBe("buy");
   expect(api.search.mock.calls.length).toBe(n + 1);
-  expect(api.captureDone).not.toHaveBeenCalled();
+  expect(api.captureDone.mock.calls).toEqual([[false]]); // the session ends, velo stays shown
 });
 
 test("a second Enter while a capture is in flight does nothing; text typed meanwhile survives", async () => {
@@ -825,7 +826,7 @@ test("a blur during an in-flight capture: success does not hide velo", async () 
   c.blurCapture();
   d.resolve("/n/Inbox.md");
   await p;
-  expect(api.captureDone).not.toHaveBeenCalled();
+  expect(api.captureDone.mock.calls).toEqual([[false]]);
   expect(store.get().capture).toBeNull();
 });
 
@@ -1435,4 +1436,117 @@ test("copyAgentSetup copies the command and returns the result for the Settings 
   api.agentSetupCommand.mockRejectedValueOnce("no exe path");
   expect(await c.copyAgentSetup()).toBe("no exe path");
   expect(store.get().err).toBe(""); // the dialog covers the banner: the error is shown in the dialog instead
+});
+
+test("a background refresh keeps the row-0 highlight, so Enter opens the listed match (#8)", async () => {
+  const { c, api, store } = setup({ Groceries: "a", X: "x" });
+  await c.show(P("X"));
+  c.setPaneMode("tasks");
+  await settle();
+  api.search.mockImplementation(async () => ({ hits: [hit("Groceries")], has_more: false, total: 1 }));
+  c.setQuery("groc");
+  await settle();
+  c.setPaneMode("notes");
+  await settle();
+  expect(store.get().sel).toBe(0);
+  await c.onNotesChanged([P("Other")]); // a sync touched another note
+  expect(store.get().sel).toBe(0);
+  await c.enter();
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+  expect(store.get().openPath).toBe(P("Groceries"));
+});
+
+test("capture into the open Inbox whose save lands in a conflict copy says so (#8)", async () => {
+  const { c, editor, store } = setup({ Inbox: "", B: "b" });
+  await c.show(P("Inbox"));
+  await c.startCapture();
+  c.setQuery("buy milk");
+  editor.flush.mockImplementationOnce(async () => {
+    c.editorOpts().onConflict("/n/Inbox (conflict).md"); // the saver wrote the text to a conflict copy and reloaded the disk text
+    return true;
+  });
+  await c.submitCapture("buy milk");
+  expect(store.get().err).toBe("Saved to a conflict copy — check Inbox");
+});
+
+test("a capture retry with corrected text replaces the unsaved line instead of adding a second (#8)", async () => {
+  const { c, editor, store } = setup({ Inbox: "", B: "b" });
+  await c.show(P("Inbox"));
+  await c.startCapture();
+  c.setQuery("buy mlik");
+  editor.flushResult = false;
+  await c.submitCapture("buy mlik");
+  c.setQuery("buy milk");
+  editor.flushResult = true;
+  await c.submitCapture("buy milk");
+  expect(editor.text).toBe("- [ ] buy milk");
+  expect(store.get().capture).toBeNull();
+});
+
+test("Enter in Tasks mode waits for the task load in flight (#8)", async () => {
+  const { c, api, store } = setup({ A: "- [ ] a", B: "- [ ] b" });
+  api.tasks.mockResolvedValue({ ...view(0), no_date: [task("A", 0, "- [ ] a")] });
+  c.setPaneMode("tasks");
+  await settle();
+  const d = deferred<TaskView>();
+  api.tasks.mockImplementationOnce(() => d.promise);
+  c.setQuery("b");
+  const entered = c.enter();
+  d.resolve({ ...view(0), no_date: [task("B", 0, "- [ ] b")] });
+  await entered;
+  expect(store.get().openPath).toBe(P("B"));
+});
+
+test("Tasks reload with the restored query when capture mode ends (#8)", async () => {
+  for (const how of ["capture", "cancel"] as const) {
+    const { c, api, store } = setup();
+    api.tasks.mockImplementation(async (q) => ({ ...view(0), no_date: q === "q0" ? [task("A", 0, "- [ ] a")] : [] }));
+    c.setPaneMode("tasks");
+    c.setQuery("q0");
+    await settle();
+    await c.startCapture();
+    c.setQuery("buy milk");
+    await c.onNotesChanged([]); // a watcher refresh mid-capture reads the capture text
+    if (how === "capture") await c.submitCapture("buy milk");
+    else {
+      c.setQuery(""); // an emptied field brings the earlier search back
+      c.cancelCapture();
+    }
+    await settle();
+    expect(store.get().taskView?.no_date, how).toHaveLength(1);
+  }
+});
+
+test("pruning the last selected tag reloads the tasks without it (#8)", async () => {
+  const { c, api, store } = setup();
+  api.tasks.mockImplementation(async (_q, tags) => ({ ...view(0), no_date: tags.length ? [] : [task("A", 0, "- [ ] a")] }));
+  c.setTags(["work"]);
+  await settle();
+  api.listTags.mockResolvedValue([]); // the last #work went away
+  await c.onNotesChanged([]);
+  await settle();
+  expect(store.get().selectedTags).toEqual([]);
+  expect(store.get().taskView?.no_date).toHaveLength(1);
+});
+
+test("alt-enter never adds a checklist to an existing empty note the title cache missed (#8)", async () => {
+  const { c, editor } = setup({ B: "" });
+  await c.openTitle("B", "enter", true);
+  expect(editor.appended).toEqual([]);
+});
+
+test("a tick shows on the task row at once, before the reload (#8)", async () => {
+  const { c, api, editor, store } = setup({ A: "- [ ] x", B: "- [ ] y" });
+  api.tasks.mockResolvedValue({ ...view(0), no_date: [task("A", 0, "- [ ] x"), task("B", 0, "- [ ] y")] });
+  await c.loadTasks();
+  api.tasks.mockImplementation(() => new Promise(() => {})); // the reloads have not landed yet
+  await c.show(P("A"));
+  editor.toggleTask.mockImplementation(() => ((editor.text = "- [x] x ✅ 2026-10-27"), true));
+  await c.tickTask(store.get().taskView!.no_date[0]);
+  api.toggleTask.mockResolvedValueOnce({ line: 0, line_text: "- [x] y" });
+  await c.tickTask(store.get().taskView!.no_date[1]);
+  expect(store.get().taskView!.no_date.map((t) => [t.done, t.line_text])).toEqual([
+    [true, "- [x] x ✅ 2026-10-27"],
+    [true, "- [x] y"],
+  ]);
 });

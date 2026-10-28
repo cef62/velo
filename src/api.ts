@@ -18,7 +18,8 @@ export const search = (query: string, sort: "modified" | "title", offset: number
 export const listTags = () => invoke<TagCount[]>("list_tags");
 export const listTitles = () => invoke<string[]>("list_titles");
 export const openNote = (path: string) => invoke<NoteDoc>("open_note", { path });
-export const openOrCreate = (title: string) => invoke<NoteDoc>("open_or_create", { title });
+/** `created`: the file did not exist before this call. */
+export const openOrCreate = (title: string) => invoke<NoteDoc & { created: boolean }>("open_or_create", { title });
 export const saveNote = (path: string, text: string, baseHash: string) => invoke<SaveResult>("save_note", { path, text, baseHash });
 export const tasks = (query: string, tags: string[], showDone: boolean) => invoke<TaskView>("tasks", { query, tags, showDone });
 /** Resolves to the toggled task's line and raw text as saved (front-matter stamping may shift it): what undo sends. */
@@ -27,7 +28,8 @@ export const captureTask = (text: string) => invoke<string>("capture_task", { te
 /** The capture note's title and, if it exists, the path capture_task writes to (an alias resolves to its note). */
 export const captureTargetTitle = () => invoke<{ title: string; path: string | null }>("capture_target_title");
 /** Capture finished or cancelled: hides velo again if the capture shortcut showed it. */
-export const captureDone = () => invoke<void>("capture_done");
+/** Ends the capture session; `hide`: hide velo again if the capture shortcut showed it. */
+export const captureDone = (hide: boolean) => invoke<void>("capture_done", { hide });
 export const setBadge = (count: number) => invoke<void>("set_badge", { count });
 export const renameNote = (path: string, newTitle: string, rewriteLinks: boolean) => invoke<RenameResult>("rename_note", { path, newTitle, rewriteLinks });
 export const backlinkCount = (title: string) => invoke<number>("backlink_count", { title });
