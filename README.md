@@ -84,6 +84,43 @@ velo keeps local snapshots of each note: on save when the last one is over 10 mi
 
 Press ⌘I (Ctrl+I) for the info panel: created and modified dates, word count, "linked from N notes", tags, aliases and the revision list. Select a revision to preview it, then Restore; the current text is kept as a revision first.
 
+## Agents (MCP)
+
+velo can act as an MCP server, so Claude Code can search, read, create and edit your notes. It is off by default.
+
+**Setup.** Turn on Settings → General → Agent access (MCP), press Copy setup command and paste it into a terminal. It runs `claude mcp add velo -- <path to velo> --mcp`.
+
+**Open or closed.** Claude Code starts `velo --mcp` itself, with no window. If velo is running, the request is forwarded to the app; otherwise velo reads and writes the notes folder directly. The switch is checked on every call.
+
+**Tools (15).**
+
+- `search_notes`: search like the search field, with tag filters and paging (50 per page).
+- `list_tags`: tags with counts.
+- `read_note`: full text, with hash, dates, tags, aliases, links and backlinks.
+- `create_note`: a new note.
+- `append_to_note`: add text at the end (creates the note if missing).
+- `edit_note`: replace text that occurs exactly once.
+- `replace_note`: replace the whole note, guarded by the hash from `read_note`.
+- `add_tags`, `remove_tags`: tag up to 200 notes per call.
+- `list_tasks`: the Tasks view.
+- `add_task`: add a `- [ ]` line to a note, or to the capture target.
+- `set_task_done`: tick or untick a task.
+- `rename_note`: rename, with link updates.
+- `move_to_trash`: move a note to the Trash.
+- `daily_note`: the daily note for a date, created if missing.
+
+**Safety.**
+
+- Locked notes are never listed, searched or returned, and the agent never decrypts anything.
+- Deletes go to the Trash. There is no permanent delete.
+- Edits are anchored (`old_text` must match once) or hash-guarded (`replace_note` fails if the note changed since you read it).
+- A note open in velo is edited through the editor, so nothing is overwritten behind it. If velo does not answer in 5 seconds the call fails with "velo is busy, retry".
+- Off by default. The running app listens on 127.0.0.1 only, and every request needs a random token.
+
+**Seeing and undoing changes.** Every write needs a summary. Before it, velo saves a revision of the note with that summary, marked as an agent change in the info panel (⌘I). Select it and press Restore.
+
+**Platforms.** macOS and Linux. Windows is not supported yet.
+
 ## How it's built
 
 Rust backend in `src-tauri` (Tauri 2); UI in `src` with React 19, Park UI v1 (Ark UI) and Panda CSS 1.12. Panda generates `styled-system/` (git-ignored) from `panda.config.ts`: `pnpm test` and `pnpm build` run `panda codegen` first; `pnpm install` runs it too (`pnpm codegen` to rerun).

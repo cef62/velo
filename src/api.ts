@@ -8,7 +8,7 @@ export type SaveResult = { kind: "saved"; hash: string; front_matter: string | n
 export type TaskItem = { path: string; title: string; line: number; text: string; due: string | null; done: boolean; done_on: string | null; line_text: string };
 export type TaskView = { overdue: TaskItem[]; today: TaskItem[]; upcoming: TaskItem[]; no_date: TaskItem[]; done: TaskItem[]; due_count: number };
 export type RenameResult = { path: string; rewritten: number };
-export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; header_labels: boolean; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean; capture_target: "inbox" | "daily"; inbox_title: string };
+export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; header_labels: boolean; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean; capture_target: "inbox" | "daily"; inbox_title: string; agent_access: boolean };
 
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<void>("set_settings", { settings });
@@ -58,6 +58,7 @@ export const agentWriteClaim = (id: number) => invoke<boolean>("agent_write_clai
 export const agentWriteDone = (id: number, result: AgentReply) => invoke<void>("agent_write_done", { id, result });
 export const snapshotAgent = (path: string, summary: string) => invoke<void>("snapshot_agent", { path, summary });
 export const snapshotText = (path: string, text: string) => invoke<void>("snapshot_text", { path, text });
+export const agentSetupCommand = () => invoke<string>("agent_setup_command");
 export const hasIdentity = () => invoke<boolean>("has_identity");
 export const setupPassphrase = (passphrase: string) => invoke<string | null>("setup_passphrase", { passphrase });
 export const identityFileExists = () => invoke<boolean>("identity_file_exists");

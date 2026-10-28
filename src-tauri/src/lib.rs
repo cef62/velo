@@ -134,6 +134,7 @@ pub fn run() {
             commands::read_revision,
             commands::snapshot_text,
             commands::has_identity,
+            commands::agent_setup_command,
             commands::setup_passphrase,
             commands::identity_file_exists,
             update::check_update,

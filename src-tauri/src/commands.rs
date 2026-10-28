@@ -518,6 +518,19 @@ pub fn setup_passphrase(app: AppHandle, st: State<'_, AppState>, passphrase: Str
     Ok(warning)
 }
 
+/// The line to paste into a terminal; single-quoted (POSIX) when the path has anything but plain path characters.
+fn setup_command(exe: &Path) -> String {
+    let p = exe.to_string_lossy();
+    let plain = p.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+@:".contains(c));
+    let p = if plain { p.into_owned() } else { format!("'{}'", p.replace('\'', r"'\''")) };
+    format!("claude mcp add velo -- {p} --mcp")
+}
+
+#[tauri::command]
+pub fn agent_setup_command() -> Result<String, String> {
+    std::env::current_exe().map(|e| setup_command(&e)).map_err(|e| e.to_string())
+}
+
 /// A keychain write failure is not fatal: the identity stays in memory for this session.
 fn keychain_warning<E>(needs_set: bool, set: impl FnOnce() -> Result<(), E>) -> Option<String> {
     (needs_set && set().is_err()).then(|| "keychain-unavailable".into())
@@ -526,6 +539,13 @@ fn keychain_warning<E>(needs_set: bool, set: impl FnOnce() -> Result<(), E>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn setup_command_uses_current_exe() {
+        let c = agent_setup_command().unwrap();
+        let exe = std::env::current_exe().unwrap();
+        assert!(c.starts_with("claude mcp add velo -- ") && c.ends_with(" --mcp"));
+        assert!(c.contains(exe.to_str().unwrap()));
+        assert_eq!(setup_command(Path::new("/a b/it's")), r"claude mcp add velo -- '/a b/it'\''s' --mcp");
+    }
     #[test] fn err_maps_io_kinds() {
         let io = |k| anyhow::Error::from(std::io::Error::from(k));
         assert_eq!(err(io(std::io::ErrorKind::NotFound)), "not-found");

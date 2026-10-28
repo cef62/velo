@@ -1178,6 +1178,10 @@ export class Controller {
     }
   }
 
+  async copyAgentSetup() {
+    try { await this.ui.copyText(await this.api.agentSetupCommand()); } catch (e) { this.setErr(errText(e)); }
+  }
+
   /** Save, freeze the editor, then install; the backend relaunches velo. On failure the editor comes back. */
   async installUpdate() {
     const u = this.store.get().update;
