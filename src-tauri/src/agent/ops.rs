@@ -107,6 +107,18 @@ impl<V: DerefMut<Target = Vault>> VaultOps<V> {
         }
     }
 
+    /// A write that failed without changing anything needs no undo trail: drop the agent snapshots taken for it. After
+    /// `NO_ANSWER` the write may have landed, so they stay.
+    fn unsnapshot<T>(&mut self, snaps: &[(String, Option<String>)], r: &anyhow::Result<T>) {
+        if r.as_ref().is_err_and(|e| e.to_string() != NO_ANSWER) {
+            for (path, id) in snaps {
+                if let Some(id) = id {
+                    self.vault.drop_revision(path, id);
+                }
+            }
+        }
+    }
+
     pub fn dir(&self) -> &Path {
         &self.vault.store.dir
     }
@@ -123,9 +135,10 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
 
     fn write(&mut self, path: &str, new_text: &str, base_hash: &str, summary: &str) -> anyhow::Result<String> {
         let path = plain(path)?;
-        // a conflicting save leaves one extra identical snapshot: harmless
-        self.vault.agent_snapshot(path, summary)?;
-        self.save(path, new_text, base_hash)
+        let snap = self.vault.agent_snapshot(path, summary)?;
+        let r = self.save(path, new_text, base_hash);
+        self.unsnapshot(&[(path.to_string(), snap)], &r);
+        r
     }
 
     fn create(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<NoteDoc> {
@@ -137,9 +150,9 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
         if self.vault.find_note(title)?.is_some() || note_path(&dir, title, false).exists() || note_path(&dir, title, true).exists() {
             return Err(anyhow!("a note with that title already exists"));
         }
-        let wfm = self.settings().write_front_matter;
-        let doc = landed(self.vault.open_or_create(title, None, wfm), &note_path(&dir, title, false), None)?;
-        self.save(&doc.path, text, &doc.hash)?; // the new stub is not snapshotted: the created text is the first revision
+        // an empty file, stamped by the save below: a front-matter stub would be snapshotted as a revision of its own
+        let doc = landed(self.vault.open_or_create(title, None, false), &note_path(&dir, title, false), None)?;
+        self.save(&doc.path, text, &doc.hash)?; // the created text is the first revision
         // the note exists now: a retry would only fail with "already exists", so say it may have been applied
         let r = self.read(&doc.path).and_then(|d| self.vault.agent_snapshot_text(&d.path, &d.text, summary).map(|_| d));
         r.map_err(|_| anyhow!(NO_ANSWER))
@@ -192,42 +205,57 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
 
     fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<String> {
         let path = plain(path)?;
-        self.vault.agent_snapshot(path, summary)?;
+        let mut snaps = vec![(path.to_string(), self.vault.agent_snapshot(path, summary)?)];
+        let mut r = Ok(String::new());
         if rewrite_links {
             // the link rewrite changes these notes too: each gets its agent revision first
             // a source the index lists but that is gone or unreadable is skipped by the rewrite too
             let srcs: Vec<String> = self.vault.index.backlinks(&title_of(path))?.into_iter().filter(|p| p != path && self.vault.rewritable(Path::new(p))).collect();
             for src in srcs {
-                self.vault.agent_snapshot(&src, summary)?;
+                match self.vault.agent_snapshot(&src, summary) {
+                    Ok(id) => snaps.push((src, id)),
+                    Err(e) => {
+                        r = Err(e);
+                        break;
+                    }
+                }
             }
         }
-        match self.vault.rename_note(path, new_title, rewrite_links) {
-            Ok(r) => Ok(r.path),
-            Err(e) if e.downcast_ref::<std::io::Error>().is_some_and(|e| e.kind() == std::io::ErrorKind::AlreadyExists) => Err(anyhow!("a note with that title already exists")),
-            Err(e) => Err(e),
+        if r.is_ok() {
+            r = match self.vault.rename_note(path, new_title, rewrite_links) {
+                Ok(r) => Ok(r.path),
+                Err(e) if e.downcast_ref::<std::io::Error>().is_some_and(|e| e.kind() == std::io::ErrorKind::AlreadyExists) => Err(anyhow!("a note with that title already exists")),
+                Err(e) => Err(e),
+            };
         }
+        self.unsnapshot(&snaps, &r); // nothing moved when the rename failed
+        r
     }
 
     fn trash(&mut self, path: &str, summary: &str) -> anyhow::Result<()> {
         let path = plain(path)?;
-        self.vault.agent_snapshot(path, summary)?;
+        let snap = self.vault.agent_snapshot(path, summary)?;
         let before = hash_of(Path::new(path));
-        landed(self.vault.delete_note_with(path, self.remove), Path::new(path), before.as_deref())
+        let r = landed(self.vault.delete_note_with(path, self.remove), Path::new(path), before.as_deref());
+        self.unsnapshot(&[(path.to_string(), snap)], &r);
+        r
     }
 
     fn toggle_task(&mut self, path: &str, line: usize, expected: &str, summary: &str) -> anyhow::Result<Toggled> {
         let path = plain(path)?;
-        self.vault.agent_snapshot(path, summary)?;
+        let snap = self.vault.agent_snapshot(path, summary)?;
         let wfm = self.settings().write_front_matter;
         let before = hash_of(Path::new(path));
-        landed(self.vault.toggle_task(path, line, expected, None, wfm), Path::new(path), before.as_deref())
+        let r = landed(self.vault.toggle_task(path, line, expected, None, wfm), Path::new(path), before.as_deref());
+        self.unsnapshot(&[(path.to_string(), snap)], &r);
+        r
     }
 
     fn capture_task(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<String> {
         let wfm = self.settings().write_front_matter;
         match self.vault.find_note(title)? {
             Some(p) if locked(&p) => return Err(anyhow!("not found")),
-            Some(p) => self.vault.agent_snapshot(&p, summary)?,
+            Some(p) => drop(self.vault.agent_snapshot(&p, summary)?),
             None => {}
         }
         let found = self.vault.find_note(title)?;
@@ -250,7 +278,10 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
     }
 
     fn snapshot(&mut self, path: &str, summary: &str) -> anyhow::Result<()> {
-        self.vault.agent_snapshot(plain(path)?, summary)
+        // the note's text as created, even an empty one: the revision records who made it and why
+        let path = plain(path)?;
+        let text = String::from_utf8_lossy(&std::fs::read(path)?).into_owned();
+        self.vault.agent_snapshot_text(path, &text, summary)
     }
 
     fn settings(&self) -> Settings {
@@ -281,7 +312,6 @@ mod tests {
         let (mut o, _) = ops();
         let d = o.create("Fresh", "hello", "made it").unwrap();
         let r = o.vault.list_revisions(&d.path).unwrap();
-        // save_note's own throttled snapshot of the empty front-matter stub may sit below it
         assert_eq!((r[0].summary.as_deref(), r[0].agent), (Some("made it"), true));
         assert!(o.vault.read_revision(&d.path, &r[0].id, None).unwrap().contains("hello"));
     }
@@ -308,6 +338,37 @@ mod tests {
         assert!(!dir.join("T.md").exists());
         let r = o.vault.list_revisions(&d.path).unwrap();
         assert_eq!(r[0].summary.as_deref(), Some("trashed"));
+    }
+    /// Summaries of the note's agent revisions, newest first.
+    fn agent_revs(o: &DirectOps, path: &str) -> Vec<String> {
+        o.vault.list_revisions(path).unwrap().into_iter().filter(|r| r.agent).map(|r| r.summary.unwrap_or_default()).collect()
+    }
+
+    /// A write that failed without changing the note leaves no agent snapshot behind.
+    #[test] fn failed_writes_leave_no_agent_snapshot() {
+        let (mut o, dir) = ops();
+        let d = o.create("A", "- [ ] t\n", "c").unwrap();
+        o.create("B", "b", "c").unwrap();
+        assert!(o.rename(&d.path, "B", false, "rename").is_err());
+        o.remove = |_| Err(std::io::Error::other("no trash"));
+        assert!(o.trash(&d.path, "trash").is_err());
+        assert!(o.toggle_task(&d.path, 9, "- [ ] t", "toggle").is_err());
+        assert!(o.write(&d.path, "x", "stale", "write").unwrap_err().to_string().starts_with("conflict"));
+        assert_eq!(agent_revs(&o, &d.path), ["c"]);
+        assert!(dir.join("A.md").exists());
+    }
+    #[test] fn created_note_has_no_stub_revision() {
+        let (mut o, _) = ops(); // front matter on (default)
+        let d = o.create("Fresh", "hello", "made it").unwrap();
+        assert_eq!(o.vault.list_revisions(&d.path).unwrap().len(), 1, "only the agent's created text");
+    }
+    #[test] fn new_empty_note_snapshot_records_the_creation() {
+        let (mut o, dir) = ops();
+        std::fs::write(dir.parent().unwrap().join("settings.json"), r#"{"write_front_matter": false}"#).unwrap();
+        let d = o.open_or_create("2031-01-02").unwrap();
+        assert_eq!(d.text, "");
+        o.snapshot(&d.path, "Agent: created daily note").unwrap();
+        assert_eq!(agent_revs(&o, &d.path), ["Agent: created daily note"]);
     }
     #[test] fn rescan_failure_is_reported() {
         let (mut o, dir) = ops();

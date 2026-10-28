@@ -414,7 +414,7 @@ pub fn snapshot_text(st: State<'_, AppState>, path: String, text: String) -> Res
 /// Agent undo trail for a write the editor applies (`agent-write`): snapshot the saved note with the summary first.
 #[tauri::command(async)]
 pub fn snapshot_agent(st: State<'_, AppState>, path: String, summary: String) -> Res<()> {
-    with_vault(&st, |v, _| v.agent_snapshot(&path, &summary))
+    with_vault(&st, |v, _| v.agent_snapshot(&path, &summary).map(drop))
 }
 
 /// The webview is about to apply `agent-write` `id`: false once the backend stopped waiting (then it must not).

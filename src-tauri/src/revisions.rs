@@ -55,7 +55,8 @@ fn ts_of(name: &str) -> Option<i64> {
 /// First snapshot id at or after `now_ms` that no snapshot uses yet (same-ms ids bump by 1 ms).
 fn free_id(dir: &std::path::Path, now_ms: i64, encrypted: bool) -> (i64, String) {
     let mut ms = now_ms;
-    while dir.join(format!("{ms}.md")).exists() || dir.join(format!("{ms}.md.age")).exists() {
+    // an orphan sidecar (its snapshot gone) counts as taken, or the new snapshot would inherit its summary
+    while dir.join(format!("{ms}.md")).exists() || dir.join(format!("{ms}.md.age")).exists() || dir.join(format!("{ms}.json")).exists() {
         ms += 1;
     }
     (ms, format!("{ms}.{}", if encrypted { "md.age" } else { "md" }))
@@ -124,6 +125,17 @@ impl Revisions {
         Ok((std::fs::read(self.dir(title).join(id))?, id.ends_with(".age")))
     }
 
+    /// Deletes snapshot `id` and its sidecar.
+    pub fn remove(&self, title: &str, id: &str) {
+        if id.contains(['/', '\\']) || id.contains("..") {
+            return;
+        }
+        std::fs::remove_file(self.dir(title).join(id)).ok();
+        if let Some(ts) = ts_of(id) {
+            std::fs::remove_file(self.dir(title).join(format!("{ts}.json"))).ok();
+        }
+    }
+
     pub fn rename(&self, old_title: &str, new_title: &str) {
         let (from, to) = (self.dir(old_title), self.dir(new_title));
         if from == to || !from.exists() {
@@ -132,11 +144,17 @@ impl Revisions {
         if std::fs::create_dir_all(&to).is_err() {
             return;
         }
+        // each snapshot moves with its sidecar, to a free id when the target already uses its own
+        for info in self.list(old_title) {
+            let (ms, id) = free_id(&to, info.ts, info.id.ends_with(".age"));
+            if std::fs::rename(from.join(&info.id), to.join(id)).is_ok() {
+                std::fs::rename(from.join(format!("{}.json", info.ts)), to.join(format!("{ms}.json"))).ok();
+            }
+        }
+        // what is left are orphan sidecars, whose snapshot is gone
         if let Ok(rd) = std::fs::read_dir(&from) {
-            for e in rd.flatten() {
-                if !to.join(e.file_name()).exists() {
-                    std::fs::rename(e.path(), to.join(e.file_name())).ok();
-                }
+            for e in rd.flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".json")) {
+                std::fs::remove_file(e.path()).ok();
             }
         }
         std::fs::remove_dir(&from).ok();
@@ -266,6 +284,27 @@ mod tests {
         assert_eq!(r.snapshot_agent("n", b"a", false, 5, "x").unwrap(), "5.md");
         assert_eq!(r.snapshot_agent("n", b"a", false, 5, "y").unwrap(), "6.md");
         assert_eq!(r.list("n").len(), 2);
+    }
+    #[test] fn orphan_sidecar_is_never_inherited() {
+        let r = rev();
+        std::fs::create_dir_all(r.dir("n")).unwrap();
+        std::fs::write(r.dir("n").join("5.json"), r#"{"summary":"stale","agent":true}"#).unwrap(); // its snapshot is gone
+        r.snapshot_bytes("n", b"x", false, 5, false).unwrap();
+        assert_eq!(r.list("n").iter().map(|x| (x.id.as_str(), x.agent)).collect::<Vec<_>>(), [("6.md", false)]);
+    }
+    #[test] fn rename_merge_keeps_snapshot_and_sidecar_together() {
+        let r = rev();
+        r.snapshot_agent("old", b"agent", false, 10, "why").unwrap();
+        std::fs::write(r.dir("old").join("3.json"), r#"{"summary":"orphan","agent":true}"#).unwrap();
+        r.snapshot_bytes("new", b"plain", false, 10, false).unwrap(); // same id in the target
+        r.rename("old", "new");
+        let l = r.list("new");
+        assert_eq!(l.len(), 2, "nothing left behind");
+        let a = l.iter().find(|x| x.agent).unwrap();
+        assert_eq!((r.read("new", &a.id).unwrap().0, a.summary.as_deref()), (b"agent".to_vec(), Some("why")));
+        assert_eq!(r.read("new", "10.md").unwrap().0, b"plain");
+        assert!(!l.iter().any(|x| x.summary.as_deref() == Some("orphan")) && !r.dir("new").join("3.json").exists());
+        assert!(!r.dir("old").exists());
     }
     #[test] fn sidecar_follows_rename_prune_encrypt() {
         let r = rev();
