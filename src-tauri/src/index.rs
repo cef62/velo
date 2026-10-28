@@ -671,20 +671,29 @@ mod tests {
         }
         batch.remove("gone.md").unwrap();
         batch.commit().unwrap();
+        assert_eq!(stale_marks(&batch), 0);
         assert!(dump(&one).len() > 8);
         assert_eq!(dump(&one), dump(&batch));
     }
+    fn stale_marks(i: &Index) -> i64 { i.db.query_row("SELECT COUNT(*) FROM tasks_stale", [], |r| r.get(0)).unwrap() }
     #[test] fn failing_note_in_batch_rolls_back_alone() {
-        let mut i = idx(&[("bad.md", "old zebra", 1)]);
-        i.db.execute_batch("CREATE TEMP TRIGGER boom BEFORE INSERT ON notes WHEN NEW.path='bad.md' AND NEW.mtime=2 BEGIN SELECT RAISE(ABORT,'boom'); END;").unwrap();
-        i.begin().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let db = tmp.path().join("index.db");
+        let mut i = Index::open(&db).unwrap();
         let nf = |t: &str| NoteFile { title: t.into(), encrypted: false };
+        i.upsert("bad.md", &nf("bad"), &Meta { mtime: 1, size: 1, birth: 0 }, Some("old zebra")).unwrap();
+        // Fails after the notes insert, so the stale-mark trigger has already fired for bad.md.
+        i.db.execute_batch("CREATE TEMP TRIGGER boom BEFORE INSERT ON links WHEN NEW.src='bad.md' BEGIN SELECT RAISE(ABORT,'boom'); END;").unwrap();
+        i.begin().unwrap();
         i.upsert("a.md", &nf("a"), &Meta { mtime: 1, size: 1, birth: 0 }, Some("alpha")).unwrap();
-        assert!(i.upsert("bad.md", &nf("bad"), &Meta { mtime: 2, size: 1, birth: 0 }, Some("new")).is_err());
+        assert!(i.upsert("bad.md", &nf("bad"), &Meta { mtime: 2, size: 1, birth: 0 }, Some("new [[x]]")).is_err());
         i.upsert("c.md", &nf("c"), &Meta { mtime: 3, size: 1, birth: 0 }, Some("gamma")).unwrap();
         i.commit().unwrap();
         let k = i.known().unwrap();
         assert_eq!((k.len(), k["bad.md"].mtime), (3, 1)); // bad.md keeps its old row
         assert_eq!(paths(&i, "zebra", Sort::Title, 0, 10, &HashMap::new()), vec!["bad.md"]);
+        assert_eq!(stale_marks(&i), 0); // the rolled-back mark is gone too
+        drop(i);
+        assert_eq!(Index::open(&db).unwrap().known().unwrap().len(), 3); // reopen keeps the index: no rebuild
     }
 }
