@@ -23,12 +23,15 @@ pub const EDITOR_TIMEOUT: Duration = Duration::from_secs(5);
 pub const CLAIMED_TIMEOUT: Duration = Duration::from_secs(60);
 const BUSY: &str = "velo is busy, retry";
 
+/// A request's reply channel, whether the webview claimed it, and the note paths it is about.
+type Pending = (mpsc::Sender<Value>, bool, Vec<String>);
+
 /// Requests awaiting the webview's `agent_write_done`; the flag is set once it claimed one (`agent_write_claim`), and
 /// the paths are the notes the request is about.
 #[derive(Default)]
 pub struct Editors {
     next: AtomicU64,
-    pub(crate) pending: Mutex<HashMap<u64, (mpsc::Sender<Value>, bool, Vec<String>)>>,
+    pub(crate) pending: Mutex<HashMap<u64, Pending>>,
     /// Notes the webview said are not open, which the backend is about to write: opening one waits (`wait_free`), or
     /// the editor could load the text the write is replacing. A multiset: two calls may hold the same note.
     held: Mutex<Vec<String>>,
