@@ -1,5 +1,13 @@
 # velo
 
+## 0.8.1
+
+### Patch Changes
+
+- 162ea60: Stopped building velo for Intel Macs; macOS releases are now Apple silicon only.
+- 356aca7: Agent access got sturdier: a stale link no longer blocks a rename, tags and CRLF notes are handled more carefully, failed agent changes leave no stray revisions, and the setup command can be copied once access is saved.
+- 52233c5: Added download progress and install errors to the update banner, and a velo.log file that records update steps and crashes.
+
 ## 0.8.0
 
 ### Minor Changes
