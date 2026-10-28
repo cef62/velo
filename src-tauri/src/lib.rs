@@ -3,6 +3,7 @@ pub mod commands;
 pub mod crypto;
 pub mod frontmatter;
 pub mod index;
+pub mod log;
 pub mod names;
 pub mod revisions;
 pub mod settings;
@@ -44,6 +45,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            // First thing in setup: the log dir needs the app handle. A panic before this point keeps only the default hook.
+            if let Ok(dir) = app.path().app_log_dir() {
+                let version = app.package_info().version.to_string();
+                log::init(&dir, version.clone());
+                log::line(&format!("velo {version} started on {} {}", std::env::consts::OS, std::env::consts::ARCH));
+            }
             #[cfg(target_os = "macos")]
             {
                 app.set_menu(build_menu(app.handle())?)?;

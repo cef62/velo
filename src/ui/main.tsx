@@ -59,6 +59,8 @@ void listen<{ done: number; total: number }>("index-progress", (ev) => controlle
 void listen("index-done", () => void controller.onIndexDone());
 void listen<{ message: string }>("index-error", (ev) => controller.onIndexError(ev.payload.message));
 void listen<{ version: string }>("update-available", (ev) => controller.onUpdateAvailable(ev.payload.version));
+void listen<{ downloaded: number; total: number | null }>("update-progress", (ev) => controller.onUpdateProgress(ev.payload.downloaded, ev.payload.total));
+void listen("update-installing", () => controller.onUpdateInstalling());
 void listen("check-updates", () => void controller.checkUpdates());
 void listen<api.AgentWrite>("agent-write", (ev) => void controller.onAgentWrite(ev.payload));
 
