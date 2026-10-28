@@ -1192,7 +1192,7 @@ export class Controller {
       if (!(await this.editor.flush())) return; // the save error stays visible; nothing is lost
       this.newShow(); // a note reply still on its way must not load (load ends the suspension)
       this.editor.suspend(); // the relaunch skips the close flow: no edit may start now
-      this.store.set({ update: { ...u, status: "installing" } });
+      this.store.set({ update: { ...u, status: "installing", message: `Downloading velo ${u.version}…` } });
       await this.api.installUpdate();
     } catch (e) {
       this.editor.resume();
@@ -1200,12 +1200,26 @@ export class Controller {
         this.store.set({ update: u }); // the daily check is running; the update is still there
         this.setErr("Checking for updates — try again in a moment");
       } else {
-        this.store.set({ update: null }); // the backend dropped it; the next check announces it again
-        this.setErr(`Update failed: ${errText(e)}`);
+        // No Install button: the backend dropped the update; the next check announces it again.
+        this.store.set({ update: { version: u.version, status: "failed", message: `Update failed: ${errText(e)}` } });
       }
     } finally {
       this.busy = this.installing = false;
     }
+  }
+
+  /** Download progress from the backend: percent when the size is known, else megabytes. */
+  onUpdateProgress(downloaded: number, total: number | null) {
+    const u = this.store.get().update;
+    if (u?.status !== "installing") return;
+    const amount = total ? `${Math.min(100, Math.floor((downloaded * 100) / total))}%` : `${(downloaded / 1e6).toFixed(1)} MB`;
+    this.store.set({ update: { ...u, message: `Downloading velo ${u.version}… ${amount}` } });
+  }
+
+  /** The download finished and verified; the bundle is being replaced. */
+  onUpdateInstalling() {
+    const u = this.store.get().update;
+    if (u?.status === "installing") this.store.set({ update: { ...u, message: `Installing velo ${u.version}… velo restarts when it's done.` } });
   }
 
   dismissUpdate() {

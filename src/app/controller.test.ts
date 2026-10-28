@@ -261,7 +261,23 @@ test("update install saves, freezes the editor, then installs", async () => {
   expect(editor.flush).toHaveBeenCalled();
   expect(editor.suspended).toBe(true);
   expect(api.installUpdate).toHaveBeenCalled();
-  expect(store.get().update).toEqual({ version: "0.6.1", status: "installing" });
+  expect(store.get().update).toEqual({ version: "0.6.1", status: "installing", message: "Downloading velo 0.6.1…" });
+});
+
+test("update install banner shows download progress, then Installing", async () => {
+  const { c, api, store } = setup();
+  api.installUpdate.mockImplementationOnce(() => new Promise(() => {})); // relaunching
+  c.onUpdateProgress(10, 100); // before the install started: ignored
+  expect(store.get().update).toBeNull();
+  c.onUpdateAvailable("0.6.1");
+  void c.installUpdate();
+  await settle();
+  c.onUpdateProgress(425, 1000);
+  expect(store.get().update?.message).toBe("Downloading velo 0.6.1… 42%");
+  c.onUpdateProgress(2_500_000, null);
+  expect(store.get().update?.message).toBe("Downloading velo 0.6.1… 2.5 MB");
+  c.onUpdateInstalling();
+  expect(store.get().update).toEqual({ version: "0.6.1", status: "installing", message: "Installing velo 0.6.1… velo restarts when it's done." });
 });
 
 test("update install refused by a failed save installs nothing", async () => {
@@ -279,8 +295,11 @@ test("a failed update install gives the editor back and says why", async () => {
   c.onUpdateAvailable("0.6.1");
   await c.installUpdate();
   expect(editor.suspended).toBe(false);
+  expect(store.get().update).toEqual({ version: "0.6.1", status: "failed", message: "Update failed: signature mismatch" });
+  c.onUpdateProgress(5, 10); // a late event doesn't bring back the busy state
+  expect(store.get().update?.status).toBe("failed");
+  c.dismissUpdate();
   expect(store.get().update).toBeNull();
-  expect(store.get().err).toBe("Update failed: signature mismatch");
 });
 
 test("manual update check: up to date names the current version", async () => {

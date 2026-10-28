@@ -72,7 +72,7 @@ export interface AppState {
   tagPanelOpen: boolean;
   exactTitleMatch: boolean; // drives the ⇧↩ Create hint
   settings: Settings | null; // non-null = the Settings dialog is open on these saved settings
-  update: { version: string; status: "available" | "current" | "installing" } | null; // the update banner
+  update: { version: string; status: "available" | "current" | "installing" | "failed"; message?: string } | null; // the update banner; message: install progress or the failure
   paneMode: "notes" | "tasks"; // what the left pane lists
   taskView: TaskView | null; // filtered by query/selectedTags like the notes list
   dueCount: number; // overdue + today, unfiltered: the Tasks switch count and the Dock badge

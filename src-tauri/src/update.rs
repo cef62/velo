@@ -3,7 +3,9 @@
 //! check's reply) and calls `install_update` once unsaved edits are saved.
 
 use crate::commands::AppState;
+use crate::log;
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Emitter, Manager};
@@ -39,6 +41,22 @@ pub struct UpdateInfo {
     pub version: String,
 }
 
+/// Payload of `update-progress`; `total` is the Content-Length, when the server sent one.
+#[derive(Serialize, Clone)]
+struct Progress {
+    downloaded: u64,
+    total: Option<u64>,
+}
+
+/// Which `n`th of the download `done` is in (`n` = 100: percent), or 256 KiB steps when the size is
+/// unknown. Progress is reported when the bucket changes, not on every chunk.
+fn bucket(done: u64, total: Option<u64>, n: u64) -> u64 {
+    match total {
+        Some(t) if t > 0 => done.min(t) * n / t,
+        _ => done >> 18,
+    }
+}
+
 pub fn should_notify(version: &str, notified: Option<&str>) -> bool {
     notified != Some(version)
 }
@@ -70,7 +88,7 @@ pub fn spawn_checker(app: AppHandle) {
             if auto_check_enabled(&app) {
                 // A background failure is never shown (offline, GitHub down): one log line.
                 if let Err(e) = tauri::async_runtime::block_on(check(&app, false)) {
-                    eprintln!("velo: update check failed: {e}");
+                    eprintln!("velo: update check failed: {e}"); // check() already wrote it to velo.log
                 }
             }
             // Wall-clock deadline, re-read after short naps: `Instant` and thread sleeps stop while
@@ -93,12 +111,20 @@ pub async fn check(app: &AppHandle, manual: bool) -> Result<Option<UpdateInfo>, 
     if !begin(app) {
         return Err(BUSY.into());
     }
+    log::line(&format!("update check start ({})", if manual { "manual" } else { "background" }));
     // The lock is released here; the network call runs without it.
     let result = async { app.updater_builder().configure_client(|c| c.read_timeout(READ_TIMEOUT)).build()?.check().await }.await;
     let mut st = state(app);
     st.busy = false;
-    let update = result.map_err(|e| e.to_string())?;
+    let update = result.map_err(|e| {
+        log::line(&format!("update check error: {e}"));
+        e.to_string()
+    })?;
     let info = update.as_ref().map(|u| UpdateInfo { version: u.version.clone() });
+    log::line(&match &info {
+        Some(i) => format!("update check result: {} available", i.version),
+        None => "update check result: up to date".into(),
+    });
     st.available = update;
     if let Some(i) = &info {
         // A manual check showed the banner itself; the background check must not re-show a dismissed one.
@@ -125,16 +151,40 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
         st.busy = true;
         update
     };
-    let result = update.download_and_install(|_, _| {}, || {}).await;
+    log::line(&format!("update download start: {} -> {}", update.current_version, update.version));
+    let (mut done, mut shown, mut logged) = (0u64, None, 0u64);
+    let downloaded = AtomicBool::new(false);
+    let on_chunk = |len: usize, total: Option<u64>| {
+        done += len as u64;
+        let b = bucket(done, total, 100);
+        if shown != Some(b) {
+            shown = Some(b);
+            app.emit("update-progress", Progress { downloaded: done, total }).ok();
+        }
+        if total.is_some() && bucket(done, total, 4) > logged {
+            logged = bucket(done, total, 4);
+            log::line(&format!("update download {}% ({done} bytes)", logged * 25));
+        }
+    };
+    let on_finish = || {
+        downloaded.store(true, Ordering::Relaxed);
+        log::line("update download done; install start");
+        app.emit("update-installing", ()).ok();
+    };
+    let result = update.download_and_install(on_chunk, on_finish).await;
     let mut st = state(app);
     st.busy = false;
     if let Err(e) = result {
+        let phase = if downloaded.load(Ordering::Relaxed) { "install" } else { "download" };
+        log::line(&format!("update {phase} error: {e}"));
+        eprintln!("velo: update {phase} failed: {e}");
         // The next check finds the version again and announces it again.
         st.available = None;
         st.notified = None;
         return Err(e.to_string());
     }
     drop(st);
+    log::line("update install done; restart");
     app.restart();
 }
 
@@ -157,5 +207,15 @@ mod tests {
         assert!(should_notify("0.6.0", None));
         assert!(!should_notify("0.6.0", Some("0.6.0")));
         assert!(should_notify("0.6.1", Some("0.6.0")));
+    }
+
+    #[test]
+    fn progress_buckets() {
+        assert_eq!(bucket(0, Some(1000), 100), 0);
+        assert_eq!(bucket(499, Some(1000), 4), 1);
+        assert_eq!(bucket(1000, Some(1000), 4), 4);
+        assert_eq!(bucket(2000, Some(1000), 100), 100); // a server that lied about the size
+        assert_eq!(bucket(300 * 1024, None, 100), 1); // unknown size: 256 KiB steps
+        assert_eq!(bucket(10, Some(0), 100), 0);
     }
 }
