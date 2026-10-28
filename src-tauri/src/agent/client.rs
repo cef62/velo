@@ -12,7 +12,7 @@ pub fn pid_alive(pid: u32) -> bool {
     unsafe { libc::kill(pid as i32, 0) == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM) }
 }
 
-const NO_ANSWER: &str = "velo did not answer; the change may have been applied — read the note before retrying";
+pub(crate) const NO_ANSWER: &str = "velo did not answer; the change may have been applied — read the note before retrying";
 
 enum Sent {
     /// Not dispatched (connect failed, unauthorized): safe to retry.

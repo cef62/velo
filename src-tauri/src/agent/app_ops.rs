@@ -1,6 +1,7 @@
 //! `NoteOps` for the running app: the app's vault (which holds unlocked notes in memory) behind the same locked-note
 //! filtering as direct mode, never with the app's identity. A write to a note the editor may have open is first offered
 //! to the webview (`agent-write`), which applies it as a user edit or answers `not-open`.
+use super::client::NO_ANSWER;
 use super::ops::{NoteOps, VaultOps, locked, plain};
 use crate::names::parse_note_file;
 use crate::commands::AppState;
@@ -42,7 +43,7 @@ impl Editors {
         self.pending.lock().unwrap().insert(id, (tx, false));
         req["id"] = id.into();
         emit(req);
-        let r = rx.recv_timeout(timeout).or_else(|e| {
+        let r = rx.recv_timeout(timeout).map_err(anyhow::Error::from).or_else(|_| {
             // decided under the lock, so a claim either lands before this (and is waited for) or is refused after it
             let claimed = {
                 let mut p = self.pending.lock().unwrap();
@@ -52,10 +53,11 @@ impl Editors {
                 }
                 c
             };
-            if claimed { rx.recv_timeout(claimed_timeout) } else { rx.try_recv().map_err(|_| e) }
+            // a claimed request may already be applied: a retry could apply it twice
+            if claimed { rx.recv_timeout(claimed_timeout).map_err(|_| anyhow!(NO_ANSWER)) } else { rx.try_recv().map_err(|_| anyhow!(BUSY)) }
         });
         self.pending.lock().unwrap().remove(&id);
-        r.map_err(|_| anyhow!(BUSY))
+        r
     }
 
     /// The webview is about to apply request `id`: true while the backend still waits for it, false once it gave up
@@ -102,6 +104,7 @@ impl<'a> AppOps<'a> {
         match r.as_str() {
             Some("conflict") => Err(anyhow!("note changed since you read it")),
             Some("refused") => Err(anyhow!("the note is open in velo and can't be edited right now, retry")),
+            Some("unsaved") => Err(anyhow!(NO_ANSWER)), // applied in the editor, then something failed: never invite a retry
             Some(s) if ok.contains(&s) => Ok(r),
             _ if ok.contains(&"hash") && r.get("hash").is_some_and(Value::is_string) => Ok(r),
             _ => Err(anyhow!("bad reply from velo's editor: {r}")),
@@ -163,8 +166,13 @@ impl NoteOps for AppOps<'_> {
         let ready = self.ask_editor(json!({"path": path, "kind": "rename", "summary": summary}), &["ready", "not-open"])? == "ready";
         let r = self.with(|o| o.rename(path, new_title, rewrite_links, summary));
         if ready {
-            // unfreezes the editor, on the new path or (failed) the old one
-            (self.route)(json!({"path": path, "kind": "renamed", "to": r.as_ref().ok()})).ok();
+            // unfreezes the editor, on the new path or (failed) the old one; a lost event would leave it frozen
+            let msg = json!({"path": path, "kind": "renamed", "to": r.as_ref().ok()});
+            for _ in 0..3 {
+                if (self.route)(msg.clone()).is_ok() {
+                    break;
+                }
+            }
         }
         r
     }
@@ -356,6 +364,36 @@ mod tests {
             e.done(id, json!({"hash": "h2"}));
         });
         assert_eq!(r.unwrap(), json!({"hash": "h2"}));
+    }
+
+    #[test] fn claimed_write_without_answer_may_have_applied() {
+        let r = round_trip(|e, id| {
+            assert!(e.claim(id)); // claimed, then no answer within the claimed wait
+        });
+        assert_eq!(r.unwrap_err().to_string(), crate::agent::client::NO_ANSWER);
+    }
+
+    #[test] fn unsaved_reply_may_have_applied() {
+        let (st, dir) = state();
+        let p = dir.join("P.md").to_string_lossy().into_owned();
+        let route = |_: Value| Ok(json!("unsaved"));
+        let mut ops = AppOps::new(&st, &route);
+        let d = ops.read(&p).unwrap();
+        assert_eq!(ops.write(&p, "v2\n", &d.hash, "s").unwrap_err().to_string(), crate::agent::client::NO_ANSWER);
+        assert_eq!(ops.capture_task("P", "x", "s").unwrap_err().to_string(), crate::agent::client::NO_ANSWER);
+    }
+
+    #[test] fn bulk_stops_after_busy() {
+        let (st, dir) = state();
+        std::fs::write(dir.join("A.md"), "a\n").unwrap();
+        st.vault.lock().unwrap().as_mut().unwrap().rescan(None);
+        let calls = Mutex::new(0);
+        let route = |_: Value| { *calls.lock().unwrap() += 1; Err(anyhow!(BUSY)) };
+        let mut ops = AppOps::new(&st, &route);
+        let r = crate::agent::tools::call(&mut ops, "add_tags", json!({"titles": ["P", "A"], "tags": ["t"], "summary": "s"})).unwrap();
+        assert_eq!(r["results"][0]["reason"], BUSY);
+        assert_eq!((r["results"][1]["status"].as_str(), r["results"][1]["reason"].as_str()), (Some("failed"), Some(BUSY)));
+        assert_eq!(*calls.lock().unwrap(), 1, "no write is offered once velo said busy");
     }
 
     #[test] fn trash_of_open_note_waits_for_the_editor_to_close_it() {

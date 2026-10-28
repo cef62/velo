@@ -1323,3 +1323,41 @@ test("agent flush before a link rewrite saves the open note, or refuses", async 
   await c.onAgentWrite({ id: 3, path: "", kind: "flush", paths: [P("A")] });
   expect(api.agentWriteDone).toHaveBeenLastCalledWith(3, "refused");
 });
+
+test("agent write applied but not saved replies unsaved, never a retryable status", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  editor.flush.mockResolvedValueOnce(true).mockResolvedValueOnce(false); // saved before, not after the apply
+  await c.onAgentWrite({ id: 10, path: P("A"), kind: "append", insert: "- [ ] once", summary: "s" });
+  expect(editor.appended).toEqual(["- [ ] once"]);
+  expect(api.agentWriteDone).toHaveBeenCalledWith(10, "unsaved");
+});
+
+test("agent write applied, then the hash read fails: unsaved, not refused", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  const open = api.openNote.getMockImplementation()!;
+  api.openNote.mockImplementationOnce(open).mockRejectedValueOnce(new Error("io"));
+  await c.onAgentWrite({ id: 11, path: P("A"), kind: "append", insert: "- [ ] once", summary: "s" });
+  expect(editor.appended).toEqual(["- [ ] once"]);
+  expect(api.agentWriteDone).toHaveBeenCalledWith(11, "unsaved");
+});
+
+test("notes-changed for the open note during an agent rename takes no snapshot and no reload", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 5, path: P("A"), kind: "rename", summary: "s" });
+  await c.onNotesChanged([P("A")]);
+  expect(api.snapshotText).not.toHaveBeenCalled();
+  expect(editor.onExternalChange).not.toHaveBeenCalled();
+});
+
+test("agent renamed: a failing history update still unfreezes the editor", async () => {
+  const { c, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 5, path: P("A"), kind: "rename", summary: "s" });
+  (c as unknown as { history: { rename: () => void } }).history.rename = () => { throw new Error("boom"); };
+  await c.onAgentWrite({ id: 6, path: P("A"), kind: "renamed", to: P("B") });
+  expect(editor.suspended && editor.currentPath() !== null).toBe(false);
+  expect(c.busy).toBe(false);
+});

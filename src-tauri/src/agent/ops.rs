@@ -165,7 +165,17 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
     fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<String> {
         let path = plain(path)?;
         self.vault.agent_snapshot(path, summary)?;
-        Ok(self.vault.rename_note(path, new_title, rewrite_links)?.path)
+        if rewrite_links {
+            // the link rewrite changes these notes too: each gets its agent revision first
+            for src in self.vault.index.backlinks(&title_of(path))?.into_iter().filter(|p| !locked(p) && p != path) {
+                self.vault.agent_snapshot(&src, summary)?;
+            }
+        }
+        match self.vault.rename_note(path, new_title, rewrite_links) {
+            Ok(r) => Ok(r.path),
+            Err(e) if e.downcast_ref::<std::io::Error>().is_some_and(|e| e.kind() == std::io::ErrorKind::AlreadyExists) => Err(anyhow!("a note with that title already exists")),
+            Err(e) => Err(e),
+        }
     }
 
     fn trash(&mut self, path: &str, summary: &str) -> anyhow::Result<()> {

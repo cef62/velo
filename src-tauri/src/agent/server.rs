@@ -9,13 +9,19 @@ use rmcp::model::{CallToolRequestParams, CallToolResponse, CallToolResult, Conte
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt};
 
+/// velo's version (tauri.conf.json, kept in step with package.json), not the crate's.
+static APP_VERSION: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    let conf: serde_json::Value = serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap_or_default();
+    conf["version"].as_str().unwrap_or(env!("CARGO_PKG_VERSION")).to_string()
+});
+
 type Dispatch = dyn Fn(&str, serde_json::Value) -> Result<serde_json::Value, String> + Send + Sync;
 
 struct Velo(Box<Dispatch>);
 
 impl ServerHandler for Velo {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_server_info(Implementation::new("velo", env!("CARGO_PKG_VERSION")))
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_server_info(Implementation::new("velo", APP_VERSION.as_str()))
     }
 
     async fn list_tools(&self, _: Option<PaginatedRequestParams>, _: RequestContext<RoleServer>) -> Result<ListToolsResult, ErrorData> {
@@ -48,4 +54,12 @@ pub fn run_stdio(dispatch: impl Fn(&str, serde_json::Value) -> Result<serde_json
         service.waiting().await?;
         Ok(())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test] fn server_version_is_the_app_version() {
+        let pkg: serde_json::Value = serde_json::from_str(include_str!("../../../package.json")).unwrap();
+        assert_eq!(super::APP_VERSION.as_str(), pkg["version"].as_str().unwrap());
+    }
 }

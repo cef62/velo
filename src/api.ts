@@ -52,7 +52,7 @@ export type AgentWrite = {
   /** `flush`: notes whose links a rename is about to rewrite. */
   paths?: string[];
 };
-export type AgentReply = { hash: string } | "not-open" | "refused" | "conflict" | "closed" | "ready" | "flushed" | "ok";
+export type AgentReply = { hash: string } | "not-open" | "refused" | "conflict" | "unsaved" | "closed" | "ready" | "flushed" | "ok";
 /** Called right before applying `id`: false once the backend stopped waiting (then leave everything as it is). */
 export const agentWriteClaim = (id: number) => invoke<boolean>("agent_write_claim", { id });
 export const agentWriteDone = (id: number, result: AgentReply) => invoke<void>("agent_write_done", { id, result });

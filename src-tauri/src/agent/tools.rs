@@ -117,6 +117,16 @@ fn err(e: anyhow::Error) -> String {
     e.to_string()
 }
 
+/// `a[k]` as a title that maps to a file name (one of only dots and spaces would become "Untitled").
+fn title_arg<'a>(a: &'a Value, k: &str) -> Result<&'a str, String> {
+    let t = arg(a, k)?;
+    match t.trim() {
+        "" => Err("title is empty".into()),
+        s if s.chars().all(|c| c == '.' || c == ' ') => Err(format!("invalid title: {t}")),
+        _ => Ok(t),
+    }
+}
+
 /// Path of the plain note `title`; a locked or missing one is "not found".
 fn path_of(ops: &dyn NoteOps, a: &Value) -> Result<String, String> {
     ops.find(arg(a, "title")?).map_err(err)?.ok_or_else(|| "not found".to_string())
@@ -169,13 +179,13 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
             Ok(json!({"title": doc.title, "text": doc.text, "hash": doc.hash, "created": iso(m.created), "modified": iso(m.modified), "tags": m.tags, "aliases": m.aliases, "links": links, "backlinks": backlinks}))
         }
         "create_note" => {
-            let doc = ops.create(arg(&a, "title")?, arg(&a, "text")?, summary).map_err(err)?;
+            let doc = ops.create(title_arg(&a, "title")?, arg(&a, "text")?, summary).map_err(err)?;
             Ok(json!({"title": doc.title, "hash": doc.hash}))
         }
         "append_to_note" => {
-            let text = arg(&a, "text")?;
-            let Some(path) = ops.find(arg(&a, "title")?).map_err(err)? else {
-                let doc = ops.create(arg(&a, "title")?, &format!("{text}\n"), summary).map_err(err)?;
+            let (title, text) = (title_arg(&a, "title")?, arg(&a, "text")?);
+            let Some(path) = ops.find(title).map_err(err)? else {
+                let doc = ops.create(title, &format!("{text}\n"), summary).map_err(err)?;
                 return Ok(json!({"title": doc.title, "hash": doc.hash}));
             };
             let doc = ops.read(&path).map_err(err)?;
@@ -207,15 +217,22 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
         }
         "list_tasks" => {
             let v = ops.tasks(a.get("query").and_then(Value::as_str).unwrap_or(""), &strings(&a, "tags"), a.get("show_done").and_then(Value::as_bool).unwrap_or(false)).map_err(err)?;
-            serde_json::to_value(v).map_err(|e| e.to_string())
+            let mut v = serde_json::to_value(v).map_err(|e| e.to_string())?;
+            // tools speak titles: drop each task's file path
+            for g in ["overdue", "today", "upcoming", "no_date", "done"] {
+                for t in v[g].as_array_mut().into_iter().flatten().filter_map(Value::as_object_mut) {
+                    t.remove("path");
+                }
+            }
+            Ok(v)
         }
         "add_task" => {
             let mut text = arg(&a, "text")?.trim().to_string();
             if text.is_empty() {
                 return Err("text is empty".into());
             }
-            if a.get("title").and_then(Value::as_str).is_some_and(|t| t.trim().is_empty()) {
-                return Err("title is empty".into());
+            if a.get("title").is_some() {
+                title_arg(&a, "title")?;
             }
             if let Some(d) = a.get("due").and_then(Value::as_str) {
                 text = format!("{text} 📅 {}", valid_date(d)?);
@@ -243,14 +260,15 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
         }
         "rename_note" => {
             let rewrite = a.get("rewrite_links").and_then(Value::as_bool).ok_or("missing rewrite_links")?;
-            let new = ops.rename(&path_of(ops, &a)?, arg(&a, "new_title")?, rewrite, summary).map_err(err)?;
+            let new = ops.rename(&path_of(ops, &a)?, title_arg(&a, "new_title")?, rewrite, summary).map_err(err)?;
             let doc = ops.read(&new).map_err(err)?;
             Ok(json!({"title": doc.title, "hash": doc.hash}))
         }
         "move_to_trash" => {
             let path = path_of(ops, &a)?;
+            let title = ops.read(&path).map_err(err)?.title;
             ops.trash(&path, summary).map_err(err)?;
-            Ok(json!({"title": arg(&a, "title")?, "trashed": true}))
+            Ok(json!({"title": title, "trashed": true}))
         }
         "daily_note" => {
             let date = match a.get("date").and_then(Value::as_str) {
@@ -329,9 +347,17 @@ fn bulk_tags(ops: &mut dyn NoteOps, add: bool, a: &Value, summary: &str) -> Resu
         }
         Ok(changed)
     };
-    let results: Vec<Value> = titles.iter().filter_map(Value::as_str).map(|t| match one(ops, t) {
-        Ok(c) => json!({"title": t, "status": if c { "changed" } else { "unchanged" }}),
-        Err(e) => json!({"title": t, "status": "failed", "reason": e}),
+    let busy = crate::agent::client::BUSY;
+    let mut stop = false; // once velo said busy, the rest would only queue up behind it
+    let results: Vec<Value> = titles.iter().map(|v| {
+        let Some(t) = v.as_str() else { return json!({"title": v, "status": "failed", "reason": "not a title"}) };
+        match if stop { Err(busy.to_string()) } else { one(ops, t) } {
+            Ok(c) => json!({"title": t, "status": if c { "changed" } else { "unchanged" }}),
+            Err(e) => {
+                stop |= e == busy;
+                json!({"title": t, "status": "failed", "reason": e})
+            }
+        }
     }).collect();
     Ok(json!({"results": results}))
 }
@@ -564,6 +590,7 @@ mod tests {
         assert_eq!(r["no_date"][0]["title"], "a");
         assert_eq!(r["no_date"][0]["line_text"], "- [ ] open one");
         assert_eq!(r["no_date"][0]["line"], 0);
+        assert!(r["no_date"][0].get("path").is_none(), "tools return titles, not paths");
         assert_eq!(r["due_count"], 0);
     }
 
@@ -655,13 +682,19 @@ mod tests {
         assert_eq!(read(&dir, "b.md"), "see [[z]]");
         let p = ops.find("z").unwrap().unwrap();
         assert_eq!(agent_revs(&ops, &p), ["renamed"]);
+        // the link source changed too: its previous text is an agent revision with the summary
+        let b = ops.find("b").unwrap().unwrap();
+        assert_eq!(agent_revs(&ops, &b), ["renamed"]);
+        let rev = ops.vault.list_revisions(&b).unwrap().into_iter().find(|r| r.agent).unwrap();
+        assert_eq!(ops.vault.read_revision(&b, &rev.id, None).unwrap(), "see [[a]]");
         assert_eq!(call(&mut ops, "rename_note", json!({"title": "a", "new_title": "q", "rewrite_links": true, "summary": "s"})), Err("not found".to_string()));
     }
 
     #[test] fn trash_moves_out_and_keeps_revisions() {
         let (mut ops, dir) = task_ops(&[("a.md", "bye"), ("s.md.age", "x")]);
         let p = ops.find("a").unwrap().unwrap();
-        call(&mut ops, "move_to_trash", json!({"title": "a", "summary": "cleanup"})).unwrap();
+        let r = call(&mut ops, "move_to_trash", json!({"title": "A", "summary": "cleanup"})).unwrap();
+        assert_eq!(r["title"], "a", "the resolved title");
         assert!(!dir.join("a.md").exists());
         assert_eq!(ops.vault.list_revisions(&p).unwrap()[0].summary.as_deref(), Some("cleanup"));
         assert_eq!(call(&mut ops, "move_to_trash", json!({"title": "s", "summary": "c"})), Err("not found".to_string()));
@@ -683,5 +716,56 @@ mod tests {
         assert_eq!(agent_revs(&ops, &p2), ["mine"]);
         assert_eq!(call(&mut ops, "daily_note", json!({"date": "2031-05-06"})).unwrap()["title"], "2031-05-06");
         assert!(call(&mut ops, "daily_note", json!({"date": "2031-13-06"})).unwrap_err().contains("invalid date"));
+    }
+}
+
+#[cfg(test)]
+mod fix_tests {
+    use super::*;
+    use crate::agent::ops::DirectOps;
+
+    fn vault(files: &[(&str, &str)]) -> (DirectOps, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap().keep();
+        for (name, text) in files {
+            std::fs::write(dir.join(name), text).unwrap();
+        }
+        let data = tempfile::tempdir().unwrap().keep();
+        (DirectOps::open(dir.clone(), &data.join("i.sqlite"), data.join("settings.json")).unwrap(), dir)
+    }
+
+    #[test] fn rename_onto_existing_title_says_so() {
+        let (mut ops, dir) = vault(&[("a.md", "x"), ("b.md", "y")]);
+        let r = call(&mut ops, "rename_note", json!({"title": "a", "new_title": "B", "rewrite_links": false, "summary": "s"}));
+        assert_eq!(r, Err("a note with that title already exists".to_string()));
+        assert!(dir.join("a.md").exists());
+    }
+
+    #[test] fn titles_without_a_usable_name_are_rejected_before_any_write() {
+        let (mut ops, dir) = vault(&[("a.md", "x")]);
+        for t in ["...", " . . "] {
+            for (name, args) in [
+                ("create_note", json!({"title": t, "text": "x", "summary": "s"})),
+                ("append_to_note", json!({"title": t, "text": "x", "summary": "s"})),
+                ("add_task", json!({"title": t, "text": "x", "summary": "s"})),
+                ("rename_note", json!({"title": "a", "new_title": t, "rewrite_links": false, "summary": "s"})),
+            ] {
+                assert_eq!(call(&mut ops, name, args), Err(format!("invalid title: {t}")), "{name} {t:?}");
+            }
+        }
+        let names: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["a.md"]);
+        // a leading dot is fine: the file is not hidden
+        call(&mut ops, "create_note", json!({"title": ".net", "text": "x", "summary": "s"})).unwrap();
+        assert!(dir.join("-net.md").exists());
+    }
+
+    #[test] fn bulk_reports_non_string_titles() {
+        let (mut ops, _) = vault(&[("a.md", "x")]);
+        let r = call(&mut ops, "add_tags", json!({"titles": ["a", 7, null], "tags": ["t"], "summary": "s"})).unwrap();
+        let rs = r["results"].as_array().unwrap();
+        assert_eq!(rs.len(), 3);
+        assert_eq!(rs[0]["status"], "changed");
+        assert_eq!((rs[1]["status"].as_str(), rs[1]["reason"].as_str(), &rs[1]["title"]), (Some("failed"), Some("not a title"), &json!(7)));
+        assert_eq!(rs[2]["reason"], "not a title");
     }
 }

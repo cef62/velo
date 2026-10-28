@@ -75,7 +75,7 @@ modified: 2026-10-27T10:02:41+01:00
 - Everything else in the block (other keys, comments, order) is left byte for byte. velo never overwrites an existing `created:` line, and edits only the first `modified:` line. Other date formats (`2026-10-27`, `2026-10-27 09:14`, quoted) are read; an unreadable value falls back to the file date, shown with a "from file" hint.
 - Turn writing off in Settings, General ("Add created/modified dates to notes"). Existing blocks are still read.
 - The block is hidden in the editor and preview. Show it with the "Show front matter in the editor" checkbox in the info panel, or bind a key to "Show / hide front matter" in Settings (unbound by default).
-- `tags:` and `aliases:` (flow list `[a, b]`, block list or single value) are read, never written. Tags merge with `#tags`. Aliases work as titles for `[[wikilinks]]`, opening by name, and search.
+- `tags:` and `aliases:` (flow list `[a, b]`, block list or single value) are read. velo itself never writes them; only an agent's `add_tags` / `remove_tags` tools change the `tags:` list. Tags merge with `#tags`. Aliases work as titles for `[[wikilinks]]`, opening by name, and search.
 - The list's date and the Recent sort use the modified date from the note.
 
 ## Revisions
@@ -114,10 +114,10 @@ velo can act as an MCP server, so Claude Code can search, read, create and edit 
 - Locked notes are never listed, searched or returned, and the agent never decrypts anything.
 - Deletes go to the Trash. There is no permanent delete.
 - Edits are anchored (`old_text` must match once) or hash-guarded (`replace_note` fails if the note changed since you read it).
-- A note open in velo is edited through the editor, so nothing is overwritten behind it. If velo does not answer in 5 seconds the call fails with "velo is busy, retry".
+- A note open in velo is edited through the editor, so nothing is overwritten behind it. If velo does not take the change within 5 seconds the call fails with "velo is busy, retry" and nothing changes. Once velo has taken it, the call waits up to 60 seconds; if no answer comes back, it fails with "velo did not answer; the change may have been applied — read the note before retrying".
 - Off by default. The running app listens on 127.0.0.1 only, and every request needs a random token.
 
-**Seeing and undoing changes.** Every write needs a summary. Before it, velo saves a revision of the note with that summary, marked as an agent change in the info panel (⌘I). Select it and press Restore.
+**Seeing and undoing changes.** Every write needs a summary (for `daily_note` it is optional). Before it, velo saves a revision of the note with that summary, marked as an agent change in the info panel (⌘I). Select it and press Restore.
 
 **Platforms.** macOS and Linux. Windows is not supported yet.
 

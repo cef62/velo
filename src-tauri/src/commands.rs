@@ -423,7 +423,7 @@ pub fn agent_write_claim(agent: State<'_, AgentState>, id: u64) -> bool {
     agent.editors.claim(id)
 }
 
-/// The webview's answer to `agent-write` `id`: `{hash}`, "not-open", "refused" or "conflict".
+/// The webview's answer to `agent-write` `id`: `{hash}`, "not-open", "refused", "conflict" or "unsaved" (applied, not saved).
 #[tauri::command]
 pub fn agent_write_done(agent: State<'_, AgentState>, id: u64, result: serde_json::Value) {
     agent.editors.done(id, result);

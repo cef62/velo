@@ -1275,7 +1275,8 @@ export class Controller {
     void this.refreshTags();
     void this.loadTasks();
     const open = this.editor.currentPath();
-    if (open && paths.includes(open)) {
+    // during an agent rename the editor is frozen on the old path: agentRenamed reloads it
+    if (open && paths.includes(open) && this.agentRenaming !== open) {
       // The reload replaces the editor text: keep the old one as a revision (a dirty editor conflicts instead).
       if (!this.editor.isDirty()) await this.api.snapshotText(open, this.editor.getText()).catch((e) => console.warn("snapshot before reload failed:", e));
       this.editor.onExternalChange(open);
@@ -1341,8 +1342,13 @@ export class Controller {
     const insert = req.insert ?? "";
     const ok = req.kind === "append" ? this.editor.appendLine(insert) : this.editor.applyChange(changedSpan(this.editor.getText(), insert));
     if (!ok) return "refused";
-    if (!(await this.editor.flush())) return "conflict"; // the edit stays in the editor; its save error or conflict banner shows
-    return { hash: (await this.api.openNote(req.path)).hash };
+    // applied: from here no failure may invite a retry, which would apply it twice
+    try {
+      if (!(await this.editor.flush())) return "unsaved"; // the edit stays in the editor; its save error or conflict banner shows
+      return { hash: (await this.api.openNote(req.path)).hash };
+    } catch {
+      return "unsaved";
+    }
   }
 
   /** The backend finished renaming the open note (`to` null: it failed): unfreeze the editor where the note now is. */
@@ -1354,8 +1360,8 @@ export class Controller {
         this.editor.resume();
         return "ok";
       }
-      this.history.rename(from, to);
       try {
+        this.history.rename(from, to);
         const doc = await this.api.openNote(to);
         this.editor.load(doc); // clean and frozen since `ready`: never refused
         this.loadedDoc(doc);
