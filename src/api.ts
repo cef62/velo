@@ -42,7 +42,7 @@ export const readRevision = (path: string, id: string) => invoke<string>("read_r
 export type AgentWrite = {
   id: number;
   path: string;
-  kind: "replace" | "append" | "trash" | "rename" | "renamed" | "flush";
+  kind: "replace" | "append" | "trash" | "rename" | "renamed" | "flush" | "trash-failed";
   /** `replace`: the note's whole new text; `append`: the line to add. */
   insert?: string;
   base?: string;
@@ -51,12 +51,18 @@ export type AgentWrite = {
   to?: string | null;
   /** `flush`: notes whose links a rename is about to rewrite. */
   paths?: string[];
+  /** `trash-failed`: the note the editor closed for a trash that then failed, and why. */
+  title?: string;
+  error?: string;
 };
 export type AgentReply = { hash: string } | "not-open" | "refused" | "conflict" | "unsaved" | "closed" | "ready" | "flushed" | "ok";
 /** Called right before applying `id`: false once the backend stopped waiting (then leave everything as it is). */
 export const agentWriteClaim = (id: number) => invoke<boolean>("agent_write_claim", { id });
 export const agentWriteDone = (id: number, result: AgentReply) => invoke<void>("agent_write_done", { id, result });
-export const snapshotAgent = (path: string, summary: string) => invoke<void>("snapshot_agent", { path, summary });
+/** The snapshot's id (null: an empty note has nothing to keep). */
+export const snapshotAgent = (path: string, summary: string) => invoke<string | null>("snapshot_agent", { path, summary });
+/** Deletes agent snapshot `id` of `path`, taken for an agent write that was then not applied. */
+export const dropAgentSnapshot = (path: string, id: string) => invoke<void>("drop_agent_snapshot", { path, id });
 export const snapshotText = (path: string, text: string) => invoke<void>("snapshot_text", { path, text });
 export const agentSetupCommand = () => invoke<string>("agent_setup_command");
 export const hasIdentity = () => invoke<boolean>("has_identity");

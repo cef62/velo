@@ -42,12 +42,12 @@ pub fn forward(data_dir: &Path, name: &str, args: &Value) -> Option<Result<Value
             Ok(b) => b,
         };
         let info: Value = serde_json::from_slice(&bytes).unwrap_or_default();
-        let (Some(pid), Some(port)) = (info["pid"].as_u64().filter(|p| (1..=i32::MAX as u64).contains(p)), info["port"].as_u64().and_then(|p| u16::try_from(p).ok())) else {
-            return Some(Err(BUSY.into()));
-        };
+        let Some(pid) = info["pid"].as_u64().filter(|p| (1..=i32::MAX as u64).contains(p)) else { return Some(Err(BUSY.into())) };
         if !pid_alive(pid as u32) {
             return None;
         }
+        // no port: the app runs but its listener did not start (`listener::mark_running`)
+        let Some(port) = info["port"].as_u64().and_then(|p| u16::try_from(p).ok()) else { return Some(Err(BUSY.into())) };
         if let Sent::Reply(r) = attempt(port, &info["token"], name, args) {
             return Some(r);
         }
@@ -80,7 +80,8 @@ fn attempt(port: u16, token: &Value, name: &str, args: &Value) -> Sent {
         return Sent::Reply(Ok(ok.take()));
     }
     match reply.get("err").and_then(Value::as_str) {
-        Some("unauthorized") => Sent::No, // rejected before dispatch; stale file from another run
+        // the request went out: never resend it nor go direct (a stopped listener means access went off)
+        Some("unauthorized") => Sent::Reply(Err(BUSY.into())),
         Some(e) => Sent::Reply(Err(e.into())),
         None => Sent::Reply(Err(NO_ANSWER.into())),
     }

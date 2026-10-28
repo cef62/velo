@@ -159,10 +159,15 @@ impl Vault {
 
     /// Re-check the whole folder against the index (the watcher missed events, or they came before it started).
     pub fn rescan(&mut self, identity: Option<&str>) -> Vec<String> {
-        let Ok(files) = self.store.list() else { return Vec::new() };
-        let Ok((stale, gone)) = self.diff(&files) else { return Vec::new() };
+        self.try_rescan(identity).unwrap_or_default()
+    }
+
+    /// `rescan`, failing when the folder or the index can't be read.
+    pub fn try_rescan(&mut self, identity: Option<&str>) -> anyhow::Result<Vec<String>> {
+        let files = self.store.list()?;
+        let (stale, gone) = self.diff(&files)?;
         let paths: Vec<PathBuf> = stale.into_iter().map(|(p, ..)| p.clone()).chain(gone.into_iter().map(PathBuf::from)).collect();
-        self.apply_fs_changes(&paths, identity)
+        Ok(self.apply_fs_changes(&paths, identity))
     }
 
     /// A note file directly inside the notes folder; anything else is refused (paths come from the webview).
@@ -266,9 +271,16 @@ impl Vault {
 
     /// Append `- [ ] text` to the note titled `title` (created if missing); returns its path.
     pub fn capture_task(&mut self, title: &str, text: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<String> {
+        if text.trim().is_empty() { return Err(anyhow!("empty")); }
+        let path = self.open_or_create(title, identity, write_fm)?.path;
+        self.append_task(&path, text, identity, write_fm)
+    }
+
+    /// Append `- [ ] text` to the note at `path`; returns the path.
+    pub fn append_task(&mut self, path: &str, text: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<String> {
         let text = text.trim().replace(['\r', '\n'], " ");
         if text.is_empty() { return Err(anyhow!("empty")); }
-        let doc = self.open_or_create(title, identity, write_fm)?;
+        let doc = self.open_note(path, identity)?;
         self.append_in(doc, &text, identity, write_fm)
     }
 
@@ -348,8 +360,7 @@ impl Vault {
         if rewrite_links_too {
             for src in self.index.backlinks(&old.title).unwrap_or_default() {
                 let sp = Path::new(&src);
-                // a plain twin of a locked note is locked too (save_note refuses it the same way)
-                if parse_note_file(sp).is_none_or(|n| n.encrypted || note_path(&self.store.dir, &n.title, true).exists()) {
+                if !self.rewritable(sp) {
                     continue;
                 }
                 let Ok(bytes) = self.store.read(sp) else { continue };
@@ -363,8 +374,16 @@ impl Vault {
         Ok(RenameResult { path: to_s, rewritten })
     }
 
+    /// Notes whose links a rename of `title` would rewrite (the "Update N links?" count).
     pub fn backlink_count(&self, title: &str) -> anyhow::Result<usize> {
-        Ok(self.index.backlinks(title)?.len())
+        Ok(self.index.backlinks(title)?.iter().filter(|p| self.rewritable(Path::new(p))).count())
+    }
+
+    /// A link source a rename may rewrite: a plain note on disk. A plain twin of a locked note is locked too
+    /// (save_note refuses it the same way); a source the index still lists after it was deleted, or one that can't be
+    /// read, is skipped.
+    pub fn rewritable(&self, src: &Path) -> bool {
+        parse_note_file(src).is_some_and(|n| !n.encrypted && !note_path(&self.store.dir, &n.title, true).exists()) && src.is_file() && std::fs::File::open(src).is_ok()
     }
 
     pub fn lock_note(&mut self, path: &str, identity: &str) -> anyhow::Result<String> {
@@ -455,16 +474,24 @@ impl Vault {
 
     /// Agent undo trail: an unthrottled snapshot of the note's current on-disk bytes, with the agent's summary.
     /// Plain notes only; the agent never reaches a locked one.
-    pub fn agent_snapshot(&mut self, path: &str, summary: &str) -> anyhow::Result<()> {
+    /// Returns the snapshot id (`None`: an empty file has nothing to keep).
+    pub fn agent_snapshot(&mut self, path: &str, summary: &str) -> anyhow::Result<Option<String>> {
         let nf = self.note(Path::new(path))?;
         if nf.encrypted || note_path(&self.store.dir, &nf.title, true).exists() {
             return Err(anyhow!("locked"));
         }
         let bytes = std::fs::read(path)?;
-        if !bytes.is_empty() { // an empty file has nothing to keep
-            self.revisions.snapshot_agent(&nf.title, &bytes, false, now_ms(), summary)?;
+        if bytes.is_empty() {
+            return Ok(None);
         }
-        Ok(())
+        Ok(Some(self.revisions.snapshot_agent(&nf.title, &bytes, false, now_ms(), summary)?))
+    }
+
+    /// Deletes revision `id` (and its summary) of the note at `path`: an agent snapshot whose write never happened.
+    pub fn drop_revision(&self, path: &str, id: &str) {
+        if let Ok(nf) = self.note(Path::new(path)) {
+            self.revisions.remove(&nf.title, id);
+        }
     }
 
     /// First revision of a note the agent just created: its created text, with the summary.
@@ -746,6 +773,15 @@ mod tests {
         assert_eq!(r.rewritten, 1);
         assert!(!dir.join("Old.md").exists() && dir.join("New.md").exists());
         assert_eq!(std::fs::read_to_string(dir.join("b.md")).unwrap(), "and [[New]]");
+    }
+    #[test] fn backlink_count_skips_sources_rename_would_skip() {
+        let (dir, db) = setup();
+        for (f, t) in [("a.md", "see [[Old]]"), ("gone.md", "[[Old]]"), ("X.md", "pre-lock [[Old]]"), ("Old.md", "")] { std::fs::write(dir.join(f), t).unwrap(); }
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        std::fs::write(dir.join("X.md.age"), "ciphertext").unwrap(); // X.md is now a locked note's plain twin
+        std::fs::remove_file(dir.join("gone.md")).unwrap(); // deleted, still indexed
+        assert_eq!(v.backlink_count("Old").unwrap(), 1);
+        assert_eq!(v.rename_note(&dir.join("Old.md").to_string_lossy(), "New", true).unwrap().rewritten, 1);
     }
     #[test] fn rename_rewrites_links_to_the_saved_title() {
         let (dir, db) = setup();

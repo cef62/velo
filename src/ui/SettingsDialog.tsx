@@ -70,6 +70,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
   const [recMsg, setRecMsg] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [updateMsg, setUpdateMsg] = useState(""); // the dialog covers the update banner: show the result here
+  const [copyMsg, setCopyMsg] = useState(""); // same for the setup command copy
   const [saving, setSaving] = useState(false);
 
   const conflicts = conflictsOf(d.shortcuts);
@@ -205,7 +206,9 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
                   <Checkbox.Label>Agent access (MCP)</Checkbox.Label>
                   <Checkbox.HiddenInput />
                 </Checkbox.Root>
-                {d.agentAccess && <Button variant="outline" size="xs" onClick={() => void controller.copyAgentSetup()}>Copy setup command</Button>}
+                {/* only once saved: before that the agent would be refused */}
+                {d.agentAccess && cur.agent_access === true && <Button variant="outline" size="xs" onClick={async () => setCopyMsg(await controller.copyAgentSetup())}>Copy setup command</Button>}
+                <span className={help} role="status">{d.agentAccess && cur.agent_access !== true ? "Save to turn it on, then copy the setup command here." : copyMsg}</span>
               </div>
               <span className={help}>Lets Claude Code read and edit your notes. Locked notes are never shared; deletes go to the Trash; every change is saved as a revision you can restore.</span>
             </div>

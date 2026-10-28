@@ -87,6 +87,32 @@ pub fn run() {
                 settings_path,
                 data_dir,
             });
+            app.manage(agent::listener::AgentState::default());
+            // before the vault opens: with access on, velo writes notes only once headless can tell it runs, or access
+            // is off (never two writers). Failing both, the notes stay closed and a dialog says why, then velo quits.
+            let fenced = {
+                let st = app.state::<commands::AppState>();
+                let mut s = st.settings.lock().unwrap();
+                if s.agent_access {
+                    agent::listener::start_or_fence(&st.data_dir, &st.settings_path, &mut s, || agent::listener::start(h.clone())).map(|l| *app.state::<agent::listener::AgentState>().listener.lock().unwrap() = l)
+                } else {
+                    Ok(())
+                }
+            };
+            let dir = match fenced {
+                Ok(()) => dir,
+                Err(e) => {
+                    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                    eprintln!("velo: {e}");
+                    let h2 = h.clone();
+                    h.dialog()
+                        .message(format!("{e}\n\nAgent access is on, so velo won't open your notes: an agent could write them at the same time. Make that folder writable, then start velo again."))
+                        .kind(MessageDialogKind::Error)
+                        .title("velo can't open your notes")
+                        .show(move |_| h2.exit(1));
+                    None
+                }
+            };
             if let Some(dir) = dir {
                 // detached on purpose: quitting must not wait for indexing
                 let h = h.clone();
@@ -99,13 +125,6 @@ pub fn run() {
             for (action, binding) in globals {
                 if let Err(e) = commands::register_global(&h, action, &binding) {
                     eprintln!("velo: {action:?} hotkey not registered: {e}");
-                }
-            }
-            app.manage(agent::listener::AgentState::default());
-            if app.state::<commands::AppState>().settings.lock().unwrap().agent_access {
-                let started = agent::listener::start(h.clone()).map(|l| *app.state::<agent::listener::AgentState>().listener.lock().unwrap() = Some(l));
-                if let Err(e) = started {
-                    eprintln!("velo: agent access listener not started: {e}");
                 }
             }
             app.manage(Mutex::new(update::UpdateState::default()));
@@ -135,6 +154,7 @@ pub fn run() {
             commands::lock_all,
             commands::delete_note,
             commands::snapshot_agent,
+            commands::drop_agent_snapshot,
             commands::agent_write_claim,
             commands::agent_write_done,
             commands::list_revisions,
@@ -152,9 +172,11 @@ pub fn run() {
         .run(|app, ev| {
             if let tauri::RunEvent::Exit = ev
                 && let Some(agent) = app.try_state::<agent::listener::AgentState>()
-                && let Some(l) = agent.listener.lock().unwrap().take()
             {
-                l.stop(); // deletes agent.json: the headless server goes direct again
+                match agent.listener.lock().unwrap().take() {
+                    Some(l) => l.stop(), // deletes agent.json: the headless server goes direct again
+                    None => agent::listener::unmark_running(&app.state::<commands::AppState>().data_dir), // a failed start's marker
+                }
             }
         });
 }

@@ -1184,7 +1184,7 @@ test("agent write to the open note goes through the editor and replies with the 
   const { c, api, editor } = setup({ A: "hello world" });
   await c.show(P("A"));
   const atSnapshot: string[] = [];
-  api.snapshotAgent.mockImplementation(async () => void atSnapshot.push(editor.text));
+  api.snapshotAgent.mockImplementation(async () => (atSnapshot.push(editor.text), "1.md"));
   await c.onAgentWrite({ id: 7, path: P("A"), kind: "replace", insert: "hello there world", base: "h", summary: "s" });
   expect(editor.changes).toEqual([{ from: 6, to: 6, insert: "there " }]); // only the changed span: a small undo step
   expect(editor.text).toBe("hello there world");
@@ -1192,6 +1192,7 @@ test("agent write to the open note goes through the editor and replies with the 
   expect(atSnapshot).toEqual(["hello world"]); // snapshot of the text before the change
   expect(editor.flush).toHaveBeenCalled();
   expect(api.agentWriteDone).toHaveBeenCalledWith(7, { hash: "h" });
+  expect(api.dropAgentSnapshot).not.toHaveBeenCalled(); // applied: its revision stays
 });
 
 test("agent append to the open note uses appendLine", async () => {
@@ -1218,6 +1219,52 @@ test("agent write refused while busy", async () => {
   await c.onAgentWrite({ id: 3, path: P("A"), kind: "replace", insert: "b", base: "h", summary: "s" });
   expect(editor.text).toBe("a");
   expect(api.agentWriteDone).toHaveBeenCalledWith(3, "refused");
+});
+
+test("an agent write waits for a note load in flight before saying not-open", async () => {
+  const { c, api, editor } = setup({ A: "a", B: "b" });
+  const d = deferred<ReturnType<typeof api.openNote> extends Promise<infer T> ? T : never>();
+  api.openNote.mockImplementationOnce(() => d.promise);
+  const shown = c.show(P("B"));
+  await settle();
+  const write = c.onAgentWrite({ id: 5, path: P("B"), kind: "append", insert: "- [ ] x", summary: "s" });
+  d.resolve({ path: P("B"), title: "B", text: "b", hash: "h", encrypted: false, meta: noMeta });
+  await shown;
+  await write;
+  expect(api.agentWriteDone).toHaveBeenCalledWith(5, { hash: "h" }); // applied in the editor, not written behind it
+  expect(editor.appended).toEqual(["- [ ] x"]);
+});
+
+test("a keystroke during the agent snapshot drops that snapshot", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  api.snapshotAgent.mockImplementationOnce(async () => { editor.text = "a typed"; editor.dirty = true; return "5.md"; });
+  await c.onAgentWrite({ id: 6, path: P("A"), kind: "replace", insert: "b", base: "h", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(6, "conflict");
+  expect(api.dropAgentSnapshot).toHaveBeenCalledWith(P("A"), "5.md"); // the write never happened: no revision for it
+});
+
+test("an agent write waits for a show still flushing the previous note", async () => {
+  const { c, api, editor } = setup({ A: "a", B: "b" });
+  await c.show(P("A"));
+  const d = deferred<boolean>();
+  editor.flush.mockImplementationOnce(() => d.promise);
+  const shown = c.show(P("B"));
+  await settle();
+  const write = c.onAgentWrite({ id: 8, path: P("B"), kind: "append", insert: "- [ ] y", summary: "s" });
+  await settle();
+  d.resolve(true);
+  await shown;
+  await write;
+  expect(api.agentWriteDone).toHaveBeenCalledWith(8, { hash: "h" }); // B ended up open: applied in the editor
+  expect(editor.appended).toEqual(["- [ ] y"]);
+});
+
+test("a failed agent trash after the editor closed the note says so", async () => {
+  const { c, api, store } = setup({ A: "a" });
+  await c.onAgentWrite({ id: 9, path: P("A"), kind: "trash-failed", title: "A", error: "Trash unavailable" });
+  expect(store.get().err).toBe("The agent couldn't move “A” to the Trash: Trash unavailable");
+  expect(api.agentWriteDone).toHaveBeenCalledWith(9, "ok");
 });
 
 test("agent write gets not-open for another note", async () => {
@@ -1379,4 +1426,13 @@ test("agent renamed: a failing history update still unfreezes the editor", async
   await c.onAgentWrite({ id: 6, path: P("A"), kind: "renamed", to: P("B") });
   expect(editor.suspended && editor.currentPath() !== null).toBe(false);
   expect(c.busy).toBe(false);
+});
+
+test("copyAgentSetup copies the command and returns the result for the Settings dialog", async () => {
+  const { c, api, calls, store } = setup();
+  expect(await c.copyAgentSetup()).toBe("Copied");
+  expect(calls).toContainEqual(["copyText", "claude mcp add velo -- /velo --mcp"]);
+  api.agentSetupCommand.mockRejectedValueOnce("no exe path");
+  expect(await c.copyAgentSetup()).toBe("no exe path");
+  expect(store.get().err).toBe(""); // the dialog covers the banner: the error is shown in the dialog instead
 });

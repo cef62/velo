@@ -2,7 +2,7 @@
 //! `<app data>/agent.json` (mode 0600) holds `{port, token, pid}`. A connection starts with one short line
 //! `{token}`, answered `{ok: true}`; then each request is one line of JSON `{name, args}` and each reply one line `{ok: value}` or
 //! `{err: message}`. A wrong token gets `{err:"unauthorized"}` and the connection is closed.
-use super::app_ops::{AppOps, EDITOR_TIMEOUT, Editors};
+use super::app_ops::{AppOps, Editors, with_route};
 use crate::commands::AppState;
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -21,6 +21,8 @@ const MAX_REQUEST: u64 = 64 << 20;
 /// Longest auth line, and how long a new connection may take to send it.
 const MAX_AUTH: u64 = 256;
 const AUTH_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long an authenticated connection may sit between requests (the headless client sends its one request at once).
+const IDLE_TIMEOUT: Duration = Duration::from_secs(if cfg!(test) { 1 } else { 30 });
 /// Connections served at once; more are closed right away, so a local flood can't exhaust threads or fds.
 const MAX_CONNS: usize = 8;
 
@@ -74,14 +76,17 @@ pub fn start(app: AppHandle) -> anyhow::Result<ListenerHandle> {
             return Err(super::OFF.into());
         }
         let agent = app.state::<AgentState>();
-        let route = |req: Value| agent.editors.ask(req, |r| { app.emit("agent-write", r).ok(); }, EDITOR_TIMEOUT);
-        let mut ops = AppOps::new(&st, &route);
-        let r = super::tools::call(&mut ops, name, args);
-        // the watcher drops the backend's own writes: refresh the UI as for an outside change
-        if !ops.touched.is_empty() {
-            app.emit("notes-changed", json!({ "paths": ops.touched })).ok();
-        }
-        r
+        let emit = |r: Value| { app.emit("agent-write", r).ok(); };
+        with_route(&agent.editors, &emit, |route, release| {
+            let mut ops = AppOps::new(&st, route);
+            ops.release = release;
+            let r = super::tools::call(&mut ops, name, args);
+            // the watcher drops the backend's own writes: refresh the UI as for an outside change
+            if !ops.touched.is_empty() {
+                app.emit("notes-changed", json!({ "paths": ops.touched })).ok();
+            }
+            r
+        })
     }))
 }
 
@@ -122,9 +127,9 @@ pub fn serve(data_dir: &Path, dispatch: Dispatch) -> anyhow::Result<ListenerHand
                 live.fetch_sub(1, Ordering::SeqCst);
                 continue; // dropped: closed
             }
-            let (token, dispatch, done) = (tok.clone(), dispatch.clone(), live.clone());
+            let (token, dispatch, done, stop) = (tok.clone(), dispatch.clone(), live.clone(), stopped.clone());
             // a failed spawn drops the closure (and the connection) instead of panicking
-            if std::thread::Builder::new().spawn(move || { handle(conn, &token, &dispatch).ok(); done.fetch_sub(1, Ordering::SeqCst); }).is_err() {
+            if std::thread::Builder::new().spawn(move || { handle(conn, &token, &dispatch, &stop).ok(); done.fetch_sub(1, Ordering::SeqCst); }).is_err() {
                 live.fetch_sub(1, Ordering::SeqCst);
             }
         }
@@ -155,7 +160,9 @@ fn auth_line(conn: &TcpStream) -> std::io::Result<Vec<u8>> {
     Ok(line)
 }
 
-fn handle(conn: TcpStream, token: &str, dispatch: &Dispatch) -> std::io::Result<()> {
+/// `stop`: this listener was stopped (access turned off, maybe on again with a new token): requests on connections
+/// it authenticated are refused undispatched with the access-off message.
+fn handle(conn: TcpStream, token: &str, dispatch: &Dispatch, stop: &AtomicBool) -> std::io::Result<()> {
     let auth: Value = serde_json::from_slice(&auth_line(&conn)?).unwrap_or_default();
     let mut reader = BufReader::new(conn.try_clone()?);
     let mut out = conn;
@@ -163,11 +170,15 @@ fn handle(conn: TcpStream, token: &str, dispatch: &Dispatch) -> std::io::Result<
         return writeln!(out, "{}", json!({"err": "unauthorized"}));
     }
     writeln!(out, "{}", json!({"ok": true}))?;
-    out.set_read_timeout(None)?; // the client waits as long as it likes between its calls
+    out.set_read_timeout(Some(IDLE_TIMEOUT))?;
     loop {
         let mut line = String::new();
         if (&mut reader).take(MAX_REQUEST).read_line(&mut line)? == 0 {
             return Ok(());
+        }
+        if stop.load(Ordering::SeqCst) {
+            // final, not retryable: a retry would find agent.json gone and could go direct beside the running app
+            return writeln!(out, "{}", json!({"err": super::OFF}));
         }
         let req: Value = serde_json::from_str(&line).unwrap_or_default();
         let name = req.get("name").and_then(Value::as_str).unwrap_or("");
@@ -182,6 +193,38 @@ fn handle(conn: TcpStream, token: &str, dispatch: &Dispatch) -> std::io::Result<
 /// Constant-time comparison, so response timing does not leak the token.
 fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Startup could not start the listener while access is on: an `agent.json` with only this pid tells `velo --mcp`
+/// the app is running (busy, never a second writer). The next listener start overwrites it.
+pub fn mark_running(data_dir: &Path) -> std::io::Result<()> {
+    write_private(&data_dir.join("agent.json"), json!({"pid": std::process::id()}).to_string().as_bytes())
+}
+
+/// Startup with access on: the listener; else the pid-only marker (`mark_running`); else access saved off (`s` too);
+/// else an error, so the app does not run with headless free to write beside it.
+pub fn start_or_fence(data_dir: &Path, settings_path: &Path, s: &mut crate::settings::Settings, start: impl FnOnce() -> anyhow::Result<ListenerHandle>) -> anyhow::Result<Option<ListenerHandle>> {
+    let e = match start() {
+        Ok(l) => return Ok(Some(l)),
+        Err(e) => e,
+    };
+    eprintln!("velo: agent access listener not started: {e}");
+    if mark_running(data_dir).is_ok() {
+        return Ok(None);
+    }
+    s.agent_access = false;
+    crate::settings::save(settings_path, s).map_err(|e2| anyhow::anyhow!("velo can't write to {} (agent access: {e}), nor save {} to turn agent access off ({e2}).", data_dir.display(), settings_path.display()))?;
+    eprintln!("velo: agent access turned off");
+    Ok(None)
+}
+
+/// Normal quit: removes `mark_running`'s marker if it is this process's (a crash leaves it, with a dead pid).
+pub fn unmark_running(data_dir: &Path) {
+    let file = data_dir.join("agent.json");
+    let mine = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).is_some_and(|j| j == json!({"pid": std::process::id()}));
+    if mine {
+        std::fs::remove_file(&file).ok();
+    }
 }
 
 /// Atomic write of a file only the user can read (0600 on unix, set at creation so it is never wider).
@@ -311,6 +354,64 @@ mod tests {
         let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
         assert_eq!(ask(&mut s, json!({"token": a["token"]})).trim(), r#"{"ok":true}"#);
         h.stop();
+    }
+
+    /// After off (and on again), a connection authenticated with the old token gets nothing more dispatched, and an
+    /// authenticated connection that goes idle is closed so it can't hold a slot.
+    #[test] fn old_and_idle_connections_are_closed() {
+        let t = tempfile::tempdir().unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let c2 = calls.clone();
+        let h = serve(t.path(), Arc::new(move |_: &str, _: Value| { c2.fetch_add(1, Ordering::SeqCst); Ok(json!(1)) })).unwrap();
+        let a = info(t.path());
+        let port = a["port"].as_u64().unwrap() as u16;
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        assert_eq!(ask(&mut s, json!({"token": a["token"]})).trim(), r#"{"ok":true}"#);
+        let mut idle = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        assert_eq!(ask(&mut idle, json!({"token": a["token"]})).trim(), r#"{"ok":true}"#);
+        h.stop();
+        assert_eq!(serde_json::from_str::<Value>(&ask(&mut s, json!({"name": "x", "args": {}}))).unwrap(), json!({"err": crate::agent::OFF}));
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "not dispatched");
+        idle.set_read_timeout(Some(IDLE_TIMEOUT * 3)).unwrap();
+        let t0 = Instant::now();
+        let mut l = String::new();
+        assert_eq!(BufReader::new(idle).read_line(&mut l).unwrap_or(0), 0, "closed");
+        assert!(t0.elapsed() < IDLE_TIMEOUT * 2);
+    }
+
+    #[test] fn running_marker_is_removed_on_quit_only_if_ours() {
+        let t = tempfile::tempdir().unwrap();
+        let f = t.path().join("agent.json");
+        mark_running(t.path()).unwrap();
+        unmark_running(t.path());
+        assert!(!f.exists());
+        std::fs::write(&f, json!({"pid": 1}).to_string()).unwrap(); // another instance's
+        unmark_running(t.path());
+        assert!(f.exists());
+        let h = serve(t.path(), echo()).unwrap(); // a live listener's file is stop()'s business
+        unmark_running(t.path());
+        assert!(f.exists());
+        h.stop();
+    }
+
+    /// Startup with access on must leave headless a sign that the app runs (listener file or marker); failing both,
+    /// access is saved off; failing that too, startup fails rather than leave two writers.
+    #[test] fn startup_fences_headless_or_fails() {
+        let t = tempfile::tempdir().unwrap();
+        let sp = t.path().join("settings.json");
+        let mut s = crate::settings::Settings { agent_access: true, ..Default::default() };
+        let l = start_or_fence(t.path(), &sp, &mut s, || serve(t.path(), echo())).unwrap();
+        assert!(l.is_some() && s.agent_access);
+        l.unwrap().stop();
+        // agent.json can't be written (its temp path is a directory): no listener, no marker
+        std::fs::create_dir(t.path().join("agent.json.tmp")).unwrap();
+        assert!(start_or_fence(t.path(), &sp, &mut s, || serve(t.path(), echo())).unwrap().is_none());
+        assert!(!t.path().join("agent.json").exists());
+        assert!(!s.agent_access && !crate::settings::load(&sp).agent_access, "saved off");
+        // settings can't be saved either: fail
+        let mut s = crate::settings::Settings { agent_access: true, ..Default::default() };
+        let e = start_or_fence(t.path(), t.path(), &mut s, || serve(t.path(), echo())).err().unwrap().to_string();
+        assert!(e.contains(&t.path().display().to_string()), "names the folder: {e}");
     }
 
     #[test] fn toggling_access_off_stops_listener_and_removes_file() {

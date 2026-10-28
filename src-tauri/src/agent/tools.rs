@@ -57,13 +57,13 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "add_tags",
-        description: concat!("Add tags to up to 200 notes (`titles`). Each note is its own write; the result lists `changed` (with the new hash), `unchanged` (already has the tag, in front matter or inline) or `failed` with a reason per title. Tags go in the front-matter `tags:` list (or as a #tag line at the end of the note when velo's front-matter setting is off).", conventions!()),
-        input_schema: r#"{"type":"object","properties":{"titles":{"type":"array","items":{"type":"string"},"maxItems":200},"tags":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}},"required":["titles","tags","summary"]}"#,
+        description: concat!("Add up to 50 tags to up to 200 notes (`titles`). Each note is its own write; the result lists `changed` (with the new hash), `unchanged` (already has the tag, in front matter or inline) or `failed` with a reason per title. Tags go in the front-matter `tags:` list (or as a #tag line at the end of the note when velo's front-matter setting is off).", conventions!()),
+        input_schema: r#"{"type":"object","properties":{"titles":{"type":"array","items":{"type":"string"},"maxItems":200},"tags":{"type":"array","items":{"type":"string"},"maxItems":50},"summary":{"type":"string"}},"required":["titles","tags","summary"]}"#,
     },
     ToolSpec {
         name: "remove_tags",
-        description: concat!("Remove tags from up to 200 notes (`titles`): from the front-matter `tags:` list and exact inline #tag words (never inside code or links). Each note is its own write; the result lists `changed` (with the new hash), `unchanged` or `failed` with a reason per title.", conventions!()),
-        input_schema: r#"{"type":"object","properties":{"titles":{"type":"array","items":{"type":"string"},"maxItems":200},"tags":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}},"required":["titles","tags","summary"]}"#,
+        description: concat!("Remove up to 50 tags from up to 200 notes (`titles`): from the front-matter `tags:` list and exact inline #tag words (never inside code or links). Each note is its own write; the result lists `changed` (with the new hash), `unchanged` or `failed` with a reason per title.", conventions!()),
+        input_schema: r#"{"type":"object","properties":{"titles":{"type":"array","items":{"type":"string"},"maxItems":200},"tags":{"type":"array","items":{"type":"string"},"maxItems":50},"summary":{"type":"string"}},"required":["titles","tags","summary"]}"#,
     },
     ToolSpec {
         name: "list_tasks",
@@ -189,9 +189,7 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
                 return Ok(json!({"title": doc.title, "hash": doc.hash}));
             };
             let doc = ops.read(&path).map_err(err)?;
-            let sep = if doc.text.is_empty() || doc.text.ends_with('\n') { "" } else { "\n" };
-            let end = if text.ends_with('\n') { "" } else { "\n" };
-            let hash = ops.write(&path, &format!("{}{sep}{text}{end}", doc.text), &doc.hash, summary).map_err(err)?;
+            let hash = ops.write(&path, &append_line(&doc.text, text), &doc.hash, summary).map_err(err)?;
             Ok(json!({"title": doc.title, "hash": hash}))
         }
         "edit_note" => {
@@ -200,7 +198,9 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
             let doc = ops.read(&path).map_err(err)?;
             let n = occurrences(&doc.text, old);
             if n != 1 {
-                return Err(format!("old_text must occur exactly once in the note; it occurs {n} times. Nothing was changed."));
+                // the note's lines end in CRLF, old_text's in LF: say so, or the agent can't tell why nothing matched
+                let hint = if n == 0 && doc.text.contains("\r\n") && old.contains('\n') && !old.contains("\r\n") { " This note uses CRLF line endings: use \\r\\n in old_text." } else { "" };
+                return Err(format!("old_text must occur exactly once in the note; it occurs {n} times. Nothing was changed.{hint}"));
             }
             let hash = ops.write(&path, &doc.text.replacen(old, new, 1), &doc.hash, summary).map_err(err)?;
             Ok(json!({"title": doc.title, "hash": hash}))
@@ -291,6 +291,17 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
 
 /// Max notes per bulk call.
 const BULK_MAX: usize = 200;
+/// Max distinct tags per bulk call.
+const TAGS_MAX: usize = 50;
+
+/// `text` with `line` added on a line of its own, in the note's line ending (CRLF if it has any).
+fn append_line(text: &str, line: &str) -> String {
+    let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let line = line.replace("\r\n", "\n").replace('\n', eol);
+    let sep = if text.is_empty() || text.ends_with('\n') { "" } else { eol };
+    let end = if line.ends_with('\n') { "" } else { eol };
+    format!("{text}{sep}{line}{end}")
+}
 
 fn bulk_tags(ops: &mut dyn NoteOps, add: bool, a: &Value, summary: &str) -> Result<Value, String> {
     use crate::{frontmatter, index, text};
@@ -298,9 +309,14 @@ fn bulk_tags(ops: &mut dyn NoteOps, add: bool, a: &Value, summary: &str) -> Resu
     if titles.len() > BULK_MAX {
         return Err(format!("too many notes: {} (at most {BULK_MAX} per call). Nothing was changed.", titles.len()));
     }
-    let tags: Vec<String> = strings(a, "tags").iter().map(|t| t.trim().trim_start_matches('#').to_string()).filter(|t| !t.is_empty()).collect();
+    // one spelling per tag (first wins), so every later check is against distinct folded tags
+    let mut seen = std::collections::HashSet::new();
+    let tags: Vec<String> = strings(a, "tags").iter().map(|t| t.trim().trim_start_matches('#').to_string()).filter(|t| !t.is_empty() && seen.insert(text::fold(t))).collect();
     if tags.is_empty() {
         return Err("tags is required".into());
+    }
+    if tags.len() > TAGS_MAX {
+        return Err(format!("too many tags: {} (at most {TAGS_MAX} per call). Nothing was changed.", tags.len()));
     }
     if let Some(t) = tags.iter().find(|t| !t.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '/')) || !t.chars().any(char::is_alphabetic)) {
         return Err(format!("invalid tag: {t}"));
@@ -312,18 +328,14 @@ fn bulk_tags(ops: &mut dyn NoteOps, add: bool, a: &Value, summary: &str) -> Resu
         let doc = ops.read(&path).map_err(err)?;
         let fm = frontmatter::parse(&doc.text);
         let new = if add {
-            let have: Vec<String> = index::all_tags(frontmatter::body(&doc.text), fm.as_ref()).into_iter().map(|(f, _)| f).collect();
-            let mut missing: Vec<String> = vec![];
-            for t in tags.iter().filter(|t| !have.contains(&text::fold(t))) {
-                if !missing.iter().any(|m| text::fold(m) == text::fold(t)) { missing.push(t.clone()); }
-            }
+            let have: std::collections::HashSet<String> = index::all_tags(frontmatter::body(&doc.text), fm.as_ref()).into_iter().map(|(f, _)| f).collect();
+            let missing: Vec<String> = tags.iter().filter(|t| !have.contains(&text::fold(t))).cloned().collect();
             if missing.is_empty() {
                 None
             } else if wfm {
                 frontmatter::set_tags(&doc.text, &missing, &[], true)?
             } else {
-                let sep = if doc.text.is_empty() || doc.text.ends_with('\n') { "" } else { "\n" };
-                Some(format!("{}{sep}{}\n", doc.text, missing.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")))
+                Some(append_line(&doc.text, &missing.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")))
             }
         } else {
             let mut cur = frontmatter::set_tags(&doc.text, &[], &tags, false)?.unwrap_or_else(|| doc.text.clone());
@@ -546,7 +558,7 @@ mod tests {
         assert_eq!(read(&dir, "d.md"), "---\ntags:\n  - 東京\n---\n3)\n");
         let r = call(&mut ops, "add_tags", json!({"titles": ["a", "c", "d"], "tags": ["été"], "summary": "s"})).unwrap();
         assert!(r["results"].as_array().unwrap().iter().all(|x| x["status"] == "changed"), "{r}");
-        assert!(read(&dir, "c.md").ends_with("perché\r\n#été\n")); // front-matter setting off: a #tag line
+        assert!(read(&dir, "c.md").ends_with("perché\r\n#été\r\n")); // front-matter setting off: a #tag line
         let (mut ops, dir) = vault_wfm(&files[2..], true);
         call(&mut ops, "add_tags", json!({"titles": ["c", "d"], "tags": ["été"], "summary": "s"})).unwrap();
         assert!(read(&dir, "c.md").contains("tags: [work, café, été]\r\n"), "{}", read(&dir, "c.md"));
@@ -580,6 +592,27 @@ mod tests {
         assert!(read(&dir, "a.md").ends_with("\n[x](#t)"), "partial removal written");
         assert_eq!(read(&dir, "b.md"), "---\ntags: [t] # c\n---\nx");
         assert_eq!(call(&mut ops, "add_tags", json!({"tags": ["t"], "summary": "s"})), Err("titles is required".to_string()));
+    }
+
+    #[test] fn too_many_tags_rejected() {
+        let (mut ops, dir) = vault(&[("a.md", "one")]);
+        let tags: Vec<String> = (0..51).map(|i| format!("t{i}")).collect();
+        let e = call(&mut ops, "add_tags", json!({"titles": ["a"], "tags": tags, "summary": "t"})).unwrap_err();
+        assert!(e.contains("at most 50"), "{e}");
+        assert_eq!(read(&dir, "a.md"), "one");
+        // repeats count once
+        let r = call(&mut ops, "add_tags", json!({"titles": ["a"], "tags": vec!["x"; 60], "summary": "t"})).unwrap();
+        assert_eq!(r["results"][0]["status"], "changed");
+    }
+
+    #[test] fn crlf_notes_keep_crlf() {
+        let (mut ops, dir) = vault_wfm(&[("a.md", "one\r\ntwo"), ("b.md", "x\r\n")], false);
+        call(&mut ops, "append_to_note", json!({"title": "a", "text": "three\nfour", "summary": "s"})).unwrap();
+        assert_eq!(read(&dir, "a.md"), "one\r\ntwo\r\nthree\r\nfour\r\n");
+        call(&mut ops, "add_tags", json!({"titles": ["b"], "tags": ["t"], "summary": "s"})).unwrap();
+        assert_eq!(read(&dir, "b.md"), "x\r\n#t\r\n");
+        let e = call(&mut ops, "edit_note", json!({"title": "a", "old_text": "one\ntwo", "new_text": "x", "summary": "s"})).unwrap_err();
+        assert!(e.contains("occurs 0 times") && e.contains("CRLF"), "{e}");
     }
 
     #[test] fn bulk_over_200_rejected() {
@@ -639,6 +672,35 @@ mod tests {
         let (mut ops, dir) = task_ops(&[("Daily.md.age", "x")]);
         assert_eq!(call(&mut ops, "add_task", json!({"text": "t", "title": "Daily", "summary": "s"})), Err("not found".to_string()));
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    }
+
+    #[test] fn add_task_goes_to_the_daily_note_when_that_is_the_capture_target() {
+        let dir = tempfile::tempdir().unwrap().keep();
+        let data = tempfile::tempdir().unwrap().keep();
+        std::fs::write(data.join("settings.json"), r#"{"capture_target": "daily"}"#).unwrap();
+        let mut ops = DirectOps::open(dir.clone(), &data.join("i.sqlite"), data.join("settings.json")).unwrap();
+        let today = crate::tasks::local_today();
+        let r = call(&mut ops, "add_task", json!({"text": "call Bob", "summary": "s"})).unwrap();
+        assert_eq!(r["title"], today.as_str());
+        assert!(read(&dir, &format!("{today}.md")).ends_with("- [ ] call Bob\n"));
+        // an explicit title still wins
+        call(&mut ops, "add_task", json!({"text": "x", "title": "Inbox", "summary": "s"})).unwrap();
+        assert!(dir.join("Inbox.md").exists());
+    }
+
+    #[test] fn list_tasks_filters_by_query_tags_and_done() {
+        let today = crate::tasks::local_today();
+        let a = format!("#work\n- [ ] alpha 📅 2000-01-01\n- [x] shipped ✅ {today}\n- [ ] gamma\n");
+        let (mut ops, _) = task_ops(&[("a.md", a.as_str()), ("b.md", "- [ ] beta\n- [ ] alphabet soup\n")]);
+        let texts = |v: &Value, g: &str| v[g].as_array().unwrap().iter().map(|t| t["text"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        let all = call(&mut ops, "list_tasks", json!({})).unwrap();
+        assert_eq!((texts(&all, "overdue"), texts(&all, "done").len(), all["due_count"].as_u64()), (vec!["alpha".to_string()], 0, Some(1)));
+        let q = call(&mut ops, "list_tasks", json!({"query": "alpha"})).unwrap();
+        assert_eq!((texts(&q, "overdue"), texts(&q, "no_date")), (vec!["alpha".to_string()], vec!["alphabet soup".to_string()]));
+        let t = call(&mut ops, "list_tasks", json!({"tags": ["WORK"]})).unwrap();
+        assert_eq!((texts(&t, "overdue"), texts(&t, "no_date")), (vec!["alpha".to_string()], vec!["gamma".to_string()]));
+        let d = call(&mut ops, "list_tasks", json!({"tags": ["work"], "show_done": true})).unwrap();
+        assert_eq!(texts(&d, "done"), ["shipped"]);
     }
 
     #[test] fn add_task_rejects_empty_text_and_title() {
@@ -805,7 +867,7 @@ mod fix_tests {
         let (mut ops, dir) = vault(&[("X.md", "the secret plan #hush #shared\n- [ ] secret task\nsee [[A]]\n"), ("A.md", "a #shared\n")]);
         call(&mut ops, "list_tags", json!({})).unwrap();
         std::fs::write(dir.join("X.md.age"), "ciphertext").unwrap();
-        ops.rescan();
+        ops.rescan().unwrap();
         for name in ["read_note", "move_to_trash", "set_task_done", "edit_note", "replace_note"] {
             let args = json!({"title": "X", "summary": "s", "line": 1, "line_text": "- [ ] secret task", "done": true, "old_text": "plan", "new_text": "p", "text": "t", "expected_hash": "h"});
             assert_eq!(call(&mut ops, name, args), Err("not found".to_string()), "{name}");
@@ -819,6 +881,16 @@ mod fix_tests {
         assert_eq!(call(&mut ops, "list_tasks", json!({})).unwrap()["no_date"], json!([]));
         assert_eq!(call(&mut ops, "read_note", json!({"title": "A"})).unwrap()["backlinks"], json!([]));
         assert_eq!(read(&dir, "X.md"), "the secret plan #hush #shared\n- [ ] secret task\nsee [[A]]\n");
+    }
+
+    /// A deleted source the index still lists must not abort the rename (it has nothing to rewrite).
+    #[test] fn rename_skips_a_stale_backlink() {
+        let (mut ops, dir) = vault(&[("P.md", "p\n"), ("A.md", "see [[P]]\n"), ("Gone.md", "see [[P]]\n")]);
+        std::fs::remove_file(dir.join("Gone.md")).unwrap(); // no rescan: still indexed
+        let r = call(&mut ops, "rename_note", json!({"title": "P", "new_title": "Q", "rewrite_links": true, "summary": "s"})).unwrap();
+        assert_eq!(r["title"], "Q");
+        assert_eq!(read(&dir, "A.md"), "see [[Q]]\n");
+        assert!(!dir.join("Gone.md").exists());
     }
 
     #[test] fn rename_leaves_locked_twin_alone() {
@@ -836,6 +908,17 @@ mod fix_tests {
         assert_eq!(read(&dir, "A.md"), "read [the #work notes](http://x) and [[Plan #work]]\n\n    code #work here\n");
         assert_eq!(r["results"][1]["status"], "changed");
         assert!(read(&dir, "B.md").ends_with("---\nSome paragraph\n"));
+    }
+
+    /// A tags row with a quote never closed is never rewritten: add_tags fails the note the same way each time.
+    #[test] fn add_tags_leaves_an_unparsable_row_alone() {
+        let t = "---\ntags: ['90s music, retro]\n---\nx\n";
+        let (mut ops, dir) = vault(&[("a.md", t)]);
+        for _ in 0..2 {
+            let r = call(&mut ops, "add_tags", json!({"titles": ["a"], "tags": ["zz"], "summary": "s"})).unwrap();
+            assert_eq!((r["results"][0]["status"].as_str(), r["results"][0]["reason"].as_str()), (Some("failed"), Some("unsupported tags: layout")));
+            assert_eq!(read(&dir, "a.md"), t);
+        }
     }
 
     #[test] fn bulk_tag_results_carry_the_new_hash() {

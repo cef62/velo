@@ -241,6 +241,17 @@ export class Controller {
   // note), and a load waits for backend writes in flight (else its reply holds pre-write text and hash).
   protected readonly pendingLoads = new Set<Promise<unknown>>();
   protected readonly pendingWrites = new Set<Promise<unknown>>();
+  /**
+   * Flush the open note, wait for backend writes in flight, then `open`; null when the flush failed. Tracked in
+   * `pendingLoads` from the flush on, so an agent write deciding "not open" waits for the note this ends up showing.
+   */
+  protected loading<T>(open: () => Promise<T>): Promise<T | null> {
+    return this.track(this.pendingLoads, (async () => {
+      if (!(await this.editor.flush())) return null;
+      while (this.pendingWrites.size) await Promise.allSettled([...this.pendingWrites]);
+      return open();
+    })());
+  }
   protected track<T>(set: Set<Promise<unknown>>, p: Promise<T>): Promise<T> {
     set.add(p);
     const done = () => set.delete(p);
@@ -423,9 +434,8 @@ export class Controller {
     }
     const current = this.newShow();
     try {
-      if (!(await this.editor.flush())) return false;
-      while (this.pendingWrites.size) await Promise.allSettled([...this.pendingWrites]);
-      const doc = await this.track(this.pendingLoads, this.api.openNote(path));
+      const doc = await this.loading(() => this.api.openNote(path));
+      if (!doc) return false;
       if (!current()) return true;
       if (!this.editor.load(doc)) return false;
       this.loadedDoc(doc);
@@ -584,12 +594,11 @@ export class Controller {
     }
     const current = this.newShow(); // a pending auto-show must not replace this note when its reply lands later
     try {
-      if (!(await this.editor.flush())) return false;
       // The title cache is the "existed before" signal (open_or_create returns a plain NoteDoc). A stale cache only
       // mislabels an empty/external note, which the empty-body rule below still opens in edit mode.
-      const created = !this.titles.has(fold(title));
-      while (this.pendingWrites.size) await Promise.allSettled([...this.pendingWrites]);
-      const doc = await this.track(this.pendingLoads, this.api.openOrCreate(title));
+      let created = false;
+      const doc = await this.loading(() => ((created = !this.titles.has(fold(title))), this.api.openOrCreate(title)));
+      if (!doc) return false;
       if (!current()) return true;
       if (!this.editor.load(doc)) return false;
       this.loadedDoc(doc);
@@ -1178,8 +1187,14 @@ export class Controller {
     }
   }
 
-  async copyAgentSetup() {
-    try { await this.ui.copyText(await this.api.agentSetupCommand()); } catch (e) { this.setErr(errText(e)); }
+  /** The result is shown in the Settings dialog, which covers the error banner. */
+  async copyAgentSetup(): Promise<string> {
+    try {
+      await this.ui.copyText(await this.api.agentSetupCommand());
+      return "Copied";
+    } catch (e) {
+      return errText(e);
+    }
   }
 
   /** Save, freeze the editor, then install; the backend relaunches velo. On failure the editor comes back. */
@@ -1313,6 +1328,13 @@ export class Controller {
 
   protected async agentWrite(req: AgentWrite): Promise<AgentReply | null> {
     if (req.kind === "renamed") return this.agentRenamed(req.path, req.to ?? null);
+    if (req.kind === "trash-failed") {
+      this.setErr(`The agent couldn't move “${req.title ?? req.path}” to the Trash: ${req.error ?? "unknown error"}`); // the note left the editor but is still there
+      return "ok";
+    }
+    // a load in flight decides which note ends up open: a not-open answered before it lands would let the backend
+    // write behind the editor that then shows the old text
+    while (this.pendingLoads.size) await Promise.allSettled([...this.pendingLoads]);
     if (req.kind === "flush") {
       // a rename is about to rewrite links in these notes: the open one must be saved first
       if (!req.paths?.includes(this.editor.currentPath() ?? "")) return "not-open";
@@ -1351,11 +1373,16 @@ export class Controller {
     let bad = check();
     if (bad) return bad;
     if (!(await this.api.agentWriteClaim(req.id))) return null; // timed out: the agent was told velo is busy
-    await this.api.snapshotAgent(req.path, req.summary ?? "");
-    if ((bad = check())) return bad;
+    const snap = await this.api.snapshotAgent(req.path, req.summary ?? "");
+    // not applied after all (a keystroke landed during the snapshot): its revision would record a write that never happened
+    const unapplied = async (r: AgentReply) => {
+      if (snap) await this.api.dropAgentSnapshot(req.path, snap).catch((e) => console.warn("dropping the agent snapshot failed:", e));
+      return r;
+    };
+    if ((bad = check())) return unapplied(bad);
     const insert = req.insert ?? "";
     const ok = req.kind === "append" ? this.editor.appendLine(insert) : this.editor.applyChange(changedSpan(this.editor.getText(), insert));
-    if (!ok) return "refused";
+    if (!ok) return unapplied("refused");
     // applied: from here no failure may invite a retry, which would apply it twice
     try {
       if (!(await this.editor.flush())) return "unsaved"; // the edit stays in the editor; its save error or conflict banner shows

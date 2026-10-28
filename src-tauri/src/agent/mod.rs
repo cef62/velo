@@ -20,7 +20,11 @@ pub fn run_headless() -> i32 {
         eprintln!("velo --mcp is not supported on Windows yet");
         return 1;
     }
-    match server::run_stdio(gate(paths::config_dir().join("settings.json"), paths::data_dir())) {
+    let (Some(config), Some(data)) = (paths::config_dir(), paths::data_dir()) else {
+        eprintln!("velo --mcp: no home directory (set HOME)");
+        return 1;
+    };
+    match server::run_stdio(gate(config.join("settings.json"), data)) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("velo --mcp: {e}");
@@ -37,6 +41,7 @@ fn gate(settings_path: PathBuf, data_dir: PathBuf) -> impl Fn(&str, Value) -> Re
     move |name, args| {
         let s = crate::settings::load(&settings_path);
         if !s.agent_access {
+            *ops.lock().unwrap_or_else(|e| e.into_inner()) = None; // nothing may stay open while access is off
             return Err(OFF.into());
         }
         if !tools::TOOL_SPECS.iter().any(|t| t.name == name) {
@@ -45,6 +50,12 @@ fn gate(settings_path: PathBuf, data_dir: PathBuf) -> impl Fn(&str, Value) -> Re
         if let Some(r) = client::forward(&data_dir, name, &args) {
             *ops.lock().unwrap_or_else(|e| e.into_inner()) = None; // the app owns the index while it runs
             return r;
+        }
+        // the app may have quit, or access gone off, since the check above: read the switch again before writing
+        let s = crate::settings::load(&settings_path);
+        if !s.agent_access {
+            *ops.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            return Err(OFF.into());
         }
         let dir = s.notes_dir.ok_or("No notes folder set in velo")?;
         let mut ops = ops.lock().unwrap_or_else(|e| e.into_inner());
@@ -56,7 +67,9 @@ fn gate(settings_path: PathBuf, data_dir: PathBuf) -> impl Fn(&str, Value) -> Re
             *ops = Some(DirectOps::open(dir, &db, settings_path.clone()).map_err(|e| e.to_string())?);
         }
         let ops = ops.as_mut().expect("opened above");
-        ops.rescan();
+        if let Err(e) = ops.rescan() {
+            eprintln!("velo --mcp: rescan of the notes folder failed: {e}"); // the call goes on with the index as it is
+        }
         tools::call(ops, name, args)
     }
 }
@@ -66,10 +79,17 @@ fn gate(settings_path: PathBuf, data_dir: PathBuf) -> impl Fn(&str, Value) -> Re
 mod tests {
     use super::*;
 
-    #[cfg(target_os = "macos")]
     #[test] fn paths_match_tauri() {
-        assert!(paths::data_dir().ends_with("Library/Application Support/dev.velo.app"));
-        assert_eq!(paths::config_dir(), paths::data_dir());
+        let (data, config) = (paths::data_dir().unwrap(), paths::config_dir().unwrap());
+        assert!(data.is_absolute() && data.ends_with("dev.velo.app") && config.ends_with("dev.velo.app"));
+        #[cfg(target_os = "macos")]
+        {
+            assert!(data.ends_with("Library/Application Support/dev.velo.app"));
+            assert_eq!(config, data);
+        }
+        // Linux: the XDG rules are the `dirs` crate's, the same calls Tauri's path resolver makes
+        #[cfg(target_os = "linux")]
+        assert_eq!((data.parent(), config.parent()), (dirs::data_dir().as_deref(), dirs::config_dir().as_deref()));
     }
 
     #[test] fn headless_refuses_when_off() {
@@ -167,6 +187,63 @@ mod tests {
         assert_eq!(call("list_tags", serde_json::json!({})), Err(OFF.to_string()));
     }
 
+    /// The direct vault (and its SQLite handle) closes once access is off, and while the app owns the vault. SQLite
+    /// removes the `-wal` file when its last connection closes, which makes the handle visible here.
+    #[test] fn direct_vault_closes_when_off_or_forwarding() {
+        let (_t, p, data, _n) = setup(true);
+        let call = gate(p.clone(), data.clone());
+        let wal = || std::fs::read_dir(&data).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().ends_with("-wal"));
+        call("list_tags", serde_json::json!({})).unwrap();
+        assert!(wal(), "open");
+        std::fs::write(&p, r#"{"agent_access":false}"#).unwrap();
+        assert_eq!(call("list_tags", serde_json::json!({})), Err(OFF.to_string()));
+        assert!(!wal(), "closed when off");
+        let (_t, p, data, _n) = setup(true);
+        let call = gate(p, data.clone());
+        call("list_tags", serde_json::json!({})).unwrap();
+        fake_app(&data, std::process::id(), true);
+        call("list_tags", serde_json::json!({})).unwrap();
+        assert!(!std::fs::read_dir(&data).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().ends_with("-wal")), "closed while forwarding");
+    }
+
+    /// Access turned off while a request is in flight: the app's stopped listener refuses it, settings say off and
+    /// agent.json is gone. The request was sent, so it must never be resent nor go direct beside the running app.
+    #[test] fn off_mid_request_never_goes_direct() {
+        use std::io::{BufRead, BufReader, Write};
+        let (_t, p, data, notes) = setup(true); std::fs::write(notes.join("a.md"), "x").unwrap();
+        std::fs::create_dir_all(&data).unwrap();
+        let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        std::fs::write(data.join("agent.json"), serde_json::json!({"port": l.local_addr().unwrap().port(), "token": "tok", "pid": std::process::id()}).to_string()).unwrap();
+        let (p2, d2) = (p.clone(), data.clone());
+        std::thread::spawn(move || for c in l.incoming().flatten() {
+            let (mut r, mut line) = (BufReader::new(c.try_clone().unwrap()), String::new());
+            r.read_line(&mut line).unwrap(); writeln!(&c, r#"{{"ok":true}}"#).unwrap(); line.clear();
+            r.read_line(&mut line).unwrap();
+            std::fs::write(&p2, r#"{"agent_access":false}"#).unwrap(); // set_settings saves off
+            std::fs::remove_file(d2.join("agent.json")).ok(); // stop() deletes agent.json
+            writeln!(&c, r#"{{"err":"unauthorized"}}"#).unwrap(); // an older app's stopped handler
+        });
+        let r = gate(p, data)("append_to_note", serde_json::json!({"title": "a", "text": "y", "summary": "s"}));
+        assert!(r.is_err(), "{r:?}");
+        assert_eq!(std::fs::read_to_string(notes.join("a.md")).unwrap(), "x");
+    }
+    /// Access turned off and the app's agent.json removed while headless retries the connection: settings are read
+    /// again before going direct.
+    #[test] fn off_while_retrying_is_refused_not_direct() {
+        let (_t, p, data, notes) = setup(true); std::fs::write(notes.join("a.md"), "x").unwrap();
+        fake_app(&data, std::process::id(), false); // pid alive, port closed: forward retries
+        let (p2, d2) = (p.clone(), data.clone());
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            std::fs::write(&p2, r#"{"agent_access":false}"#).unwrap();
+            std::fs::remove_file(d2.join("agent.json")).unwrap();
+        });
+        let r = gate(p, data)("append_to_note", serde_json::json!({"title": "a", "text": "y", "summary": "s"}));
+        t.join().unwrap();
+        assert_eq!(r, Err(OFF.to_string()));
+        assert_eq!(std::fs::read_to_string(notes.join("a.md")).unwrap(), "x");
+    }
+
     const NO_ANSWER: &str = "velo did not answer; the change may have been applied — read the note before retrying";
     #[test] fn no_reply_after_send_is_not_retried_nor_direct() {
         use std::io::{BufRead, BufReader, Write};
@@ -185,6 +262,18 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(300));
         assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert_eq!(std::fs::read_to_string(notes.join("a.md")).unwrap(), "x");
+    }
+    /// The app runs with access on but its listener failed to start: it leaves a pid-only marker, so headless never
+    /// writes beside it; once that pid is gone the marker is stale and headless goes direct.
+    #[test] fn app_without_listener_is_busy_not_direct() {
+        let (_t, p, data, notes) = setup(true); std::fs::write(notes.join("a.md"), "x").unwrap();
+        std::fs::create_dir_all(&data).unwrap();
+        listener::mark_running(&data).unwrap();
+        let call = gate(p, data.clone());
+        assert_eq!(call("append_to_note", serde_json::json!({"title": "a", "text": "y", "summary": "s"})), Err("velo is busy, retry".to_string()));
+        assert_eq!(std::fs::read_to_string(notes.join("a.md")).unwrap(), "x");
+        std::fs::write(data.join("agent.json"), serde_json::json!({"pid": dead_pid()}).to_string()).unwrap();
+        assert!(call("append_to_note", serde_json::json!({"title": "a", "text": "y", "summary": "s"})).is_ok());
     }
     #[test] fn broken_agent_json_is_busy_not_direct() {
         for bad in ["not json", "{}", r#"{"port":1,"token":"t"}"#, r#"{"port":1,"token":"t","pid":0}"#, r#"{"port":1,"token":"t","pid":4294967295}"#, r#"{"token":"t","pid":1}"#] {
