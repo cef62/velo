@@ -20,7 +20,11 @@ pub fn run_headless() -> i32 {
         eprintln!("velo --mcp is not supported on Windows yet");
         return 1;
     }
-    match server::run_stdio(gate(paths::config_dir().join("settings.json"), paths::data_dir())) {
+    let (Some(config), Some(data)) = (paths::config_dir(), paths::data_dir()) else {
+        eprintln!("velo --mcp: no home directory (set HOME)");
+        return 1;
+    };
+    match server::run_stdio(gate(config.join("settings.json"), data)) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("velo --mcp: {e}");
@@ -66,10 +70,17 @@ fn gate(settings_path: PathBuf, data_dir: PathBuf) -> impl Fn(&str, Value) -> Re
 mod tests {
     use super::*;
 
-    #[cfg(target_os = "macos")]
     #[test] fn paths_match_tauri() {
-        assert!(paths::data_dir().ends_with("Library/Application Support/dev.velo.app"));
-        assert_eq!(paths::config_dir(), paths::data_dir());
+        let (data, config) = (paths::data_dir().unwrap(), paths::config_dir().unwrap());
+        assert!(data.is_absolute() && data.ends_with("dev.velo.app") && config.ends_with("dev.velo.app"));
+        #[cfg(target_os = "macos")]
+        {
+            assert!(data.ends_with("Library/Application Support/dev.velo.app"));
+            assert_eq!(config, data);
+        }
+        // Linux: the XDG rules are the `dirs` crate's, the same calls Tauri's path resolver makes
+        #[cfg(target_os = "linux")]
+        assert_eq!((data.parent(), config.parent()), (dirs::data_dir().as_deref(), dirs::config_dir().as_deref()));
     }
 
     #[test] fn headless_refuses_when_off() {
