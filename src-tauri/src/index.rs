@@ -181,8 +181,21 @@ impl Index {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Group the following upserts/removes into one transaction until `commit`: one WAL append per batch, not
+    /// per note. Each note keeps its own savepoint, so a failing note rolls back alone.
+    pub fn begin(&self) -> anyhow::Result<()> {
+        Ok(self.db.execute_batch("BEGIN")?)
+    }
+
+    /// Commit a `begin` batch; on failure roll it back so the connection is usable (the next diff reindexes it).
+    pub fn commit(&self) -> anyhow::Result<()> {
+        self.db.execute_batch("COMMIT").inspect_err(|_| _ = self.db.execute_batch("ROLLBACK"))?;
+        Ok(())
+    }
+
     pub fn upsert(&mut self, path: &str, nf: &NoteFile, meta: &Meta, body: Option<&str>) -> anyhow::Result<()> {
-        let tx = self.db.transaction()?;
+        // A savepoint is its own transaction outside `begin`, and nests inside one.
+        let tx = self.db.savepoint()?;
         for sql in DELETES {
             tx.execute(sql, [path])?;
         }
@@ -222,7 +235,7 @@ impl Index {
     }
 
     pub fn remove(&mut self, path: &str) -> anyhow::Result<()> {
-        let tx = self.db.transaction()?;
+        let tx = self.db.savepoint()?;
         for sql in DELETES {
             tx.execute(sql, [path])?;
         }
@@ -637,5 +650,41 @@ mod tests {
         i.upsert("e.md.age", &NoteFile { title: "e".into(), encrypted: true }, &Meta { mtime: 5, size: 1, birth: 0 }, Some(FM)).unwrap();
         assert_eq!(row(&i, "e.md.age"), (5, "file".into(), 5, "file".into()));
         assert!(i.titles().unwrap().iter().all(|t| t != "Nick"));
+    }
+    fn dump(i: &Index) -> Vec<String> {
+        let q = ["SELECT rowid,* FROM notes", "SELECT rowid,path,body FROM notes_fts", "SELECT * FROM links", "SELECT * FROM tags", "SELECT * FROM aliases", "SELECT * FROM tasks"];
+        q.iter().flat_map(|sql| {
+            let mut st = i.db.prepare(&format!("{sql} ORDER BY 1,2")).unwrap();
+            let n = st.column_count();
+            st.query_map([], |r| Ok((0..n).map(|c| format!("{:?}", r.get_ref(c).unwrap())).collect::<Vec<_>>().join("|"))).unwrap().map(|r| r.unwrap()).collect::<Vec<_>>()
+        }).collect()
+    }
+    const NOTES: [(&str, &str, i64); 4] = [("a.md", "see [[B]] #t\n- [ ] do @due(2026-01-02)", 1), ("B.md", FM, 2), ("c.md", "zebra [[a]]", 3), ("gone.md", "x", 4)];
+    #[test] fn batched_build_matches_per_note() {
+        let mut one = idx(&NOTES);
+        one.remove("gone.md").unwrap();
+        let mut batch = idx(&[]);
+        batch.begin().unwrap();
+        for (p, body, m) in NOTES {
+            let nf = NoteFile { title: p.trim_end_matches(".md").into(), encrypted: false };
+            batch.upsert(p, &nf, &Meta { mtime: m, size: body.len() as u64, birth: 0 }, Some(body)).unwrap();
+        }
+        batch.remove("gone.md").unwrap();
+        batch.commit().unwrap();
+        assert!(dump(&one).len() > 8);
+        assert_eq!(dump(&one), dump(&batch));
+    }
+    #[test] fn failing_note_in_batch_rolls_back_alone() {
+        let mut i = idx(&[("bad.md", "old zebra", 1)]);
+        i.db.execute_batch("CREATE TEMP TRIGGER boom BEFORE INSERT ON notes WHEN NEW.path='bad.md' AND NEW.mtime=2 BEGIN SELECT RAISE(ABORT,'boom'); END;").unwrap();
+        i.begin().unwrap();
+        let nf = |t: &str| NoteFile { title: t.into(), encrypted: false };
+        i.upsert("a.md", &nf("a"), &Meta { mtime: 1, size: 1, birth: 0 }, Some("alpha")).unwrap();
+        assert!(i.upsert("bad.md", &nf("bad"), &Meta { mtime: 2, size: 1, birth: 0 }, Some("new")).is_err());
+        i.upsert("c.md", &nf("c"), &Meta { mtime: 3, size: 1, birth: 0 }, Some("gamma")).unwrap();
+        i.commit().unwrap();
+        let k = i.known().unwrap();
+        assert_eq!((k.len(), k["bad.md"].mtime), (3, 1)); // bad.md keeps its old row
+        assert_eq!(paths(&i, "zebra", Sort::Title, 0, 10, &HashMap::new()), vec!["bad.md"]);
     }
 }
