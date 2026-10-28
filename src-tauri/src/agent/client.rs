@@ -80,7 +80,8 @@ fn attempt(port: u16, token: &Value, name: &str, args: &Value) -> Sent {
         return Sent::Reply(Ok(ok.take()));
     }
     match reply.get("err").and_then(Value::as_str) {
-        Some("unauthorized") => Sent::No, // rejected before dispatch; stale file from another run
+        // the request went out: never resend it nor go direct (a stopped listener means access went off)
+        Some("unauthorized") => Sent::Reply(Err(BUSY.into())),
         Some(e) => Sent::Reply(Err(e.into())),
         None => Sent::Reply(Err(NO_ANSWER.into())),
     }

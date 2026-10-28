@@ -51,6 +51,12 @@ fn gate(settings_path: PathBuf, data_dir: PathBuf) -> impl Fn(&str, Value) -> Re
             *ops.lock().unwrap_or_else(|e| e.into_inner()) = None; // the app owns the index while it runs
             return r;
         }
+        // the app may have quit, or access gone off, since the check above: read the switch again before writing
+        let s = crate::settings::load(&settings_path);
+        if !s.agent_access {
+            *ops.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            return Err(OFF.into());
+        }
         let dir = s.notes_dir.ok_or("No notes folder set in velo")?;
         let mut ops = ops.lock().unwrap_or_else(|e| e.into_inner());
         if ops.as_ref().is_none_or(|o| o.dir() != dir) {
@@ -198,6 +204,44 @@ mod tests {
         fake_app(&data, std::process::id(), true);
         call("list_tags", serde_json::json!({})).unwrap();
         assert!(!std::fs::read_dir(&data).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().ends_with("-wal")), "closed while forwarding");
+    }
+
+    /// Access turned off while a request is in flight: the app's stopped listener refuses it, settings say off and
+    /// agent.json is gone. The request was sent, so it must never be resent nor go direct beside the running app.
+    #[test] fn off_mid_request_never_goes_direct() {
+        use std::io::{BufRead, BufReader, Write};
+        let (_t, p, data, notes) = setup(true); std::fs::write(notes.join("a.md"), "x").unwrap();
+        std::fs::create_dir_all(&data).unwrap();
+        let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        std::fs::write(data.join("agent.json"), serde_json::json!({"port": l.local_addr().unwrap().port(), "token": "tok", "pid": std::process::id()}).to_string()).unwrap();
+        let (p2, d2) = (p.clone(), data.clone());
+        std::thread::spawn(move || for c in l.incoming().flatten() {
+            let (mut r, mut line) = (BufReader::new(c.try_clone().unwrap()), String::new());
+            r.read_line(&mut line).unwrap(); writeln!(&c, r#"{{"ok":true}}"#).unwrap(); line.clear();
+            r.read_line(&mut line).unwrap();
+            std::fs::write(&p2, r#"{"agent_access":false}"#).unwrap(); // set_settings saves off
+            std::fs::remove_file(d2.join("agent.json")).ok(); // stop() deletes agent.json
+            writeln!(&c, r#"{{"err":"unauthorized"}}"#).unwrap(); // an older app's stopped handler
+        });
+        let r = gate(p, data)("append_to_note", serde_json::json!({"title": "a", "text": "y", "summary": "s"}));
+        assert!(r.is_err(), "{r:?}");
+        assert_eq!(std::fs::read_to_string(notes.join("a.md")).unwrap(), "x");
+    }
+    /// Access turned off and the app's agent.json removed while headless retries the connection: settings are read
+    /// again before going direct.
+    #[test] fn off_while_retrying_is_refused_not_direct() {
+        let (_t, p, data, notes) = setup(true); std::fs::write(notes.join("a.md"), "x").unwrap();
+        fake_app(&data, std::process::id(), false); // pid alive, port closed: forward retries
+        let (p2, d2) = (p.clone(), data.clone());
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            std::fs::write(&p2, r#"{"agent_access":false}"#).unwrap();
+            std::fs::remove_file(d2.join("agent.json")).unwrap();
+        });
+        let r = gate(p, data)("append_to_note", serde_json::json!({"title": "a", "text": "y", "summary": "s"}));
+        t.join().unwrap();
+        assert_eq!(r, Err(OFF.to_string()));
+        assert_eq!(std::fs::read_to_string(notes.join("a.md")).unwrap(), "x");
     }
 
     const NO_ANSWER: &str = "velo did not answer; the change may have been applied — read the note before retrying";

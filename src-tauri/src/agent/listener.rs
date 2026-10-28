@@ -167,7 +167,7 @@ fn auth_line(conn: &TcpStream) -> std::io::Result<Vec<u8>> {
 }
 
 /// `stop`: this listener was stopped (access turned off, maybe on again with a new token): requests on connections
-/// it authenticated are refused undispatched, so the client retries with the current `agent.json`.
+/// it authenticated are refused undispatched with the access-off message.
 fn handle(conn: TcpStream, token: &str, dispatch: &Dispatch, stop: &AtomicBool) -> std::io::Result<()> {
     let auth: Value = serde_json::from_slice(&auth_line(&conn)?).unwrap_or_default();
     let mut reader = BufReader::new(conn.try_clone()?);
@@ -183,7 +183,8 @@ fn handle(conn: TcpStream, token: &str, dispatch: &Dispatch, stop: &AtomicBool) 
             return Ok(());
         }
         if stop.load(Ordering::SeqCst) {
-            return writeln!(out, "{}", json!({"err": "unauthorized"}));
+            // final, not retryable: a retry would find agent.json gone and could go direct beside the running app
+            return writeln!(out, "{}", json!({"err": super::OFF}));
         }
         let req: Value = serde_json::from_str(&line).unwrap_or_default();
         let name = req.get("name").and_then(Value::as_str).unwrap_or("");
@@ -349,7 +350,7 @@ mod tests {
         let mut idle = TcpStream::connect(("127.0.0.1", port)).unwrap();
         assert_eq!(ask(&mut idle, json!({"token": a["token"]})).trim(), r#"{"ok":true}"#);
         h.stop();
-        assert_eq!(ask(&mut s, json!({"name": "x", "args": {}})).trim(), r#"{"err":"unauthorized"}"#);
+        assert_eq!(serde_json::from_str::<Value>(&ask(&mut s, json!({"name": "x", "args": {}}))).unwrap(), json!({"err": crate::agent::OFF}));
         assert_eq!(calls.load(Ordering::SeqCst), 0, "not dispatched");
         idle.set_read_timeout(Some(IDLE_TIMEOUT * 3)).unwrap();
         let t0 = Instant::now();
