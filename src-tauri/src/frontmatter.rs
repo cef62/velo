@@ -506,7 +506,7 @@ mod tests {
         let tags = |t: &str| parse(&format!("---\ntags: {t}\n---\n")).unwrap().tags;
         assert_eq!(tags("'don''t'"), ["don't"]);
         assert_eq!(tags("['it''s', \"a\\\", b\", c]"), ["it's", "a\", b", "c"]);
-        for v in ["say \"hi\", it's", "a\\b, c", "x, y"] {
+        for v in ["say \"hi\", it's", "a\\b, c", "x, y", "x\\\\y, z", "a, b\\"] {
             let t = format!("---\nTags:\n  - {v}\ntags: [a]\n---\n");
             let out = set_tags(&t, &["zz".into()], &[], true).unwrap().unwrap();
             assert_eq!(parse(&out).unwrap().tags[0], v, "{out}");
