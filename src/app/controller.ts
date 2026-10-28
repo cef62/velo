@@ -1350,11 +1350,16 @@ export class Controller {
     let bad = check();
     if (bad) return bad;
     if (!(await this.api.agentWriteClaim(req.id))) return null; // timed out: the agent was told velo is busy
-    await this.api.snapshotAgent(req.path, req.summary ?? "");
-    if ((bad = check())) return bad;
+    const snap = await this.api.snapshotAgent(req.path, req.summary ?? "");
+    // not applied after all (a keystroke landed during the snapshot): its revision would record a write that never happened
+    const unapplied = async (r: AgentReply) => {
+      if (snap) await this.api.dropAgentSnapshot(req.path, snap).catch((e) => console.warn("dropping the agent snapshot failed:", e));
+      return r;
+    };
+    if ((bad = check())) return unapplied(bad);
     const insert = req.insert ?? "";
     const ok = req.kind === "append" ? this.editor.appendLine(insert) : this.editor.applyChange(changedSpan(this.editor.getText(), insert));
-    if (!ok) return "refused";
+    if (!ok) return unapplied("refused");
     // applied: from here no failure may invite a retry, which would apply it twice
     try {
       if (!(await this.editor.flush())) return "unsaved"; // the edit stays in the editor; its save error or conflict banner shows

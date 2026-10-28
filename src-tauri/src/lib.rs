@@ -129,6 +129,7 @@ pub fn run() {
             commands::lock_all,
             commands::delete_note,
             commands::snapshot_agent,
+            commands::drop_agent_snapshot,
             commands::agent_write_claim,
             commands::agent_write_done,
             commands::list_revisions,

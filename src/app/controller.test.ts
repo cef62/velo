@@ -1165,7 +1165,7 @@ test("agent write to the open note goes through the editor and replies with the 
   const { c, api, editor } = setup({ A: "hello world" });
   await c.show(P("A"));
   const atSnapshot: string[] = [];
-  api.snapshotAgent.mockImplementation(async () => void atSnapshot.push(editor.text));
+  api.snapshotAgent.mockImplementation(async () => (atSnapshot.push(editor.text), "1.md"));
   await c.onAgentWrite({ id: 7, path: P("A"), kind: "replace", insert: "hello there world", base: "h", summary: "s" });
   expect(editor.changes).toEqual([{ from: 6, to: 6, insert: "there " }]); // only the changed span: a small undo step
   expect(editor.text).toBe("hello there world");
@@ -1173,6 +1173,7 @@ test("agent write to the open note goes through the editor and replies with the 
   expect(atSnapshot).toEqual(["hello world"]); // snapshot of the text before the change
   expect(editor.flush).toHaveBeenCalled();
   expect(api.agentWriteDone).toHaveBeenCalledWith(7, { hash: "h" });
+  expect(api.dropAgentSnapshot).not.toHaveBeenCalled(); // applied: its revision stays
 });
 
 test("agent append to the open note uses appendLine", async () => {
@@ -1213,6 +1214,15 @@ test("an agent write waits for a note load in flight before saying not-open", as
   await write;
   expect(api.agentWriteDone).toHaveBeenCalledWith(5, { hash: "h" }); // applied in the editor, not written behind it
   expect(editor.appended).toEqual(["- [ ] x"]);
+});
+
+test("a keystroke during the agent snapshot drops that snapshot", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  api.snapshotAgent.mockImplementationOnce(async () => { editor.text = "a typed"; editor.dirty = true; return "5.md"; });
+  await c.onAgentWrite({ id: 6, path: P("A"), kind: "replace", insert: "b", base: "h", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(6, "conflict");
+  expect(api.dropAgentSnapshot).toHaveBeenCalledWith(P("A"), "5.md"); // the write never happened: no revision for it
 });
 
 test("a failed agent trash after the editor closed the note says so", async () => {
