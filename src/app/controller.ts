@@ -510,18 +510,23 @@ export class Controller {
 
   /** true = fresh first page (new query/folder/sort), selecting its first row; false = reload the loaded range in place. */
   runSearch(selectFirst: boolean, keepOpen: boolean | "highlight" = false): Promise<void> {
+    // a refresh supersedes a fresh first page still in flight: it inherits that page's row-0 rule, or the new query's
+    // first match would never be selected and Enter would create a note while it is listed
+    if (!selectFirst && this.pendingFirst !== null) [selectFirst, keepOpen] = [true, this.pendingFirst];
     const p = this.doSearch(selectFirst, keepOpen);
     if (selectFirst) this.searching = p;
     return p;
   }
 
   /** keepOpen: after a reset, stay on the open note when it is in the new first page instead of opening row 0. "highlight": never open anything; select the open note's row if listed, else highlight row 0 (Enter opens it). */
+  protected pendingFirst: boolean | "highlight" | null = null; // keepOpen of a fresh first page not landed yet
   protected async doSearch(selectFirst: boolean, keepOpen: boolean | "highlight") {
     const seq = ++this.searchSeq;
     const r = this.results;
     const highlighted = this.highlighted();
+    if (selectFirst) this.pendingFirst = keepOpen;
     try {
-      await (selectFirst ? r.reset() : r.refresh());
+      await (selectFirst ? r.reset() : r.refresh()).finally(() => seq === this.searchSeq && (this.pendingFirst = null));
       if (seq !== this.searchSeq) return;
       this.listChanged(selectFirst);
       if (selectFirst) {
@@ -541,7 +546,7 @@ export class Controller {
     const seq = ++this.searchSeq;
     const highlighted = this.highlighted();
     try {
-      await this.results.reset();
+      await this.results.reset().finally(() => seq === this.searchSeq && (this.pendingFirst = null));
       if (seq !== this.searchSeq) return;
       this.listChanged(true);
       this.reselect(highlighted);

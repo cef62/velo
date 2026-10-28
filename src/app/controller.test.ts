@@ -1620,3 +1620,31 @@ test("Enter in Tasks mode waits for every task load in flight, not only the firs
   await entered;
   expect(store.get().openPath).toBe(P("B"));
 });
+
+test("a refresh landing while a typed query's search is in flight keeps its first match, so Enter opens it (#15 N1)", async () => {
+  for (const how of ["typed", "pane switch"] as const) {
+    const { c, api, store } = setup({ Groceries: "g", X: "x", Y: "y" });
+    await c.show(P("X"));
+    if (how === "typed") {
+      await c.runSearch(true, true);
+      await settle();
+    } else {
+      c.setPaneMode("tasks");
+      c.setQuery("gro");
+      await settle();
+    }
+    const d1 = deferred<Page>();
+    const d2 = deferred<Page>();
+    api.search.mockImplementationOnce(() => d1.promise).mockImplementationOnce(() => d2.promise);
+    if (how === "typed") c.setQuery("gro");
+    else c.setPaneMode("notes"); // a "highlight" reset
+    const w = c.onNotesChanged([]); // the watcher refresh overtakes it
+    d1.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
+    d2.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
+    await w;
+    await settle();
+    await c.enter();
+    expect(api.openOrCreate, how).not.toHaveBeenCalled();
+    expect(store.get().openPath, how).toBe(P("Groceries"));
+  }
+});
