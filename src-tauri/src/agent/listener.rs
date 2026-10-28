@@ -201,6 +201,15 @@ pub fn mark_running(data_dir: &Path) -> std::io::Result<()> {
     write_private(&data_dir.join("agent.json"), json!({"pid": std::process::id()}).to_string().as_bytes())
 }
 
+/// Normal quit: removes `mark_running`'s marker if it is this process's (a crash leaves it, with a dead pid).
+pub fn unmark_running(data_dir: &Path) {
+    let file = data_dir.join("agent.json");
+    let mine = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).is_some_and(|j| j == json!({"pid": std::process::id()}));
+    if mine {
+        std::fs::remove_file(&file).ok();
+    }
+}
+
 /// Atomic write of a file only the user can read (0600 on unix, set at creation so it is never wider).
 fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let tmp = path.with_extension("json.tmp");
@@ -351,6 +360,21 @@ mod tests {
         let mut l = String::new();
         assert_eq!(BufReader::new(idle).read_line(&mut l).unwrap_or(0), 0, "closed");
         assert!(t0.elapsed() < IDLE_TIMEOUT * 2);
+    }
+
+    #[test] fn running_marker_is_removed_on_quit_only_if_ours() {
+        let t = tempfile::tempdir().unwrap();
+        let f = t.path().join("agent.json");
+        mark_running(t.path()).unwrap();
+        unmark_running(t.path());
+        assert!(!f.exists());
+        std::fs::write(&f, json!({"pid": 1}).to_string()).unwrap(); // another instance's
+        unmark_running(t.path());
+        assert!(f.exists());
+        let h = serve(t.path(), echo()).unwrap(); // a live listener's file is stop()'s business
+        unmark_running(t.path());
+        assert!(f.exists());
+        h.stop();
     }
 
     #[test] fn toggling_access_off_stops_listener_and_removes_file() {

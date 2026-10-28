@@ -147,9 +147,11 @@ pub fn run() {
         .run(|app, ev| {
             if let tauri::RunEvent::Exit = ev
                 && let Some(agent) = app.try_state::<agent::listener::AgentState>()
-                && let Some(l) = agent.listener.lock().unwrap().take()
             {
-                l.stop(); // deletes agent.json: the headless server goes direct again
+                match agent.listener.lock().unwrap().take() {
+                    Some(l) => l.stop(), // deletes agent.json: the headless server goes direct again
+                    None => agent::listener::unmark_running(&app.state::<commands::AppState>().data_dir), // a failed start's marker
+                }
             }
         });
 }
