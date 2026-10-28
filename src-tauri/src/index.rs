@@ -152,7 +152,10 @@ impl Index {
         let db = Connection::open(db_path)?;
         // journal_mode returns a row, so read it instead of executing.
         let _: String = db.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
-        db.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON;")?;
+        // rusqlite already sets busy_timeout to 5 s: a second connection (`velo --mcp` direct mode, a reopen) waits
+        // out a batch chunk (about 1 s). journal_size_limit: an FTS merge can grow the WAL to ~76 MB; shrink it back
+        // when the WAL restarts.
+        db.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON; PRAGMA journal_size_limit=8388608;")?;
         // Older indexes lack tags, dates, aliases or tasks, or parsed front matter differently: drop them so the
         // vault's reconcile reindexes every note.
         // DROP, not DELETE: deleting every FTS5 row one by one took ~1 min at 10k notes.
@@ -164,8 +167,10 @@ impl Index {
             db.execute_batch(&format!("DROP TABLE IF EXISTS tasks_stale; DROP TABLE IF EXISTS tasks; DROP TABLE IF EXISTS notes_fts; DROP TABLE IF EXISTS notes; DROP TABLE IF EXISTS links; DROP TABLE IF EXISTS tags; DROP TABLE IF EXISTS aliases; PRAGMA user_version={SCHEMA_VERSION};"))?;
         }
         db.execute_batch(SCHEMA)?;
-        // FTS5 deletes otherwise leave old segments (all trigrams) in notes_fts_data.
-        db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1);")?;
+        // FTS5 'secure-delete' made re-indexing an existing note cost ~13 ms (it edits the leaves of every trigram of the
+        // old body: 135 s for 10k notes); `purge` erases deleted text when it matters instead. Off also for indexes
+        // that stored it on.
+        db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 0);")?;
         Ok(Index { db })
     }
 
@@ -175,6 +180,14 @@ impl Index {
         Ok(())
     }
 
+    /// Erase deleted note text from disk (after a lock): an FTS5 delete leaves the old trigrams in segments until a
+    /// merge, so merge them all ('optimize' drops deleted entries; secure_delete zeroes the freed pages), then
+    /// truncate the WAL. ~0.3 s at 10k notes.
+    pub fn purge(&self) -> anyhow::Result<()> {
+        self.db.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('optimize')")?;
+        self.checkpoint()
+    }
+
     pub fn known(&self) -> anyhow::Result<HashMap<String, Meta>> {
         let mut st = self.db.prepare("SELECT path, mtime, size FROM notes")?;
         let rows = st.query_map([], |r| Ok((r.get(0)?, Meta { mtime: r.get(1)?, size: r.get::<_, i64>(2)? as u64, birth: 0 })))?;
@@ -182,9 +195,20 @@ impl Index {
     }
 
     /// Group the following upserts/removes into one transaction until `commit`: one WAL append per batch, not
-    /// per note. Each note keeps its own savepoint, so a failing note rolls back alone.
+    /// per note. Each note keeps its own savepoint, so a note's SQL error rolls back that note alone; an error that
+    /// aborts the transaction (disk full, I/O) loses the whole batch, and `in_batch` turns false.
     pub fn begin(&self) -> anyhow::Result<()> {
         Ok(self.db.execute_batch("BEGIN")?)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn raw(&self) -> &Connection {
+        &self.db
+    }
+
+    /// A `begin` batch is open (false after an error aborted it).
+    pub fn in_batch(&self) -> bool {
+        !self.db.is_autocommit()
     }
 
     /// Commit a `begin` batch; on failure roll it back so the connection is usable (the next diff reindexes it).
@@ -695,5 +719,39 @@ mod tests {
         assert_eq!(stale_marks(&i), 0); // the rolled-back mark is gone too
         drop(i);
         assert_eq!(Index::open(&db).unwrap().known().unwrap().len(), 3); // reopen keeps the index: no rebuild
+    }
+    /// Re-indexing runs every DELETE once per note: a scan instead of an index search is O(notes²) over a rescan.
+    #[test] fn note_deletes_search_an_index() {
+        let i = idx(&[]);
+        for sql in DELETES {
+            let mut st = i.db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let plan: Vec<String> = st.query_map(["x"], |r| r.get(3)).unwrap().map(Result::unwrap).collect();
+            // FTS5 by rowid shows as a virtual-table scan with an equality constraint on the rowid.
+            assert!(plan.iter().all(|p| !p.starts_with("SCAN ") || p.contains("VIRTUAL TABLE INDEX 0:=")), "{sql}: {plan:?}");
+        }
+    }
+    /// FTS5 secure-delete made re-indexing a note ~13 ms (137 s for 10k); deleted text is erased by `purge` instead.
+    #[test] fn fts_secure_delete_is_off_even_when_stored_on() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = tmp.path().join("index.db");
+        Index::open(&db).unwrap().db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1);").unwrap();
+        let i = Index::open(&db).unwrap();
+        assert_eq!(i.db.query_row("SELECT v FROM notes_fts_config WHERE k='secure-delete'", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    }
+    #[test] fn second_connection_waits_for_a_batch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = tmp.path().join("index.db");
+        let (mut a, mut b) = (Index::open(&db).unwrap(), Index::open(&db).unwrap());
+        let nf = |t: &str| NoteFile { title: t.into(), encrypted: false };
+        let meta = Meta { mtime: 1, size: 1, birth: 0 };
+        a.begin().unwrap();
+        a.upsert("a.md", &nf("a"), &meta, Some("alpha")).unwrap();
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            a.commit().unwrap();
+        });
+        b.upsert("b.md", &nf("b"), &meta, Some("beta")).unwrap(); // "database is locked" with busy_timeout 0
+        t.join().unwrap();
+        assert_eq!(b.known().unwrap().len(), 2);
     }
 }

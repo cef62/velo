@@ -99,6 +99,11 @@ fn note_meta(text: &str, m: &Meta) -> NoteMeta {
     NoteMeta { created, created_src: cs.into(), modified, modified_src: ms.into(), tags, aliases: fm.map(|f| f.aliases).unwrap_or_default() }
 }
 
+/// A plain note whose locked twin is on disk: its text must be erased from the index, not just deleted.
+fn lost_plain(dir: &Path, p: &Path) -> bool {
+    parse_note_file(p).is_some_and(|nf| !nf.encrypted && note_path(dir, &nf.title, true).exists())
+}
+
 fn parse(p: &Path) -> anyhow::Result<NoteFile> {
     parse_note_file(p).ok_or_else(|| anyhow!("not a note file: {}", p.display()))
 }
@@ -129,6 +134,7 @@ impl Vault {
         let files = v.store.list()?;
         let (stale, gone) = v.diff(&files)?;
         let total = stale.len();
+        let new_locked = stale.iter().any(|(p, nf, _)| nf.encrypted && v.index.title_modified(&s(p)).ok().flatten().is_none());
         // One transaction per chunk: a crash loses at most a chunk, which isn't in `known()`, so the next open redoes it.
         v.index.begin()?;
         for (i, (path, nf, meta)) in stale.into_iter().enumerate() {
@@ -148,6 +154,12 @@ impl Vault {
             v.index.remove(g)?;
         }
         v.index.commit()?;
+        // A note locked elsewhere while velo was closed: its plain twin's text is deleted but not yet erased.
+        if new_locked || gone.iter().any(|g| lost_plain(&v.store.dir, Path::new(g))) {
+            v.index.purge()?;
+        } else if total > 0 {
+            v.index.checkpoint()?; // don't keep a bulk build's WAL for the whole session
+        }
         if let Some(id) = identity {
             for (path, nf, _) in &files {
                 if nf.encrypted {
@@ -174,10 +186,15 @@ impl Vault {
 
     /// `rescan`, failing when the folder or the index can't be read.
     pub fn try_rescan(&mut self, identity: Option<&str>) -> anyhow::Result<Vec<String>> {
+        let paths = self.stale_paths()?;
+        Ok(self.apply_fs_changes(&paths, identity))
+    }
+
+    /// Paths a rescan would apply: files that differ from the index, and indexed notes no longer on disk.
+    pub fn stale_paths(&self) -> anyhow::Result<Vec<PathBuf>> {
         let files = self.store.list()?;
         let (stale, gone) = self.diff(&files)?;
-        let paths: Vec<PathBuf> = stale.into_iter().map(|(p, ..)| p.clone()).chain(gone.into_iter().map(PathBuf::from)).collect();
-        Ok(self.apply_fs_changes(&paths, identity))
+        Ok(stale.into_iter().map(|(p, ..)| p.clone()).chain(gone.into_iter().map(PathBuf::from)).collect())
     }
 
     /// A note file directly inside the notes folder; anything else is refused (paths come from the webview).
@@ -375,6 +392,7 @@ impl Vault {
         let mut rewritten = 0;
         if rewrite_links_too {
             let batched = self.index.begin().is_ok();
+            let mut done = Vec::new();
             for src in self.index.backlinks(&old.title).unwrap_or_default() {
                 let sp = Path::new(&src);
                 if !self.rewritable(sp) {
@@ -385,10 +403,14 @@ impl Vault {
                 if n > 0 && self.store.write_atomic(sp, new_text.as_bytes()).is_ok() {
                     self.reindex(sp, Some(&new_text)).ok();
                     rewritten += n;
+                    done.push((src, new_text));
                 }
             }
-            if batched {
-                self.index.commit().ok();
+            if batched && !(self.index.in_batch() && self.index.commit().is_ok()) {
+                // Disk full or I/O error lost the batch; the self-write hides these files from the watcher, so redo them.
+                for (src, text) in &done {
+                    self.reindex(Path::new(src), Some(text)).ok();
+                }
             }
         }
         Ok(RenameResult { path: to_s, rewritten })
@@ -423,7 +445,7 @@ impl Vault {
         std::fs::remove_file(from).context("removing plaintext note")?;
         self.index.remove(path)?;
         self.reindex(&to, None)?;
-        self.index.checkpoint()?; // drop pre-lock WAL frames holding plaintext
+        self.index.purge()?; // erase the plaintext from FTS segments and pre-lock WAL frames
         self.unlocked.insert(s(&to), lossy(&plain));
         Ok(s(&to))
     }
@@ -530,13 +552,28 @@ impl Vault {
 
     pub fn apply_fs_changes(&mut self, paths: &[PathBuf], identity: Option<&str>) -> Vec<String> {
         let mut changed = Vec::new();
-        let mut lost_plain = false;
-        // If `begin` fails, each upsert/remove commits on its own, as before.
-        let mut batched = self.index.begin().is_ok();
-        for (i, p) in paths.iter().enumerate() {
-            if batched && i > 0 && i % CHUNK == 0 {
-                batched = self.index.commit().is_ok() && self.index.begin().is_ok();
+        let mut purge = false;
+        for chunk in paths.chunks(CHUNK) {
+            let mark = changed.len();
+            // If `begin` fails, each upsert/remove commits on its own, as before.
+            let batched = self.index.begin().is_ok();
+            let ok = self.apply_chunk(chunk, identity, batched, &mut changed, &mut purge);
+            if batched && !(ok && self.index.commit().is_ok()) {
+                // Disk full or I/O error: the whole batch is gone, so redo it note by note, else `changed` would list
+                // notes that aren't indexed.
+                changed.truncate(mark);
+                self.apply_chunk(chunk, identity, false, &mut changed, &mut purge);
             }
+        }
+        if purge {
+            self.index.purge().ok();
+        }
+        changed
+    }
+
+    /// `apply_fs_changes` for one chunk; false (and stop) when an error aborted the `batched` transaction.
+    fn apply_chunk(&mut self, paths: &[PathBuf], identity: Option<&str>, batched: bool, changed: &mut Vec<String>, purge: &mut bool) -> bool {
+        for p in paths {
             let Some(nf) = parse_note_file(p) else { continue };
             let key = s(p);
             match self.store.read(p) {
@@ -545,10 +582,16 @@ impl Vault {
                         continue;
                     }
                     let body = (!nf.encrypted).then(|| lossy(&bytes));
+                    let new = nf.encrypted && self.index.title_modified(&key).ok().flatten().is_none();
                     if self.reindex(p, body.as_deref()).is_err() {
+                        if batched && !self.index.in_batch() {
+                            return false;
+                        }
                         continue;
                     }
                     if nf.encrypted {
+                        // locked elsewhere: its plain twin's text may have been deleted from the index in an earlier batch
+                        *purge |= new;
                         self.secure_revisions(&nf.title, identity);
                         if let Some(id) = identity {
                             self.try_unlock(p, id);
@@ -558,22 +601,19 @@ impl Vault {
                 // Only a missing file is a deletion: iCloud-evicted, unreadable or sync-locked files stay listed.
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                     if self.index.remove(&key).is_err() {
+                        if batched && !self.index.in_batch() {
+                            return false;
+                        }
                         continue;
                     }
                     self.unlocked.remove(&key);
-                    lost_plain |= !nf.encrypted && note_path(&self.store.dir, &nf.title, true).exists();
+                    *purge |= lost_plain(&self.store.dir, p); // locked on another machine: erase its plaintext
                 }
                 Err(_) => continue,
             }
             changed.push(key);
         }
-        if batched {
-            self.index.commit().ok();
-        }
-        if lost_plain {
-            self.index.checkpoint().ok(); // locked on another machine: drop WAL frames holding its plaintext
-        }
-        changed
+        true
     }
 
     /// A note locked elsewhere (synced in as .md.age) must leave no plaintext revisions here: encrypt them,
@@ -1084,5 +1124,97 @@ mod tests {
         v.snapshot_text(&d.path, "stalesecret", Some(&id)).unwrap();
         assert_eq!(names().len(), 1);
         assert!(names().iter().all(|f| f.ends_with(".md.age")));
+    }
+
+    /// Some 3-byte FTS trigram of any of `words` in the index files (the vault may still be open).
+    fn trigram_on_disk(db: &Path, words: &[&str]) -> bool {
+        ["", "-wal", "-shm"].iter().filter_map(|x| std::fs::read(format!("{}{x}", db.display())).ok())
+            .any(|b| words.iter().any(|w| w.as_bytes().windows(3).any(|g| b.windows(3).any(|x| x == g))))
+    }
+    const OLD: [&str; 3] = ["zqxjvkplmwqbyfh", "xjqwvkzbmhyfpg", "vqzkjxwbpmyhfk"];
+    /// A plain note edited a few times (each edit leaves its old trigrams in FTS segments) among other notes.
+    fn edited_note() -> (Vault, PathBuf, PathBuf, String) {
+        let (dir, db) = setup();
+        for i in 0..300 { std::fs::write(dir.join(format!("filler {i}.md")), format!("filler {i} lorem ipsum dolor")).unwrap(); }
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let d = v.open_or_create("s", None, false).unwrap();
+        for (k, w) in OLD.iter().enumerate() {
+            v.save_note(&d.path, &format!("version {k} {w}"), &stat_hash(&d.path), None, false).unwrap();
+            let fillers: Vec<PathBuf> = (k * 50..k * 50 + 50).map(|i| dir.join(format!("filler {i}.md"))).collect();
+            for f in &fillers { std::fs::write(f, format!("edited {k} lorem")).unwrap(); }
+            v.apply_fs_changes(&fillers, None);
+        }
+        assert!(trigram_on_disk(&db, &OLD[..2]), "old versions linger until purged: the test would prove nothing");
+        (v, dir, db, d.path)
+    }
+    #[test] fn lock_erases_every_version_of_the_note_from_the_index_files() {
+        let (mut v, _dir, db, p) = edited_note();
+        v.lock_note(&p, &crypto::new_identity()).unwrap();
+        assert!(!trigram_on_disk(&db, &OLD), "while open");
+        drop(v);
+        assert!(!trigram_on_disk(&db, &OLD), "after close");
+    }
+    #[test] fn locked_elsewhere_in_a_later_batch_still_erases_the_plaintext() {
+        let (mut v, dir, db, p) = edited_note();
+        std::fs::remove_file(&p).unwrap();
+        v.apply_fs_changes(&[PathBuf::from(&p)], None); // the delete arrives first, with no locked twin yet
+        std::fs::write(dir.join("s.md.age"), crypto::encrypt(&crypto::new_identity(), b"x").unwrap()).unwrap();
+        v.apply_fs_changes(&[dir.join("s.md.age")], None);
+        assert!(!trigram_on_disk(&db, &OLD));
+    }
+    #[test] fn locked_elsewhere_while_closed_is_erased_on_open() {
+        // velo saw: neither change, only the delete, or only the locked twin, before it closed
+        for seen in ["none", "delete", "twin"] {
+            let (mut v, dir, db, p) = edited_note();
+            let age = dir.join("s.md.age");
+            let twin = || std::fs::write(&age, crypto::encrypt(&crypto::new_identity(), b"x").unwrap()).unwrap();
+            match seen {
+                "delete" => { std::fs::remove_file(&p).unwrap(); v.apply_fs_changes(&[PathBuf::from(&p)], None); }
+                "twin" => { twin(); v.apply_fs_changes(&[age.clone()], None); }
+                _ => {}
+            }
+            drop(v);
+            if seen != "twin" { twin(); }
+            if seen != "delete" { std::fs::remove_file(&p).unwrap(); }
+            let _v = open(dir, &db, None).unwrap();
+            assert!(!trigram_on_disk(&db, &OLD), "seen {seen}");
+        }
+    }
+    #[test] fn open_leaves_no_wal_behind() {
+        let (dir, db) = setup();
+        for i in 0..50 { std::fs::write(dir.join(format!("n{i}.md")), "some text").unwrap(); }
+        let _v = open(dir, &db, None).unwrap();
+        assert_eq!(std::fs::metadata(format!("{}-wal", db.display())).unwrap().len(), 0);
+    }
+    /// Lets `pages` more pages into the index, so a big note fails with SQLITE_FULL (aborting the batch).
+    fn nearly_full(v: &Vault, pages: i64) {
+        let n: i64 = v.index.raw().query_row("PRAGMA page_count", [], |r| r.get(0)).unwrap();
+        v.index.raw().query_row(&format!("PRAGMA max_page_count={}", n + pages), [], |_| Ok(())).unwrap();
+    }
+    fn huge() -> String { (0..200_000).map(|i| format!("w{i} ")).collect() }
+    #[test] fn disk_full_mid_batch_reports_only_indexed_notes() {
+        let (dir, db) = setup();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let ps: Vec<PathBuf> = ["a", "b", "c"].iter().map(|t| dir.join(format!("{t}.md"))).collect();
+        for (p, body) in ps.iter().zip(["alpha", &huge(), "gamma"]) { std::fs::write(p, body).unwrap(); }
+        nearly_full(&v, 3);
+        let changed = v.apply_fs_changes(&ps, None);
+        nearly_full(&v, 1_000_000);
+        let indexed: Vec<String> = changed.iter().filter(|p| v.index.title_modified(p).unwrap().is_some()).cloned().collect();
+        assert_eq!(changed, indexed);
+        assert_eq!(changed.len(), 2, "a and c fit");
+    }
+    #[test] fn disk_full_in_link_rewrite_still_reindexes_rewritten_notes() {
+        let (dir, db) = setup();
+        std::fs::write(dir.join("Old.md"), "").unwrap();
+        std::fs::write(dir.join("a.md"), "see [[Old]]").unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        std::fs::write(dir.join("b.md"), format!("[[Old]] {}", huge())).unwrap(); // after a in the links table
+        v.apply_fs_changes(&[dir.join("b.md")], None);
+        nearly_full(&v, 6);
+        let r = v.rename_note(&dir.join("Old.md").to_string_lossy(), "New", true).unwrap();
+        nearly_full(&v, 1_000_000);
+        assert_eq!(r.rewritten, 2);
+        assert!(v.index.backlinks("New").unwrap().contains(&dir.join("a.md").to_string_lossy().into_owned()));
     }
 }

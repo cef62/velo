@@ -127,7 +127,14 @@ fn apply_watch(st: &AppState, base: &Path, batch: Option<Vec<PathBuf>>) -> Vec<S
         Some(v) if watch::applies_to(&v.store.dir, base) => Some(f(v)),
         _ => None,
     };
-    let Some(paths) = batch else { return with(&mut |v| v.rescan(id.as_deref())).unwrap_or_default() };
+    // A rescan lists the stale paths under the lock, then applies them in the same chunks.
+    let paths = match batch {
+        Some(p) => p,
+        None => match st.vault.lock().unwrap().as_ref() {
+            Some(v) if watch::applies_to(&v.store.dir, base) => v.stale_paths().unwrap_or_default(),
+            _ => return vec![],
+        },
+    };
     let mut changed = Vec::new();
     for chunk in paths.chunks(100) {
         let Some(c) = with(&mut |v| v.apply_fs_changes(chunk, id.as_deref())) else { break };
