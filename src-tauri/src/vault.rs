@@ -116,6 +116,9 @@ pub(crate) fn move_to_trash(p: &Path) -> std::io::Result<()> {
     ctx.delete(p).map_err(|e| std::io::Error::other(e.to_string()))
 }
 
+/// Notes per index transaction in bulk paths (10k-note cold build: 500 writes 544 MB, 2000 writes 270 MB, one transaction 155 MB).
+const CHUNK: usize = 2000;
+
 impl Vault {
     /// `progress(done, total)` counts files needing (re)indexing; every 250 files and at the end, never when none.
     pub fn open_with_progress(dir: PathBuf, db_path: &Path, identity: Option<&str>, progress: &mut dyn FnMut(usize, usize)) -> anyhow::Result<Vault> {
@@ -126,10 +129,16 @@ impl Vault {
         let files = v.store.list()?;
         let (stale, gone) = v.diff(&files)?;
         let total = stale.len();
+        // One transaction per chunk: a crash loses at most a chunk, which isn't in `known()`, so the next open redoes it.
+        v.index.begin()?;
         for (i, (path, nf, meta)) in stale.into_iter().enumerate() {
             if let Ok(bytes) = v.store.read(path) {
                 let body = (!nf.encrypted).then(|| lossy(&bytes));
                 v.index.upsert(&s(path), nf, meta, body.as_deref())?;
+            }
+            if (i + 1) % CHUNK == 0 {
+                v.index.commit()?;
+                v.index.begin()?;
             }
             if (i + 1) % 250 == 0 || i + 1 == total {
                 progress(i + 1, total);
@@ -138,6 +147,7 @@ impl Vault {
         for g in &gone {
             v.index.remove(g)?;
         }
+        v.index.commit()?;
         if let Some(id) = identity {
             for (path, nf, _) in &files {
                 if nf.encrypted {
@@ -364,6 +374,7 @@ impl Vault {
 
         let mut rewritten = 0;
         if rewrite_links_too {
+            let batched = self.index.begin().is_ok();
             for src in self.index.backlinks(&old.title).unwrap_or_default() {
                 let sp = Path::new(&src);
                 if !self.rewritable(sp) {
@@ -375,6 +386,9 @@ impl Vault {
                     self.reindex(sp, Some(&new_text)).ok();
                     rewritten += n;
                 }
+            }
+            if batched {
+                self.index.commit().ok();
             }
         }
         Ok(RenameResult { path: to_s, rewritten })
@@ -517,7 +531,12 @@ impl Vault {
     pub fn apply_fs_changes(&mut self, paths: &[PathBuf], identity: Option<&str>) -> Vec<String> {
         let mut changed = Vec::new();
         let mut lost_plain = false;
-        for p in paths {
+        // If `begin` fails, each upsert/remove commits on its own, as before.
+        let mut batched = self.index.begin().is_ok();
+        for (i, p) in paths.iter().enumerate() {
+            if batched && i > 0 && i % CHUNK == 0 {
+                batched = self.index.commit().is_ok() && self.index.begin().is_ok();
+            }
             let Some(nf) = parse_note_file(p) else { continue };
             let key = s(p);
             match self.store.read(p) {
@@ -547,6 +566,9 @@ impl Vault {
                 Err(_) => continue,
             }
             changed.push(key);
+        }
+        if batched {
+            self.index.commit().ok();
         }
         if lost_plain {
             self.index.checkpoint().ok(); // locked on another machine: drop WAL frames holding its plaintext

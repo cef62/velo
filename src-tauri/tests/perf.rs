@@ -18,6 +18,7 @@ fn search_p95_under_50ms() {
     let mut idx = Index::open(&tmp.path().join("index.db")).unwrap();
     let build = Instant::now();
     let mut n = 0;
+    idx.begin().unwrap();
     for e in std::fs::read_dir(&dir).unwrap() {
         let p = e.unwrap().path();
         if p.extension().is_none_or(|x| x != "md") {
@@ -29,6 +30,7 @@ fn search_p95_under_50ms() {
         idx.upsert(p.file_name().unwrap().to_str().unwrap(), &nf, &meta, Some(&body)).unwrap();
         n += 1;
     }
+    idx.commit().unwrap();
     println!("cold build of {n} notes: {:.1} s", build.elapsed().as_secs_f64());
     assert!(n > 0, "no fixture notes in {dir}");
     let none = HashMap::new();
@@ -81,4 +83,30 @@ fn search_p95_under_50ms() {
     let p95 = times[times.len() * 95 / 100];
     println!("{n} notes tasks view: p50 {:.2} ms, p95 {p95:.2} ms", times[times.len() / 2]);
     assert!(p95 < 50.0, "tasks view p95 {p95:.2} ms");
+}
+
+/// Bytes this process has written to disk so far (macOS `proc_pid_rusage`).
+#[cfg(target_os = "macos")]
+fn bytes_written() -> u64 {
+    let mut ri: libc::rusage_info_v2 = unsafe { std::mem::zeroed() };
+    let rc = unsafe { libc::proc_pid_rusage(libc::getpid(), libc::RUSAGE_INFO_V2, &mut ri as *mut _ as *mut libc::rusage_info_t) };
+    assert_eq!(rc, 0, "proc_pid_rusage failed");
+    ri.ri_diskio_byteswritten
+}
+
+/// Counts the whole process: run alone (`--test-threads=1` or by name) so other tests don't add to it.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore]
+fn cold_build_disk_writes() {
+    let dir = std::env::var("VELO_FIXTURE").unwrap_or_else(|_| "../fixtures/notes".into());
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("index.db");
+    let (before, t) = (bytes_written(), Instant::now());
+    let v = velo_lib::vault::Vault::open_with_progress(dir.into(), &db, None, &mut |_, _| {}).unwrap();
+    let secs = t.elapsed().as_secs_f64();
+    drop(v); // closing the last connection checkpoints the WAL into the main file
+    let mb = (bytes_written() - before) as f64 / 1e6;
+    let file = std::fs::metadata(&db).unwrap().len() as f64 / 1e6;
+    println!("cold build: {mb:.0} MB written in {secs:.1} s, index {file:.0} MB");
 }
