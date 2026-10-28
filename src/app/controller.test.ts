@@ -1735,3 +1735,68 @@ test("a backend tick still reloads the view after the optimistic patch (#15 Copi
   expect(store.get().taskView!.no_date).toEqual([]);
   expect(store.get().taskView!.done).toHaveLength(1);
 });
+
+test("the saver's own retry saves the capture line and restamps the front matter: Enter never duplicates it (#15 r5 M1)", async () => {
+  for (const retry of ["buy milk", "buy mlik"]) {
+    const { c, editor, store } = setup({ Inbox: "---\nmodified: 1\n---\n- [ ] old", B: "b" });
+    await c.show(P("Inbox"));
+    await c.startCapture();
+    c.setQuery("buy mlik");
+    editor.flushResult = false;
+    await c.submitCapture("buy mlik");
+    expect(store.get().capture?.err).toMatch(/wasn't saved/);
+    editor.text = editor.text.replace("modified: 1", "modified: 2"); // the saver's 1 s retry landed and restamped the block
+    c.editorOpts().onSaved();
+    expect(store.get().capture?.err, retry).toBe(""); // saved: the field no longer asks for a retry
+    c.setQuery(retry);
+    editor.flushResult = true;
+    await c.submitCapture(retry);
+    expect(editor.text, retry).toBe(`---\nmodified: 2\n---\n- [ ] old\n- [ ] ${retry}`);
+    expect(store.get().capture, retry).toBeNull();
+  }
+});
+
+test("a tick through the editor never drops a filter load in flight (#15 r5 m1)", async () => {
+  const { c, api, editor, store } = setup({ A: "- [ ] x", B: "- [ ] foo" });
+  c.setPaneMode("tasks");
+  api.tasks.mockResolvedValue({ ...view(0), no_date: [task("A", 0, "- [ ] x"), task("B", 0, "- [ ] foo")] });
+  await c.loadTasks();
+  await c.show(P("A"));
+  const d = deferred<TaskView>();
+  api.tasks.mockImplementationOnce(() => d.promise);
+  c.setQuery("foo");
+  editor.toggleTask.mockImplementation(() => ((editor.text = "- [x] x ✅ 2026-10-27"), true));
+  await c.tickTask(store.get().taskView!.no_date[0]);
+  d.resolve({ ...view(0), no_date: [task("B", 0, "- [ ] foo")] });
+  await c.enter();
+  expect(store.get().taskView!.no_date.map((t) => t.path)).toEqual([P("B")]);
+  expect(store.get().openPath).toBe(P("B"));
+});
+
+test("an editor tick stays shown over every reply read before its save, and the patch ends once the save lands (#15 r5 m1)", async () => {
+  const { c, api, editor, store } = setup({ A: "- [ ] x" });
+  const before = { ...view(0), no_date: [task("A", 0, "- [ ] x")] };
+  api.tasks.mockResolvedValue(before);
+  await c.loadTasks();
+  await c.show(P("A"));
+  editor.toggleTask.mockImplementation(() => ((editor.text = "- [x] x ✅ 2026-10-27"), true));
+  await c.tickTask(store.get().taskView!.no_date[0]);
+  await c.loadTasks(); // a reload before the save landed still reads the unticked line
+  expect(store.get().taskView!.no_date[0].done).toBe(true);
+  c.editorOpts().onSaved(); // the save landed
+  await c.loadTasks(); // the index now says unticked again (the user unticked it in the editor meanwhile): believe it
+  expect(store.get().taskView!.no_date[0].done).toBe(false);
+});
+
+test("a tick then an untick through the editor before the save: a pre-save reply shows the row unticked (#15 r5 m1)", async () => {
+  const { c, api, editor, store } = setup({ A: "- [ ] x" });
+  api.tasks.mockResolvedValue({ ...view(0), no_date: [task("A", 0, "- [ ] x")] });
+  await c.loadTasks();
+  await c.show(P("A"));
+  editor.toggleTask.mockImplementation(() => ((editor.text = editor.text.startsWith("- [ ]") ? "- [x] x ✅ 2026-10-27" : "- [ ] x"), true));
+  await c.tickTask(store.get().taskView!.no_date[0]);
+  await c.tickTask(store.get().taskView!.no_date[0]);
+  expect(store.get().taskView!.no_date[0]).toMatchObject({ done: false, line_text: "- [ ] x" });
+  await c.loadTasks(); // read before the save landed
+  expect(store.get().taskView!.no_date[0]).toMatchObject({ done: false, line_text: "- [ ] x" });
+});
