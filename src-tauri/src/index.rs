@@ -96,6 +96,7 @@ CREATE INDEX IF NOT EXISTS links_src ON links(src);
 CREATE TABLE IF NOT EXISTS tasks(path TEXT NOT NULL, line INTEGER NOT NULL, text TEXT NOT NULL, done INTEGER NOT NULL, due TEXT, done_on TEXT, line_text TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS tasks_path ON tasks(path);
 CREATE TABLE IF NOT EXISTS tasks_stale(path TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS purge_pending(one INTEGER PRIMARY KEY CHECK(one = 1));
 CREATE TRIGGER IF NOT EXISTS notes_written AFTER INSERT ON notes BEGIN INSERT INTO tasks_stale(path) VALUES(new.path); END;
 "#;
 
@@ -180,12 +181,29 @@ impl Index {
         Ok(())
     }
 
-    /// Erase deleted note text from disk (after a lock): an FTS5 delete leaves the old trigrams in segments until a
-    /// merge, so merge them all ('optimize' drops deleted entries; secure_delete zeroes the freed pages), then
-    /// truncate the WAL. ~0.3 s at 10k notes.
-    pub fn purge(&self) -> anyhow::Result<()> {
-        self.db.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('optimize')")?;
-        self.checkpoint()
+    /// Mark that deleted note text must be erased (`purge_pending`). Write it before, or in the same transaction
+    /// as, the delete: the mark survives a crash or a failed purge, so the erase is retried.
+    pub fn need_purge(&self) -> anyhow::Result<()> {
+        self.db.execute("INSERT OR IGNORE INTO purge_pending(one) VALUES(1)", [])?;
+        Ok(())
+    }
+
+    /// If marked, erase deleted note text from disk (after a lock): an FTS5 delete leaves the old trigrams in segments
+    /// until a merge, so 'rebuild' the FTS index from the remaining rows (secure_delete zeroes the freed pages), then
+    /// truncate the WAL. Not 'optimize': it can keep delete markers (with their trigrams) when the structure has
+    /// empty deepest levels, and failed 2 in 300 runs of the lock test. The mark is cleared only after all succeeded.
+    pub fn purge_pending(&self) -> anyhow::Result<()> {
+        if !self.db.query_row("SELECT EXISTS(SELECT 1 FROM purge_pending)", [], |r| r.get::<_, bool>(0))? {
+            return Ok(());
+        }
+        self.db.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')")?;
+        // A reader (`velo --mcp` direct mode) pins old pages, so the checkpoint can't overwrite them: it waits up to
+        // the busy timeout (5 s), then reports busy; keep the mark for the next trigger.
+        if self.db.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get::<_, i64>(0))? != 0 {
+            anyhow::bail!("checkpoint blocked by another connection");
+        }
+        self.db.execute("DELETE FROM purge_pending", [])?;
+        Ok(())
     }
 
     pub fn known(&self) -> anyhow::Result<HashMap<String, Meta>> {
