@@ -1225,6 +1225,22 @@ test("a keystroke during the agent snapshot drops that snapshot", async () => {
   expect(api.dropAgentSnapshot).toHaveBeenCalledWith(P("A"), "5.md"); // the write never happened: no revision for it
 });
 
+test("an agent write waits for a show still flushing the previous note", async () => {
+  const { c, api, editor } = setup({ A: "a", B: "b" });
+  await c.show(P("A"));
+  const d = deferred<boolean>();
+  editor.flush.mockImplementationOnce(() => d.promise);
+  const shown = c.show(P("B"));
+  await settle();
+  const write = c.onAgentWrite({ id: 8, path: P("B"), kind: "append", insert: "- [ ] y", summary: "s" });
+  await settle();
+  d.resolve(true);
+  await shown;
+  await write;
+  expect(api.agentWriteDone).toHaveBeenCalledWith(8, { hash: "h" }); // B ended up open: applied in the editor
+  expect(editor.appended).toEqual(["- [ ] y"]);
+});
+
 test("a failed agent trash after the editor closed the note says so", async () => {
   const { c, api, store } = setup({ A: "a" });
   await c.onAgentWrite({ id: 9, path: P("A"), kind: "trash-failed", title: "A", error: "Trash unavailable" });

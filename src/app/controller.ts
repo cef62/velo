@@ -241,6 +241,17 @@ export class Controller {
   // note), and a load waits for backend writes in flight (else its reply holds pre-write text and hash).
   protected readonly pendingLoads = new Set<Promise<unknown>>();
   protected readonly pendingWrites = new Set<Promise<unknown>>();
+  /**
+   * Flush the open note, wait for backend writes in flight, then `open`; null when the flush failed. Tracked in
+   * `pendingLoads` from the flush on, so an agent write deciding "not open" waits for the note this ends up showing.
+   */
+  protected loading<T>(open: () => Promise<T>): Promise<T | null> {
+    return this.track(this.pendingLoads, (async () => {
+      if (!(await this.editor.flush())) return null;
+      while (this.pendingWrites.size) await Promise.allSettled([...this.pendingWrites]);
+      return open();
+    })());
+  }
   protected track<T>(set: Set<Promise<unknown>>, p: Promise<T>): Promise<T> {
     set.add(p);
     const done = () => set.delete(p);
@@ -423,9 +434,8 @@ export class Controller {
     }
     const current = this.newShow();
     try {
-      if (!(await this.editor.flush())) return false;
-      while (this.pendingWrites.size) await Promise.allSettled([...this.pendingWrites]);
-      const doc = await this.track(this.pendingLoads, this.api.openNote(path));
+      const doc = await this.loading(() => this.api.openNote(path));
+      if (!doc) return false;
       if (!current()) return true;
       if (!this.editor.load(doc)) return false;
       this.loadedDoc(doc);
@@ -584,12 +594,11 @@ export class Controller {
     }
     const current = this.newShow(); // a pending auto-show must not replace this note when its reply lands later
     try {
-      if (!(await this.editor.flush())) return false;
       // The title cache is the "existed before" signal (open_or_create returns a plain NoteDoc). A stale cache only
       // mislabels an empty/external note, which the empty-body rule below still opens in edit mode.
-      const created = !this.titles.has(fold(title));
-      while (this.pendingWrites.size) await Promise.allSettled([...this.pendingWrites]);
-      const doc = await this.track(this.pendingLoads, this.api.openOrCreate(title));
+      let created = false;
+      const doc = await this.loading(() => ((created = !this.titles.has(fold(title))), this.api.openOrCreate(title)));
+      if (!doc) return false;
       if (!current()) return true;
       if (!this.editor.load(doc)) return false;
       this.loadedDoc(doc);
