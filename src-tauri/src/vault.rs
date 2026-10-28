@@ -558,6 +558,11 @@ impl Vault {
     }
 
     pub fn apply_fs_changes(&mut self, paths: &[PathBuf], identity: Option<&str>) -> Vec<String> {
+        self.apply_fs_changes_then(paths, identity, true)
+    }
+
+    /// `apply_fs_changes`; `purge` false defers a marked purge to the caller's last chunk (a rescan purges once).
+    pub fn apply_fs_changes_then(&mut self, paths: &[PathBuf], identity: Option<&str>, purge: bool) -> Vec<String> {
         let mut changed = Vec::new();
         for chunk in paths.chunks(CHUNK) {
             let mark = changed.len();
@@ -571,13 +576,18 @@ impl Vault {
                 self.apply_chunk(chunk, identity, false, &mut changed);
             }
         }
-        self.purge_pending(false);
+        if purge {
+            self.purge_pending(false);
+        }
         changed
     }
 
-    /// Drop a note from the index; a plain note whose locked twin exists marks a purge in the same transaction.
+    /// Drop a note from the index; a plain note whose locked twin exists (on disk, or still indexed: a sync may be
+    /// rewriting it) marks a purge in the same transaction.
     fn remove_note(&mut self, path: &str) -> anyhow::Result<()> {
-        if lost_plain(&self.store.dir, Path::new(path)) { self.index.remove_erasing(path) } else { self.index.remove(path) }
+        let p = Path::new(path);
+        let twin_indexed = || parse_note_file(p).is_some_and(|nf| !nf.encrypted && self.index.title_modified(&s(&note_path(&self.store.dir, &nf.title, true))).ok().flatten().is_some());
+        if lost_plain(&self.store.dir, p) || twin_indexed() { self.index.remove_erasing(path) } else { self.index.remove(path) }
     }
 
     /// Retry a failed purge whose backoff has ended; the wait until the next retry while it still fails.
@@ -1272,7 +1282,7 @@ mod tests {
         assert!(!trigram_on_disk(&db, &OLD), "plaintext survives reopen+rescan (rescan changed {also:?})");
     }
     fn purge_marked(v: &Vault) -> bool {
-        v.index.raw().query_row("SELECT EXISTS(SELECT 1 FROM purge_mark)", [], |x| x.get(0)).unwrap()
+        v.index.raw().query_row("SELECT EXISTS(SELECT 1 FROM purge_mark WHERE gen > 0)", [], |x| x.get(0)).unwrap()
     }
     /// Makes the next purge fail: a reader pins the old pages, so the TRUNCATE checkpoint reports busy.
     fn block_purge(v: &Vault, db: &Path) -> rusqlite::Connection {
@@ -1510,7 +1520,7 @@ mod tests {
         let (id2, p2) = (id.clone(), p.clone());
         let a = std::thread::spawn(move || { let t = std::time::Instant::now(); v.lock_note(&p2, &id2).unwrap(); eprintln!("lock_note took {:?}", t.elapsed()); v });
         // B: any watcher batch / MCP try_rescan ends with purge_pending(false); it sees A's fresh mark
-        while !b.index.raw().query_row("SELECT EXISTS(SELECT 1 FROM purge_mark)", [], |r| r.get::<_, bool>(0)).unwrap() { std::thread::yield_now(); }
+        while !b.index.raw().query_row("SELECT EXISTS(SELECT 1 FROM purge_mark WHERE gen > 0)", [], |r| r.get::<_, bool>(0)).unwrap() { std::thread::yield_now(); }
         b.index.purge_pending(false).unwrap();
         let early = !purge_marked(&b) && dir.join("s.md").exists();
         let v = a.join().unwrap();
@@ -1538,7 +1548,11 @@ mod tests {
         eprintln!("changed {ch:?}; t's plaintext after its lock was applied: {h:?}; marked {}", purge_marked(&v));
         assert_eq!(total(&h), 0, "t's plaintext stays until an event after the window, a lock, or the next open");
     }
+    /// The retry timer is one per process (a static flag): tests that spawn it run one at a time.
+    static TIMER: std::sync::Mutex<()> = std::sync::Mutex::new(());
     #[test] fn failed_purge_is_retried_when_the_backoff_ends_without_events() {
+        let _t = TIMER.lock().unwrap_or_else(|e| e.into_inner());
+        while crate::commands::PURGE_RETRY.load(std::sync::atomic::Ordering::SeqCst) { std::thread::yield_now(); } // the last test's thread exiting
         let (mut v, _dir, db, p) = edited_note();
         v.index.purge_backoff = std::time::Duration::from_millis(200);
         let r = block_purge(&v, &db);
@@ -1553,5 +1567,151 @@ mod tests {
         while purge_marked(&v.lock().unwrap()) && t.elapsed() < std::time::Duration::from_secs(5) { std::thread::sleep(std::time::Duration::from_millis(20)); }
         assert!(!purge_marked(&v.lock().unwrap()), "no retry after the window");
         assert!(!trigram_on_disk(&db, &OLD));
+    }
+
+    fn gen_of(v: &Vault) -> Option<i64> {
+        v.index.raw().query_row("SELECT gen FROM purge_mark", [], |r| r.get(0)).ok()
+    }
+    /// R4-1: the mark row is deleted on clear, so `gen` restarts at 1: a stale CLEAR from an older purge matches a newer mark.
+    #[test] fn r4_gen_reuse_lets_old_purge_clear_newer_mark() {
+        let (mut v, dir, db, p) = edited_note();
+        let t = v.open_or_create("t", None, false).unwrap();
+        v.save_note(&t.path, &format!("t {}", secret(7, 200)), &stat_hash(&t.path), None, false).unwrap();
+        v.index.checkpoint().unwrap();
+        assert!(total(&cjk_hits(&db)) > 0, "control");
+        assert!(!purge_marked(&v));
+        let mut b = open(dir.clone(), &db, None).unwrap(); // second process
+        let id = crypto::new_identity();
+        // A: lock_note's index steps (early mark, then remove_erasing), then purge's read + rebuild
+        let to = dir.join("s.md.age");
+        std::fs::write(&to, crypto::encrypt(&id, &std::fs::read(&p).unwrap()).unwrap()).unwrap();
+        std::fs::remove_file(&p).unwrap();
+        v.index.need_purge().unwrap();
+        v.index.remove_erasing(&p).unwrap();
+        v.reindex(&to, None).unwrap();
+        let g = gen_of(&v).unwrap();
+        v.index.raw().execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')").unwrap();
+        // B: a full purge completes meanwhile and deletes the row
+        b.index.purge_pending(true).unwrap();
+        assert!(!purge_marked(&b));
+        // B: t, locked on another machine, arrives: apply_chunk's steps for [t.md, t.md.age]
+        std::fs::write(dir.join("t.md.age"), crypto::encrypt(&id, b"x").unwrap()).unwrap();
+        std::fs::remove_file(&t.path).unwrap();
+        b.index.begin().unwrap();
+        b.remove_note(&t.path).unwrap(); // remove_erasing: gen 1
+        b.index.need_purge().unwrap(); // t.md.age new to the index: gen 2
+        b.reindex(&dir.join("t.md.age"), None).unwrap();
+        b.index.commit().unwrap();
+        eprintln!("A read gen {g}; B's new mark gen {:?}", gen_of(&b));
+        // A: checkpoint + CLEAR with its stale generation
+        assert_eq!(v.index.raw().query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        let n = v.index.raw().execute(crate::index::CLEAR_PURGE, [g]).unwrap();
+        eprintln!("A's stale CLEAR deleted {n} row(s); mark left: {}", purge_marked(&b));
+        b.index.purge_pending(false).unwrap(); // B's batch-end purge: nothing marked
+        drop(b);
+        drop(v);
+        let mut v = open(dir.clone(), &db, Some(&id)).unwrap();
+        v.rescan(Some(&id));
+        drop(v);
+        let h = cjk_hits(&db);
+        assert_eq!(total(&h), 0, "t's plaintext survives lock + reopen + rescan: {h:?}");
+    }
+    /// R4-2: the backoff keyed on gen is fooled by the same restart: a new delete gets a failed purge's generation.
+    #[test] fn r4_backoff_gen_reuse_skips_new_delete() {
+        let (mut v, dir, db, p) = edited_note();
+        let t = v.open_or_create("t", None, false).unwrap();
+        v.save_note(&t.path, &format!("t {}", secret(9, 300)), &stat_hash(&t.path), None, false).unwrap();
+        v.index.checkpoint().unwrap();
+        assert!(total(&cjk_hits(&db)) > 0, "control");
+        let b = open(dir.clone(), &db, None).unwrap();
+        let r = block_purge(&v, &db);
+        v.lock_note(&p, &crypto::new_identity()).unwrap(); // its purge fails
+        let g = gen_of(&v);
+        drop(r);
+        b.index.purge_pending(true).unwrap(); // another process's purge succeeds and deletes the row
+        std::fs::write(dir.join("t.md.age"), crypto::encrypt(&crypto::new_identity(), b"x").unwrap()).unwrap();
+        std::fs::remove_file(&t.path).unwrap();
+        v.apply_fs_changes(&[PathBuf::from(&t.path), dir.join("t.md.age")], None);
+        let h = cjk_hits(&db);
+        eprintln!("failed gen {g:?}, new gen {:?}; hits {h:?}; retry_in {:?}", gen_of(&v), v.index.purge_retry_in());
+        assert_eq!(total(&h), 0, "t's plaintext kept for the rest of the 60 s window");
+    }
+    /// R4-3: with a reader that stays (default 5 s busy timeout), how long a failing purge holds the vault. Timing
+    /// probe: `cargo test --lib r4_failing -- --ignored --nocapture`.
+    #[test] #[ignore] fn r4_failing_purge_hold_times() {
+        let (mut v, dir, db, p) = edited_note();
+        let r = block_purge(&v, &db);
+        v.index.raw().busy_timeout(std::time::Duration::from_secs(5)).unwrap(); // the real timeout
+        let t0 = std::time::Instant::now();
+        v.lock_note(&p, &crypto::new_identity()).unwrap();
+        eprintln!("lock_note with a reader: {:?}", t0.elapsed());
+        v.index.purge_backoff = std::time::Duration::ZERO;
+        let t0 = std::time::Instant::now();
+        let next = v.retry_purge();
+        eprintln!("timer retry_purge with a reader: {:?}, next {next:?}", t0.elapsed());
+        v.index.purge_backoff = std::time::Duration::from_secs(60);
+        // three chunks, each bringing a note locked on another machine: each bumps the gen, so none is backed off
+        let t0 = std::time::Instant::now();
+        for k in 0..3 {
+            let q = v.open_or_create(&format!("q{k}"), None, false).unwrap();
+            std::fs::write(dir.join(format!("q{k}.md.age")), crypto::encrypt(&crypto::new_identity(), b"x").unwrap()).unwrap();
+            std::fs::remove_file(&q.path).unwrap();
+            let c = std::time::Instant::now();
+            v.apply_fs_changes_then(&[PathBuf::from(&q.path), dir.join(format!("q{k}.md.age"))], None, k == 2); // as apply_watch
+            eprintln!("chunk {k}: {:?}", c.elapsed());
+        }
+        eprintln!("3 chunks inside the backoff window: {:?}", t0.elapsed());
+        drop(r);
+    }
+    /// R4-4: a retry scheduled while the timer thread is between its last retry and clearing its flag is dropped.
+    #[test] fn r4_retry_scheduled_as_timer_exits_is_lost() {
+        let _t = TIMER.lock().unwrap_or_else(|e| e.into_inner());
+        while crate::commands::PURGE_RETRY.load(std::sync::atomic::Ordering::SeqCst) { std::thread::yield_now(); } // the last test's thread exiting
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let ran = std::sync::Arc::new(AtomicBool::new(false));
+        let r2 = ran.clone();
+        crate::commands::spawn_purge_retry(std::time::Duration::ZERO, move || {
+            // the last retry succeeded; a purge fails elsewhere and schedules before this thread clears PURGE_RETRY
+            let r3 = r2.clone();
+            crate::commands::spawn_purge_retry(std::time::Duration::ZERO, move || { r3.store(true, Ordering::SeqCst); None });
+            None
+        });
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        assert!(ran.load(Ordering::SeqCst), "the second schedule never ran");
+    }
+    /// R4-5: both twins indexed (a sync conflict); the .age is briefly absent (rewritten by unlink + create, as git
+    /// checkout does) when the plain twin's delete is checked; the .age then reappears with its row still indexed.
+    #[test] fn r4_twin_gap_deletes_plain_without_mark() {
+        let (mut v, dir, db, p) = edited_note();
+        let age = dir.join("s.md.age");
+        std::fs::write(&age, crypto::encrypt(&crypto::new_identity(), b"x").unwrap()).unwrap();
+        v.apply_fs_changes(&[age.clone()], None); // new locked note: purges the old versions; s.md stays live
+        assert!(!purge_marked(&v));
+        assert!(trigram_on_disk(&db, &OLD[2..]), "control: s.md's current text is a live row");
+        // one batch [s.md, s.md.age]: s.md deleted, s.md.age rewritten with a gap
+        std::fs::remove_file(&age).unwrap();
+        std::fs::remove_file(&p).unwrap();
+        v.index.begin().unwrap();
+        let mut changed = Vec::new();
+        v.apply_chunk(&[PathBuf::from(&p)], None, true, &mut changed);
+        std::fs::write(&age, crypto::encrypt(&crypto::new_identity(), b"y").unwrap()).unwrap();
+        v.apply_chunk(&[age.clone()], None, true, &mut changed);
+        v.index.commit().unwrap();
+        v.purge_pending(false);
+        eprintln!("marked after the batch: {}", purge_marked(&v));
+        drop(v);
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        v.rescan(None);
+        drop(v);
+        assert!(!trigram_on_disk(&db, &OLD[2..]), "the locked note's plaintext survives batch + reopen + rescan");
+    }
+    #[test] fn only_the_last_chunk_purges() {
+        let (mut v, dir, _db, p) = edited_note();
+        std::fs::write(dir.join("s.md.age"), crypto::encrypt(&crypto::new_identity(), b"x").unwrap()).unwrap();
+        std::fs::remove_file(&p).unwrap();
+        v.apply_fs_changes_then(&[PathBuf::from(&p), dir.join("s.md.age")], None, false);
+        assert!(purge_marked(&v), "a chunk before the last purged");
+        v.apply_fs_changes_then(&[], None, true);
+        assert!(!purge_marked(&v));
     }
 }

@@ -121,7 +121,7 @@ fn open_vault_inner(app: &AppHandle, st: &AppState, dir: &Path, me: u64) -> anyh
     Ok(())
 }
 
-static PURGE_RETRY: AtomicBool = AtomicBool::new(false);
+pub(crate) static PURGE_RETRY: AtomicBool = AtomicBool::new(false);
 
 /// A purge that failed (a reader pinned old pages) is retried when its backoff ends, with no file event needed.
 fn schedule_purge_retry(app: &AppHandle) {
@@ -132,19 +132,23 @@ fn schedule_purge_retry(app: &AppHandle) {
 }
 
 /// One sleeping thread per process: sleeps `wait`, runs `retry`, and sleeps again for the wait it returns.
-/// shortcut: a purge failing just as the thread exits is retried only by the next batch, lock or open; fine while
-/// failures need an outside reader.
 pub(crate) fn spawn_purge_retry(wait: std::time::Duration, retry: impl Fn() -> Option<std::time::Duration> + Send + 'static) {
     if PURGE_RETRY.swap(true, Ordering::SeqCst) {
         return;
     }
     std::thread::spawn(move || {
         let mut wait = Some(wait);
-        while let Some(w) = wait {
-            std::thread::sleep(w + std::time::Duration::from_millis(100)); // past the window, not on its edge
-            wait = retry();
+        loop {
+            while let Some(w) = wait {
+                std::thread::sleep(w + std::time::Duration::from_millis(100)); // past the window, not on its edge
+                wait = retry();
+            }
+            PURGE_RETRY.store(false, Ordering::SeqCst);
+            wait = retry(); // a failure that scheduled before the store above saw the flag still set
+            if wait.is_none() || PURGE_RETRY.swap(true, Ordering::SeqCst) {
+                break;
+            }
         }
-        PURGE_RETRY.store(false, Ordering::SeqCst);
     });
 }
 
@@ -165,8 +169,10 @@ fn apply_watch(st: &AppState, base: &Path, batch: Option<Vec<PathBuf>>) -> Vec<S
         },
     };
     let mut changed = Vec::new();
-    for chunk in paths.chunks(100) {
-        let Some(c) = with(&mut |v| v.apply_fs_changes(chunk, id.as_deref())) else { break };
+    let n = paths.chunks(100).len();
+    for (i, chunk) in paths.chunks(100).enumerate() {
+        // a pending purge runs once, after the last chunk
+        let Some(c) = with(&mut |v| v.apply_fs_changes_then(chunk, id.as_deref(), i + 1 == n)) else { break };
         changed.extend(c);
     }
     changed

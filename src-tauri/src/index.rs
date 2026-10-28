@@ -81,10 +81,12 @@ pub struct Index {
     pub(crate) purge_backoff: std::time::Duration,
 }
 
-const MARK_PURGE: &str = "INSERT INTO purge_mark(one, gen) VALUES(1, 1) ON CONFLICT(one) DO UPDATE SET gen = gen + 1";
+/// The row stays: a cleared mark keeps its generation negated, so generations never repeat (a stale clear can't match
+/// a newer mark) and `gen > 0` means pending.
+const MARK_PURGE: &str = "INSERT INTO purge_mark(one, gen) VALUES(1, 1) ON CONFLICT(one) DO UPDATE SET gen = abs(gen) + 1";
 
 /// Clears the purge mark only if no delete bumped it since the purge read it (another connection may have).
-pub(crate) const CLEAR_PURGE: &str = "DELETE FROM purge_mark WHERE gen = ?1";
+pub(crate) const CLEAR_PURGE: &str = "UPDATE purge_mark SET gen = -gen WHERE gen = ?1";
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS notes(path TEXT PRIMARY KEY, title TEXT NOT NULL, title_folded TEXT NOT NULL,
@@ -214,7 +216,7 @@ impl Index {
     /// empty deepest levels, and failed 2 in 300 runs of the lock test. The mark is cleared only after all succeeded.
     /// `force` (open, a new lock) skips the backoff after a failure.
     pub fn purge_pending(&self, force: bool) -> anyhow::Result<()> {
-        let Some(generation) = self.db.query_row("SELECT gen FROM purge_mark", [], |r| r.get::<_, i64>(0)).optional()? else {
+        let Some(generation) = self.db.query_row("SELECT gen FROM purge_mark WHERE gen > 0", [], |r| r.get::<_, i64>(0)).optional()? else {
             return Ok(());
         };
         if !force && self.purge_failed.get().is_some_and(|(t, g)| g == generation && t.elapsed() < self.purge_backoff) {
@@ -228,15 +230,18 @@ impl Index {
     /// While a failed purge is still marked: how long until its backoff ends (when the app retries it unprompted).
     pub fn purge_retry_in(&self) -> Option<std::time::Duration> {
         let (t, _) = self.purge_failed.get()?;
-        let marked = self.db.query_row("SELECT EXISTS(SELECT 1 FROM purge_mark)", [], |r| r.get::<_, bool>(0)).unwrap_or(true);
+        let marked = self.db.query_row("SELECT EXISTS(SELECT 1 FROM purge_mark WHERE gen > 0)", [], |r| r.get::<_, bool>(0)).unwrap_or(true);
         marked.then(|| self.purge_backoff.saturating_sub(t.elapsed()))
     }
 
     fn purge(&self, generation: i64) -> anyhow::Result<()> {
         self.db.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')")?;
-        // A reader (`velo --mcp` direct mode) pins old pages, so the checkpoint can't overwrite them: it waits up to
-        // the busy timeout (5 s), then reports busy; keep the mark for the next trigger.
-        if self.db.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get::<_, i64>(0))? != 0 {
+        // A reader (`velo --mcp` direct mode) pins old pages, so the checkpoint can't overwrite them: wait only 100 ms
+        // (the vault mutex is held), then report busy and keep the mark for the next trigger.
+        self.db.busy_timeout(std::time::Duration::from_millis(100))?;
+        let busy = self.db.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get::<_, i64>(0));
+        self.db.busy_timeout(std::time::Duration::from_secs(5))?; // rusqlite's default
+        if busy? != 0 {
             anyhow::bail!("checkpoint blocked by another connection");
         }
         self.db.execute(CLEAR_PURGE, [generation])?;
