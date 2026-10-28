@@ -910,6 +910,17 @@ mod fix_tests {
         assert!(read(&dir, "B.md").ends_with("---\nSome paragraph\n"));
     }
 
+    /// A tags row with a quote never closed is never rewritten: add_tags fails the note the same way each time.
+    #[test] fn add_tags_leaves_an_unparsable_row_alone() {
+        let t = "---\ntags: ['90s music, retro]\n---\nx\n";
+        let (mut ops, dir) = vault(&[("a.md", t)]);
+        for _ in 0..2 {
+            let r = call(&mut ops, "add_tags", json!({"titles": ["a"], "tags": ["zz"], "summary": "s"})).unwrap();
+            assert_eq!((r["results"][0]["status"].as_str(), r["results"][0]["reason"].as_str()), (Some("failed"), Some("unsupported tags: layout")));
+            assert_eq!(read(&dir, "a.md"), t);
+        }
+    }
+
     #[test] fn bulk_tag_results_carry_the_new_hash() {
         let (mut ops, dir) = vault(&[("a.md", "one\n"), ("b.md", "two #t\n")]);
         let r = call(&mut ops, "add_tags", json!({"titles": ["a", "b"], "tags": ["t"], "summary": "s"})).unwrap();

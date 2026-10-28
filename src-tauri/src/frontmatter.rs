@@ -29,12 +29,23 @@ fn block(text: &str) -> Option<(usize, usize)> {
     None
 }
 
-fn unquote(v: &str) -> &str {
+/// The scalar's value: quotes removed, with YAML's `''` (single-quoted) and `\"` / `\\` (double-quoted) undone.
+fn unquote(v: &str) -> std::borrow::Cow<'_, str> {
     let v = v.trim();
-    for q in ['"', '\''] {
-        if let Some(s) = v.strip_prefix(q).and_then(|s| s.strip_suffix(q)) { return s; }
+    if let Some(s) = v.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')).filter(|_| v.len() > 1) {
+        return s.replace("''", "'").into();
     }
-    v
+    if let Some(s) = v.strip_prefix('"').and_then(|s| s.strip_suffix('"')).filter(|_| v.len() > 1) {
+        let (mut out, mut it) = (String::with_capacity(s.len()), s.chars().peekable());
+        while let Some(c) = it.next() {
+            match (c, it.peek()) {
+                ('\\', Some(&n)) if n == '"' || n == '\\' => { out.push(n); it.next(); }
+                _ => out.push(c),
+            }
+        }
+        return out.into();
+    }
+    v.into()
 }
 
 fn lines(s: &str) -> impl Iterator<Item = &str> {
@@ -63,13 +74,14 @@ fn flow_item(v: &str) -> String {
     } else if v.contains('"') {
         format!("'{}'", v.replace('\'', "''"))
     } else {
-        format!("\"{v}\"")
+        format!("\"{}\"", v.replace('\\', "\\\\"))
     }
 }
 
 /// The raw items of a flow list `a, "b, c", d]` (text after `[`), up to the first `]` outside quotes. As in YAML, a
-/// quote opens a quoted item only at the item's start (`don't` is plain text); `''` inside single quotes is a quote.
-fn flow_items(f: &str) -> Vec<&str> {
+/// quote opens a quoted item only at the item's start (`don't` is plain text); `''` inside single quotes and `\"`
+/// inside double quotes stay in the item. `None` when a quote is never closed.
+fn flow_scan(f: &str) -> Option<Vec<&str>> {
     let (mut out, mut start, mut quote, mut skip) = (vec![], 0, None, false);
     let mut it = f.char_indices().peekable();
     while let Some((i, c)) = it.next() {
@@ -79,6 +91,7 @@ fn flow_items(f: &str) -> Vec<&str> {
         }
         match (quote, c) {
             (Some('\''), '\'') if it.peek().is_some_and(|&(_, n)| n == '\'') => skip = true,
+            (Some('"'), '\\') => skip = true,
             (Some(q), _) if c == q => quote = None,
             (Some(_), _) => {}
             (None, '"' | '\'') if f[start..i].trim().is_empty() => quote = Some(c),
@@ -86,14 +99,22 @@ fn flow_items(f: &str) -> Vec<&str> {
                 out.push(f[start..i].trim());
                 start = i + 1;
                 if c == ']' {
-                    return out.into_iter().filter(|s| !s.is_empty()).collect();
+                    return Some(out.into_iter().filter(|s| !s.is_empty()).collect());
                 }
             }
             _ => {}
         }
     }
+    if quote.is_some() {
+        return None;
+    }
     out.push(f[start..].trim());
-    out.into_iter().filter(|s| !s.is_empty()).collect()
+    Some(out.into_iter().filter(|s| !s.is_empty()).collect())
+}
+
+/// `flow_scan`, or for a quote never closed the plain comma split velo always read such lists with.
+fn flow_items(f: &str) -> Vec<&str> {
+    flow_scan(f).unwrap_or_else(|| f.split(']').next().unwrap_or("").split(',').map(str::trim).filter(|s| !s.is_empty()).collect())
 }
 
 /// Flow lists, scalars or block lists under every `key:` row (any `key_rest` spelling), in order.
@@ -113,7 +134,7 @@ fn list(inner: &str, key: &str) -> Vec<String> {
             }
         }
     }
-    items.into_iter().map(|s| unquote(s).to_string()).filter(|s| !s.is_empty()).collect()
+    items.into_iter().map(|s| unquote(s).into_owned()).filter(|s| !s.is_empty()).collect()
 }
 
 pub fn parse(text: &str) -> Option<FrontMatter> {
@@ -130,7 +151,7 @@ pub fn body(text: &str) -> &str {
 }
 
 pub fn parse_date(v: &str) -> Option<DateTime<FixedOffset>> {
-    let v = unquote(v);
+    let v = &*unquote(v);
     if let Ok(d) = DateTime::parse_from_rfc3339(v) { return Some(d); }
     let naive = NaiveDate::parse_from_str(v, "%Y-%m-%d").ok().and_then(|d| d.and_hms_opt(0, 0, 0))
         // local date-times; the `T` forms are what Obsidian's "Date & time" property writes
@@ -183,7 +204,7 @@ fn tag_row<'a>(rows: &[&'a str], k: usize) -> Result<(Vec<&'a str>, usize, bool)
     Ok(if v.starts_with('[') {
         // only a single-line list with nothing after `]`
         if !v.ends_with(']') || v[1..v.len() - 1].contains(['[', ']', '#']) { return unsupported(); }
-        (flow_items(&v[1..]), k + 1, true)
+        (flow_scan(&v[1..]).ok_or("unsupported tags: layout")?, k + 1, true) // an unclosed quote: never rewritten
     } else if v == "~" || v == "null" {
         (vec![], k + 1, true) // YAML null: an empty list
     } else if !v.is_empty() {
@@ -227,10 +248,19 @@ pub fn set_tags(text: &str, add: &[String], remove: &[String], create_block: boo
         let eol = if rows[k].ends_with("\r\n") { "\r\n" } else { "\n" };
         let mut skip = vec![(k, end)];
         // flow items keep their bytes; block values become flow items
+        // a list going on after a blank or comment line (or indented under a flow row) would dangle below the
+        // folded row
+        let gap = |e: usize| rows[e..].iter().map(|l| l.trim_end_matches(['\n', '\r'])).find(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#')).is_some_and(|l| l.starts_with([' ', '\t', '-']));
+        if gap(end) {
+            return Err("unsupported tags: layout".into());
+        }
         let as_flow = |it: Vec<&str>, flow: bool| it.into_iter().map(|i| if flow { i.to_string() } else { flow_item(i) }).collect::<Vec<_>>();
         let mut all: Vec<String> = as_flow(std::mem::take(&mut items), flow);
         for j in more {
             let (it, e, f) = tag_row(&rows, j)?;
+            if gap(e) {
+                return Err("unsupported tags: layout".into());
+            }
             all.extend(as_flow(it, f));
             skip.push((j, e));
         }
@@ -423,7 +453,7 @@ mod tests {
         assert_eq!(tags("[don't, x]"), ["don't", "x"]);
         assert_eq!(tags("[l'été, 日本, x]"), ["l'été", "日本", "x"]);
         assert_eq!(tags("[\"a, b\", c]"), ["a, b", "c"]);
-        assert_eq!(tags("['it''s, ok', d]"), ["it''s, ok", "d"], "'' stays inside a single-quoted item");
+        assert_eq!(tags("['it''s, ok', d]"), ["it's, ok", "d"], "'' stays inside a single-quoted item (and reads as ')");
         assert_eq!(parse("---\naliases: [Bob's notes, B]\n---\n").unwrap().aliases, ["Bob's notes", "B"]);
         assert_eq!(set_tags("---\ntags: [don't, x]\n---\n", &["y2".into()], &[], false).unwrap().unwrap(), "---\ntags: [don't, x, y2]\n---\n");
     }
@@ -445,6 +475,42 @@ mod tests {
         let out = set_tags(t, &["z".into()], &[], false).unwrap().unwrap();
         assert_eq!(out, "---\ntags: [a:b, c, \"x, y\", plain, z]\n---\n");
         assert_eq!(parse(&out).unwrap().tags, ["a:b", "c", "x, y", "plain", "z"]);
+    }
+
+    /// A quote opened at an item's start and never closed: read as the plain comma split velo always did, and never
+    /// rewritten (the row didn't parse cleanly).
+    #[test]
+    fn unclosed_quote_reads_plain_and_refuses_writes() {
+        let tags = |t: &str| parse(&format!("---\ntags: {t}\n---\n")).unwrap().tags;
+        assert_eq!(tags("['90s music, retro]"), ["'90s music", "retro"]);
+        assert_eq!(tags("[a, 'b, c]"), ["a", "'b", "c"]);
+        assert_eq!(parse("---\naliases: ['Til death, Til]\n---\n").unwrap().aliases, ["'Til death", "Til"]);
+        for (add, rm) in [(vec!["zz".to_string()], vec![]), (vec![], vec!["a".to_string()])] {
+            assert_eq!(set_tags("---\ntags: [a, 'b]\n---\n", &add, &rm, true), Err("unsupported tags: layout".into()));
+        }
+    }
+
+    /// A block list that goes on after a blank or comment line can't be folded into a flow row: its tail would dangle.
+    #[test]
+    fn fold_refuses_a_block_list_with_a_gap() {
+        for t in ["---\nTags:\n  - x\n\n  - y\ntags: [a]\n---\n", "---\nTags:\n  - x\n  # c\n  - y\ntags: [a]\n---\n", "---\nTags:\n  - x\ntags: [a]\n  - y\n---\n"] {
+            assert_eq!(set_tags(t, &["zz".into()], &[], true), Err("unsupported tags: layout".into()), "{t:?}");
+        }
+        // a blank line or comment followed by another key is fine
+        assert!(set_tags("---\nTags:\n  - x\n\n# note\ntags: [a]\n---\n", &["zz".into()], &[], true).unwrap().is_some());
+    }
+
+    /// Quoted scalars read with their YAML escapes undone, and a fold writes them back to the same value.
+    #[test]
+    fn quoted_escapes_round_trip() {
+        let tags = |t: &str| parse(&format!("---\ntags: {t}\n---\n")).unwrap().tags;
+        assert_eq!(tags("'don''t'"), ["don't"]);
+        assert_eq!(tags("['it''s', \"a\\\", b\", c]"), ["it's", "a\", b", "c"]);
+        for v in ["say \"hi\", it's", "a\\b, c", "x, y"] {
+            let t = format!("---\nTags:\n  - {v}\ntags: [a]\n---\n");
+            let out = set_tags(&t, &["zz".into()], &[], true).unwrap().unwrap();
+            assert_eq!(parse(&out).unwrap().tags[0], v, "{out}");
+        }
     }
 
     #[test]
