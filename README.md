@@ -1,6 +1,6 @@
 # velo
 
-A fast, keyboard-first notes app for macOS, Windows and Linux, built with Tauri 2 and a React 19 UI (Park UI on Ark UI, styled with Panda CSS 1.12). One box searches and creates: type to filter your notes, press Enter to open the match or create a new note with that title.
+A fast, keyboard-first notes app for macOS (Apple silicon), Windows and Linux, built with Tauri 2 and a React 19 UI (Park UI on Ark UI, styled with Panda CSS 1.12). One box searches and creates: type to filter your notes, press Enter to open the match or create a new note with that title.
 
 Inspired by nvALT and Notational Velocity; not affiliated with or endorsed by their authors.
 
@@ -157,7 +157,7 @@ Release builds are not notarized: on macOS they carry only an ad-hoc signature, 
 
 ## Updates
 
-velo checks GitHub for a new release 30 seconds after launch and then once a day. When one is out, a banner offers **Install and restart**: velo saves your note, installs the update and relaunches. Check by hand from **velo → Check for Updates…** (macOS) or **Settings → Updates → Check now**; turn the daily check off in Settings. Updates are verified against velo's signing key before they install. On Linux, in-app updates work for the AppImage, .deb and .rpm (the .deb and .rpm installs ask for your password); if one fails, download the new version from the Releases page. Versions before 0.6.0 have no updater: install 0.6.0 by hand once.
+velo checks GitHub for a new release 30 seconds after launch and then once a day. When one is out, a banner offers **Install and restart**: velo saves your note, installs the update and relaunches. Check by hand from **velo → Check for Updates…** (macOS) or **Settings → Updates → Check now**; turn the daily check off in Settings. Updates are verified against velo's signing key before they install. On Linux, in-app updates work for the AppImage, .deb and .rpm (the .deb and .rpm installs ask for your password); if one fails, download the new version from the Releases page. Versions before 0.6.0 have no updater: install 0.6.0 by hand once. 0.8.0 is the last build for Intel Macs: they stop getting updates (a manual check shows a "platform not found" error). If you installed the Intel (x64) build on an Apple silicon Mac, download the Apple silicon (aarch64) .dmg from the Releases page once.
 
 ## Known limitations
 
@@ -197,4 +197,4 @@ Versions are managed with [Changesets](https://github.com/changesets/changesets)
 - Every user-visible change ships with a changeset in the same commit or PR: `pnpm changeset`, pick `patch` or `minor`, and write one past-tense sentence from the user's point of view.
 - `pnpm version-packages` applies pending changesets (bumps `package.json`, writes `CHANGELOG.md`) and mirrors the version into `src-tauri/tauri.conf.json`.
 - `pnpm release:tag` creates the `vX.Y.Z` git tag.
-- On GitHub: `ci.yml` builds and tests every PR and `main`. `release.yml` (Changesets action) opens a "Version Packages" PR while changesets are pending; merging it tags `vX.Y.Z` and dispatches `build-release.yml`, which builds macOS (arm64 + x64), Linux and Windows one after the other into a draft GitHub Release and publishes it once `latest.json` lists all four platforms.
+- On GitHub: `ci.yml` builds and tests every PR and `main`. `release.yml` (Changesets action) opens a "Version Packages" PR while changesets are pending; merging it tags `vX.Y.Z` and dispatches `build-release.yml`, which builds macOS (Apple silicon), Linux and Windows one after the other into a draft GitHub Release and publishes it once `latest.json` lists all three platforms.
