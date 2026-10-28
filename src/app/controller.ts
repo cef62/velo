@@ -543,6 +543,9 @@ export class Controller {
 
   /** Sort changed: fresh first page from the top, keeping the open note selected if it is loaded. */
   protected async resort() {
+    // a typed query's first page is in flight: keep its row-0 rule (it pages with the new sort), but never leave the open note
+    // when it is listed (a note just created by openTitle)
+    if (this.pendingFirst !== null) return this.runSearch(true, this.pendingFirst || true);
     const seq = ++this.searchSeq;
     const highlighted = this.highlighted();
     try {
@@ -598,17 +601,13 @@ export class Controller {
   async enter(force = false, checklist = false) {
     if (this.store.get().paneMode === "tasks") {
       // the field filters tasks here: Enter opens the first one shown, never creates a note
-      // a newer load (watcher, save) supersedes the one in flight, whose reply is then dropped: wait for the latest
-      for (let p = this.tasksLoading; ; p = this.tasksLoading) {
-        await p;
-        if (p === this.tasksLoading) break;
-      }
+      await settled(() => this.tasksLoading);
       const v = this.store.get().taskView;
       const first = v && [...v.overdue, ...v.today, ...v.upcoming, ...v.no_date, ...v.done][0];
       if (first) await this.openTask(first);
       return;
     }
-    await this.searching;
+    await settled(() => this.searching);
     const a = enterAction(this.store.get().query, this.results.loaded, this.results.get(this.store.get().sel), force);
     if (!a) return;
     try {
@@ -1490,6 +1489,14 @@ export class Controller {
     this.setIndexing(false);
     this.setErr(message);
     void this.runSearch(false); // no vault -> shows the setup screen
+  }
+}
+
+/** Awaits the latest of a promise that can be replaced while awaited (a newer load drops the older one's reply). */
+async function settled(latest: () => Promise<unknown>) {
+  for (let p = latest(); ; p = latest()) {
+    await p;
+    if (p === latest()) return;
   }
 }
 

@@ -1648,3 +1648,44 @@ test("a refresh landing while a typed query's search is in flight keeps its firs
     expect(store.get().openPath, how).toBe(P("Groceries"));
   }
 });
+
+test("Notes-mode Enter waits for the refresh that overtook the typed search (#15 M1)", async () => {
+  const { c, api, store } = setup({ X: "x", Y: "y", Z: "z", Groceries: "g" });
+  await c.runSearch(true, true);
+  await settle();
+  await c.show(P("Z")); // e.g. a wikilink to a note not on the first page
+  store.set({ sel: -1 });
+  const d1 = deferred<Page>();
+  const d2 = deferred<Page>();
+  api.search.mockImplementationOnce(() => d1.promise).mockImplementationOnce(() => d2.promise);
+  c.setQuery("gro");
+  const entered = c.enter();
+  void c.onNotesChanged([]);
+  d1.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
+  await settle();
+  d2.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
+  await entered;
+  await settle();
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+  expect(store.get().openPath).toBe(P("Groceries"));
+});
+
+test("a sort toggle overtaking a typed search keeps its first match (#15 M2)", async () => {
+  const { c, api, store } = setup({ Groceries: "g", X: "x", Y: "y" });
+  await c.show(P("X"));
+  await c.runSearch(true, true);
+  await settle();
+  const d1 = deferred<Page>();
+  const d2 = deferred<Page>();
+  api.search.mockImplementationOnce(() => d1.promise).mockImplementationOnce(() => d2.promise);
+  c.setQuery("gro");
+  const sorted = c.toggleSort();
+  await settle();
+  d1.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
+  d2.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
+  await sorted;
+  await settle();
+  await c.enter();
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+  expect(store.get().openPath).toBe(P("Groceries"));
+});
