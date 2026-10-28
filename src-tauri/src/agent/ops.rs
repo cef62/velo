@@ -86,8 +86,10 @@ impl DirectOps {
     }
 
     /// Catch up with outside changes since the last call (mtime/size diff, as the app does after missed events).
-    pub fn rescan(&mut self) {
-        self.vault.rescan(None);
+    /// One listing plus a stat per note each call (about 15 ms for 10k notes): a folder-mtime shortcut would miss
+    /// in-place edits, and the spec wants a fresh view.
+    pub fn rescan(&mut self) -> anyhow::Result<()> {
+        self.vault.try_rescan(None).map(drop)
     }
 }
 
@@ -304,6 +306,12 @@ mod tests {
         assert!(!dir.join("T.md").exists());
         let r = o.vault.list_revisions(&d.path).unwrap();
         assert_eq!(r[0].summary.as_deref(), Some("trashed"));
+    }
+    #[test] fn rescan_failure_is_reported() {
+        let (mut o, dir) = ops();
+        assert!(o.rescan().is_ok());
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(o.rescan().is_err(), "an unreadable folder must not look like an up-to-date index");
     }
     #[test] fn agent_snapshot_refuses_locked() {
         let (mut o, dir) = ops();

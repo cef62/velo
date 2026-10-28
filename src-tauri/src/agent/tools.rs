@@ -805,7 +805,7 @@ mod fix_tests {
         let (mut ops, dir) = vault(&[("X.md", "the secret plan #hush #shared\n- [ ] secret task\nsee [[A]]\n"), ("A.md", "a #shared\n")]);
         call(&mut ops, "list_tags", json!({})).unwrap();
         std::fs::write(dir.join("X.md.age"), "ciphertext").unwrap();
-        ops.rescan();
+        ops.rescan().unwrap();
         for name in ["read_note", "move_to_trash", "set_task_done", "edit_note", "replace_note"] {
             let args = json!({"title": "X", "summary": "s", "line": 1, "line_text": "- [ ] secret task", "done": true, "old_text": "plan", "new_text": "p", "text": "t", "expected_hash": "h"});
             assert_eq!(call(&mut ops, name, args), Err("not found".to_string()), "{name}");

@@ -159,10 +159,15 @@ impl Vault {
 
     /// Re-check the whole folder against the index (the watcher missed events, or they came before it started).
     pub fn rescan(&mut self, identity: Option<&str>) -> Vec<String> {
-        let Ok(files) = self.store.list() else { return Vec::new() };
-        let Ok((stale, gone)) = self.diff(&files) else { return Vec::new() };
+        self.try_rescan(identity).unwrap_or_default()
+    }
+
+    /// `rescan`, failing when the folder or the index can't be read.
+    pub fn try_rescan(&mut self, identity: Option<&str>) -> anyhow::Result<Vec<String>> {
+        let files = self.store.list()?;
+        let (stale, gone) = self.diff(&files)?;
         let paths: Vec<PathBuf> = stale.into_iter().map(|(p, ..)| p.clone()).chain(gone.into_iter().map(PathBuf::from)).collect();
-        self.apply_fs_changes(&paths, identity)
+        Ok(self.apply_fs_changes(&paths, identity))
     }
 
     /// A note file directly inside the notes folder; anything else is refused (paths come from the webview).

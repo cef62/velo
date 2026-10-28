@@ -61,7 +61,9 @@ fn gate(settings_path: PathBuf, data_dir: PathBuf) -> impl Fn(&str, Value) -> Re
             *ops = Some(DirectOps::open(dir, &db, settings_path.clone()).map_err(|e| e.to_string())?);
         }
         let ops = ops.as_mut().expect("opened above");
-        ops.rescan();
+        if let Err(e) = ops.rescan() {
+            eprintln!("velo --mcp: rescan of the notes folder failed: {e}"); // the call goes on with the index as it is
+        }
         tools::call(ops, name, args)
     }
 }
