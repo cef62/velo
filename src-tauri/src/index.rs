@@ -354,8 +354,13 @@ impl Index {
     }
 
     pub fn find_title(&self, title: &str) -> anyhow::Result<Option<String>> {
-        let mut st = self.db.prepare("SELECT path FROM notes WHERE title_folded=?1 UNION ALL SELECT path FROM aliases WHERE alias_folded=?1 LIMIT 1")?;
-        Ok(st.query_map([fold(title)], |r| r.get(0))?.next().transpose()?)
+        Ok(self.find_titles(title)?.into_iter().next())
+    }
+
+    /// Every note `title` names: title matches first, then aliases.
+    pub fn find_titles(&self, title: &str) -> anyhow::Result<Vec<String>> {
+        let mut st = self.db.prepare("SELECT path FROM notes WHERE title_folded=?1 UNION ALL SELECT path FROM aliases WHERE alias_folded=?1")?;
+        Ok(st.query_map([fold(title)], |r| r.get(0))?.collect::<Result<_, _>>()?)
     }
 
     pub fn titles(&self) -> anyhow::Result<Vec<String>> {

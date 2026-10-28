@@ -126,7 +126,8 @@ impl<V: DerefMut<Target = Vault>> VaultOps<V> {
 
 impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
     fn find(&self, title: &str) -> anyhow::Result<Option<String>> {
-        Ok(self.vault.find_note(title)?.filter(|p| !locked(p)))
+        // a locked note's title must not hide a plain note's alias
+        Ok(self.vault.index.find_titles(title)?.into_iter().find(|p| !locked(p)))
     }
 
     fn read(&mut self, path: &str) -> anyhow::Result<NoteDoc> {
@@ -253,25 +254,35 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
 
     fn capture_task(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<String> {
         let wfm = self.settings().write_front_matter;
-        match self.vault.find_note(title)? {
-            Some(p) if locked(&p) => return Err(anyhow!("not found")),
-            Some(p) => drop(self.vault.agent_snapshot(&p, summary)?),
-            None => {}
+        let found = self.find(title)?;
+        if found.is_none() && self.vault.find_note(title)?.is_some() {
+            return Err(anyhow!("not found")); // only a locked note has that name
         }
-        let found = self.vault.find_note(title)?;
+        if text.trim().is_empty() {
+            return Err(anyhow!("empty"));
+        }
         let target = found.as_ref().map_or_else(|| note_path(self.dir(), title, false), PathBuf::from);
         let before = hash_of(&target);
-        let path = landed(self.vault.capture_task(title, text, None, wfm), &target, before.as_deref())?;
-        if found.is_none() {
+        let Some(p) = found else {
+            // an empty file first, stamped by the append's save: a front-matter stub would get a revision of its own
+            let doc = landed(self.vault.open_or_create(title, None, false), &target, before.as_deref())?;
+            let path = landed(self.vault.append_task(&doc.path, text, None, wfm), &target, None)?;
             // a created note's first revision is its created text
             self.vault.agent_snapshot(&path, summary).map_err(|_| anyhow!(NO_ANSWER))?;
-        }
-        Ok(path)
+            return Ok(path);
+        };
+        let snap = self.vault.agent_snapshot(&p, summary)?;
+        let r = landed(self.vault.append_task(&p, text, None, wfm), &target, before.as_deref());
+        self.unsnapshot(&[(p, snap)], &r);
+        r
     }
 
     fn open_or_create(&mut self, title: &str) -> anyhow::Result<NoteDoc> {
-        if self.vault.find_note(title)?.is_some_and(|p| locked(&p)) {
-            return Err(anyhow!("not found"));
+        if let Some(p) = self.find(title)? {
+            return self.vault.open_note(&p, None);
+        }
+        if self.vault.find_note(title)?.is_some() {
+            return Err(anyhow!("not found")); // only a locked note has that name
         }
         let wfm = self.settings().write_front_matter;
         self.vault.open_or_create(title, None, wfm)
@@ -369,6 +380,29 @@ mod tests {
         assert_eq!(d.text, "");
         o.snapshot(&d.path, "Agent: created daily note").unwrap();
         assert_eq!(agent_revs(&o, &d.path), ["Agent: created daily note"]);
+    }
+    /// A locked note's title must not hide a plain note that has it as an alias (no leak either way).
+    #[test] fn locked_title_does_not_shadow_plain_alias() {
+        let (mut o, dir) = ops();
+        std::fs::write(dir.join("Foo.md.age"), "ciphertext").unwrap();
+        std::fs::write(dir.join("Bar.md"), "---\naliases: [Foo]\n---\nbar\n").unwrap();
+        o.rescan().unwrap();
+        let bar = dir.join("Bar.md").to_string_lossy().into_owned();
+        assert_eq!(o.find("foo").unwrap(), Some(bar.clone()));
+        assert_eq!(o.open_or_create("Foo").unwrap().path, bar);
+        assert_eq!(o.capture_task("Foo", "t", "s").unwrap(), bar);
+        assert!(std::fs::read_to_string(&bar).unwrap().ends_with("bar\n- [ ] t\n"));
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2, "nothing created");
+        // only a locked note has the title: still not found, and nothing is created beside it
+        std::fs::write(dir.join("Solo.md.age"), "ciphertext").unwrap();
+        o.rescan().unwrap();
+        assert_eq!(o.capture_task("Solo", "t", "s").unwrap_err().to_string(), "not found");
+        assert_eq!(o.open_or_create("Solo").err().unwrap().to_string(), "not found");
+    }
+    #[test] fn task_into_new_note_has_no_stub_revision() {
+        let (mut o, _) = ops();
+        let p = o.capture_task("New", "t", "s").unwrap();
+        assert_eq!(o.vault.list_revisions(&p).unwrap().len(), 1, "only the agent's created text");
     }
     #[test] fn rescan_failure_is_reported() {
         let (mut o, dir) = ops();

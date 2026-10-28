@@ -271,9 +271,16 @@ impl Vault {
 
     /// Append `- [ ] text` to the note titled `title` (created if missing); returns its path.
     pub fn capture_task(&mut self, title: &str, text: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<String> {
+        if text.trim().is_empty() { return Err(anyhow!("empty")); }
+        let path = self.open_or_create(title, identity, write_fm)?.path;
+        self.append_task(&path, text, identity, write_fm)
+    }
+
+    /// Append `- [ ] text` to the note at `path`; returns the path.
+    pub fn append_task(&mut self, path: &str, text: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<String> {
         let text = text.trim().replace(['\r', '\n'], " ");
         if text.is_empty() { return Err(anyhow!("empty")); }
-        let doc = self.open_or_create(title, identity, write_fm)?;
+        let doc = self.open_note(path, identity)?;
         self.append_in(doc, &text, identity, write_fm)
     }
 
