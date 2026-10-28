@@ -674,6 +674,35 @@ mod tests {
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
     }
 
+    #[test] fn add_task_goes_to_the_daily_note_when_that_is_the_capture_target() {
+        let dir = tempfile::tempdir().unwrap().keep();
+        let data = tempfile::tempdir().unwrap().keep();
+        std::fs::write(data.join("settings.json"), r#"{"capture_target": "daily"}"#).unwrap();
+        let mut ops = DirectOps::open(dir.clone(), &data.join("i.sqlite"), data.join("settings.json")).unwrap();
+        let today = crate::tasks::local_today();
+        let r = call(&mut ops, "add_task", json!({"text": "call Bob", "summary": "s"})).unwrap();
+        assert_eq!(r["title"], today.as_str());
+        assert!(read(&dir, &format!("{today}.md")).ends_with("- [ ] call Bob\n"));
+        // an explicit title still wins
+        call(&mut ops, "add_task", json!({"text": "x", "title": "Inbox", "summary": "s"})).unwrap();
+        assert!(dir.join("Inbox.md").exists());
+    }
+
+    #[test] fn list_tasks_filters_by_query_tags_and_done() {
+        let today = crate::tasks::local_today();
+        let a = format!("#work\n- [ ] alpha 📅 2000-01-01\n- [x] shipped ✅ {today}\n- [ ] gamma\n");
+        let (mut ops, _) = task_ops(&[("a.md", a.as_str()), ("b.md", "- [ ] beta\n- [ ] alphabet soup\n")]);
+        let texts = |v: &Value, g: &str| v[g].as_array().unwrap().iter().map(|t| t["text"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        let all = call(&mut ops, "list_tasks", json!({})).unwrap();
+        assert_eq!((texts(&all, "overdue"), texts(&all, "done").len(), all["due_count"].as_u64()), (vec!["alpha".to_string()], 0, Some(1)));
+        let q = call(&mut ops, "list_tasks", json!({"query": "alpha"})).unwrap();
+        assert_eq!((texts(&q, "overdue"), texts(&q, "no_date")), (vec!["alpha".to_string()], vec!["alphabet soup".to_string()]));
+        let t = call(&mut ops, "list_tasks", json!({"tags": ["WORK"]})).unwrap();
+        assert_eq!((texts(&t, "overdue"), texts(&t, "no_date")), (vec!["alpha".to_string()], vec!["gamma".to_string()]));
+        let d = call(&mut ops, "list_tasks", json!({"tags": ["work"], "show_done": true})).unwrap();
+        assert_eq!(texts(&d, "done"), ["shipped"]);
+    }
+
     #[test] fn add_task_rejects_empty_text_and_title() {
         let (mut ops, dir) = task_ops(&[]);
         assert_eq!(call(&mut ops, "add_task", json!({"text": "  ", "due": "2030-01-02", "summary": "s"})), Err("text is empty".to_string()));
