@@ -538,7 +538,7 @@ mod tests {
 
     #[test]
     fn set_tags_refuses_unrecognised_layouts() {
-        for t in ["tags: [a, b] # note", "tags: [a,\n  b]", "tags: a # c", "tags: {a: 1}", "tags:\n  k: v"] {
+        for t in ["tags: [a, b] # note", "tags: [a,\n  b]", "tags: a # c", "tags: {a: 1}", "tags:\n  k: v", "tags: [a] [b]", "tags: [\"a\"] # c]", "tags: [a, #b]", "tags: [a#b, c]", "tags: [\"#a\" #b]"] {
             let text = format!("---\n{t}\n---\nbody");
             assert_eq!(set_tags(&text, &["x".into()], &["a".into()], true), Err("unsupported tags: layout".into()), "{t}");
         }
