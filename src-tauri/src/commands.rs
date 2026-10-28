@@ -212,7 +212,7 @@ fn swap_globals(changed: &[(GlobalAction, String, String)], held: &[String], reg
     for (i, (a, _, n)) in changed.iter().enumerate() {
         if let Err(e) = reg(*a, n) {
             changed[..i].iter().for_each(|(_, _, n)| unreg(n));
-            changed.iter().for_each(|(a, o, _)| { reg(*a, o).ok(); });
+            restore(changed, reg);
             return Err(e);
         }
     }
@@ -222,7 +222,16 @@ fn swap_globals(changed: &[(GlobalAction, String, String)], held: &[String], reg
 /// Undo a finished `swap_globals` (the vault reopen failed after it).
 fn revert_globals(changed: &[(GlobalAction, String, String)], reg: &mut Reg, unreg: &mut Unreg) {
     changed.iter().for_each(|(_, _, n)| unreg(n));
-    changed.iter().for_each(|(a, o, _)| { reg(*a, o).ok(); });
+    restore(changed, reg);
+}
+
+/// Re-register the old keys; one that fails stays unregistered (another app took it meanwhile), so say which.
+fn restore(changed: &[(GlobalAction, String, String)], reg: &mut Reg) {
+    for (a, o, _) in changed {
+        if let Err(e) = reg(*a, o) {
+            eprintln!("velo: {a:?} hotkey {o} not restored: {e}");
+        }
+    }
 }
 
 #[tauri::command]
@@ -631,14 +640,14 @@ mod global_tests {
         assert!(changed_globals(&a, &b).is_empty());
         b.shortcuts.insert("capture".into(), "Mod+KeyG".into());
         b.shortcuts.insert("toggle_window".into(), "Mod+Shift+Space".into()); // same as default: unchanged
-        assert_eq!(changed_globals(&a, &b), vec![(GlobalAction::Capture, "Mod+Shift+Alt+KeyN".to_string(), "Mod+KeyG".to_string())]);
+        assert_eq!(changed_globals(&a, &b), vec![(GlobalAction::Capture, "Mod+Alt+Shift+KeyN".to_string(), "Mod+KeyG".to_string())]);
     }
     fn with(t: &str, c: &str) -> Settings {
         let mut s = Settings::default();
         s.shortcuts.insert("toggle_window".into(), t.into()); s.shortcuts.insert("capture".into(), c.into()); s
     }
     const T: &str = "Mod+Shift+Space";
-    const C: &str = "Mod+Shift+Alt+KeyN";
+    const C: &str = "Mod+Alt+Shift+KeyN";
     fn ch(a: GlobalAction, o: &str, n: &str) -> (GlobalAction, String, String) { (a, o.into(), n.into()) }
     #[test] fn changed_globals_toggle_both_swap_none() {
         use GlobalAction::*;
