@@ -108,6 +108,33 @@ impl Editors {
     }
 }
 
+/// Runs one agent call `f` with its editor round trip (`route`, through `editors`, sending requests with `emit`) and
+/// `release`, which ends the not-open hold on a note once the call's backend write to it is done. Whatever the call
+/// still holds is released when it returns.
+pub fn with_route<T>(editors: &Editors, emit: &dyn Fn(Value), f: impl FnOnce(&dyn Fn(Value) -> anyhow::Result<Value>, &dyn Fn(&str)) -> T) -> T {
+    let held = Mutex::new(Vec::<String>::new());
+    let route = |req: Value| {
+        let paths = req_paths(&req);
+        let r = editors.ask(req, emit, EDITOR_TIMEOUT);
+        if r.as_ref().is_ok_and(|v| v == "not-open") {
+            held.lock().unwrap().extend(paths);
+        }
+        r
+    };
+    let release = |p: &str| {
+        let mut h = held.lock().unwrap();
+        if let Some(i) = h.iter().position(|x| x == p) {
+            h.swap_remove(i);
+            editors.release(&[p.to_string()]);
+        }
+    };
+    let out = f(&route, &release);
+    editors.release(&std::mem::take(&mut *held.lock().unwrap()));
+    out
+}
+
+fn no_release(_: &str) {}
+
 pub struct AppOps<'a> {
     st: &'a AppState,
     /// The `agent-write` round trip: `{path, kind, insert, base?, summary}` in, the webview's reply out.
@@ -117,11 +144,13 @@ pub struct AppOps<'a> {
     /// Paths the backend wrote (or may have): the watcher drops its own writes, so the listener sends these as
     /// `notes-changed` for the list, tags, tasks and a clean open note to reload.
     pub touched: Vec<String>,
+    /// Called once the backend wrote a note the webview said is not open (see `with_route`).
+    pub release: &'a dyn Fn(&str),
 }
 
 impl<'a> AppOps<'a> {
     pub fn new(st: &'a AppState, route: &'a dyn Fn(Value) -> anyhow::Result<Value>) -> Self {
-        AppOps { st, route, remove: crate::vault::move_to_trash, touched: Vec::new() }
+        AppOps { st, route, remove: crate::vault::move_to_trash, touched: Vec::new(), release: &no_release }
     }
 
     /// Runs `f` on the app's vault, locked for this one operation only (the editor round trip needs it free).
@@ -172,7 +201,9 @@ impl NoteOps for AppOps<'_> {
             Some(hash) => Ok(hash),
             None => {
                 self.touched.push(path.to_string());
-                self.with(|o| o.write(path, new_text, base_hash, summary))
+                let r = self.with(|o| o.write(path, new_text, base_hash, summary));
+                (self.release)(path);
+                r
             }
         }
     }
@@ -209,6 +240,7 @@ impl NoteOps for AppOps<'_> {
         }
         let ready = self.ask_editor(json!({"path": path, "kind": "rename", "summary": summary}), &["ready", "not-open"])? == "ready";
         let r = self.with(|o| o.rename(path, new_title, rewrite_links, summary));
+        sources.iter().chain([&path.to_string()]).for_each(|p| (self.release)(p));
         if !ready {
             // (an open renamed note is reloaded by `renamed`)
             self.touched.push(path.to_string());
@@ -234,6 +266,7 @@ impl NoteOps for AppOps<'_> {
         let closed = self.ask_editor(json!({"path": path, "kind": "trash", "summary": summary}), &["closed", "not-open"])? == "closed";
         self.touched.push(path.to_string());
         let r = self.with(|o| o.trash(path, summary));
+        (self.release)(path);
         if let (true, Err(e)) = (closed, &r) {
             // the note left the editor but is still there: say why, or it just vanishes from view
             let title = parse_note_file(Path::new(path)).map(|n| n.title);
@@ -253,14 +286,16 @@ impl NoteOps for AppOps<'_> {
 
     fn capture_task(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<String> {
         let line = format!("- [ ] {}", text.trim().replace(['\r', '\n'], " "));
-        if let Some(path) = self.find(title)?
+        let found = self.find(title)?;
+        if let Some(path) = &found
             && !text.trim().is_empty()
             && self.via_editor(json!({"path": path, "kind": "append", "insert": line, "summary": summary}))?.is_some()
         {
-            return Ok(path);
+            return Ok(path.clone());
         }
         // a locked match, a missing note (created here) or one not open in the editor
         let r = self.with(|o| o.capture_task(title, text, summary));
+        found.iter().for_each(|p| (self.release)(p));
         self.touched.extend(r.as_ref().ok().cloned());
         r
     }
@@ -471,6 +506,27 @@ mod tests {
         assert!(late.is_err());
         editors.done(id, json!("not-open"));
         assert!(editors.wait_free("/n/L.md", Duration::ZERO));
+    }
+
+    /// A note's not-open hold ends when its own backend write is done, not at the end of the agent call; whatever
+    /// the call still holds is released when it ends.
+    #[test] fn hold_ends_with_the_note_write_not_the_call() {
+        let (st, dir) = state();
+        let p = dir.join("P.md").to_string_lossy().into_owned();
+        let editors = Editors::default();
+        let emit = |r: Value| editors.done(r["id"].as_u64().unwrap(), json!("not-open"));
+        with_route(&editors, &emit, |route, release| {
+            let mut ops = AppOps::new(&st, route);
+            ops.release = release;
+            let d = ops.read(&p).unwrap();
+            ops.write(&p, "v2\n", &d.hash, "s").unwrap();
+            assert!(editors.wait_free(&p, Duration::ZERO), "free right after its write, mid-call");
+            ops.capture_task("P", "t", "s").unwrap();
+            assert!(editors.wait_free(&p, Duration::ZERO));
+            route(json!({"path": "/n/X.md", "kind": "replace"})).unwrap(); // held, never written in this call
+            assert!(!editors.wait_free("/n/X.md", Duration::ZERO));
+        });
+        assert!(editors.wait_free("/n/X.md", Duration::ZERO), "released when the call ends");
     }
 
     #[test] fn trash_failure_after_closed_is_shown() {
