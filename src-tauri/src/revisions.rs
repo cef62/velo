@@ -144,17 +144,22 @@ impl Revisions {
         if std::fs::create_dir_all(&to).is_err() {
             return;
         }
-        // each snapshot moves with its sidecar, to a free id when the target already uses its own
-        for info in self.list(old_title) {
+        // each snapshot moves with its sidecar, to a free id when the target already uses its own; oldest first, so
+        // bumped ids keep the moved history in order
+        for info in self.list(old_title).into_iter().rev() {
             let (ms, id) = free_id(&to, info.ts, info.id.ends_with(".age"));
             if std::fs::rename(from.join(&info.id), to.join(id)).is_ok() {
                 std::fs::rename(from.join(format!("{}.json", info.ts)), to.join(format!("{ms}.json"))).ok();
             }
         }
-        // what is left are orphan sidecars, whose snapshot is gone
+        // orphan sidecars (no snapshot left beside them) go; a snapshot that failed to move keeps its own
         if let Ok(rd) = std::fs::read_dir(&from) {
-            for e in rd.flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".json")) {
-                std::fs::remove_file(e.path()).ok();
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let Some(ts) = name.strip_suffix(".json") else { continue };
+                if !from.join(format!("{ts}.md")).exists() && !from.join(format!("{ts}.md.age")).exists() {
+                    std::fs::remove_file(e.path()).ok();
+                }
             }
         }
         std::fs::remove_dir(&from).ok();
@@ -305,6 +310,30 @@ mod tests {
         assert_eq!(r.read("new", "10.md").unwrap().0, b"plain");
         assert!(!l.iter().any(|x| x.summary.as_deref() == Some("orphan")) && !r.dir("new").join("3.json").exists());
         assert!(!r.dir("old").exists());
+    }
+    /// Clashes are resolved oldest first, so the moved history keeps its order.
+    #[test] fn rename_merge_keeps_source_order() {
+        let r = rev();
+        r.snapshot_bytes("old", b"older", false, 10, false).unwrap();
+        r.snapshot_bytes("old", b"newer", false, 11, false).unwrap();
+        r.snapshot_bytes("new", b"target", false, 10, false).unwrap();
+        r.rename("old", "new");
+        let l = r.list("new");
+        let texts: Vec<Vec<u8>> = l.iter().map(|x| r.read("new", &x.id).unwrap().0).collect();
+        let pos = |t: &[u8]| texts.iter().position(|x| x == t).unwrap();
+        assert!(pos(b"newer") < pos(b"older"), "newest first: {:?}", l.iter().map(|x| &x.id).collect::<Vec<_>>());
+    }
+    /// A snapshot that could not move keeps its sidecar (its agent label and summary).
+    #[cfg(unix)]
+    #[test] fn failed_merge_move_keeps_the_sidecar() {
+        use std::os::unix::fs::PermissionsExt;
+        let r = rev();
+        r.snapshot_agent("old", b"a", false, 10, "why").unwrap();
+        r.snapshot_bytes("new", b"b", false, 20, false).unwrap();
+        std::fs::set_permissions(r.dir("new"), std::fs::Permissions::from_mode(0o555)).unwrap();
+        r.rename("old", "new");
+        std::fs::set_permissions(r.dir("new"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(r.list("old").first().and_then(|x| x.summary.clone()).as_deref(), Some("why"));
     }
     #[test] fn sidecar_follows_rename_prune_encrypt() {
         let r = rev();
