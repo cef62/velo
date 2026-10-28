@@ -78,20 +78,36 @@ pub fn rewrite_links(body: &str, old: &str, new: &str) -> (String, usize) {
     (out, n)
 }
 
-/// Removes each exact `#tag` word (same scanner rules as `extract_tags`) outside fenced code, inline code spans and
-/// `](#...)` link targets; returns the new text and the count. A line left empty is dropped.
+/// A list item or task with nothing after its marker (`-`, `1.`, `- [ ]`).
+fn bare_marker(t: &str) -> bool {
+    let m = ["[ ]", "[x]", "[X]"].iter().find_map(|b| t.strip_suffix(b)).map_or(t, str::trim_end);
+    matches!(m, "-" | "*" | "+") || (m.len() > 1 && m[..m.len() - 1].bytes().all(|b| b.is_ascii_digit()) && m.ends_with(['.', ')']))
+}
+
+/// Removes each exact `#tag` word (same scanner rules as `extract_tags`) outside fenced and indented code, inline code
+/// spans, `[...]` link text, `[[...]]` links and `](#...)` link targets; returns the new text and the count. A line
+/// left empty, or left as a bare list or task marker, is dropped.
 pub fn remove_inline_tag(body: &str, tag_folded: &str) -> (String, usize) {
-    let (mut out, mut n, mut fenced) = (String::new(), 0, false);
+    let (mut out, mut n, mut fenced, mut after_blank, mut icode) = (String::new(), 0, false, true, false);
     for raw in body.split_inclusive('\n') {
         let line = raw.trim_end_matches(['\n', '\r']);
         let t = line.trim_start();
         if t.starts_with("```") || t.starts_with("~~~") { fenced = !fenced; }
-        if fenced || t.starts_with("```") || t.starts_with("~~~") { out.push_str(raw); continue; }
-        let (mut cuts, mut code, mut prev, mut prev2) = (vec![], false, None, None::<char>);
+        // indented code: 4+ spaces (or a tab) after a blank line or more code; an indented list item is not code
+        let indented = (line.starts_with("    ") || line.starts_with('\t')) && !t.is_empty();
+        icode = indented && (after_blank || icode) && !bare_marker(t.split(' ').next().unwrap_or(""));
+        after_blank = t.is_empty();
+        if fenced || icode || t.starts_with("```") || t.starts_with("~~~") { out.push_str(raw); continue; }
+        let (mut cuts, mut code, mut prev, mut prev2, mut depth) = (vec![], false, None, None::<char>, 0usize);
         for (i, c) in line.char_indices() {
             if c == '`' {
                 code = !code;
-            } else if c == '#' && !code && prev.is_none_or(|p: char| p.is_whitespace() || p == '(') && !(prev == Some('(') && prev2 == Some(']')) {
+            } else if code {
+            } else if c == '[' {
+                depth += 1;
+            } else if c == ']' {
+                depth = depth.saturating_sub(1);
+            } else if c == '#' && depth == 0 && prev.is_none_or(|p: char| p.is_whitespace() || p == '(') && !(prev == Some('(') && prev2 == Some(']')) {
                 let tag: String = line[i + 1..].chars().take_while(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '/')).collect();
                 if tag.chars().any(char::is_alphabetic) && fold(&tag) == tag_folded { cuts.push((i, i + 1 + tag.len())); }
             }
@@ -110,7 +126,7 @@ pub fn remove_inline_tag(body: &str, tag_folded: &str) -> (String, usize) {
             l.push_str(pre);
         }
         l.push_str(&line[last..]);
-        if !l.trim().is_empty() { out.push_str(&l); out.push_str(&raw[line.len()..]); }
+        if !l.trim().is_empty() && !bare_marker(l.trim()) { out.push_str(&l); out.push_str(&raw[line.len()..]); }
     }
     (out, n)
 }
@@ -135,5 +151,13 @@ mod tests {
         let (out, n) = remove_inline_tag(b, "tag");
         assert_eq!(out, "keep #tagging and `#tag` and [x](#tag)\nfoo bar\n```\n#tag\n```\n#other\nend");
         assert_eq!(n, 4);
+    }
+    #[test] fn remove_inline_tag_skips_link_text_and_indented_code() {
+        let b = "read [the #work notes](http://x) and [[Plan #work]] #work\n\n    code #work here\n- a\n    - #work nested\n";
+        assert_eq!(remove_inline_tag(b, "work"), ("read [the #work notes](http://x) and [[Plan #work]]\n\n    code #work here\n- a\n    - nested\n".into(), 2));
+    }
+    #[test] fn remove_inline_tag_drops_bare_markers() {
+        let b = "Some paragraph\n- #work\n- [ ] #work\n1. #work\n- keep #work\n-\n";
+        assert_eq!(remove_inline_tag(b, "work").0, "Some paragraph\n- keep\n-\n");
     }
 }

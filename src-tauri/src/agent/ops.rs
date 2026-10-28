@@ -3,8 +3,10 @@
 use crate::index::{Page, Sort, TagCount};
 use crate::names::{note_path, parse_note_file};
 use crate::settings::{self, Settings};
-use crate::store::SaveResult;
+use super::client::NO_ANSWER;
+use crate::store::{SaveResult, hash};
 use crate::tasks::TaskView;
+use crate::text::fold;
 use crate::vault::{NoteDoc, Toggled, Vault};
 use anyhow::anyhow;
 use std::ops::DerefMut;
@@ -42,8 +44,20 @@ pub trait NoteOps {
     fn backlinks(&self, title: &str) -> anyhow::Result<Vec<String>>;
 }
 
+/// An encrypted note, or the plain twin of one (`X.md` beside `X.md.age`: a lock synced in before the delete, or a
+/// lock that failed to remove the plaintext). Both stay hidden from the agent.
 pub fn locked(path: &str) -> bool {
-    path.ends_with(".md.age")
+    path.ends_with(".md.age") || (path.ends_with(".md") && Path::new(&format!("{path}.age")).exists())
+}
+
+/// `r`, unless it failed after the file at `path` changed from `before` (its hash; `None` = missing): the write
+/// landed, so a plain error would invite a retry that applies it twice.
+fn landed<T>(r: anyhow::Result<T>, path: &Path, before: Option<&str>) -> anyhow::Result<T> {
+    r.map_err(|e| if std::fs::read(path).ok().map(|b| hash(&b)).as_deref() != before { anyhow!(NO_ANSWER) } else { e })
+}
+
+fn hash_of(path: &Path) -> Option<String> {
+    std::fs::read(path).ok().map(|b| hash(&b))
 }
 
 fn title_of(path: &str) -> String {
@@ -84,7 +98,8 @@ impl<V: DerefMut<Target = Vault>> VaultOps<V> {
 
     fn save(&mut self, path: &str, text: &str, base_hash: &str) -> anyhow::Result<String> {
         let wfm = self.settings().write_front_matter;
-        match self.vault.save_note(path, text, base_hash, None, wfm)? {
+        let before = hash_of(Path::new(path));
+        match landed(self.vault.save_note(path, text, base_hash, None, wfm), Path::new(path), before.as_deref())? {
             SaveResult::Saved { hash, .. } => Ok(hash),
             SaveResult::Conflict { conflict_path, .. } => Err(anyhow!("conflict: saved to {}", title_of(&conflict_path))),
         }
@@ -121,11 +136,11 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
             return Err(anyhow!("a note with that title already exists"));
         }
         let wfm = self.settings().write_front_matter;
-        let doc = self.vault.open_or_create(title, None, wfm)?;
+        let doc = landed(self.vault.open_or_create(title, None, wfm), &note_path(&dir, title, false), None)?;
         self.save(&doc.path, text, &doc.hash)?; // the new stub is not snapshotted: the created text is the first revision
-        let doc = self.read(&doc.path)?;
-        self.vault.agent_snapshot_text(&doc.path, &doc.text, summary)?;
-        Ok(doc)
+        // the note exists now: a retry would only fail with "already exists", so say it may have been applied
+        let r = self.read(&doc.path).and_then(|d| self.vault.agent_snapshot_text(&d.path, &d.text, summary).map(|_| d));
+        r.map_err(|_| anyhow!(NO_ANSWER))
     }
 
     fn search(&self, query: &str, tags: &[String], offset: usize) -> anyhow::Result<Page> {
@@ -149,8 +164,19 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
     }
 
     fn tags(&self) -> anyhow::Result<Vec<TagCount>> {
-        // already plain-only: locked notes' bodies (and so their tags) never reach the index
-        self.vault.tags()
+        // locked notes' bodies (and so their tags) never reach the index; a plain twin's do, so take them out
+        let mut tags = self.vault.tags()?;
+        for e in std::fs::read_dir(self.dir())?.flatten() {
+            let Some(twin) = e.path().to_str().and_then(|p| p.strip_suffix(".age")).filter(|p| p.ends_with(".md")).map(String::from) else { continue };
+            let mut seen = std::collections::HashSet::new();
+            for t in self.vault.index.tags_of(&twin)?.into_iter().map(|t| fold(&t)).filter(|t| seen.insert(t.clone())) {
+                if let Some(c) = tags.iter_mut().find(|c| fold(&c.tag) == t) {
+                    c.count -= 1;
+                }
+            }
+        }
+        tags.retain(|c| c.count > 0);
+        Ok(tags)
     }
 
     fn tasks(&self, query: &str, tags: &[String], show_done: bool) -> anyhow::Result<TaskView> {
@@ -181,14 +207,16 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
     fn trash(&mut self, path: &str, summary: &str) -> anyhow::Result<()> {
         let path = plain(path)?;
         self.vault.agent_snapshot(path, summary)?;
-        self.vault.delete_note_with(path, self.remove)
+        let before = hash_of(Path::new(path));
+        landed(self.vault.delete_note_with(path, self.remove), Path::new(path), before.as_deref())
     }
 
     fn toggle_task(&mut self, path: &str, line: usize, expected: &str, summary: &str) -> anyhow::Result<Toggled> {
         let path = plain(path)?;
         self.vault.agent_snapshot(path, summary)?;
         let wfm = self.settings().write_front_matter;
-        self.vault.toggle_task(path, line, expected, None, wfm)
+        let before = hash_of(Path::new(path));
+        landed(self.vault.toggle_task(path, line, expected, None, wfm), Path::new(path), before.as_deref())
     }
 
     fn capture_task(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<String> {
@@ -198,10 +226,13 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
             Some(p) => self.vault.agent_snapshot(&p, summary)?,
             None => {}
         }
-        let existed = self.vault.find_note(title)?.is_some();
-        let path = self.vault.capture_task(title, text, None, wfm)?;
-        if !existed {
-            self.vault.agent_snapshot(&path, summary)?; // a created note's first revision is its created text
+        let found = self.vault.find_note(title)?;
+        let target = found.as_ref().map_or_else(|| note_path(self.dir(), title, false), PathBuf::from);
+        let before = hash_of(&target);
+        let path = landed(self.vault.capture_task(title, text, None, wfm), &target, before.as_deref())?;
+        if found.is_none() {
+            // a created note's first revision is its created text
+            self.vault.agent_snapshot(&path, summary).map_err(|_| anyhow!(NO_ANSWER))?;
         }
         Ok(path)
     }

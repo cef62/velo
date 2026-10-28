@@ -92,7 +92,8 @@ mod tests {
         assert!(std::fs::read_dir(tmp.path().join("data")).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with("index-")));
     }
 
-    /// Fake app: answers every request with `{"ok": {"fake": name}}` when the token matches. Returns the data dir setup.
+    /// Fake app: answers the auth line `{"ok": true}` when the token matches, then every request with
+    /// `{"ok": {"fake": name}}`.
     fn fake_app(data: &std::path::Path, pid: u32, listen: bool) {
         use std::io::{BufRead, BufReader, Write};
         std::fs::create_dir_all(data).unwrap();
@@ -102,10 +103,12 @@ mod tests {
         if !listen { return; }
         std::thread::spawn(move || for c in l.incoming().flatten() {
             let mut r = BufReader::new(c.try_clone().unwrap()); let mut line = String::new();
+            r.read_line(&mut line).unwrap();
+            if serde_json::from_str::<Value>(&line).unwrap()["token"] != "tok" { writeln!(&c, r#"{{"err":"unauthorized"}}"#).unwrap(); continue; }
+            writeln!(&c, r#"{{"ok":true}}"#).unwrap(); line.clear();
             while r.read_line(&mut line).unwrap_or(0) > 0 {
                 let q: Value = serde_json::from_str(&line).unwrap(); line.clear();
-                let rep = if q["token"] == "tok" { serde_json::json!({"ok": {"fake": q["name"]}}) } else { serde_json::json!({"err": "unauthorized"}) };
-                writeln!(&c, "{rep}").unwrap();
+                writeln!(&c, "{}", serde_json::json!({"ok": {"fake": q["name"]}})).unwrap();
             }
         });
     }
@@ -165,15 +168,16 @@ mod tests {
 
     const NO_ANSWER: &str = "velo did not answer; the change may have been applied — read the note before retrying";
     #[test] fn no_reply_after_send_is_not_retried_nor_direct() {
-        use std::io::{BufRead, BufReader};
+        use std::io::{BufRead, BufReader, Write};
         let (_t, p, data, notes) = setup(true); std::fs::write(notes.join("a.md"), "x").unwrap();
         std::fs::create_dir_all(&data).unwrap();
         let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
         std::fs::write(data.join("agent.json"), serde_json::json!({"port": l.local_addr().unwrap().port(), "token": "tok", "pid": std::process::id()}).to_string()).unwrap();
         let seen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)); let s2 = seen.clone();
         std::thread::spawn(move || for c in l.incoming().flatten() {
-            let mut line = String::new();
-            if BufReader::new(c).read_line(&mut line).unwrap_or(0) > 0 { s2.fetch_add(1, std::sync::atomic::Ordering::SeqCst); } // drop: close without reply
+            let (mut r, mut line) = (BufReader::new(c.try_clone().unwrap()), String::new());
+            r.read_line(&mut line).unwrap(); writeln!(&c, r#"{{"ok":true}}"#).unwrap(); line.clear(); // auth accepted
+            if r.read_line(&mut line).unwrap_or(0) > 0 { s2.fetch_add(1, std::sync::atomic::Ordering::SeqCst); } // drop: close without reply
         });
         let r = gate(p, data)("append_to_note", serde_json::json!({"title": "a", "text": "y", "summary": "s"}));
         assert_eq!(r, Err(NO_ANSWER.to_string()));

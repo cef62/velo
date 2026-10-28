@@ -79,11 +79,14 @@ pub struct AppOps<'a> {
     route: &'a dyn Fn(Value) -> anyhow::Result<Value>,
     /// Real OS Trash; tests swap it for a plain remove.
     pub(crate) remove: fn(&Path) -> std::io::Result<()>,
+    /// Paths the backend wrote (or may have): the watcher drops its own writes, so the listener sends these as
+    /// `notes-changed` for the list, tags, tasks and a clean open note to reload.
+    pub touched: Vec<String>,
 }
 
 impl<'a> AppOps<'a> {
     pub fn new(st: &'a AppState, route: &'a dyn Fn(Value) -> anyhow::Result<Value>) -> Self {
-        AppOps { st, route, remove: crate::vault::move_to_trash }
+        AppOps { st, route, remove: crate::vault::move_to_trash, touched: Vec::new() }
     }
 
     /// Runs `f` on the app's vault, locked for this one operation only (the editor round trip needs it free).
@@ -132,12 +135,17 @@ impl NoteOps for AppOps<'_> {
         // the editor checks `base` against the saved note and applies only the changed span
         match self.via_editor(json!({"path": path, "kind": "replace", "insert": new_text, "base": base_hash, "summary": summary}))? {
             Some(hash) => Ok(hash),
-            None => self.with(|o| o.write(path, new_text, base_hash, summary)),
+            None => {
+                self.touched.push(path.to_string());
+                self.with(|o| o.write(path, new_text, base_hash, summary))
+            }
         }
     }
 
     fn create(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<NoteDoc> {
-        self.with(|o| o.create(title, text, summary))
+        let r = self.with(|o| o.create(title, text, summary));
+        self.touched.extend(r.as_ref().map(|d| d.path.clone()));
+        r
     }
 
     fn search(&self, query: &str, tags: &[String], offset: usize) -> anyhow::Result<Page> {
@@ -156,15 +164,23 @@ impl NoteOps for AppOps<'_> {
     /// editor then follows it to the new path (`renamed`). Notes whose links get rewritten are saved first too.
     fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<String> {
         let path = plain(path)?;
+        let mut sources = Vec::new();
         if rewrite_links {
             let title = parse_note_file(Path::new(path)).map(|n| n.title).unwrap_or_default();
-            let sources: Vec<String> = self.with(|o| o.vault.index.backlinks(&title))?.into_iter().filter(|p| !locked(p)).collect();
+            sources = self.with(|o| o.vault.index.backlinks(&title))?.into_iter().filter(|p| !locked(p)).collect();
             if !sources.is_empty() && (self.route)(json!({"kind": "flush", "paths": sources}))? == "refused" {
                 return Err(anyhow!("note is open in velo with unsaved changes"));
             }
         }
         let ready = self.ask_editor(json!({"path": path, "kind": "rename", "summary": summary}), &["ready", "not-open"])? == "ready";
         let r = self.with(|o| o.rename(path, new_title, rewrite_links, summary));
+        if !ready {
+            // (an open renamed note is reloaded by `renamed`)
+            self.touched.push(path.to_string());
+            self.touched.extend(r.as_ref().ok().cloned());
+        }
+        // the rewritten sources were saved clean above: notes-changed makes the open one reload its new links
+        self.touched.extend(sources);
         if ready {
             // unfreezes the editor, on the new path or (failed) the old one; a lost event would leave it frozen
             let msg = json!({"path": path, "kind": "renamed", "to": r.as_ref().ok()});
@@ -181,6 +197,7 @@ impl NoteOps for AppOps<'_> {
     fn trash(&mut self, path: &str, summary: &str) -> anyhow::Result<()> {
         let path = plain(path)?;
         self.ask_editor(json!({"path": path, "kind": "trash", "summary": summary}), &["closed", "not-open"])?;
+        self.touched.push(path.to_string());
         self.with(|o| o.trash(path, summary))
     }
 
@@ -202,11 +219,16 @@ impl NoteOps for AppOps<'_> {
             return Ok(path);
         }
         // a locked match, a missing note (created here) or one not open in the editor
-        self.with(|o| o.capture_task(title, text, summary))
+        let r = self.with(|o| o.capture_task(title, text, summary));
+        self.touched.extend(r.as_ref().ok().cloned());
+        r
     }
 
     fn open_or_create(&mut self, title: &str) -> anyhow::Result<NoteDoc> {
-        self.with(|o| o.open_or_create(title))
+        let existed = self.find(title)?.is_some();
+        let r = self.with(|o| o.open_or_create(title));
+        self.touched.extend(r.as_ref().ok().filter(|_| !existed).map(|d| d.path.clone()));
+        r
     }
 
     fn snapshot(&mut self, path: &str, summary: &str) -> anyhow::Result<()> {
@@ -444,7 +466,43 @@ mod tests {
         assert!(std::path::Path::new(&p).exists(), "not renamed");
         let route = |req: Value| Ok(json!(if req["kind"] == "flush" { "flushed" } else { "not-open" }));
         let mut ops = AppOps::new(&st, &route);
-        ops.rename(&p, "Q", true, "s").unwrap();
+        let q = ops.rename(&p, "Q", true, "s").unwrap();
         assert_eq!(std::fs::read_to_string(&a).unwrap(), "see [[Q]]\n");
+        // the watcher drops this self-write: notes-changed must name the (flushed, clean) source so the editor reloads
+        assert_eq!(ops.touched, [p, q, a]);
+    }
+
+    #[test] fn plain_twin_of_locked_note_is_hidden_in_app_mode() {
+        let (st, dir) = state();
+        std::fs::write(dir.join("L.md"), "pre-lock zebra #twin\n- [ ] twin task\n").unwrap(); // L.md.age is beside it
+        st.vault.lock().unwrap().as_mut().unwrap().rescan(None);
+        let mut ops = AppOps::new(&st, &never);
+        assert_eq!(ops.find("L").unwrap(), None);
+        assert_eq!(ops.read(&dir.join("L.md").to_string_lossy()).err().unwrap().to_string(), "not found");
+        assert_eq!(ops.search("zebra", &[], 0).unwrap().hits.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(), ["P"]);
+        assert!(ops.tags().unwrap().iter().all(|t| t.tag != "twin"));
+        assert_eq!(ops.tasks("", &[], true).unwrap().no_date.len(), 1);
+        assert_eq!(crate::agent::tools::call(&mut ops, "move_to_trash", json!({"title": "L", "summary": "s"})), Err("not found".to_string()));
+    }
+
+    #[test] fn backend_writes_are_reported_for_notes_changed() {
+        let (st, dir) = state();
+        let path = |t: &str| dir.join(format!("{t}.md")).to_string_lossy().into_owned();
+        let route = |_: Value| Ok(json!("not-open"));
+        let mut ops = AppOps::new(&st, &route);
+        ops.remove = |p| std::fs::remove_file(p);
+        let call = |ops: &mut AppOps, name: &str, args: Value| {
+            ops.touched.clear();
+            crate::agent::tools::call(ops, name, args).unwrap();
+            std::mem::take(&mut ops.touched)
+        };
+        assert_eq!(call(&mut ops, "create_note", json!({"title": "Meeting", "text": "hi", "summary": "s"})), [path("Meeting")]);
+        assert_eq!(call(&mut ops, "add_tags", json!({"titles": ["P"], "tags": ["x"], "summary": "s"})), [path("P")]);
+        assert_eq!(call(&mut ops, "add_task", json!({"title": "P", "text": "do it", "summary": "s"})), [path("P")]);
+        assert_eq!(call(&mut ops, "append_to_note", json!({"title": "Meeting", "text": "more", "summary": "s"})), [path("Meeting")]);
+        assert_eq!(call(&mut ops, "move_to_trash", json!({"title": "Meeting", "summary": "s"})), [path("Meeting")]);
+        assert!(call(&mut ops, "read_note", json!({"title": "P"})).is_empty(), "reads touch nothing");
+        // and the watcher indeed drops them (so nothing else would refresh the UI)
+        assert!(st.vault.lock().unwrap().as_mut().unwrap().apply_fs_changes(&[PathBuf::from(path("P"))], None).is_empty());
     }
 }

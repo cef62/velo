@@ -56,11 +56,17 @@ fn attempt(port: u16, token: &Value, name: &str, args: &Value) -> Sent {
     if conn.set_read_timeout(Some(Duration::from_secs(90))).is_err() {
         return Sent::No;
     }
-    if writeln!(conn, "{}", json!({"token": token, "name": name, "args": args})).is_err() {
+    // auth first, answered before the request goes out: an unauthorized request is never sent
+    let Ok(mut reader) = conn.try_clone().map(BufReader::new) else { return Sent::No };
+    let mut line = String::new();
+    if writeln!(conn, "{}", json!({"token": token})).is_err() || reader.read_line(&mut line).is_err() || serde_json::from_str::<Value>(&line).ok() != Some(json!({"ok": true})) {
+        return Sent::No; // unauthorized (a stale file from another run) or not velo
+    }
+    if writeln!(conn, "{}", json!({"name": name, "args": args})).is_err() {
         return Sent::Reply(Err(NO_ANSWER.into()));
     }
-    let mut line = String::new();
-    let got = BufReader::new(conn).read_line(&mut line);
+    line.clear();
+    let got = reader.read_line(&mut line);
     let Some(mut reply) = got.ok().and_then(|_| serde_json::from_str::<Value>(&line).ok()) else { return Sent::Reply(Err(NO_ANSWER.into())) };
     if let Some(ok) = reply.get_mut("ok") {
         return Sent::Reply(Ok(ok.take()));

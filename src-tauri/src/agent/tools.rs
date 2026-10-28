@@ -57,12 +57,12 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "add_tags",
-        description: concat!("Add tags to up to 200 notes (`titles`). Each note is its own write; the result lists `changed`, `unchanged` (already has the tag, in front matter or inline) or `failed` with a reason per title. Tags go in the front-matter `tags:` list (or as a #tag line at the end of the note when velo's front-matter setting is off).", conventions!()),
+        description: concat!("Add tags to up to 200 notes (`titles`). Each note is its own write; the result lists `changed` (with the new hash), `unchanged` (already has the tag, in front matter or inline) or `failed` with a reason per title. Tags go in the front-matter `tags:` list (or as a #tag line at the end of the note when velo's front-matter setting is off).", conventions!()),
         input_schema: r#"{"type":"object","properties":{"titles":{"type":"array","items":{"type":"string"},"maxItems":200},"tags":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}},"required":["titles","tags","summary"]}"#,
     },
     ToolSpec {
         name: "remove_tags",
-        description: concat!("Remove tags from up to 200 notes (`titles`): from the front-matter `tags:` list and exact inline #tag words (never inside code or links). Each note is its own write; the result lists `changed`, `unchanged` or `failed` with a reason per title.", conventions!()),
+        description: concat!("Remove tags from up to 200 notes (`titles`): from the front-matter `tags:` list and exact inline #tag words (never inside code or links). Each note is its own write; the result lists `changed` (with the new hash), `unchanged` or `failed` with a reason per title.", conventions!()),
         input_schema: r#"{"type":"object","properties":{"titles":{"type":"array","items":{"type":"string"},"maxItems":200},"tags":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}},"required":["titles","tags","summary"]}"#,
     },
     ToolSpec {
@@ -306,7 +306,8 @@ fn bulk_tags(ops: &mut dyn NoteOps, add: bool, a: &Value, summary: &str) -> Resu
         return Err(format!("invalid tag: {t}"));
     }
     let wfm = ops.settings().write_front_matter;
-    let one = |ops: &mut dyn NoteOps, title: &str| -> Result<bool, String> {
+    // the new hash when the note changed
+    let one = |ops: &mut dyn NoteOps, title: &str| -> Result<Option<String>, String> {
         let path = ops.find(title).map_err(err)?.ok_or("not found")?;
         let doc = ops.read(&path).map_err(err)?;
         let fm = frontmatter::parse(&doc.text);
@@ -332,10 +333,9 @@ fn bulk_tags(ops: &mut dyn NoteOps, add: bool, a: &Value, summary: &str) -> Resu
             cur.push_str(&body);
             Some(cur).filter(|c| *c != doc.text)
         };
-        let mut changed = false;
+        let mut changed = None;
         if let Some(new) = &new {
-            ops.write(&path, new, &doc.hash, summary).map_err(err)?;
-            changed = true;
+            changed = Some(ops.write(&path, new, &doc.hash, summary).map_err(err)?);
         }
         if !add {
             // A tag the index still sees (e.g. only in a link target) could not be removed: write what went, then fail.
@@ -352,7 +352,8 @@ fn bulk_tags(ops: &mut dyn NoteOps, add: bool, a: &Value, summary: &str) -> Resu
     let results: Vec<Value> = titles.iter().map(|v| {
         let Some(t) = v.as_str() else { return json!({"title": v, "status": "failed", "reason": "not a title"}) };
         match if stop { Err(busy.to_string()) } else { one(ops, t) } {
-            Ok(c) => json!({"title": t, "status": if c { "changed" } else { "unchanged" }}),
+            Ok(Some(hash)) => json!({"title": t, "status": "changed", "hash": hash}),
+            Ok(None) => json!({"title": t, "status": "unchanged"}),
             Err(e) => {
                 stop |= e == busy;
                 json!({"title": t, "status": "failed", "reason": e})
@@ -733,6 +734,12 @@ mod fix_tests {
         (DirectOps::open(dir.clone(), &data.join("i.sqlite"), data.join("settings.json")).unwrap(), dir)
     }
 
+    fn read(dir: &std::path::Path, f: &str) -> String { std::fs::read_to_string(dir.join(f)).unwrap() }
+
+    fn titles(v: &Value) -> Vec<String> {
+        v["notes"].as_array().unwrap().iter().map(|n| n["title"].as_str().unwrap().to_string()).collect()
+    }
+
     #[test] fn rename_onto_existing_title_says_so() {
         let (mut ops, dir) = vault(&[("a.md", "x"), ("b.md", "y")]);
         let r = call(&mut ops, "rename_note", json!({"title": "a", "new_title": "B", "rewrite_links": false, "summary": "s"}));
@@ -767,5 +774,65 @@ mod fix_tests {
         assert_eq!(rs[0]["status"], "changed");
         assert_eq!((rs[1]["status"].as_str(), rs[1]["reason"].as_str(), &rs[1]["title"]), (Some("failed"), Some("not a title"), &json!(7)));
         assert_eq!(rs[2]["reason"], "not a title");
+    }
+
+    /// `X.md` beside `X.md.age` (lock synced in before the delete, or a lock that failed to remove the plaintext).
+    #[test] fn plain_twin_of_locked_note_is_hidden() {
+        let (mut ops, dir) = vault(&[("X.md", "the secret plan #hush #shared\n- [ ] secret task\nsee [[A]]\n"), ("A.md", "a #shared\n")]);
+        call(&mut ops, "list_tags", json!({})).unwrap();
+        std::fs::write(dir.join("X.md.age"), "ciphertext").unwrap();
+        ops.rescan();
+        for name in ["read_note", "move_to_trash", "set_task_done", "edit_note", "replace_note"] {
+            let args = json!({"title": "X", "summary": "s", "line": 1, "line_text": "- [ ] secret task", "done": true, "old_text": "plan", "new_text": "p", "text": "t", "expected_hash": "h"});
+            assert_eq!(call(&mut ops, name, args), Err("not found".to_string()), "{name}");
+        }
+        assert_eq!(call(&mut ops, "rename_note", json!({"title": "X", "new_title": "Y", "rewrite_links": false, "summary": "s"})), Err("not found".to_string()));
+        assert_eq!(call(&mut ops, "add_task", json!({"title": "X", "text": "t", "summary": "s"})), Err("not found".to_string()));
+        let r = call(&mut ops, "add_tags", json!({"titles": ["X"], "tags": ["t"], "summary": "s"})).unwrap();
+        assert_eq!(r["results"][0]["reason"], "not found");
+        assert!(titles(&call(&mut ops, "search_notes", json!({"query": "secret"})).unwrap()).is_empty());
+        assert_eq!(call(&mut ops, "list_tags", json!({})).unwrap()["tags"], json!([{"tag": "shared", "count": 1}]));
+        assert_eq!(call(&mut ops, "list_tasks", json!({})).unwrap()["no_date"], json!([]));
+        assert_eq!(call(&mut ops, "read_note", json!({"title": "A"})).unwrap()["backlinks"], json!([]));
+        assert_eq!(read(&dir, "X.md"), "the secret plan #hush #shared\n- [ ] secret task\nsee [[A]]\n");
+    }
+
+    #[test] fn remove_tags_keeps_links_code_and_paragraphs() {
+        let (mut ops, dir) = vault(&[("A.md", "read [the #work notes](http://x) and [[Plan #work]]\n\n    code #work here\n"), ("B.md", "Some paragraph\n- #work\n- [ ] #work\n")]);
+        let r = call(&mut ops, "remove_tags", json!({"titles": ["A", "B"], "tags": ["work"], "summary": "s"})).unwrap();
+        assert_eq!(r["results"][0]["reason"], "tag only appears in code or a link");
+        assert_eq!(read(&dir, "A.md"), "read [the #work notes](http://x) and [[Plan #work]]\n\n    code #work here\n");
+        assert_eq!(r["results"][1]["status"], "changed");
+        assert!(read(&dir, "B.md").ends_with("---\nSome paragraph\n"));
+    }
+
+    #[test] fn bulk_tag_results_carry_the_new_hash() {
+        let (mut ops, dir) = vault(&[("a.md", "one\n"), ("b.md", "two #t\n")]);
+        let r = call(&mut ops, "add_tags", json!({"titles": ["a", "b"], "tags": ["t"], "summary": "s"})).unwrap();
+        assert_eq!(r["results"][0]["hash"], crate::store::hash(&std::fs::read(dir.join("a.md")).unwrap()));
+        assert_eq!(r["results"][1], json!({"title": "b", "status": "unchanged"}));
+        let r = call(&mut ops, "remove_tags", json!({"titles": ["b"], "tags": ["t"], "summary": "s"})).unwrap();
+        assert_eq!(r["results"][0]["hash"], crate::store::hash(&std::fs::read(dir.join("b.md")).unwrap()));
+    }
+
+    /// The file write lands, then indexing fails (SQLite busy or broken): a plain error would invite a retry that
+    /// appends twice.
+    #[test] fn failure_after_the_write_landed_is_not_retryable() {
+        let dir = tempfile::tempdir().unwrap().keep();
+        std::fs::write(dir.join("A.md"), "a\n").unwrap();
+        std::fs::write(dir.join("B.md"), "- [ ] t\n").unwrap();
+        let data = tempfile::tempdir().unwrap().keep();
+        let db = data.join("i.sqlite");
+        let mut ops = DirectOps::open(dir.clone(), &db, data.join("settings.json")).unwrap();
+        rusqlite::Connection::open(&db).unwrap().execute_batch("CREATE TRIGGER boom BEFORE INSERT ON notes BEGIN SELECT RAISE(ABORT, 'boom'); END;").unwrap();
+        let na = crate::agent::client::NO_ANSWER.to_string();
+        assert_eq!(call(&mut ops, "append_to_note", json!({"title": "A", "text": "once", "summary": "s"})), Err(na.clone()));
+        assert!(read(&dir, "A.md").ends_with("\na\nonce\n"), "it did land");
+        assert_eq!(call(&mut ops, "add_task", json!({"title": "A", "text": "x", "summary": "s"})), Err(na.clone()));
+        assert_eq!(call(&mut ops, "add_task", json!({"title": "New", "text": "x", "summary": "s"})), Err(na.clone()));
+        assert_eq!(call(&mut ops, "set_task_done", json!({"title": "B", "line": 0, "line_text": "- [ ] t", "done": true, "summary": "s"})), Err(na.clone()));
+        assert_eq!(call(&mut ops, "create_note", json!({"title": "C", "text": "c", "summary": "s"})), Err(na));
+        // nothing written: the plain error stays
+        assert_eq!(call(&mut ops, "edit_note", json!({"title": "A", "old_text": "zzz", "new_text": "y", "summary": "s"})).unwrap_err().contains("0 times"), true);
     }
 }
