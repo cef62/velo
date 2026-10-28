@@ -41,6 +41,7 @@ fn gate(settings_path: PathBuf, data_dir: PathBuf) -> impl Fn(&str, Value) -> Re
     move |name, args| {
         let s = crate::settings::load(&settings_path);
         if !s.agent_access {
+            *ops.lock().unwrap_or_else(|e| e.into_inner()) = None; // nothing may stay open while access is off
             return Err(OFF.into());
         }
         if !tools::TOOL_SPECS.iter().any(|t| t.name == name) {
@@ -176,6 +177,25 @@ mod tests {
         assert!(call("list_tags", serde_json::json!({})).is_ok());
         std::fs::write(&p, r#"{"agent_access":false}"#).unwrap();
         assert_eq!(call("list_tags", serde_json::json!({})), Err(OFF.to_string()));
+    }
+
+    /// The direct vault (and its SQLite handle) closes once access is off, and while the app owns the vault. SQLite
+    /// removes the `-wal` file when its last connection closes, which makes the handle visible here.
+    #[test] fn direct_vault_closes_when_off_or_forwarding() {
+        let (_t, p, data, _n) = setup(true);
+        let call = gate(p.clone(), data.clone());
+        let wal = || std::fs::read_dir(&data).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().ends_with("-wal"));
+        call("list_tags", serde_json::json!({})).unwrap();
+        assert!(wal(), "open");
+        std::fs::write(&p, r#"{"agent_access":false}"#).unwrap();
+        assert_eq!(call("list_tags", serde_json::json!({})), Err(OFF.to_string()));
+        assert!(!wal(), "closed when off");
+        let (_t, p, data, _n) = setup(true);
+        let call = gate(p, data.clone());
+        call("list_tags", serde_json::json!({})).unwrap();
+        fake_app(&data, std::process::id(), true);
+        call("list_tags", serde_json::json!({})).unwrap();
+        assert!(!std::fs::read_dir(&data).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().ends_with("-wal")), "closed while forwarding");
     }
 
     const NO_ANSWER: &str = "velo did not answer; the change may have been applied — read the note before retrying";
