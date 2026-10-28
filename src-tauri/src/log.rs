@@ -44,7 +44,7 @@ fn append(path: &Path, msg: &str) {
     }
     let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f %z");
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-        writeln!(f, "{ts} {msg}").ok();
+        f.write_all(format!("{ts} {msg}\n").as_bytes()).ok(); // one write: lines from two threads never interleave
     }
 }
 

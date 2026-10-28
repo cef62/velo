@@ -168,14 +168,14 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
     };
     let on_finish = || {
         downloaded.store(true, Ordering::Relaxed);
-        log::line("update download done; install start");
+        log::line("update download done; verifying and installing");
         app.emit("update-installing", ()).ok();
     };
     let result = update.download_and_install(on_chunk, on_finish).await;
     let mut st = state(app);
     st.busy = false;
     if let Err(e) = result {
-        let phase = if downloaded.load(Ordering::Relaxed) { "install" } else { "download" };
+        let phase = if downloaded.load(Ordering::Relaxed) { "verify/install" } else { "download" }; // the plugin checks the signature after on_finish
         log::line(&format!("update {phase} error: {e}"));
         eprintln!("velo: update {phase} failed: {e}");
         // The next check finds the version again and announces it again.

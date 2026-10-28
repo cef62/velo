@@ -1216,7 +1216,7 @@ export class Controller {
     this.store.set({ update: { ...u, message: `Downloading velo ${u.version}… ${amount}` } });
   }
 
-  /** The download finished and verified; the bundle is being replaced. */
+  /** The download finished; the plugin now checks the signature and replaces the bundle. */
   onUpdateInstalling() {
     const u = this.store.get().update;
     if (u?.status === "installing") this.store.set({ update: { ...u, message: `Installing velo ${u.version}… velo restarts when it's done.` } });
