@@ -1,5 +1,12 @@
 # velo
 
+## 0.8.2
+
+### Patch Changes
+
+- e73e7fb: Indexing a notes folder now writes far less to disk and finishes about twice as fast.
+- 1428df2: Fixed several Tasks and quick-capture rough edges: Enter no longer creates a stray note or opens a stale task after a refresh, capture retries and conflict copies are reported correctly, the capture shortcut returns you to the previous app, code blocks and dates are read more strictly, and task rows tick instantly and highlight the search.
+
 ## 0.8.1
 
 ### Patch Changes
