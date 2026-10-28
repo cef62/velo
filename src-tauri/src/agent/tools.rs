@@ -529,6 +529,30 @@ mod tests {
         assert_eq!(read(&dir, "a.md"), "text\n#x #y\n");
     }
 
+    /// Non-ASCII and CRLF in every tag path (front matter flow and block lists, inline, indented): no panic.
+    #[test] fn tag_tools_on_non_ascii_and_crlf_text() {
+        let files = [
+            ("a.md", "#work città\n#work 🎉\n"),
+            ("b.md", "intro\n\n    perché\n\n東京 #work\n"),
+            ("c.md", "---\r\ntags: [work, café]\r\n---\r\n- [ ] perché #work\r\n- #work\r\n"),
+            ("d.md", "---\ntags:\n  - work\n  - 東京\n---\n#work 3)\n"),
+        ];
+        let (mut ops, dir) = vault_wfm(&files, false);
+        let r = call(&mut ops, "remove_tags", json!({"titles": ["a", "b", "c", "d"], "tags": ["work"], "summary": "s"})).unwrap();
+        assert!(r["results"].as_array().unwrap().iter().all(|x| x["status"] == "changed"), "{r}");
+        assert_eq!(read(&dir, "a.md"), "città\n🎉\n");
+        assert_eq!(read(&dir, "b.md"), "intro\n\n    perché\n\n東京\n");
+        assert_eq!(read(&dir, "c.md"), "---\r\ntags: [café]\r\n---\r\n- [ ] perché\r\n");
+        assert_eq!(read(&dir, "d.md"), "---\ntags:\n  - 東京\n---\n3)\n");
+        let r = call(&mut ops, "add_tags", json!({"titles": ["a", "c", "d"], "tags": ["été"], "summary": "s"})).unwrap();
+        assert!(r["results"].as_array().unwrap().iter().all(|x| x["status"] == "changed"), "{r}");
+        assert!(read(&dir, "c.md").ends_with("perché\r\n#été\n")); // front-matter setting off: a #tag line
+        let (mut ops, dir) = vault_wfm(&files[2..], true);
+        call(&mut ops, "add_tags", json!({"titles": ["c", "d"], "tags": ["été"], "summary": "s"})).unwrap();
+        assert!(read(&dir, "c.md").contains("tags: [work, café, été]\r\n"), "{}", read(&dir, "c.md"));
+        assert!(read(&dir, "d.md").contains("  - 東京\n  - été\n"), "{}", read(&dir, "d.md"));
+    }
+
     #[test] fn remove_tags_front_matter_and_inline() {
         let (mut ops, dir) = vault_wfm(&[("a.md", "---\ntags: [x, keep]\n---\nsee #x and #xylo")], false);
         let r = call(&mut ops, "remove_tags", json!({"titles": ["a"], "tags": ["X"], "summary": "t"})).unwrap();
@@ -795,6 +819,14 @@ mod fix_tests {
         assert_eq!(call(&mut ops, "list_tasks", json!({})).unwrap()["no_date"], json!([]));
         assert_eq!(call(&mut ops, "read_note", json!({"title": "A"})).unwrap()["backlinks"], json!([]));
         assert_eq!(read(&dir, "X.md"), "the secret plan #hush #shared\n- [ ] secret task\nsee [[A]]\n");
+    }
+
+    #[test] fn rename_leaves_locked_twin_alone() {
+        let (mut ops, dir) = vault(&[("P.md", "p\n"), ("X.md", "secret, see [[P]]\n"), ("A.md", "see [[P]]\n")]);
+        std::fs::write(dir.join("X.md.age"), "ciphertext").unwrap();
+        call(&mut ops, "rename_note", json!({"title": "P", "new_title": "Q", "rewrite_links": true, "summary": "s"})).unwrap();
+        assert_eq!(read(&dir, "A.md"), "see [[Q]]\n");
+        assert_eq!(read(&dir, "X.md"), "secret, see [[P]]\n");
     }
 
     #[test] fn remove_tags_keeps_links_code_and_paragraphs() {

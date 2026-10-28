@@ -348,7 +348,8 @@ impl Vault {
         if rewrite_links_too {
             for src in self.index.backlinks(&old.title).unwrap_or_default() {
                 let sp = Path::new(&src);
-                if parse_note_file(sp).is_none_or(|n| n.encrypted) {
+                // a plain twin of a locked note is locked too (save_note refuses it the same way)
+                if parse_note_file(sp).is_none_or(|n| n.encrypted || note_path(&self.store.dir, &n.title, true).exists()) {
                     continue;
                 }
                 let Ok(bytes) = self.store.read(sp) else { continue };

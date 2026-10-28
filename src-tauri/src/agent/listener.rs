@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 pub type Dispatch = Arc<dyn Fn(&str, Value) -> Result<Value, String> + Send + Sync>;
@@ -135,13 +135,26 @@ pub fn serve(data_dir: &Path, dispatch: Dispatch) -> anyhow::Result<ListenerHand
     Ok(ListenerHandle { file, token, addr, stop, accept: Some(accept) })
 }
 
+/// The auth line, read byte by byte (the client sends nothing more until it is answered) within `AUTH_TIMEOUT` of
+/// the accept in total, so a client trickling bytes can't hold a slot.
+fn auth_line(conn: &TcpStream) -> std::io::Result<Vec<u8>> {
+    let deadline = Instant::now() + AUTH_TIMEOUT;
+    let (mut line, mut b) = (Vec::new(), [0u8; 1]);
+    while (line.len() as u64) < MAX_AUTH && !line.ends_with(b"\n") {
+        let left = deadline.checked_duration_since(Instant::now()).filter(|d| !d.is_zero()).ok_or(std::io::ErrorKind::TimedOut)?;
+        conn.set_read_timeout(Some(left))?;
+        if (&*conn).read(&mut b)? == 0 {
+            break;
+        }
+        line.push(b[0]);
+    }
+    Ok(line)
+}
+
 fn handle(conn: TcpStream, token: &str, dispatch: &Dispatch) -> std::io::Result<()> {
-    conn.set_read_timeout(Some(AUTH_TIMEOUT))?;
+    let auth: Value = serde_json::from_slice(&auth_line(&conn)?).unwrap_or_default();
     let mut reader = BufReader::new(conn.try_clone()?);
     let mut out = conn;
-    let mut line = String::new();
-    (&mut reader).take(MAX_AUTH).read_line(&mut line)?;
-    let auth: Value = serde_json::from_str(&line).unwrap_or_default();
     if !same(auth.get("token").and_then(Value::as_str).unwrap_or(""), token) {
         return writeln!(out, "{}", json!({"err": "unauthorized"}));
     }
@@ -277,6 +290,19 @@ mod tests {
         // idle ones time out before auth, freeing the slots
         assert!(idle.into_iter().all(closed));
         std::thread::sleep(std::time::Duration::from_millis(200));
+        // a client trickling bytes is cut off AUTH_TIMEOUT after the accept, not after its last byte
+        let mut slow = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let t0 = std::time::Instant::now();
+        let trickle = std::thread::spawn({
+            let mut s = slow.try_clone().unwrap();
+            move || while s.write_all(b" ").is_ok() && t0.elapsed() < AUTH_TIMEOUT * 3 { std::thread::sleep(std::time::Duration::from_millis(500)); }
+        });
+        slow.set_read_timeout(Some(AUTH_TIMEOUT * 3)).unwrap();
+        let mut l = String::new();
+        let _ = BufReader::new(&mut slow).read_line(&mut l);
+        assert!(t0.elapsed() < AUTH_TIMEOUT + std::time::Duration::from_secs(2), "closed after {:?}", t0.elapsed());
+        drop(slow);
+        trickle.join().unwrap();
         let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
         assert_eq!(ask(&mut s, json!({"token": a["token"]})).trim(), r#"{"ok":true}"#);
         h.stop();

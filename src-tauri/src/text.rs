@@ -81,7 +81,7 @@ pub fn rewrite_links(body: &str, old: &str, new: &str) -> (String, usize) {
 /// A list item or task with nothing after its marker (`-`, `1.`, `- [ ]`).
 fn bare_marker(t: &str) -> bool {
     let m = ["[ ]", "[x]", "[X]"].iter().find_map(|b| t.strip_suffix(b)).map_or(t, str::trim_end);
-    matches!(m, "-" | "*" | "+") || (m.len() > 1 && m[..m.len() - 1].bytes().all(|b| b.is_ascii_digit()) && m.ends_with(['.', ')']))
+    matches!(m, "-" | "*" | "+") || m.strip_suffix(['.', ')']).is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// Removes each exact `#tag` word (same scanner rules as `extract_tags`) outside fenced and indented code, inline code
@@ -116,6 +116,9 @@ pub fn remove_inline_tag(body: &str, tag_folded: &str) -> (String, usize) {
         }
         if cuts.is_empty() { out.push_str(raw); continue; }
         n += cuts.len();
+        // a list item whose only content was the tag(s) goes; text that merely looks like a marker stays
+        let marker = line[..cuts[0].0].trim();
+        let item = bare_marker(marker);
         let (mut l, mut last) = (String::new(), 0);
         for (a, b) in cuts {
             let (mut pre, after) = (&line[last..a], &line[b..]);
@@ -126,7 +129,7 @@ pub fn remove_inline_tag(body: &str, tag_folded: &str) -> (String, usize) {
             l.push_str(pre);
         }
         l.push_str(&line[last..]);
-        if !l.trim().is_empty() && !bare_marker(l.trim()) { out.push_str(&l); out.push_str(&raw[line.len()..]); }
+        if !l.trim().is_empty() && !(item && l.trim() == marker) { out.push_str(&l); out.push_str(&raw[line.len()..]); }
     }
     (out, n)
 }
@@ -155,6 +158,20 @@ mod tests {
     #[test] fn remove_inline_tag_skips_link_text_and_indented_code() {
         let b = "read [the #work notes](http://x) and [[Plan #work]] #work\n\n    code #work here\n- a\n    - #work nested\n";
         assert_eq!(remove_inline_tag(b, "work"), ("read [the #work notes](http://x) and [[Plan #work]]\n\n    code #work here\n- a\n    - nested\n".into(), 2));
+    }
+    #[test] fn remove_inline_tag_handles_non_ascii_and_crlf() {
+        for (b, want) in [
+            ("#work città\n", "città\n"),
+            ("#work 🎉\n", "🎉\n"),
+            ("intro\n\n    perché #work\n", "intro\n\n    perché #work\n"),
+            ("- 東京 #work\r\n- #work\r\n", "- 東京\r\n"),
+            ("perché\n- [ ] #work\n1. #work 🎉\n", "perché\n1. 🎉\n"),
+        ] {
+            assert_eq!(remove_inline_tag(b, "work").0, want, "{b:?}");
+        }
+    }
+    #[test] fn remove_inline_tag_keeps_marker_like_text() {
+        assert_eq!(remove_inline_tag("Budget approved #work 2024.\n#work 3)\n#work 2024.\n#work -\n", "work").0, "Budget approved 2024.\n3)\n2024.\n-\n");
     }
     #[test] fn remove_inline_tag_drops_bare_markers() {
         let b = "Some paragraph\n- #work\n- [ ] #work\n1. #work\n- keep #work\n-\n";
