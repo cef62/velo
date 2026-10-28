@@ -236,7 +236,7 @@ export class Controller {
   protected captureSession = 0; // bumped when capture mode ends: a late submit result belongs to an old session
   protected capturePending = false; // a submit is in flight: another Enter would append the task twice
   protected keptCapture = false;
-  protected captureAppended: { path: string; text: string } | null = null; // in the editor, its save failed: a retry only re-saves
+  protected captureAppended: { path: string; text: string; doc: string } | null = null; // in the editor (`doc` right after), its save failed: a retry only re-saves
   // One writer per note across awaits: a backend write waits for note loads in flight (the load decides the editor's
   // note), and a load waits for backend writes in flight (else its reply holds pre-write text and hash).
   protected readonly pendingLoads = new Set<Promise<unknown>>();
@@ -295,13 +295,15 @@ export class Controller {
       // the path the backend would write (an alias resolves to its note); no note yet: compare titles
       if (openPath && this.editor.currentPath() === openPath && (path ? path === openPath : fold(title) === fold(target))) {
         // not editable: read-only while indexing (the gate) or suspended mid lock hand-off
-        const a = this.captureAppended;
-        if (!(a && a.path === openPath && a.text === t)) {
-          // a retry with corrected text replaces the line its failed save left in the editor
-          const old = a?.path === openPath ? lineSpan(this.editor.getText(), "- [ ] " + a.text) : null;
-          const ok = old ? this.editor.applyChange({ ...old, insert: "- [ ] " + t }) : this.editor.appendLine("- [ ] " + t);
+        // The line a failed save left behind is ours only while the editor text is exactly as the append left it (it ends
+        // the text); a conflict reload, typing or an external reload drops the claim, so a retry never edits another line.
+        const cur = this.editor.getText();
+        const a = this.captureAppended?.path === openPath && this.captureAppended.doc === cur ? this.captureAppended : null;
+        if (a?.text !== t) {
+          const line = "- [ ] " + t;
+          const ok = a ? this.editor.applyChange({ from: cur.length - ("- [ ] " + a.text).length, to: cur.length, insert: line }) : this.editor.appendLine(line);
           if (!ok) return this.failCapture(indexing ? errText("indexing") : `${target} can't be edited right now`);
-          this.captureAppended = { path: openPath, text: t };
+          this.captureAppended = { path: openPath, text: t, doc: this.editor.getText() };
         }
         const conflict = this.store.get().conflict;
         if (!(await this.editor.flush())) return live() ? this.failCapture(`${target} wasn't saved — Enter retries the save`) : undefined;
@@ -947,13 +949,15 @@ export class Controller {
     // the row shows the tick now, not after the reload (the editor path waits for its save and a 300 ms debounce)
     const next = r === "editor" ? { line: item.line, line_text: this.editor.getText().split("\n")[item.line]?.replace(/\r$/, "") ?? item.line_text } : r;
     this.patchTask(item, { ...next, done: !item.done });
-    if (r === "editor") return; // through the editor, ⌘Z undoes it
+    if (r === "editor") return; // through the editor, ⌘Z undoes it; its save's onSaved reloads the view
+    void this.loadTasks(); // the patch dropped flipTask's reload, started before it
     clearTimeout(this.undoTimer);
     this.store.set({ tickUndo: { path: item.path, line: r.line, lineText: r.line_text, unticked: item.done } });
     this.undoTimer = setTimeout(() => this.store.set({ tickUndo: null }), UNDO_MS);
   }
 
   protected patchTask(item: TaskItem, next: Partial<TaskItem>) {
+    this.newTasksReq(); // a load started before the tick read the old line: its reply must not undo the patch
     this.store.set(({ taskView: v }) => {
       if (!v) return {};
       const p = (ts: TaskItem[]) => ts.map((t) => (t.path === item.path && t.line === item.line ? { ...t, ...next } : t));
@@ -1498,15 +1502,6 @@ async function settled(latest: () => Promise<unknown>) {
     await p;
     if (p === latest()) return;
   }
-}
-
-/** The span of the last line in `text` that reads exactly `line`, or null. */
-export function lineSpan(text: string, line: string): { from: number; to: number } | null {
-  for (let i = text.lastIndexOf(line); i >= 0; i = i ? text.lastIndexOf(line, i - 1) : -1) {
-    const end = i + line.length;
-    if ((i === 0 || text[i - 1] === "\n") && (end === text.length || text[end] === "\n" || text[end] === "\r")) return { from: i, to: end };
-  }
-  return null;
 }
 
 /** The single change turning `a` into `b`: common prefix and suffix kept, so undo and the caret only touch what changed. */

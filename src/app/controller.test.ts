@@ -1689,3 +1689,49 @@ test("a sort toggle overtaking a typed search keeps its first match (#15 M2)", a
   expect(api.openOrCreate).not.toHaveBeenCalled();
   expect(store.get().openPath).toBe(P("Groceries"));
 });
+
+test("a capture retry never edits a line it did not write: after a conflict reload the older identical task stays (#15 Copilot)", async () => {
+  for (const retry of ["buy milk", "buy mlik"]) {
+    const { c, editor, store } = setup({ Inbox: "- [ ] buy mlik", B: "b" }); // the older task has the same text
+    await c.show(P("Inbox"));
+    await c.startCapture();
+    c.setQuery("buy mlik");
+    editor.flushResult = false;
+    await c.submitCapture("buy mlik");
+    editor.text = "- [ ] buy mlik"; // an autosave retry conflicted: the line went to a conflict copy, the editor reloaded the disk text
+    c.setQuery(retry);
+    editor.flushResult = true;
+    await c.submitCapture(retry);
+    expect(editor.text, retry).toBe(`- [ ] buy mlik\n- [ ] ${retry}`);
+    expect(store.get().capture, retry).toBeNull();
+  }
+});
+
+test("a task load started before a tick never restores the unticked row (#15 Copilot)", async () => {
+  const { c, api, editor, store } = setup({ A: "- [ ] x" });
+  api.tasks.mockResolvedValue({ ...view(0), no_date: [task("A", 0, "- [ ] x")] });
+  await c.loadTasks();
+  await c.show(P("A"));
+  const d = deferred<TaskView>();
+  api.tasks.mockImplementationOnce(() => d.promise);
+  const loading = c.loadTasks(); // e.g. a watcher refresh, still in flight
+  editor.toggleTask.mockImplementation(() => ((editor.text = "- [x] x ✅ 2026-10-27"), true));
+  await c.tickTask(store.get().taskView!.no_date[0]);
+  d.resolve({ ...view(0), no_date: [task("A", 0, "- [ ] x")] }); // read before the tick was saved
+  await loading;
+  expect(store.get().taskView!.no_date[0].done).toBe(true);
+});
+
+test("a backend tick still reloads the view after the optimistic patch (#15 Copilot)", async () => {
+  const { c, api, store } = setup({ A: "a", B: "- [ ] y" });
+  api.tasks.mockResolvedValue({ ...view(0), no_date: [task("B", 0, "- [ ] y")] });
+  await c.loadTasks();
+  api.toggleTask.mockResolvedValueOnce({ line: 0, line_text: "- [x] y ✅ 2026-10-27" });
+  const d = deferred<TaskView>();
+  api.tasks.mockImplementation(() => d.promise); // the reloads land after the tick returned
+  await c.tickTask(store.get().taskView!.no_date[0]);
+  d.resolve({ ...view(0), done: [{ ...task("B", 0, "- [x] y ✅ 2026-10-27"), done: true }] });
+  await settle();
+  expect(store.get().taskView!.no_date).toEqual([]);
+  expect(store.get().taskView!.done).toHaveLength(1);
+});
