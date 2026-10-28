@@ -519,6 +519,7 @@ export class Controller {
   protected async doSearch(selectFirst: boolean, keepOpen: boolean | "highlight") {
     const seq = ++this.searchSeq;
     const r = this.results;
+    const highlighted = this.highlighted();
     try {
       await (selectFirst ? r.reset() : r.refresh());
       if (seq !== this.searchSeq) return;
@@ -528,11 +529,7 @@ export class Controller {
         else if (keepOpen === "highlight") {
           this.store.set({ sel: r.count ? 0 : -1 }); // highlight row 0, don't open it
         } else void this.select(r.count ? 0 : -1, "auto");
-      } else {
-        // the open note's row; else keep a highlight (row 0 after a "highlight" reset), or Enter would create a note
-        const i = r.indexOf(this.editor.currentPath() ?? "");
-        this.store.set((s) => ({ sel: i >= 0 ? i : s.sel < r.count ? s.sel : -1 }));
-      }
+      } else this.reselect(highlighted);
     } catch (e) {
       if (e === "no-folder") this.store.set({ phase: "setup" });
       else if (e !== "indexing") console.error("search failed", e);
@@ -542,14 +539,30 @@ export class Controller {
   /** Sort changed: fresh first page from the top, keeping the open note selected if it is loaded. */
   protected async resort() {
     const seq = ++this.searchSeq;
+    const highlighted = this.highlighted();
     try {
       await this.results.reset();
       if (seq !== this.searchSeq) return;
       this.listChanged(true);
-      this.selectOpen();
+      this.reselect(highlighted);
     } catch (e) {
       if (e !== "indexing") console.error("search failed", e);
     }
+  }
+
+  /** The path of a highlighted row that is not the open note (row 0 after a "highlight" reset), read before the rows change. */
+  protected highlighted(): string | null {
+    const p = this.results.get(this.store.get().sel)?.path;
+    return p && p !== this.editor.currentPath() ? p : null;
+  }
+
+  /**
+   * After the rows changed: the open note's row, else the highlighted note's row (Enter opens it, never creates a note).
+   * By path, never by index: a row that moved or left must not leave the highlight on another note.
+   */
+  protected reselect(highlighted: string | null) {
+    const open = this.results.indexOf(this.editor.currentPath() ?? "");
+    this.store.set({ sel: open >= 0 ? open : highlighted ? this.results.indexOf(highlighted) : -1 });
   }
 
   /** Load pages until row `index` exists (the list scrolled near its end). */
@@ -580,7 +593,11 @@ export class Controller {
   async enter(force = false, checklist = false) {
     if (this.store.get().paneMode === "tasks") {
       // the field filters tasks here: Enter opens the first one shown, never creates a note
-      await this.tasksLoading;
+      // a newer load (watcher, save) supersedes the one in flight, whose reply is then dropped: wait for the latest
+      for (let p = this.tasksLoading; ; p = this.tasksLoading) {
+        await p;
+        if (p === this.tasksLoading) break;
+      }
       const v = this.store.get().taskView;
       const first = v && [...v.overdue, ...v.today, ...v.upcoming, ...v.no_date, ...v.done][0];
       if (first) await this.openTask(first);
@@ -712,8 +729,7 @@ export class Controller {
         this.clearErr();
         this.history.loaded(np, "explicit");
       }
-      await this.runSearch(false);
-      this.selectOpen();
+      await this.runSearch(false); // reselects the open note's row (by path)
     } catch (e) {
       // The file moved but could not be reopened: stay read-only (never resume on the old path).
       this.setErr(`Note moved but could not be reopened (${e}); pick it from the list`);

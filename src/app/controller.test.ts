@@ -1550,3 +1550,73 @@ test("a tick shows on the task row at once, before the reload (#8)", async () =>
     [true, "- [x] y"],
   ]);
 });
+
+test("own edit removes the filtered tag: the list highlights nothing, never another note (#15 F1)", async () => {
+  const { c, api, store } = setup({ A: "a #work", B: "b #work", C: "c #work" });
+  api.listTags.mockResolvedValue([{ tag: "work", count: 3 }]);
+  api.search.mockImplementation(async () => ({ hits: [hit("A"), hit("B"), hit("C")], has_more: false, total: 3 }));
+  c.setTags(["work"]);
+  await settle();
+  await settle(); // A open, sel 0
+  api.search.mockImplementation(async () => ({ hits: [hit("B"), hit("C")], has_more: false, total: 2 }));
+  c.editorOpts().onSaved(); // the user deleted #work from A; autosave landed
+  await new Promise((r) => setTimeout(r, 350));
+  await settle();
+  expect([store.get().openPath, store.get().sel]).toEqual([P("A"), -1]);
+});
+
+test("a watcher refresh that drops the open note: arrows and Enter never act on the shifted row (#15 F1)", async () => {
+  for (const act of ["step", "enter"] as const) {
+    const { c, api, store } = setup();
+    await c.runSearch(true);
+    await settle(); // A open, sel 0
+    api.search.mockImplementation(async () => ({ hits: [hit("B"), hit("C")], has_more: false, total: 2 }));
+    await c.onNotesChanged([P("A")]);
+    expect(store.get().sel, act).toBe(-1);
+    if (act === "step") {
+      await c.step(1);
+      expect(store.get().openPath, act).toBe(P("B"));
+    } else {
+      await c.enter();
+      expect(store.get().openPath, act).toBe(P("A")); // empty query, nothing highlighted: nothing happens
+    }
+  }
+});
+
+test("a highlight follows its note through a refresh or a re-sort (#15 F1)", async () => {
+  const { c, api, store } = setup({ Groceries: "a", X: "x", Y: "y" });
+  await c.show(P("X"));
+  api.search.mockImplementation(async () => ({ hits: [hit("Groceries"), hit("Y")], has_more: false, total: 2 }));
+  c.setPaneMode("tasks");
+  c.setQuery("g");
+  await settle();
+  c.setPaneMode("notes");
+  await settle();
+  expect(store.get().sel).toBe(0); // Groceries highlighted, X open and not listed
+  api.search.mockImplementation(async () => ({ hits: [hit("Y"), hit("Groceries")], has_more: false, total: 2 }));
+  await c.onNotesChanged([]);
+  expect(store.get().sel).toBe(1);
+  api.search.mockImplementation(async () => ({ hits: [hit("Groceries"), hit("Y")], has_more: false, total: 2 }));
+  await c.toggleSort();
+  expect(store.get().sel).toBe(0);
+  await c.enter();
+  expect(store.get().openPath).toBe(P("Groceries"));
+});
+
+test("Enter in Tasks mode waits for every task load in flight, not only the first (#15 F2)", async () => {
+  const { c, api, store } = setup({ A: "- [ ] a", B: "- [ ] b" });
+  api.tasks.mockResolvedValue({ ...view(0), no_date: [task("A", 0, "- [ ] a")] });
+  c.setPaneMode("tasks");
+  await settle();
+  const d1 = deferred<TaskView>();
+  const d2 = deferred<TaskView>();
+  api.tasks.mockImplementationOnce(() => d1.promise).mockImplementation(async (q) => (q === "b" ? d2.promise : view(0)));
+  c.setQuery("b");
+  const entered = c.enter();
+  void c.loadTasks(); // a watcher or save refresh starts a newer load
+  d1.resolve({ ...view(0), no_date: [task("B", 0, "- [ ] b")] });
+  await settle();
+  d2.resolve({ ...view(0), no_date: [task("B", 0, "- [ ] b")] });
+  await entered;
+  expect(store.get().openPath).toBe(P("B"));
+});
