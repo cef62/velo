@@ -80,8 +80,9 @@ fn flow_item(v: &str) -> String {
 
 /// The raw items of a flow list `a, "b, c", d]` (text after `[`), up to the first `]` outside quotes. As in YAML, a
 /// quote opens a quoted item only at the item's start (`don't` is plain text); `''` inside single quotes and `\"`
-/// inside double quotes stay in the item. `None` when a quote is never closed.
-fn flow_scan(f: &str) -> Option<Vec<&str>> {
+/// inside double quotes stay in the item. Also returns where the list ends (just past its `]`, or the end of `f`).
+/// `None` when a quote is never closed.
+fn flow_scan(f: &str) -> Option<(Vec<&str>, usize)> {
     let (mut out, mut start, mut quote, mut skip) = (vec![], 0, None, false);
     let mut it = f.char_indices().peekable();
     while let Some((i, c)) = it.next() {
@@ -99,7 +100,7 @@ fn flow_scan(f: &str) -> Option<Vec<&str>> {
                 out.push(f[start..i].trim());
                 start = i + 1;
                 if c == ']' {
-                    return Some(out.into_iter().filter(|s| !s.is_empty()).collect());
+                    return Some((out.into_iter().filter(|s| !s.is_empty()).collect(), i + 1));
                 }
             }
             _ => {}
@@ -109,12 +110,12 @@ fn flow_scan(f: &str) -> Option<Vec<&str>> {
         return None;
     }
     out.push(f[start..].trim());
-    Some(out.into_iter().filter(|s| !s.is_empty()).collect())
+    Some((out.into_iter().filter(|s| !s.is_empty()).collect(), f.len()))
 }
 
 /// `flow_scan`, or for a quote never closed the plain comma split velo always read such lists with.
 fn flow_items(f: &str) -> Vec<&str> {
-    flow_scan(f).unwrap_or_else(|| f.split(']').next().unwrap_or("").split(',').map(str::trim).filter(|s| !s.is_empty()).collect())
+    flow_scan(f).map(|(items, _)| items).unwrap_or_else(|| f.split(']').next().unwrap_or("").split(',').map(str::trim).filter(|s| !s.is_empty()).collect())
 }
 
 /// Flow lists, scalars or block lists under every `key:` row (any `key_rest` spelling), in order.
@@ -203,8 +204,11 @@ fn tag_row<'a>(rows: &[&'a str], k: usize) -> Result<(Vec<&'a str>, usize, bool)
     let unsupported = || Err("unsupported tags: layout".to_string());
     Ok(if v.starts_with('[') {
         // only a single-line list with nothing after `]`
-        if !v.ends_with(']') || v[1..v.len() - 1].contains(['[', ']', '#']) { return unsupported(); }
-        (flow_scan(&v[1..]).ok_or("unsupported tags: layout")?, k + 1, true) // an unclosed quote: never rewritten
+        // one list ending the line; brackets and `#` only inside quoted items; an unclosed quote: never rewritten
+        let Some((items, end)) = flow_scan(&v[1..]) else { return unsupported() };
+        let quoted = |i: &str| ['"', '\''].iter().any(|q| i.len() > 1 && i.starts_with(*q) && i.ends_with(*q));
+        if end != v.len() - 1 || !v.ends_with(']') || items.iter().any(|i| !quoted(i) && i.contains(['[', ']', '#'])) { return unsupported(); }
+        (items, k + 1, true)
     } else if v == "~" || v == "null" {
         (vec![], k + 1, true) // YAML null: an empty list
     } else if !v.is_empty() {
@@ -508,8 +512,20 @@ mod tests {
         assert_eq!(tags("['it''s', \"a\\\", b\", c]"), ["it's", "a\", b", "c"]);
         for v in ["say \"hi\", it's", "a\\b, c", "x, y", "x\\\\y, z", "a, b\\"] {
             let t = format!("---\nTags:\n  - {v}\ntags: [a]\n---\n");
-            let out = set_tags(&t, &["zz".into()], &[], true).unwrap().unwrap();
+            let out = set_tags(&t, &["zz".into()], &[], true).unwrap_or_else(|e| panic!("{v}: {e}")).unwrap();
             assert_eq!(parse(&out).unwrap().tags[0], v, "{out}");
+        }
+    }
+
+    /// Copilot's fold inputs: every block value survives the move into a flow row, and the folded note stays writable.
+    #[test]
+    fn fold_keeps_block_values_copilot_cases() {
+        for v in ["\"#work\"", "a \"quote\", Bob's desk", "C:\\temp, docs", "C:\\work, docs"] {
+            let t = format!("---\nTags:\n  - {v}\ntags: [personal]\n---\nx\n");
+            let want = parse(&t).unwrap().tags;
+            let out = set_tags(&t, &["zz".into()], &[], true).unwrap_or_else(|e| panic!("{v}: {e}")).unwrap();
+            assert_eq!(parse(&out).unwrap().tags, [want.clone(), vec!["zz".to_string()]].concat(), "{v}: {out}");
+            assert!(set_tags(&out, &[], &["personal".into()], false).unwrap().is_some(), "folded row stays writable: {out}");
         }
     }
 
