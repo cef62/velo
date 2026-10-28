@@ -1201,6 +1201,20 @@ test("agent write refused while busy", async () => {
   expect(api.agentWriteDone).toHaveBeenCalledWith(3, "refused");
 });
 
+test("an agent write waits for a note load in flight before saying not-open", async () => {
+  const { c, api, editor } = setup({ A: "a", B: "b" });
+  const d = deferred<ReturnType<typeof api.openNote> extends Promise<infer T> ? T : never>();
+  api.openNote.mockImplementationOnce(() => d.promise);
+  const shown = c.show(P("B"));
+  await settle();
+  const write = c.onAgentWrite({ id: 5, path: P("B"), kind: "append", insert: "- [ ] x", summary: "s" });
+  d.resolve({ path: P("B"), title: "B", text: "b", hash: "h", encrypted: false, meta: noMeta });
+  await shown;
+  await write;
+  expect(api.agentWriteDone).toHaveBeenCalledWith(5, { hash: "h" }); // applied in the editor, not written behind it
+  expect(editor.appended).toEqual(["- [ ] x"]);
+});
+
 test("a failed agent trash after the editor closed the note says so", async () => {
   const { c, api, store } = setup({ A: "a" });
   await c.onAgentWrite({ id: 9, path: P("A"), kind: "trash-failed", title: "A", error: "Trash unavailable" });

@@ -1303,6 +1303,9 @@ export class Controller {
       this.setErr(`The agent couldn't move “${req.title ?? req.path}” to the Trash: ${req.error ?? "unknown error"}`); // the note left the editor but is still there
       return "ok";
     }
+    // a load in flight decides which note ends up open: a not-open answered before it lands would let the backend
+    // write behind the editor that then shows the old text
+    while (this.pendingLoads.size) await Promise.allSettled([...this.pendingLoads]);
     if (req.kind === "flush") {
       // a rename is about to rewrite links in these notes: the open one must be saved first
       if (!req.paths?.includes(this.editor.currentPath() ?? "")) return "not-open";
