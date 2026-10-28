@@ -69,6 +69,9 @@ pub fn all_tags(body: &str, fm: Option<&FrontMatter>) -> Vec<(String, String)> {
     out
 }
 
+/// Bump to rebuild every index once (5: `Tags:` / `tags :` / `Aliases:` front-matter keys are read).
+const SCHEMA_VERSION: i64 = 5;
+
 pub struct Index {
     db: Connection,
 }
@@ -147,10 +150,11 @@ impl Index {
         // journal_mode returns a row, so read it instead of executing.
         let _: String = db.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
         db.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON;")?;
-        // Older indexes lack tags, dates, aliases or tasks: drop them so the vault's reconcile reindexes every note.
+        // Older indexes lack tags, dates, aliases or tasks, or parsed front matter differently: drop them so the
+        // vault's reconcile reindexes every note.
         // DROP, not DELETE: deleting every FTS5 row one by one took ~1 min at 10k notes.
-        if db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? < 4 {
-            db.execute_batch("DROP TABLE IF EXISTS tasks; DROP TABLE IF EXISTS notes_fts; DROP TABLE IF EXISTS notes; DROP TABLE IF EXISTS links; DROP TABLE IF EXISTS tags; DROP TABLE IF EXISTS aliases; PRAGMA user_version=4;")?;
+        if db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? < SCHEMA_VERSION {
+            db.execute_batch(&format!("DROP TABLE IF EXISTS tasks; DROP TABLE IF EXISTS notes_fts; DROP TABLE IF EXISTS notes; DROP TABLE IF EXISTS links; DROP TABLE IF EXISTS tags; DROP TABLE IF EXISTS aliases; PRAGMA user_version={SCHEMA_VERSION};"))?;
         }
         db.execute_batch(SCHEMA)?;
         // FTS5 deletes otherwise leave old segments (all trigrams) in notes_fts_data.
@@ -534,9 +538,17 @@ mod tests {
         i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("- [ ] t")).unwrap(); drop(i);
         Connection::open(&db).unwrap().execute_batch("PRAGMA user_version=3").unwrap();
         let mut i = Index::open(&db).unwrap(); assert!(i.known().unwrap().is_empty()); assert!(i.task_rows(&[]).unwrap().is_empty());
-        assert_eq!(i.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 4);
+        assert_eq!(i.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
         i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("- [ ] t")).unwrap();
         assert_eq!(i.task_rows(&[]).unwrap().len(), 1);
+    }
+    /// v5: `Tags:` / `tags :` / `Aliases:` are read now, so notes indexed by v4 must be parsed again once.
+    #[test] fn schema_v4_db_is_rebuilt() {
+        let dir = tempfile::tempdir().unwrap(); let db = dir.path().join("i.db");
+        let mut i = Index::open(&db).unwrap();
+        i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("x")).unwrap(); drop(i);
+        Connection::open(&db).unwrap().execute_batch("PRAGMA user_version=4").unwrap();
+        assert!(Index::open(&db).unwrap().known().unwrap().is_empty());
     }
     #[test] fn schema_upgrade_reindexes() {
         let dir = tempfile::tempdir().unwrap(); let db = dir.path().join("i.db");
@@ -544,7 +556,7 @@ mod tests {
         i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("#x")).unwrap(); drop(i);
         Connection::open(&db).unwrap().execute_batch("PRAGMA user_version=2").unwrap();
         let i = Index::open(&db).unwrap(); assert!(i.known().unwrap().is_empty()); assert!(i.tags().unwrap().is_empty());
-        assert_eq!(i.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 4);
+        assert_eq!(i.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
         let mut i = i; i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("#x")).unwrap(); drop(i);
         assert_eq!(Index::open(&db).unwrap().known().unwrap().len(), 1);
     }
