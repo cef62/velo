@@ -53,22 +53,23 @@ fn key_rest<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     k.trim_end_matches([' ', '\t']).eq_ignore_ascii_case(key).then_some(rest)
 }
 
-/// Flow list, scalar or block list under the first `key:` (any `key_rest` spelling).
+/// Flow lists, scalars or block lists under every `key:` row (any `key_rest` spelling), in order.
 fn list(inner: &str, key: &str) -> Vec<String> {
-    let Some(v) = lines(inner).find_map(|l| key_rest(l, key)) else { return vec![] };
-    let v = v.trim();
-    let items: Vec<&str> = if let Some(f) = v.strip_prefix('[') {
-        f.split(']').next().unwrap_or("").split(',').collect()
-    } else if !v.is_empty() {
-        vec![v]
-    } else {
-        let mut it = lines(inner).skip_while(|l| key_rest(l, key).is_none()).skip(1);
-        let mut out = vec![];
-        while let Some(l) = it.next() {
-            match l.trim_start().strip_prefix('-') { Some(x) if l.starts_with([' ', '-']) => out.push(x), _ => break }
+    let ls: Vec<&str> = lines(inner).collect();
+    let mut items: Vec<&str> = vec![];
+    for (i, l) in ls.iter().enumerate() {
+        let Some(v) = key_rest(l, key) else { continue };
+        let v = v.trim();
+        if let Some(f) = v.strip_prefix('[') {
+            items.extend(f.split(']').next().unwrap_or("").split(','));
+        } else if !v.is_empty() {
+            items.push(v);
+        } else {
+            for l in &ls[i + 1..] {
+                match l.trim_start().strip_prefix('-') { Some(x) if l.starts_with([' ', '-']) => items.push(x), _ => break }
+            }
         }
-        out
-    };
+    }
     items.into_iter().map(|s| unquote(s).to_string()).filter(|s| !s.is_empty()).collect()
 }
 
@@ -131,9 +132,31 @@ fn tag_key(s: &str) -> String {
     crate::text::fold(unquote(s).trim_start_matches('#'))
 }
 
+/// The items of the `tags` row `rows[k]`, the row after its list, and whether it is a one-line (flow) value.
+fn tag_row<'a>(rows: &[&'a str], k: usize) -> Result<(Vec<&'a str>, usize, bool), String> {
+    let row = rows[k].trim_end_matches(['\n', '\r']);
+    let v = row[row.find(':').expect("a tags row") + 1..].trim();
+    let unsupported = || Err("unsupported tags: layout".to_string());
+    Ok(if v.starts_with('[') {
+        // only a single-line list with nothing after `]`
+        if !v.ends_with(']') || v[1..v.len() - 1].contains(['[', ']', '#']) { return unsupported(); }
+        (v[1..v.len() - 1].split(',').map(str::trim).filter(|s| !s.is_empty()).collect(), k + 1, true)
+    } else if v == "~" || v == "null" {
+        (vec![], k + 1, true) // YAML null: an empty list
+    } else if !v.is_empty() {
+        let quoted = v.len() > 1 && ['"', '\''].iter().any(|q| v.starts_with(*q) && v.ends_with(*q));
+        if !quoted && v.contains(['[', ']', '{', '}', ',', '#', '|', '>', '&', '*', '!', '%', '@', '\'', '"', ':']) { return unsupported(); }
+        (vec![v], k + 1, true)
+    } else {
+        if rows.get(k + 1).is_some_and(|l| l.starts_with([' ', '\t']) && !l.trim_start().starts_with('-')) { return unsupported(); }
+        let n = rows[k + 1..].iter().take_while(|l| l.trim_start().starts_with('-') && l.starts_with([' ', '-'])).count();
+        (rows[k + 1..k + 1 + n].iter().map(|l| l.trim().trim_start_matches('-').trim()).collect(), k + 1 + n, false)
+    })
+}
+
 /// Adds/removes tags (matched with `fold`, a leading `#` ignored) by editing only the `tags:` key; the form the note
 /// uses stays (flow or block list). A new key is a flow list `tags: [a, b]`; with no block at all one is created only
-/// if `create_block`. `None` when nothing changes.
+/// if `create_block`. Several `tags` rows are folded into the first one when a tag changes. `None` when nothing changes.
 pub fn set_tags(text: &str, add: &[String], remove: &[String], create_block: bool) -> Result<Option<String>, String> {
     let rm: Vec<String> = remove.iter().map(|t| tag_key(t)).collect();
     let mut adds: Vec<&str> = vec![];
@@ -154,23 +177,31 @@ pub fn set_tags(text: &str, add: &[String], remove: &[String], create_block: boo
     };
     let row = strip(rows[k]);
     let key = &row[..row.find(':').expect("key_rest matched") + 1]; // the note's own spelling, kept
-    let v = row[key.len()..].trim().to_string();
-    let unsupported = || Err("unsupported tags: layout".to_string());
-    let (mut items, end, flow): (Vec<&str>, usize, bool) = if v.starts_with('[') {
-        // only a single-line list with nothing after `]`
-        if !v.ends_with(']') || v[1..v.len() - 1].contains(['[', ']', '#']) { return unsupported(); }
-        (v[1..v.len() - 1].split(',').map(str::trim).filter(|s| !s.is_empty()).collect(), k + 1, true)
-    } else if v == "~" || v == "null" {
-        (vec![], k + 1, true) // YAML null: an empty list
-    } else if !v.is_empty() {
-        let quoted = v.len() > 1 && ['"', '\''].iter().any(|q| v.starts_with(*q) && v.ends_with(*q));
-        if !quoted && v.contains(['[', ']', '{', '}', ',', '#', '|', '>', '&', '*', '!', '%', '@', '\'', '"', ':']) { return unsupported(); }
-        (vec![v.as_str()], k + 1, true)
-    } else {
-        if rows.get(k + 1).is_some_and(|l| l.starts_with([' ', '\t']) && !l.trim_start().starts_with('-')) { return unsupported(); }
-        let n = rows[k + 1..].iter().take_while(|l| l.trim_start().starts_with('-') && l.starts_with([' ', '-'])).count();
-        (rows[k + 1..k + 1 + n].iter().map(|l| l.trim().trim_start_matches('-').trim()).collect(), k + 1 + n, false)
-    };
+    let (mut items, end, flow) = tag_row(&rows, k)?;
+    // more `tags` rows (an older velo added one under `Tags:`): fold them into this one, as a flow list
+    let more: Vec<usize> = (end..rows.len()).filter(|&j| key_rest(rows[j].trim_end_matches(['\n', '\r']), "tags").is_some()).collect();
+    if !more.is_empty() {
+        let eol = if rows[k].ends_with("\r\n") { "\r\n" } else { "\n" };
+        let mut skip = vec![(k, end)];
+        for j in more {
+            let (it, e, _) = tag_row(&rows, j)?;
+            items.extend(it);
+            skip.push((j, e));
+        }
+        let mut seen = std::collections::HashSet::new();
+        items.retain(|i| seen.insert(tag_key(i)));
+        let mut folded = text[..first].to_string();
+        for (i, r) in rows.iter().enumerate() {
+            if i == k {
+                folded.push_str(&format!("{key} [{}]{eol}", items.join(", ")));
+            } else if !skip.iter().any(|&(a, b)| (a..b).contains(&i)) {
+                folded.push_str(r);
+            }
+        }
+        folded.push_str(&text[close..]);
+        // no tag change: leave the note as it is
+        return set_tags(&folded, add, remove, create_block); // None when no tag changes: the note stays as it is
+    }
     let before = items.len();
     let keep: Vec<bool> = items.iter().map(|i| !rm.contains(&tag_key(i))).collect();
     let mut kept_rows: Vec<&str> = rows[k + 1..end].iter().zip(&keep).filter(|(_, k)| **k).map(|(r, _)| *r).collect();
@@ -314,6 +345,17 @@ mod tests {
         }
         // not the tags key: an indented line, or another key starting with "tags"
         assert!(parse("---\n  tags: [a]\ntagsx: [b]\n---\n").unwrap().tags.is_empty());
+    }
+
+    /// v0.8.0 added a second `tags:` row under a `Tags:` one: both rows count, and a write folds them into one.
+    #[test]
+    fn several_tags_rows_are_read_and_written_as_one() {
+        let t = "---\nTags: [a]\ntags:\n  - x\n---\nbody\n";
+        assert_eq!(parse(t).unwrap().tags, ["a", "x"]);
+        assert_eq!(set_tags(t, &["x".into()], &[], true).unwrap(), None, "already there: no duplicate");
+        assert_eq!(set_tags(t, &[], &["x".into()], false).unwrap().unwrap(), "---\nTags: [a]\nbody\n".replace("body", "---\nbody"));
+        assert_eq!(set_tags(t, &["b".into()], &[], true).unwrap().unwrap(), "---\nTags: [a, x, b]\n---\nbody\n");
+        assert!(set_tags("---\ntags: [a]\nTags: {x}\n---\n", &[], &["a".into()], false).is_err(), "any unsupported row refuses");
     }
 
     #[test]
