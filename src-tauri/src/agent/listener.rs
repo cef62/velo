@@ -213,7 +213,7 @@ pub fn start_or_fence(data_dir: &Path, settings_path: &Path, s: &mut crate::sett
         return Ok(None);
     }
     s.agent_access = false;
-    crate::settings::save(settings_path, s).map_err(|e2| anyhow::anyhow!("agent access is on but velo can't start it, mark itself running or turn it off: {e}; {e2}"))?;
+    crate::settings::save(settings_path, s).map_err(|e2| anyhow::anyhow!("velo can't write to {} (agent access: {e}), nor save {} to turn agent access off ({e2}).", data_dir.display(), settings_path.display()))?;
     eprintln!("velo: agent access turned off");
     Ok(None)
 }
@@ -410,7 +410,8 @@ mod tests {
         assert!(!s.agent_access && !crate::settings::load(&sp).agent_access, "saved off");
         // settings can't be saved either: fail
         let mut s = crate::settings::Settings { agent_access: true, ..Default::default() };
-        assert!(start_or_fence(t.path(), t.path(), &mut s, || serve(t.path(), echo())).is_err());
+        let e = start_or_fence(t.path(), t.path(), &mut s, || serve(t.path(), echo())).err().unwrap().to_string();
+        assert!(e.contains(&t.path().display().to_string()), "names the folder: {e}");
     }
 
     #[test] fn toggling_access_off_stops_listener_and_removes_file() {

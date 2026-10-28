@@ -80,6 +80,32 @@ pub fn run() {
                 settings_path,
                 data_dir,
             });
+            app.manage(agent::listener::AgentState::default());
+            // before the vault opens: with access on, velo writes notes only once headless can tell it runs, or access
+            // is off (never two writers). Failing both, the notes stay closed and a dialog says why, then velo quits.
+            let fenced = {
+                let st = app.state::<commands::AppState>();
+                let mut s = st.settings.lock().unwrap();
+                if s.agent_access {
+                    agent::listener::start_or_fence(&st.data_dir, &st.settings_path, &mut s, || agent::listener::start(h.clone())).map(|l| *app.state::<agent::listener::AgentState>().listener.lock().unwrap() = l)
+                } else {
+                    Ok(())
+                }
+            };
+            let dir = match fenced {
+                Ok(()) => dir,
+                Err(e) => {
+                    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                    eprintln!("velo: {e}");
+                    let h2 = h.clone();
+                    h.dialog()
+                        .message(format!("{e}\n\nAgent access is on, so velo won't open your notes: an agent could write them at the same time. Make that folder writable, then start velo again."))
+                        .kind(MessageDialogKind::Error)
+                        .title("velo can't open your notes")
+                        .show(move |_| h2.exit(1));
+                    None
+                }
+            };
             if let Some(dir) = dir {
                 // detached on purpose: quitting must not wait for indexing
                 let h = h.clone();
@@ -94,15 +120,6 @@ pub fn run() {
                     eprintln!("velo: {action:?} hotkey not registered: {e}");
                 }
             }
-            app.manage(agent::listener::AgentState::default());
-            let st = app.state::<commands::AppState>();
-            let mut s = st.settings.lock().unwrap();
-            if s.agent_access {
-                // never two writers: fails setup if headless can't be told the app runs nor access turned off
-                let l = agent::listener::start_or_fence(&st.data_dir, &st.settings_path, &mut s, || agent::listener::start(h.clone()))?;
-                *app.state::<agent::listener::AgentState>().listener.lock().unwrap() = l;
-            }
-            drop(s);
             app.manage(Mutex::new(update::UpdateState::default()));
             update::spawn_checker(h.clone());
             Ok(())
