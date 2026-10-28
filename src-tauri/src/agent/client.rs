@@ -42,12 +42,12 @@ pub fn forward(data_dir: &Path, name: &str, args: &Value) -> Option<Result<Value
             Ok(b) => b,
         };
         let info: Value = serde_json::from_slice(&bytes).unwrap_or_default();
-        let (Some(pid), Some(port)) = (info["pid"].as_u64().filter(|p| (1..=i32::MAX as u64).contains(p)), info["port"].as_u64().and_then(|p| u16::try_from(p).ok())) else {
-            return Some(Err(BUSY.into()));
-        };
+        let Some(pid) = info["pid"].as_u64().filter(|p| (1..=i32::MAX as u64).contains(p)) else { return Some(Err(BUSY.into())) };
         if !pid_alive(pid as u32) {
             return None;
         }
+        // no port: the app runs but its listener did not start (`listener::mark_running`)
+        let Some(port) = info["port"].as_u64().and_then(|p| u16::try_from(p).ok()) else { return Some(Err(BUSY.into())) };
         if let Sent::Reply(r) = attempt(port, &info["token"], name, args) {
             return Some(r);
         }

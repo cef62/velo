@@ -99,6 +99,7 @@ pub fn run() {
                 let started = agent::listener::start(h.clone()).map(|l| *app.state::<agent::listener::AgentState>().listener.lock().unwrap() = Some(l));
                 if let Err(e) = started {
                     eprintln!("velo: agent access listener not started: {e}");
+                    agent::listener::mark_running(&app.state::<commands::AppState>().data_dir).ok();
                 }
             }
             app.manage(Mutex::new(update::UpdateState::default()));

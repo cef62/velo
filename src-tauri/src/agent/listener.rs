@@ -21,6 +21,8 @@ const MAX_REQUEST: u64 = 64 << 20;
 /// Longest auth line, and how long a new connection may take to send it.
 const MAX_AUTH: u64 = 256;
 const AUTH_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long an authenticated connection may sit between requests (the headless client sends its one request at once).
+const IDLE_TIMEOUT: Duration = Duration::from_secs(if cfg!(test) { 1 } else { 30 });
 /// Connections served at once; more are closed right away, so a local flood can't exhaust threads or fds.
 const MAX_CONNS: usize = 8;
 
@@ -122,9 +124,9 @@ pub fn serve(data_dir: &Path, dispatch: Dispatch) -> anyhow::Result<ListenerHand
                 live.fetch_sub(1, Ordering::SeqCst);
                 continue; // dropped: closed
             }
-            let (token, dispatch, done) = (tok.clone(), dispatch.clone(), live.clone());
+            let (token, dispatch, done, stop) = (tok.clone(), dispatch.clone(), live.clone(), stopped.clone());
             // a failed spawn drops the closure (and the connection) instead of panicking
-            if std::thread::Builder::new().spawn(move || { handle(conn, &token, &dispatch).ok(); done.fetch_sub(1, Ordering::SeqCst); }).is_err() {
+            if std::thread::Builder::new().spawn(move || { handle(conn, &token, &dispatch, &stop).ok(); done.fetch_sub(1, Ordering::SeqCst); }).is_err() {
                 live.fetch_sub(1, Ordering::SeqCst);
             }
         }
@@ -155,7 +157,9 @@ fn auth_line(conn: &TcpStream) -> std::io::Result<Vec<u8>> {
     Ok(line)
 }
 
-fn handle(conn: TcpStream, token: &str, dispatch: &Dispatch) -> std::io::Result<()> {
+/// `stop`: this listener was stopped (access turned off, maybe on again with a new token): requests on connections
+/// it authenticated are refused undispatched, so the client retries with the current `agent.json`.
+fn handle(conn: TcpStream, token: &str, dispatch: &Dispatch, stop: &AtomicBool) -> std::io::Result<()> {
     let auth: Value = serde_json::from_slice(&auth_line(&conn)?).unwrap_or_default();
     let mut reader = BufReader::new(conn.try_clone()?);
     let mut out = conn;
@@ -163,11 +167,14 @@ fn handle(conn: TcpStream, token: &str, dispatch: &Dispatch) -> std::io::Result<
         return writeln!(out, "{}", json!({"err": "unauthorized"}));
     }
     writeln!(out, "{}", json!({"ok": true}))?;
-    out.set_read_timeout(None)?; // the client waits as long as it likes between its calls
+    out.set_read_timeout(Some(IDLE_TIMEOUT))?;
     loop {
         let mut line = String::new();
         if (&mut reader).take(MAX_REQUEST).read_line(&mut line)? == 0 {
             return Ok(());
+        }
+        if stop.load(Ordering::SeqCst) {
+            return writeln!(out, "{}", json!({"err": "unauthorized"}));
         }
         let req: Value = serde_json::from_str(&line).unwrap_or_default();
         let name = req.get("name").and_then(Value::as_str).unwrap_or("");
@@ -182,6 +189,12 @@ fn handle(conn: TcpStream, token: &str, dispatch: &Dispatch) -> std::io::Result<
 /// Constant-time comparison, so response timing does not leak the token.
 fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Startup could not start the listener while access is on: an `agent.json` with only this pid tells `velo --mcp`
+/// the app is running (busy, never a second writer). The next listener start overwrites it.
+pub fn mark_running(data_dir: &Path) -> std::io::Result<()> {
+    write_private(&data_dir.join("agent.json"), json!({"pid": std::process::id()}).to_string().as_bytes())
 }
 
 /// Atomic write of a file only the user can read (0600 on unix, set at creation so it is never wider).
@@ -311,6 +324,29 @@ mod tests {
         let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
         assert_eq!(ask(&mut s, json!({"token": a["token"]})).trim(), r#"{"ok":true}"#);
         h.stop();
+    }
+
+    /// After off (and on again), a connection authenticated with the old token gets nothing more dispatched, and an
+    /// authenticated connection that goes idle is closed so it can't hold a slot.
+    #[test] fn old_and_idle_connections_are_closed() {
+        let t = tempfile::tempdir().unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let c2 = calls.clone();
+        let h = serve(t.path(), Arc::new(move |_: &str, _: Value| { c2.fetch_add(1, Ordering::SeqCst); Ok(json!(1)) })).unwrap();
+        let a = info(t.path());
+        let port = a["port"].as_u64().unwrap() as u16;
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        assert_eq!(ask(&mut s, json!({"token": a["token"]})).trim(), r#"{"ok":true}"#);
+        let mut idle = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        assert_eq!(ask(&mut idle, json!({"token": a["token"]})).trim(), r#"{"ok":true}"#);
+        h.stop();
+        assert_eq!(ask(&mut s, json!({"name": "x", "args": {}})).trim(), r#"{"err":"unauthorized"}"#);
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "not dispatched");
+        idle.set_read_timeout(Some(IDLE_TIMEOUT * 3)).unwrap();
+        let t0 = Instant::now();
+        let mut l = String::new();
+        assert_eq!(BufReader::new(idle).read_line(&mut l).unwrap_or(0), 0, "closed");
+        assert!(t0.elapsed() < IDLE_TIMEOUT * 2);
     }
 
     #[test] fn toggling_access_off_stops_listener_and_removes_file() {

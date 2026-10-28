@@ -197,6 +197,18 @@ mod tests {
         assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert_eq!(std::fs::read_to_string(notes.join("a.md")).unwrap(), "x");
     }
+    /// The app runs with access on but its listener failed to start: it leaves a pid-only marker, so headless never
+    /// writes beside it; once that pid is gone the marker is stale and headless goes direct.
+    #[test] fn app_without_listener_is_busy_not_direct() {
+        let (_t, p, data, notes) = setup(true); std::fs::write(notes.join("a.md"), "x").unwrap();
+        std::fs::create_dir_all(&data).unwrap();
+        listener::mark_running(&data).unwrap();
+        let call = gate(p, data.clone());
+        assert_eq!(call("append_to_note", serde_json::json!({"title": "a", "text": "y", "summary": "s"})), Err("velo is busy, retry".to_string()));
+        assert_eq!(std::fs::read_to_string(notes.join("a.md")).unwrap(), "x");
+        std::fs::write(data.join("agent.json"), serde_json::json!({"pid": dead_pid()}).to_string()).unwrap();
+        assert!(call("append_to_note", serde_json::json!({"title": "a", "text": "y", "summary": "s"})).is_ok());
+    }
     #[test] fn broken_agent_json_is_busy_not_direct() {
         for bad in ["not json", "{}", r#"{"port":1,"token":"t"}"#, r#"{"port":1,"token":"t","pid":0}"#, r#"{"port":1,"token":"t","pid":4294967295}"#, r#"{"token":"t","pid":1}"#] {
             let (_t, p, data, _n) = setup(true); std::fs::create_dir_all(&data).unwrap();
