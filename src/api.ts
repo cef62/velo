@@ -42,7 +42,7 @@ export const readRevision = (path: string, id: string) => invoke<string>("read_r
 export type AgentWrite = {
   id: number;
   path: string;
-  kind: "replace" | "append" | "trash" | "rename" | "renamed" | "flush";
+  kind: "replace" | "append" | "trash" | "rename" | "renamed" | "flush" | "trash-failed";
   /** `replace`: the note's whole new text; `append`: the line to add. */
   insert?: string;
   base?: string;
@@ -51,6 +51,9 @@ export type AgentWrite = {
   to?: string | null;
   /** `flush`: notes whose links a rename is about to rewrite. */
   paths?: string[];
+  /** `trash-failed`: the note the editor closed for a trash that then failed, and why. */
+  title?: string;
+  error?: string;
 };
 export type AgentReply = { hash: string } | "not-open" | "refused" | "conflict" | "unsaved" | "closed" | "ready" | "flushed" | "ok";
 /** Called right before applying `id`: false once the backend stopped waiting (then leave everything as it is). */

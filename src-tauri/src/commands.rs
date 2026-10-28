@@ -301,13 +301,20 @@ pub fn list_titles(st: State<'_, AppState>) -> Res<Vec<String>> {
     with_vault(&st, |v, _| v.titles())
 }
 
+/// Longest wait for an agent's backend write to the note being opened (it is then opened as it is).
+const AGENT_HOLD_MAX: std::time::Duration = std::time::Duration::from_secs(5);
+
 #[tauri::command(async)]
-pub fn open_note(st: State<'_, AppState>, path: String) -> Res<NoteDoc> {
+pub fn open_note(st: State<'_, AppState>, agent: State<'_, AgentState>, path: String) -> Res<NoteDoc> {
+    agent.editors.wait_free(&path, AGENT_HOLD_MAX); // an agent may be writing it right now
     with_vault(&st, |v, id| v.open_note(&path, id))
 }
 
 #[tauri::command(async)]
-pub fn open_or_create(st: State<'_, AppState>, title: String) -> Res<NoteDoc> {
+pub fn open_or_create(st: State<'_, AppState>, agent: State<'_, AgentState>, title: String) -> Res<NoteDoc> {
+    if let Ok(Some(path)) = with_vault(&st, |v, _| v.find_note(&title)) {
+        agent.editors.wait_free(&path, AGENT_HOLD_MAX);
+    }
     let fm = st.settings.lock().unwrap().write_front_matter;
     with_vault(&st, |v, id| v.open_or_create(&title, id, fm))
 }

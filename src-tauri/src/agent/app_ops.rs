@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, mpsc};
+use std::sync::{Condvar, Mutex, mpsc};
 use std::time::Duration;
 
 /// How long a write waits for the webview before failing with "velo is busy, retry".
@@ -23,11 +23,21 @@ pub const EDITOR_TIMEOUT: Duration = Duration::from_secs(5);
 pub const CLAIMED_TIMEOUT: Duration = Duration::from_secs(60);
 const BUSY: &str = "velo is busy, retry";
 
-/// Requests awaiting the webview's `agent_write_done`; the flag is set once it claimed one (`agent_write_claim`).
+/// Requests awaiting the webview's `agent_write_done`; the flag is set once it claimed one (`agent_write_claim`), and
+/// the paths are the notes the request is about.
 #[derive(Default)]
 pub struct Editors {
     next: AtomicU64,
-    pub(crate) pending: Mutex<HashMap<u64, (mpsc::Sender<Value>, bool)>>,
+    pub(crate) pending: Mutex<HashMap<u64, (mpsc::Sender<Value>, bool, Vec<String>)>>,
+    /// Notes the webview said are not open, which the backend is about to write: opening one waits (`wait_free`), or
+    /// the editor could load the text the write is replacing. A multiset: two calls may hold the same note.
+    held: Mutex<Vec<String>>,
+    freed: Condvar,
+}
+
+/// The note paths an `agent-write` request is about (`path`, or a flush's `paths`).
+pub fn req_paths(req: &Value) -> Vec<String> {
+    req.get("path").into_iter().chain(req.get("paths").and_then(Value::as_array).into_iter().flatten()).filter_map(|p| p.as_str().map(String::from)).collect()
 }
 
 impl Editors {
@@ -40,7 +50,7 @@ impl Editors {
     fn ask_within(&self, mut req: Value, emit: impl FnOnce(Value), timeout: Duration, claimed_timeout: Duration) -> anyhow::Result<Value> {
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = mpsc::channel();
-        self.pending.lock().unwrap().insert(id, (tx, false));
+        self.pending.lock().unwrap().insert(id, (tx, false, req_paths(&req)));
         req["id"] = id.into();
         emit(req);
         let r = rx.recv_timeout(timeout).map_err(anyhow::Error::from).or_else(|_| {
@@ -67,9 +77,31 @@ impl Editors {
     }
 
     pub fn done(&self, id: u64, result: Value) {
-        if let Some((tx, _)) = self.pending.lock().unwrap().remove(&id) {
+        if let Some((tx, _, paths)) = self.pending.lock().unwrap().remove(&id) {
+            // held before the backend sees the reply, so no open can slip in between
+            if result == "not-open" {
+                self.held.lock().unwrap().extend(paths);
+            }
             tx.send(result).ok();
         }
+    }
+
+    /// The agent call that got "not-open" for `paths` is done writing them.
+    pub fn release(&self, paths: &[String]) {
+        let mut h = self.held.lock().unwrap();
+        for p in paths {
+            if let Some(i) = h.iter().position(|x| x == p) {
+                h.swap_remove(i);
+            }
+        }
+        self.freed.notify_all();
+    }
+
+    /// Waits up to `max` while an agent call holds `path`; false if it still does.
+    pub fn wait_free(&self, path: &str, max: Duration) -> bool {
+        let h = self.held.lock().unwrap();
+        let (h, _) = self.freed.wait_timeout_while(h, max, |h| h.iter().any(|x| x == path)).unwrap();
+        !h.iter().any(|x| x == path)
     }
 }
 
@@ -196,9 +228,15 @@ impl NoteOps for AppOps<'_> {
     /// The open note is saved and closed in the editor first, so autosave can't bring it back.
     fn trash(&mut self, path: &str, summary: &str) -> anyhow::Result<()> {
         let path = plain(path)?;
-        self.ask_editor(json!({"path": path, "kind": "trash", "summary": summary}), &["closed", "not-open"])?;
+        let closed = self.ask_editor(json!({"path": path, "kind": "trash", "summary": summary}), &["closed", "not-open"])? == "closed";
         self.touched.push(path.to_string());
-        self.with(|o| o.trash(path, summary))
+        let r = self.with(|o| o.trash(path, summary));
+        if let (true, Err(e)) = (closed, &r) {
+            // the note left the editor but is still there: say why, or it just vanishes from view
+            let title = parse_note_file(Path::new(path)).map(|n| n.title);
+            (self.route)(json!({"path": path, "kind": "trash-failed", "title": title, "error": e.to_string()})).ok();
+        }
+        r
     }
 
     fn toggle_task(&mut self, path: &str, line: usize, expected: &str, summary: &str) -> anyhow::Result<Toggled> {
@@ -403,6 +441,46 @@ mod tests {
         let d = ops.read(&p).unwrap();
         assert_eq!(ops.write(&p, "v2\n", &d.hash, "s").unwrap_err().to_string(), crate::agent::client::NO_ANSWER);
         assert_eq!(ops.capture_task("P", "x", "s").unwrap_err().to_string(), crate::agent::client::NO_ANSWER);
+    }
+
+    /// "not-open" holds the note's path (or a flush's paths) until the agent call releases it, so velo can't open the
+    /// old text between that reply and the backend write.
+    #[test] fn not_open_holds_paths_until_released() {
+        let editors = Editors::default();
+        let answer = |req: Value, reply: Value| editors.ask(req, |r| editors.done(r["id"].as_u64().unwrap(), reply), Duration::from_secs(1)).unwrap();
+        assert_eq!(answer(json!({"path": "/n/P.md", "kind": "replace"}), json!("not-open")), "not-open");
+        answer(json!({"kind": "flush", "paths": ["/n/A.md"]}), json!("not-open"));
+        answer(json!({"path": "/n/O.md", "kind": "replace"}), json!({"hash": "h"})); // open: applied by the editor, no hold
+        assert!(editors.wait_free("/n/O.md", Duration::from_secs(5)));
+        let t0 = std::time::Instant::now();
+        assert!(!editors.wait_free("/n/P.md", Duration::from_millis(50)), "held");
+        assert!(t0.elapsed() < Duration::from_secs(1));
+        std::thread::scope(|s| {
+            s.spawn(|| { std::thread::sleep(Duration::from_millis(100)); editors.release(&["/n/P.md".into(), "/n/A.md".into()]); });
+            let t0 = std::time::Instant::now();
+            assert!(editors.wait_free("/n/P.md", Duration::from_secs(5)));
+            assert!(t0.elapsed() >= Duration::from_millis(100));
+        });
+        assert!(editors.wait_free("/n/A.md", Duration::ZERO));
+        // a reply after the backend gave up holds nothing
+        let mut id = 0;
+        let late = editors.ask(json!({"path": "/n/L.md", "kind": "replace"}), |r| id = r["id"].as_u64().unwrap(), Duration::from_millis(10));
+        assert!(late.is_err());
+        editors.done(id, json!("not-open"));
+        assert!(editors.wait_free("/n/L.md", Duration::ZERO));
+    }
+
+    #[test] fn trash_failure_after_closed_is_shown() {
+        let (st, dir) = state();
+        let p = dir.join("P.md").to_string_lossy().into_owned();
+        let seen = Mutex::new(Vec::new());
+        let route = |req: Value| { seen.lock().unwrap().push(req.clone()); Ok(json!(if req["kind"] == "trash" { "closed" } else { "ok" })) };
+        let mut ops = AppOps::new(&st, &route);
+        ops.remove = |_| Err(std::io::Error::other("Trash unavailable"));
+        assert!(ops.trash(&p, "s").is_err());
+        let last = seen.lock().unwrap().last().unwrap().clone();
+        assert_eq!((last["kind"].as_str(), last["path"].as_str()), (Some("trash-failed"), Some(p.as_str())));
+        assert!(last["error"].as_str().unwrap().contains("Trash unavailable"));
     }
 
     #[test] fn bulk_stops_after_busy() {

@@ -2,7 +2,7 @@
 //! `<app data>/agent.json` (mode 0600) holds `{port, token, pid}`. A connection starts with one short line
 //! `{token}`, answered `{ok: true}`; then each request is one line of JSON `{name, args}` and each reply one line `{ok: value}` or
 //! `{err: message}`. A wrong token gets `{err:"unauthorized"}` and the connection is closed.
-use super::app_ops::{AppOps, EDITOR_TIMEOUT, Editors};
+use super::app_ops::{AppOps, EDITOR_TIMEOUT, Editors, req_paths};
 use crate::commands::AppState;
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -76,9 +76,18 @@ pub fn start(app: AppHandle) -> anyhow::Result<ListenerHandle> {
             return Err(super::OFF.into());
         }
         let agent = app.state::<AgentState>();
-        let route = |req: Value| agent.editors.ask(req, |r| { app.emit("agent-write", r).ok(); }, EDITOR_TIMEOUT);
+        let held = Mutex::new(Vec::new()); // paths this call got "not-open" for: held until it is done writing
+        let route = |req: Value| {
+            let paths = req_paths(&req);
+            let r = agent.editors.ask(req, |r| { app.emit("agent-write", r).ok(); }, EDITOR_TIMEOUT);
+            if r.as_ref().is_ok_and(|v| v == "not-open") {
+                held.lock().unwrap().extend(paths);
+            }
+            r
+        };
         let mut ops = AppOps::new(&st, &route);
         let r = super::tools::call(&mut ops, name, args);
+        agent.editors.release(&std::mem::take(&mut *held.lock().unwrap()));
         // the watcher drops the backend's own writes: refresh the UI as for an outside change
         if !ops.touched.is_empty() {
             app.emit("notes-changed", json!({ "paths": ops.touched })).ok();

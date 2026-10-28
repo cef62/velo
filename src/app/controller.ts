@@ -1299,6 +1299,10 @@ export class Controller {
 
   protected async agentWrite(req: AgentWrite): Promise<AgentReply | null> {
     if (req.kind === "renamed") return this.agentRenamed(req.path, req.to ?? null);
+    if (req.kind === "trash-failed") {
+      this.setErr(`The agent couldn't move “${req.title ?? req.path}” to the Trash: ${req.error ?? "unknown error"}`); // the note left the editor but is still there
+      return "ok";
+    }
     if (req.kind === "flush") {
       // a rename is about to rewrite links in these notes: the open one must be saved first
       if (!req.paths?.includes(this.editor.currentPath() ?? "")) return "not-open";

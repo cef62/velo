@@ -1201,6 +1201,13 @@ test("agent write refused while busy", async () => {
   expect(api.agentWriteDone).toHaveBeenCalledWith(3, "refused");
 });
 
+test("a failed agent trash after the editor closed the note says so", async () => {
+  const { c, api, store } = setup({ A: "a" });
+  await c.onAgentWrite({ id: 9, path: P("A"), kind: "trash-failed", title: "A", error: "Trash unavailable" });
+  expect(store.get().err).toBe("The agent couldn't move “A” to the Trash: Trash unavailable");
+  expect(api.agentWriteDone).toHaveBeenCalledWith(9, "ok");
+});
+
 test("agent write gets not-open for another note", async () => {
   const { c, api, editor } = setup({ A: "a", B: "b" });
   await c.show(P("A"));
