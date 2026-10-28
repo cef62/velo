@@ -53,31 +53,35 @@ fn key_rest<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     k.trim_end_matches([' ', '\t']).eq_ignore_ascii_case(key).then_some(rest)
 }
 
-/// Raw items as a flow list body; one that would not survive as a flow item (an unquoted block-list value with `,`,
-/// brackets, `#`, `:` or edge spaces) is quoted.
-fn flow_join(items: &[&str]) -> String {
-    let quoted = |i: &str| ['"', '\''].iter().any(|q| i.len() > 1 && i.starts_with(*q) && i.ends_with(*q));
-    let item = |i: &&str| {
-        if quoted(i) || !(i.contains([',', '[', ']', '#', ':']) || i.trim() != *i) {
-            i.to_string()
-        } else if i.contains('"') {
-            format!("'{i}'")
-        } else {
-            format!("\"{i}\"")
-        }
-    };
-    items.iter().map(item).collect::<Vec<_>>().join(", ")
+/// A block-list value as a flow-list item: quoted when it would not survive unquoted (a `,`, bracket or `#`, a
+/// leading quote, `: `, a trailing `:`, or edge spaces).
+fn flow_item(v: &str) -> String {
+    let quoted = ['"', '\''].iter().any(|q| v.len() > 1 && v.starts_with(*q) && v.ends_with(*q));
+    let plain_ok = !v.contains([',', '[', ']', '#']) && !v.starts_with(['"', '\'']) && !v.contains(": ") && !v.ends_with(':') && v.trim() == v;
+    if quoted || plain_ok {
+        v.to_string()
+    } else if v.contains('"') {
+        format!("'{}'", v.replace('\'', "''"))
+    } else {
+        format!("\"{v}\"")
+    }
 }
 
-/// The raw items of a flow list `a, "b, c", d]` (text after `[`), up to the first `]` outside quotes; a comma inside
-/// quotes belongs to its item.
+/// The raw items of a flow list `a, "b, c", d]` (text after `[`), up to the first `]` outside quotes. As in YAML, a
+/// quote opens a quoted item only at the item's start (`don't` is plain text); `''` inside single quotes is a quote.
 fn flow_items(f: &str) -> Vec<&str> {
-    let (mut out, mut start, mut quote) = (vec![], 0, None);
-    for (i, c) in f.char_indices() {
+    let (mut out, mut start, mut quote, mut skip) = (vec![], 0, None, false);
+    let mut it = f.char_indices().peekable();
+    while let Some((i, c)) = it.next() {
+        if skip {
+            skip = false;
+            continue;
+        }
         match (quote, c) {
+            (Some('\''), '\'') if it.peek().is_some_and(|&(_, n)| n == '\'') => skip = true,
             (Some(q), _) if c == q => quote = None,
             (Some(_), _) => {}
-            (None, '"' | '\'') => quote = Some(c),
+            (None, '"' | '\'') if f[start..i].trim().is_empty() => quote = Some(c),
             (None, ',' | ']') => {
                 out.push(f[start..i].trim());
                 start = i + 1;
@@ -222,17 +226,20 @@ pub fn set_tags(text: &str, add: &[String], remove: &[String], create_block: boo
     if !more.is_empty() {
         let eol = if rows[k].ends_with("\r\n") { "\r\n" } else { "\n" };
         let mut skip = vec![(k, end)];
+        // flow items keep their bytes; block values become flow items
+        let as_flow = |it: Vec<&str>, flow: bool| it.into_iter().map(|i| if flow { i.to_string() } else { flow_item(i) }).collect::<Vec<_>>();
+        let mut all: Vec<String> = as_flow(std::mem::take(&mut items), flow);
         for j in more {
-            let (it, e, _) = tag_row(&rows, j)?;
-            items.extend(it);
+            let (it, e, f) = tag_row(&rows, j)?;
+            all.extend(as_flow(it, f));
             skip.push((j, e));
         }
         let mut seen = std::collections::HashSet::new();
-        items.retain(|i| seen.insert(tag_key(i)));
+        all.retain(|i| seen.insert(tag_key(i)));
         let mut folded = text[..first].to_string();
         for (i, r) in rows.iter().enumerate() {
             if i == k {
-                folded.push_str(&format!("{key} [{}]{eol}", flow_join(&items)));
+                folded.push_str(&format!("{key} [{}]{eol}", all.join(", ")));
             } else if !skip.iter().any(|&(a, b)| (a..b).contains(&i)) {
                 folded.push_str(r);
             }
@@ -252,7 +259,7 @@ pub fn set_tags(text: &str, add: &[String], remove: &[String], create_block: boo
     let mut out = String::new();
     if flow || (items.is_empty() && fresh.is_empty()) {
         items.extend(fresh);
-        out.push_str(&format!("{key} [{}]{eol}", flow_join(&items)));
+        out.push_str(&format!("{key} [{}]{eol}", items.join(", "))); // flow items (or none): their own bytes
     } else {
         out.push_str(rows[k]);
         let indent: String = rows.get(k + 1).map_or("  ".into(), |l| l.chars().take_while(|c| *c == ' ').collect());
@@ -407,6 +414,37 @@ mod tests {
         assert_eq!(parse(&bare).unwrap().tags, ["a, b", "x", "y"], "an unquoted block item is quoted when it moves into a flow list: {bare}");
         let one = set_tags("---\ntags: [\"a, b\", c]\n---\n", &[], &["c".into()], false).unwrap().unwrap();
         assert_eq!(one, "---\ntags: [\"a, b\"]\n---\n");
+    }
+
+    /// A quote opens a quoted item only at the item's start (YAML): an apostrophe inside a plain item is text.
+    #[test]
+    fn apostrophes_in_plain_flow_items_are_text() {
+        let tags = |t: &str| parse(&format!("---\ntags: {t}\n---\n")).unwrap().tags;
+        assert_eq!(tags("[don't, x]"), ["don't", "x"]);
+        assert_eq!(tags("[l'été, 日本, x]"), ["l'été", "日本", "x"]);
+        assert_eq!(tags("[\"a, b\", c]"), ["a, b", "c"]);
+        assert_eq!(tags("['it''s, ok', d]"), ["it''s, ok", "d"], "'' stays inside a single-quoted item");
+        assert_eq!(parse("---\naliases: [Bob's notes, B]\n---\n").unwrap().aliases, ["Bob's notes", "B"]);
+        assert_eq!(set_tags("---\ntags: [don't, x]\n---\n", &["y2".into()], &[], false).unwrap().unwrap(), "---\ntags: [don't, x, y2]\n---\n");
+    }
+
+    /// For flow lists with no item opening with a quote, the reader agrees with the plain comma split velo used before.
+    #[test]
+    fn plain_flow_lists_read_as_before() {
+        fn old(f: &str) -> Vec<&str> { f.split(']').next().unwrap_or("").split(',').map(str::trim).filter(|s| !s.is_empty()).collect() }
+        for f in ["a, b]", "Work, Idea]", " x ,y , z ]", "don't, x]", "Bob's notes, B]", "a:b, c]", "café, 日本, 🎉]", "a b, c-d, e/f]", "]", ", ,a,]", "it's, they're, x] trailing", "a\"b, c]"] {
+            assert_eq!(flow_items(f), old(f), "{f:?}");
+        }
+    }
+
+    /// Folding keeps untouched flow items byte for byte; only block values that would not survive in a flow list get
+    /// quoted.
+    #[test]
+    fn folding_quotes_only_block_values_that_need_it() {
+        let t = "---\ntags: [a:b, c]\nTags:\n  - x, y\n  - plain\n---\n";
+        let out = set_tags(t, &["z".into()], &[], false).unwrap().unwrap();
+        assert_eq!(out, "---\ntags: [a:b, c, \"x, y\", plain, z]\n---\n");
+        assert_eq!(parse(&out).unwrap().tags, ["a:b", "c", "x, y", "plain", "z"]);
     }
 
     #[test]
