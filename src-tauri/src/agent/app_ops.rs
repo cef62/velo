@@ -234,13 +234,18 @@ impl NoteOps for AppOps<'_> {
         if rewrite_links {
             let title = parse_note_file(Path::new(path)).map(|n| n.title).unwrap_or_default();
             sources = self.with(|o| o.vault.index.backlinks(&title))?.into_iter().filter(|p| !locked(p)).collect();
-            if !sources.is_empty() && (self.route)(json!({"kind": "flush", "paths": sources}))? == "refused" {
+            let flushed = if sources.is_empty() { None } else { Some((self.route)(json!({"kind": "flush", "paths": sources}))?) };
+            // shortcut: the sources' hold ends here, not at the rewrite: kept across the rename round trip below it
+            // would deadlock with an open of a source for 5 s. A source opened in that window reloads on notes-changed
+            // (a keystroke in it meets the base-hash conflict path); upgrade if the editor ever takes the rename first.
+            sources.iter().for_each(|p| (self.release)(p));
+            if flushed.is_some_and(|f| f == "refused") {
                 return Err(anyhow!("note is open in velo with unsaved changes"));
             }
         }
         let ready = self.ask_editor(json!({"path": path, "kind": "rename", "summary": summary}), &["ready", "not-open"])? == "ready";
         let r = self.with(|o| o.rename(path, new_title, rewrite_links, summary));
-        sources.iter().chain([&path.to_string()]).for_each(|p| (self.release)(p));
+        (self.release)(path);
         if !ready {
             // (an open renamed note is reloaded by `renamed`)
             self.touched.push(path.to_string());
@@ -536,6 +541,25 @@ mod tests {
             assert!(!editors.wait_free("/n/X.md", Duration::ZERO));
         });
         assert!(editors.wait_free("/n/X.md", Duration::ZERO), "released when the call ends");
+        // rename with links: the sources' hold ends with the flush reply, so opening one can't stall the rename's own
+        // editor round trip
+        let src = dir.join("S.md").to_string_lossy().into_owned();
+        std::fs::write(&src, "see [[P]]\n").unwrap();
+        st.vault.lock().unwrap().as_mut().unwrap().rescan(None);
+        let free_at_rename = Mutex::new(None);
+        let emit = |r: Value| {
+            if r["kind"] == "rename" {
+                *free_at_rename.lock().unwrap() = Some(editors.wait_free(&src, Duration::ZERO));
+            }
+            editors.done(r["id"].as_u64().unwrap(), json!("not-open"));
+        };
+        with_route(&editors, &emit, |route, release| {
+            let mut ops = AppOps::new(&st, route);
+            ops.release = release;
+            ops.rename(&p, "Q", true, "s").unwrap();
+        });
+        assert_eq!(*free_at_rename.lock().unwrap(), Some(true));
+        assert_eq!(std::fs::read_to_string(&src).unwrap(), "see [[Q]]\n");
     }
 
     #[test] fn trash_failure_after_closed_is_shown() {
