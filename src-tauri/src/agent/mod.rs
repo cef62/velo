@@ -162,4 +162,30 @@ mod tests {
         std::fs::write(&p, r#"{"agent_access":false}"#).unwrap();
         assert_eq!(call("list_tags", serde_json::json!({})), Err(OFF.to_string()));
     }
+
+    const NO_ANSWER: &str = "velo did not answer; the change may have been applied — read the note before retrying";
+    #[test] fn no_reply_after_send_is_not_retried_nor_direct() {
+        use std::io::{BufRead, BufReader};
+        let (_t, p, data, notes) = setup(true); std::fs::write(notes.join("a.md"), "x").unwrap();
+        std::fs::create_dir_all(&data).unwrap();
+        let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        std::fs::write(data.join("agent.json"), serde_json::json!({"port": l.local_addr().unwrap().port(), "token": "tok", "pid": std::process::id()}).to_string()).unwrap();
+        let seen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)); let s2 = seen.clone();
+        std::thread::spawn(move || for c in l.incoming().flatten() {
+            let mut line = String::new();
+            if BufReader::new(c).read_line(&mut line).unwrap_or(0) > 0 { s2.fetch_add(1, std::sync::atomic::Ordering::SeqCst); } // drop: close without reply
+        });
+        let r = gate(p, data)("append_to_note", serde_json::json!({"title": "a", "text": "y", "summary": "s"}));
+        assert_eq!(r, Err(NO_ANSWER.to_string()));
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(std::fs::read_to_string(notes.join("a.md")).unwrap(), "x");
+    }
+    #[test] fn broken_agent_json_is_busy_not_direct() {
+        for bad in ["not json", "{}", r#"{"port":1,"token":"t"}"#, r#"{"port":1,"token":"t","pid":0}"#, r#"{"port":1,"token":"t","pid":4294967295}"#, r#"{"token":"t","pid":1}"#] {
+            let (_t, p, data, _n) = setup(true); std::fs::create_dir_all(&data).unwrap();
+            std::fs::write(data.join("agent.json"), bad).unwrap();
+            assert_eq!(gate(p, data)("list_tags", serde_json::json!({})), Err("velo is busy, retry".to_string()), "{bad}");
+        }
+    }
 }
