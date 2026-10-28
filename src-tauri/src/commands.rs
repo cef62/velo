@@ -104,6 +104,7 @@ fn open_vault_inner(app: &AppHandle, st: &AppState, dir: &Path, me: u64) -> anyh
     let w = watch::spawn(dir.to_path_buf(), move |batch| {
         let st = handle.state::<AppState>();
         notify_changed(&handle, apply_watch(&st, &base, batch));
+        schedule_purge_retry(&handle);
     })?;
     if !current() {
         w.stop();
@@ -116,7 +117,35 @@ fn open_vault_inner(app: &AppHandle, st: &AppState, dir: &Path, me: u64) -> anyh
     }
     // changes made while indexing, before the watcher ran or before this vault was installed
     notify_changed(app, apply_watch(st, dir, None));
+    schedule_purge_retry(app);
     Ok(())
+}
+
+static PURGE_RETRY: AtomicBool = AtomicBool::new(false);
+
+/// A purge that failed (a reader pinned old pages) is retried when its backoff ends, with no file event needed.
+fn schedule_purge_retry(app: &AppHandle) {
+    let st = app.state::<AppState>();
+    let Some(wait) = st.vault.lock().unwrap().as_ref().and_then(|v| v.index.purge_retry_in()) else { return };
+    let app = app.clone();
+    spawn_purge_retry(wait, move || app.state::<AppState>().vault.lock().unwrap().as_ref().and_then(Vault::retry_purge));
+}
+
+/// One sleeping thread per process: sleeps `wait`, runs `retry`, and sleeps again for the wait it returns.
+/// shortcut: a purge failing just as the thread exits is retried only by the next batch, lock or open; fine while
+/// failures need an outside reader.
+pub(crate) fn spawn_purge_retry(wait: std::time::Duration, retry: impl Fn() -> Option<std::time::Duration> + Send + 'static) {
+    if PURGE_RETRY.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let mut wait = Some(wait);
+        while let Some(w) = wait {
+            std::thread::sleep(w + std::time::Duration::from_millis(100)); // past the window, not on its edge
+            wait = retry();
+        }
+        PURGE_RETRY.store(false, Ordering::SeqCst);
+    });
 }
 
 /// Apply watcher changes (`None` = rescan the folder) in chunks, releasing the vault lock between them so
@@ -428,8 +457,10 @@ pub fn backlink_count(st: State<'_, AppState>, title: String) -> Res<usize> {
 }
 
 #[tauri::command(async)]
-pub fn lock_note(st: State<'_, AppState>, path: String) -> Res<String> {
-    with_vault(&st, |v, id| v.lock_note(&path, id.ok_or_else(|| anyhow::anyhow!("no-identity"))?))
+pub fn lock_note(app: AppHandle, st: State<'_, AppState>, path: String) -> Res<String> {
+    let r = with_vault(&st, |v, id| v.lock_note(&path, id.ok_or_else(|| anyhow::anyhow!("no-identity"))?));
+    schedule_purge_retry(&app);
+    r
 }
 
 #[tauri::command(async)]

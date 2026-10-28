@@ -75,12 +75,13 @@ const SCHEMA_VERSION: i64 = 6;
 
 pub struct Index {
     db: Connection,
-    /// Last failed purge: watcher batches don't retry it for `PURGE_BACKOFF` (each try is a full FTS rebuild, and a
-    /// busy checkpoint waits 5 s).
-    purge_failed: std::cell::Cell<Option<std::time::Instant>>,
+    /// Last failed purge and the mark generation it tried: watcher batches don't retry that generation for
+    /// `purge_backoff` (each try is a full FTS rebuild, and a busy checkpoint waits 5 s). A newer delete retries at once.
+    purge_failed: std::cell::Cell<Option<(std::time::Instant, i64)>>,
+    pub(crate) purge_backoff: std::time::Duration,
 }
 
-const PURGE_BACKOFF: std::time::Duration = std::time::Duration::from_secs(60);
+const MARK_PURGE: &str = "INSERT INTO purge_mark(one, gen) VALUES(1, 1) ON CONFLICT(one) DO UPDATE SET gen = gen + 1";
 
 /// Clears the purge mark only if no delete bumped it since the purge read it (another connection may have).
 pub(crate) const CLEAR_PURGE: &str = "DELETE FROM purge_mark WHERE gen = ?1";
@@ -181,7 +182,7 @@ impl Index {
         // that stored it on. Stored on means an older build (0.8.2) wrote here since we last ran: it may have locked a
         // note whose earlier versions we left in the segments, so mark a purge in the same transaction.
         let downgraded = db.query_row("SELECT v FROM notes_fts_config WHERE k='secure-delete'", [], |r| r.get::<_, i64>(0)).optional()?.unwrap_or(0) != 0;
-        let index = Index { db, purge_failed: Default::default() };
+        let index = Index { db, purge_failed: Default::default(), purge_backoff: std::time::Duration::from_secs(60) };
         if downgraded {
             index.db.execute_batch("BEGIN")?;
             index.need_purge()?;
@@ -203,7 +204,7 @@ impl Index {
     /// as, the delete: the mark survives a crash or a failed purge, so the erase is retried. Bumps a generation, so a
     /// purge already running elsewhere doesn't clear a mark for a delete it didn't cover.
     pub fn need_purge(&self) -> anyhow::Result<()> {
-        self.db.execute("INSERT INTO purge_mark(one, gen) VALUES(1, 1) ON CONFLICT(one) DO UPDATE SET gen = gen + 1", [])?;
+        self.db.execute(MARK_PURGE, [])?;
         Ok(())
     }
 
@@ -216,12 +217,19 @@ impl Index {
         let Some(generation) = self.db.query_row("SELECT gen FROM purge_mark", [], |r| r.get::<_, i64>(0)).optional()? else {
             return Ok(());
         };
-        if !force && self.purge_failed.get().is_some_and(|t| t.elapsed() < PURGE_BACKOFF) {
+        if !force && self.purge_failed.get().is_some_and(|(t, g)| g == generation && t.elapsed() < self.purge_backoff) {
             return Ok(());
         }
         let r = self.purge(generation);
-        self.purge_failed.set(r.is_err().then(std::time::Instant::now));
+        self.purge_failed.set(r.is_err().then(|| (std::time::Instant::now(), generation)));
         r
+    }
+
+    /// While a failed purge is still marked: how long until its backoff ends (when the app retries it unprompted).
+    pub fn purge_retry_in(&self) -> Option<std::time::Duration> {
+        let (t, _) = self.purge_failed.get()?;
+        let marked = self.db.query_row("SELECT EXISTS(SELECT 1 FROM purge_mark)", [], |r| r.get::<_, bool>(0)).unwrap_or(true);
+        marked.then(|| self.purge_backoff.saturating_sub(t.elapsed()))
     }
 
     fn purge(&self, generation: i64) -> anyhow::Result<()> {
@@ -306,7 +314,20 @@ impl Index {
     }
 
     pub fn remove(&mut self, path: &str) -> anyhow::Result<()> {
+        self.remove_marked(path, false)
+    }
+
+    /// `remove` of a note whose plaintext must be erased: bumps the purge mark in the same transaction as the delete,
+    /// so a purge running on another connection can't clear the mark before this delete exists.
+    pub fn remove_erasing(&mut self, path: &str) -> anyhow::Result<()> {
+        self.remove_marked(path, true)
+    }
+
+    fn remove_marked(&mut self, path: &str, mark: bool) -> anyhow::Result<()> {
         let tx = self.db.savepoint()?;
+        if mark {
+            tx.execute(MARK_PURGE, [])?;
+        }
         for sql in DELETES {
             tx.execute(sql, [path])?;
         }

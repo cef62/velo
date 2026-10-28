@@ -134,9 +134,9 @@ impl Vault {
         let files = v.store.list()?;
         let (stale, gone) = v.diff(&files)?;
         let total = stale.len();
-        // A note locked elsewhere while velo was closed: its plain twin's text gets (or got) deleted but not erased.
-        let lost = stale.iter().any(|(p, nf, _)| nf.encrypted && v.index.title_modified(&s(p)).ok().flatten().is_none())
-            || gone.iter().any(|g| lost_plain(&v.store.dir, Path::new(g)));
+        // A locked note new to the index: its plain twin's text may have been deleted earlier (a watcher batch, an
+        // earlier session) but not erased. A plain twin deleted now marks in its own delete (`remove_note`).
+        let lost = stale.iter().any(|(p, nf, _)| nf.encrypted && v.index.title_modified(&s(p)).ok().flatten().is_none());
         // One transaction per chunk: a crash loses at most a chunk, which isn't in `known()`, so the next open redoes it.
         v.index.begin()?;
         if lost {
@@ -156,7 +156,7 @@ impl Vault {
             }
         }
         for g in &gone {
-            v.index.remove(g)?;
+            v.remove_note(g)?;
         }
         v.index.commit()?;
         v.purge_pending(true); // also one a crash or a failure left from an earlier session
@@ -449,7 +449,7 @@ impl Vault {
         let plain = self.store.read(from)?;
         self.store.write_atomic(&to, &crypto::encrypt(identity, &plain)?)?;
         std::fs::remove_file(from).context("removing plaintext note")?;
-        self.index.remove(path)?;
+        self.index.remove_erasing(path)?; // marks again with the delete: another process may have cleared the early mark
         self.reindex(&to, None)?;
         // The note is locked whatever happens next; a failed erase stays marked and is retried (watcher, lock, open).
         self.purge_pending(true);
@@ -486,7 +486,7 @@ impl Vault {
         let p = Path::new(path);
         self.note(p)?;
         remove(p)?;
-        self.index.remove(path)?;
+        self.remove_note(path)?;
         self.unlocked.remove(path);
         Ok(())
     }
@@ -575,6 +575,17 @@ impl Vault {
         changed
     }
 
+    /// Drop a note from the index; a plain note whose locked twin exists marks a purge in the same transaction.
+    fn remove_note(&mut self, path: &str) -> anyhow::Result<()> {
+        if lost_plain(&self.store.dir, Path::new(path)) { self.index.remove_erasing(path) } else { self.index.remove(path) }
+    }
+
+    /// Retry a failed purge whose backoff has ended; the wait until the next retry while it still fails.
+    pub fn retry_purge(&self) -> Option<std::time::Duration> {
+        self.purge_pending(false);
+        self.index.purge_retry_in()
+    }
+
     /// Run a marked purge; on failure log it and keep the mark for the next trigger. `force` skips the backoff.
     fn purge_pending(&self, force: bool) {
         if let Err(e) = self.index.purge_pending(force) {
@@ -614,7 +625,7 @@ impl Vault {
                 // Only a missing file is a deletion: iCloud-evicted, unreadable or sync-locked files stay listed.
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                     // locked on another machine: its plaintext must be erased, not just deleted
-                    if (lost_plain(&self.store.dir, p) && self.index.need_purge().is_err()) || self.index.remove(&key).is_err() {
+                    if self.remove_note(&key).is_err() {
                         if batched && !self.index.in_batch() {
                             return false;
                         }
@@ -1488,5 +1499,59 @@ mod tests {
         let db2 = tempfile::tempdir().unwrap().keep().join("cold.sqlite");
         let cold = open(dir.clone(), &db2, None).unwrap();
         assert_eq!(r1_dump(&v), r1_dump(&cold));
+    }
+
+#[test] fn r3_early_lock_mark_cleared_by_other_process() {
+        let (mut v, dir, db, p) = edited_note();
+        let b = open(dir.clone(), &db, None).unwrap(); // second process (`velo --mcp` direct mode)
+        let now = now_ms();
+        for i in 0..300 { v.revisions.snapshot_bytes("s", format!("rev {i}").as_bytes(), false, now - 100_000 + i as i64 * 10, false).unwrap(); }
+        let id = crypto::new_identity();
+        let (id2, p2) = (id.clone(), p.clone());
+        let a = std::thread::spawn(move || { let t = std::time::Instant::now(); v.lock_note(&p2, &id2).unwrap(); eprintln!("lock_note took {:?}", t.elapsed()); v });
+        // B: any watcher batch / MCP try_rescan ends with purge_pending(false); it sees A's fresh mark
+        while !b.index.raw().query_row("SELECT EXISTS(SELECT 1 FROM purge_mark)", [], |r| r.get::<_, bool>(0)).unwrap() { std::thread::yield_now(); }
+        b.index.purge_pending(false).unwrap();
+        let early = !purge_marked(&b) && dir.join("s.md").exists();
+        let v = a.join().unwrap();
+        eprintln!("B cleared A's mark while s.md still existed: {early}; mark left after lock_note: {}", purge_marked(&v));
+        drop(v);
+        drop(b);
+        let mut v = open(dir.clone(), &db, Some(&id)).unwrap();
+        v.rescan(Some(&id));
+        drop(v);
+        assert!(!trigram_on_disk(&db, &OLD), "locked note's plaintext survives lock + reopen + rescan");
+    }
+#[test] fn r3_backoff_hides_external_lock() {
+        let (mut v, dir, db, p) = edited_note();
+        let t = v.open_or_create("t", None, false).unwrap();
+        v.save_note(&t.path, &format!("t {}", secret(9, 300)), &stat_hash(&t.path), None, false).unwrap();
+        v.index.checkpoint().unwrap();
+        assert!(total(&cjk_hits(&db)) > 0, "control");
+        let r = block_purge(&v, &db);
+        v.lock_note(&p, &crypto::new_identity()).unwrap(); // its purge fails: backoff starts
+        drop(r); // the reader is gone at once
+        std::fs::write(dir.join("t.md.age"), crypto::encrypt(&crypto::new_identity(), b"x").unwrap()).unwrap();
+        std::fs::remove_file(&t.path).unwrap();
+        let ch = v.apply_fs_changes(&[PathBuf::from(&t.path), dir.join("t.md.age")], None);
+        let h = cjk_hits(&db);
+        eprintln!("changed {ch:?}; t's plaintext after its lock was applied: {h:?}; marked {}", purge_marked(&v));
+        assert_eq!(total(&h), 0, "t's plaintext stays until an event after the window, a lock, or the next open");
+    }
+    #[test] fn failed_purge_is_retried_when_the_backoff_ends_without_events() {
+        let (mut v, _dir, db, p) = edited_note();
+        v.index.purge_backoff = std::time::Duration::from_millis(200);
+        let r = block_purge(&v, &db);
+        v.lock_note(&p, &crypto::new_identity()).unwrap(); // its purge fails
+        drop(r);
+        let wait = v.index.purge_retry_in().expect("a failed purge schedules a retry");
+        assert!(wait <= std::time::Duration::from_millis(200));
+        let v = std::sync::Arc::new(std::sync::Mutex::new(v));
+        let v2 = v.clone();
+        crate::commands::spawn_purge_retry(wait, move || v2.lock().unwrap().retry_purge()); // as the app does
+        let t = std::time::Instant::now();
+        while purge_marked(&v.lock().unwrap()) && t.elapsed() < std::time::Duration::from_secs(5) { std::thread::sleep(std::time::Duration::from_millis(20)); }
+        assert!(!purge_marked(&v.lock().unwrap()), "no retry after the window");
+        assert!(!trigram_on_disk(&db, &OLD));
     }
 }
