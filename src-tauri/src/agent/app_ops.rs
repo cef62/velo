@@ -432,21 +432,33 @@ mod tests {
         assert_eq!((last["kind"].as_str(), last["insert"].as_str().unwrap().starts_with("- [x] a")), (Some("replace"), true));
     }
 
-    /// Runs `ask_within` (50 ms, then 2 s once claimed) while `webview` gets the request's id on another thread.
-    fn round_trip(webview: impl FnOnce(&Editors, u64) + Send) -> anyhow::Result<Value> {
+    /// Runs `ask_within` (50 ms, then 2 s once claimed) while `webview` gets the request's id on another thread, and
+    /// `asked`, which yields once `ask_within` has returned. `claim_first` claims inside the emit, before the 50 ms
+    /// wait starts. No outcome depends on how the threads are scheduled.
+    fn round_trip(claim_first: bool, webview: impl FnOnce(&Editors, u64, &mpsc::Receiver<()>) + Send) -> anyhow::Result<Value> {
         let editors = Editors::default();
         let (tx, rx) = mpsc::channel();
+        let (asked_tx, asked) = mpsc::channel();
         std::thread::scope(|s| {
             let e = &editors;
-            s.spawn(move || webview(e, rx.recv().unwrap()));
-            editors.ask_within(json!({}), |r| tx.send(r["id"].as_u64().unwrap()).unwrap(), Duration::from_millis(50), Duration::from_secs(2))
+            s.spawn(move || webview(e, rx.recv().unwrap(), &asked));
+            let emit = |r: Value| {
+                let id = r["id"].as_u64().unwrap();
+                if claim_first {
+                    assert!(e.claim(id));
+                }
+                tx.send(id).unwrap();
+            };
+            let r = editors.ask_within(json!({}), emit, Duration::from_millis(50), Duration::from_secs(2));
+            asked_tx.send(()).ok(); // the webview may be gone already
+            r
         })
     }
 
     #[test] fn claim_after_timeout_is_refused() {
         let claimed = Mutex::new(None);
-        let r = round_trip(|e, id| {
-            std::thread::sleep(Duration::from_millis(150));
+        let r = round_trip(false, |e, id, asked| {
+            asked.recv().unwrap(); // the backend has already decided (busy)
             *claimed.lock().unwrap() = Some(e.claim(id));
             e.done(id, json!({"hash": "late"}));
         });
@@ -456,18 +468,15 @@ mod tests {
 
     #[test] fn claimed_write_waits_past_timeout() {
         assert_eq!(CLAIMED_TIMEOUT, Duration::from_secs(60));
-        let r = round_trip(|e, id| {
-            assert!(e.claim(id));
-            std::thread::sleep(Duration::from_millis(200)); // well past the 50 ms timeout
+        let r = round_trip(true, |e, id, _| {
+            std::thread::sleep(Duration::from_millis(200)); // past the 50 ms timeout, well within the 2 s claimed wait
             e.done(id, json!({"hash": "h2"}));
         });
         assert_eq!(r.unwrap(), json!({"hash": "h2"}));
     }
 
     #[test] fn claimed_write_without_answer_may_have_applied() {
-        let r = round_trip(|e, id| {
-            assert!(e.claim(id)); // claimed, then no answer within the claimed wait
-        });
+        let r = round_trip(true, |_, _, asked| asked.recv().unwrap()); // claimed, then no answer within the claimed wait
         assert_eq!(r.unwrap_err().to_string(), crate::agent::client::NO_ANSWER);
     }
 
