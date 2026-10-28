@@ -195,7 +195,9 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
         self.vault.agent_snapshot(path, summary)?;
         if rewrite_links {
             // the link rewrite changes these notes too: each gets its agent revision first
-            for src in self.vault.index.backlinks(&title_of(path))?.into_iter().filter(|p| !locked(p) && p != path) {
+            // a source the index lists but that is gone or unreadable is skipped by the rewrite too
+            let srcs: Vec<String> = self.vault.index.backlinks(&title_of(path))?.into_iter().filter(|p| p != path && self.vault.rewritable(Path::new(p))).collect();
+            for src in srcs {
                 self.vault.agent_snapshot(&src, summary)?;
             }
         }

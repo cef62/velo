@@ -821,6 +821,16 @@ mod fix_tests {
         assert_eq!(read(&dir, "X.md"), "the secret plan #hush #shared\n- [ ] secret task\nsee [[A]]\n");
     }
 
+    /// A deleted source the index still lists must not abort the rename (it has nothing to rewrite).
+    #[test] fn rename_skips_a_stale_backlink() {
+        let (mut ops, dir) = vault(&[("P.md", "p\n"), ("A.md", "see [[P]]\n"), ("Gone.md", "see [[P]]\n")]);
+        std::fs::remove_file(dir.join("Gone.md")).unwrap(); // no rescan: still indexed
+        let r = call(&mut ops, "rename_note", json!({"title": "P", "new_title": "Q", "rewrite_links": true, "summary": "s"})).unwrap();
+        assert_eq!(r["title"], "Q");
+        assert_eq!(read(&dir, "A.md"), "see [[Q]]\n");
+        assert!(!dir.join("Gone.md").exists());
+    }
+
     #[test] fn rename_leaves_locked_twin_alone() {
         let (mut ops, dir) = vault(&[("P.md", "p\n"), ("X.md", "secret, see [[P]]\n"), ("A.md", "see [[P]]\n")]);
         std::fs::write(dir.join("X.md.age"), "ciphertext").unwrap();

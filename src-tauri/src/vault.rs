@@ -353,8 +353,7 @@ impl Vault {
         if rewrite_links_too {
             for src in self.index.backlinks(&old.title).unwrap_or_default() {
                 let sp = Path::new(&src);
-                // a plain twin of a locked note is locked too (save_note refuses it the same way)
-                if parse_note_file(sp).is_none_or(|n| n.encrypted || note_path(&self.store.dir, &n.title, true).exists()) {
+                if !self.rewritable(sp) {
                     continue;
                 }
                 let Ok(bytes) = self.store.read(sp) else { continue };
@@ -368,8 +367,16 @@ impl Vault {
         Ok(RenameResult { path: to_s, rewritten })
     }
 
+    /// Notes whose links a rename of `title` would rewrite (the "Update N links?" count).
     pub fn backlink_count(&self, title: &str) -> anyhow::Result<usize> {
-        Ok(self.index.backlinks(title)?.len())
+        Ok(self.index.backlinks(title)?.iter().filter(|p| self.rewritable(Path::new(p))).count())
+    }
+
+    /// A link source a rename may rewrite: a plain note on disk. A plain twin of a locked note is locked too
+    /// (save_note refuses it the same way); a source the index still lists after it was deleted, or one that can't be
+    /// read, is skipped.
+    pub fn rewritable(&self, src: &Path) -> bool {
+        parse_note_file(src).is_some_and(|n| !n.encrypted && !note_path(&self.store.dir, &n.title, true).exists()) && src.is_file() && std::fs::File::open(src).is_ok()
     }
 
     pub fn lock_note(&mut self, path: &str, identity: &str) -> anyhow::Result<String> {
@@ -751,6 +758,15 @@ mod tests {
         assert_eq!(r.rewritten, 1);
         assert!(!dir.join("Old.md").exists() && dir.join("New.md").exists());
         assert_eq!(std::fs::read_to_string(dir.join("b.md")).unwrap(), "and [[New]]");
+    }
+    #[test] fn backlink_count_skips_sources_rename_would_skip() {
+        let (dir, db) = setup();
+        for (f, t) in [("a.md", "see [[Old]]"), ("gone.md", "[[Old]]"), ("X.md", "pre-lock [[Old]]"), ("Old.md", "")] { std::fs::write(dir.join(f), t).unwrap(); }
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        std::fs::write(dir.join("X.md.age"), "ciphertext").unwrap(); // X.md is now a locked note's plain twin
+        std::fs::remove_file(dir.join("gone.md")).unwrap(); // deleted, still indexed
+        assert_eq!(v.backlink_count("Old").unwrap(), 1);
+        assert_eq!(v.rename_note(&dir.join("Old.md").to_string_lossy(), "New", true).unwrap().rewritten, 1);
     }
     #[test] fn rename_rewrites_links_to_the_saved_title() {
         let (dir, db) = setup();
