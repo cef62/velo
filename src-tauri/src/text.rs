@@ -84,12 +84,21 @@ fn bare_marker(t: &str) -> bool {
     matches!(m, "-" | "*" | "+") || m.strip_suffix(['.', ')']).is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
 }
 
+/// Another backtick in `rest` before the paragraph ends (a blank line).
+fn span_closes(rest: &str) -> bool {
+    rest.split_inclusive('\n').enumerate().take_while(|(i, l)| *i == 0 || !l.trim().is_empty()).any(|(_, l)| l.contains('`'))
+}
+
 /// Removes each exact `#tag` word (same scanner rules as `extract_tags`) outside fenced and indented code, inline code
 /// spans, `[...]` link text, `[[...]]` links and `](#...)` link targets; returns the new text and the count. A line
 /// left empty, or left as a bare list or task marker, is dropped.
 pub fn remove_inline_tag(body: &str, tag_folded: &str) -> (String, usize) {
     let (mut out, mut n, mut fenced, mut after_blank, mut icode) = (String::new(), 0, false, true, false);
+    // inside an inline code span, which may run over the lines of one paragraph
+    let (mut code, mut pos) = (false, 0);
     for raw in body.split_inclusive('\n') {
+        let start = pos;
+        pos += raw.len();
         let line = raw.trim_end_matches(['\n', '\r']);
         let t = line.trim_start();
         if t.starts_with("```") || t.starts_with("~~~") { fenced = !fenced; }
@@ -97,11 +106,12 @@ pub fn remove_inline_tag(body: &str, tag_folded: &str) -> (String, usize) {
         let indented = (line.starts_with("    ") || line.starts_with('\t')) && !t.is_empty();
         icode = indented && (after_blank || icode) && !bare_marker(t.split(' ').next().unwrap_or(""));
         after_blank = t.is_empty();
-        if fenced || icode || t.starts_with("```") || t.starts_with("~~~") { out.push_str(raw); continue; }
-        let (mut cuts, mut code, mut prev, mut prev2, mut depth) = (vec![], false, None, None::<char>, 0usize);
+        if fenced || icode || t.is_empty() || t.starts_with("```") || t.starts_with("~~~") { code = false; out.push_str(raw); continue; }
+        let (mut cuts, mut prev, mut prev2, mut depth) = (vec![], None, None::<char>, 0usize);
         for (i, c) in line.char_indices() {
             if c == '`' {
-                code = !code;
+                // a backtick opens a span only if another one closes it within the paragraph; otherwise it is literal
+                code = !code && span_closes(&body[start + i + 1..]);
             } else if code {
             } else if c == '[' {
                 depth += 1;
@@ -172,6 +182,12 @@ mod tests {
     }
     #[test] fn remove_inline_tag_keeps_marker_like_text() {
         assert_eq!(remove_inline_tag("Budget approved #work 2024.\n#work 3)\n#work 2024.\n#work -\n", "work").0, "Budget approved 2024.\n3)\n2024.\n-\n");
+    }
+    #[test] fn remove_inline_tag_skips_multi_line_code_spans() {
+        // a code span may run over lines within a paragraph; a blank line ends it, and an unmatched backtick is literal
+        let b = "see `code\n#work here` done\n\nit`s #work\n";
+        assert_eq!(remove_inline_tag(b, "work"), ("see `code\n#work here` done\n\nit`s\n".into(), 1));
+        assert_eq!(remove_inline_tag("a `x\n\n#work` b\n", "work").0, "a `x\n\n` b\n");
     }
     #[test] fn remove_inline_tag_drops_bare_markers() {
         let b = "Some paragraph\n- #work\n- [ ] #work\n1. #work\n- keep #work\n-\n";

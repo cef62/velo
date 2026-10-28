@@ -46,16 +46,23 @@ fn value<'a>(inner: &'a str, key: &str) -> Option<&'a str> {
     lines(inner).find_map(|l| l.strip_prefix(key)?.strip_prefix(':'))
 }
 
-/// Flow list, scalar or block list under the first `key:`.
+/// The text after the colon when `line` is the top-level list key `key`, matched case-insensitively and with blanks
+/// allowed before the colon (`Tags:`, `tags :`).
+fn key_rest<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let (k, rest) = line.split_once(':')?;
+    k.trim_end_matches([' ', '\t']).eq_ignore_ascii_case(key).then_some(rest)
+}
+
+/// Flow list, scalar or block list under the first `key:` (any `key_rest` spelling).
 fn list(inner: &str, key: &str) -> Vec<String> {
-    let Some(v) = value(inner, key) else { return vec![] };
+    let Some(v) = lines(inner).find_map(|l| key_rest(l, key)) else { return vec![] };
     let v = v.trim();
     let items: Vec<&str> = if let Some(f) = v.strip_prefix('[') {
         f.split(']').next().unwrap_or("").split(',').collect()
     } else if !v.is_empty() {
         vec![v]
     } else {
-        let mut it = lines(inner).skip_while(|l| l.strip_prefix(key).and_then(|r| r.strip_prefix(':')).is_none()).skip(1);
+        let mut it = lines(inner).skip_while(|l| key_rest(l, key).is_none()).skip(1);
         let mut out = vec![];
         while let Some(l) = it.next() {
             match l.trim_start().strip_prefix('-') { Some(x) if l.starts_with([' ', '-']) => out.push(x), _ => break }
@@ -141,11 +148,13 @@ pub fn set_tags(text: &str, add: &[String], remove: &[String], create_block: boo
     let nl = if text[..first].ends_with("\r\n") { "\r\n" } else { "\n" };
     let rows: Vec<&str> = text[first..close].split_inclusive('\n').collect();
     let strip = |r: &str| r.trim_end_matches(['\n', '\r']).to_string();
-    let Some(k) = rows.iter().position(|r| r.starts_with("tags:")) else {
+    let Some(k) = rows.iter().position(|r| key_rest(r.trim_end_matches(['\n', '\r']), "tags").is_some()) else {
         if adds.is_empty() { return Ok(None); }
         return Ok(Some(format!("{}tags: [{}]{nl}{}", &text[..close], adds.join(", "), &text[close..])));
     };
-    let v = strip(rows[k]).trim_start_matches("tags:").trim().to_string();
+    let row = strip(rows[k]);
+    let key = &row[..row.find(':').expect("key_rest matched") + 1]; // the note's own spelling, kept
+    let v = row[key.len()..].trim().to_string();
     let unsupported = || Err("unsupported tags: layout".to_string());
     let (mut items, end, flow): (Vec<&str>, usize, bool) = if v.starts_with('[') {
         // only a single-line list with nothing after `]`
@@ -173,7 +182,7 @@ pub fn set_tags(text: &str, add: &[String], remove: &[String], create_block: boo
     let mut out = String::new();
     if flow || (items.is_empty() && fresh.is_empty()) {
         items.extend(fresh);
-        out.push_str(&format!("tags: [{}]{eol}", items.join(", ")));
+        out.push_str(&format!("{key} [{}]{eol}", items.join(", ")));
     } else {
         out.push_str(rows[k]);
         let indent: String = rows.get(k + 1).map_or("  ".into(), |l| l.chars().take_while(|c| *c == ' ').collect());
@@ -290,6 +299,21 @@ mod tests {
         assert_eq!(set_tags(block, &["c".into()], &["A".into()], true).unwrap().unwrap(), "---\r\ntags:\r\n  - \"b\"\r\n  - c\r\nother: 1\r\n---\r\nbody");
         assert_eq!(set_tags(block, &[], &["a".into(), "b".into()], true).unwrap().unwrap(), "---\r\ntags: []\r\nother: 1\r\n---\r\nbody");
         assert_eq!(set_tags("---\ntags: solo\n---\n", &["x".into()], &[], true).unwrap().unwrap(), "---\ntags: [solo, x]\n---\n");
+    }
+
+    #[test]
+    fn tags_key_spelling_variants_are_one_key() {
+        for key in ["Tags", "tags ", "TAGS\t"] {
+            let t = format!("---\n{key}: [a]\n---\nx");
+            assert_eq!(parse(&t).unwrap().tags, ["a"], "{key:?}");
+            assert_eq!(set_tags(&t, &["b".into()], &[], true).unwrap().unwrap(), format!("---\n{key}: [a, b]\n---\nx"), "no second tags row");
+            assert_eq!(set_tags(&t, &[], &["a".into()], true).unwrap().unwrap(), format!("---\n{key}: []\n---\nx"));
+            let b = format!("---\n{key}:\n  - a\n---\nx");
+            assert_eq!(parse(&b).unwrap().tags, ["a"]);
+            assert_eq!(set_tags(&b, &["b".into()], &[], true).unwrap().unwrap(), format!("---\n{key}:\n  - a\n  - b\n---\nx"));
+        }
+        // not the tags key: an indented line, or another key starting with "tags"
+        assert!(parse("---\n  tags: [a]\ntagsx: [b]\n---\n").unwrap().tags.is_empty());
     }
 
     #[test]
