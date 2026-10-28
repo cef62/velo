@@ -88,7 +88,7 @@ Press ⌘I (Ctrl+I) for the info panel: created and modified dates, word count, 
 
 velo can act as an MCP server, so Claude Code can search, read, create and edit your notes. It is off by default.
 
-**Setup.** Turn on Settings → General → Agent access (MCP), press Copy setup command and paste it into a terminal. It runs `claude mcp add velo -- <path to velo> --mcp`.
+**Setup.** Turn on Settings → General → Agent access (MCP) and save, then reopen Settings, press Copy setup command and paste it into a terminal. It runs `claude mcp add velo -- <path to velo> --mcp`.
 
 **Open or closed.** Claude Code starts `velo --mcp` itself, with no window. If velo is running, the request is forwarded to the app; otherwise velo reads and writes the notes folder directly. The switch is checked on every call.
 
@@ -101,7 +101,7 @@ velo can act as an MCP server, so Claude Code can search, read, create and edit 
 - `append_to_note`: add text at the end (creates the note if missing).
 - `edit_note`: replace text that occurs exactly once.
 - `replace_note`: replace the whole note, guarded by the hash from `read_note`.
-- `add_tags`, `remove_tags`: tag up to 200 notes per call.
+- `add_tags`, `remove_tags`: up to 50 tags on up to 200 notes per call.
 - `list_tasks`: the Tasks view.
 - `add_task`: add a `- [ ]` line to a note, or to the capture target.
 - `set_task_done`: tick or untick a task.

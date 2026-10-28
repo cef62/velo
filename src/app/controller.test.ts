@@ -1382,3 +1382,12 @@ test("agent renamed: a failing history update still unfreezes the editor", async
   expect(editor.suspended && editor.currentPath() !== null).toBe(false);
   expect(c.busy).toBe(false);
 });
+
+test("copyAgentSetup copies the command and returns the result for the Settings dialog", async () => {
+  const { c, api, calls, store } = setup();
+  expect(await c.copyAgentSetup()).toBe("Copied");
+  expect(calls).toContainEqual(["copyText", "claude mcp add velo -- /velo --mcp"]);
+  api.agentSetupCommand.mockRejectedValueOnce("no exe path");
+  expect(await c.copyAgentSetup()).toBe("no exe path");
+  expect(store.get().err).toBe(""); // the dialog covers the banner: the error is shown in the dialog instead
+});

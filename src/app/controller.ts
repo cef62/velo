@@ -1178,8 +1178,14 @@ export class Controller {
     }
   }
 
-  async copyAgentSetup() {
-    try { await this.ui.copyText(await this.api.agentSetupCommand()); } catch (e) { this.setErr(errText(e)); }
+  /** The result is shown in the Settings dialog, which covers the error banner. */
+  async copyAgentSetup(): Promise<string> {
+    try {
+      await this.ui.copyText(await this.api.agentSetupCommand());
+      return "Copied";
+    } catch (e) {
+      return errText(e);
+    }
   }
 
   /** Save, freeze the editor, then install; the backend relaunches velo. On failure the editor comes back. */
