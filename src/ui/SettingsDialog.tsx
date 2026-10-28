@@ -59,6 +59,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
     headerLabels: cur.header_labels === true,
     writeFrontMatter: cur.write_front_matter !== false,
     autoUpdateCheck: cur.auto_update_check !== false,
+    agentAccess: cur.agent_access === true,
     captureTarget: cur.capture_target === "daily" ? "daily" : "inbox",
     inboxTitle: cur.inbox_title ?? "Inbox",
     shortcuts: resolve(cur.shortcuts, isMac),
@@ -193,6 +194,20 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
               </Checkbox.Root>
               <Button variant="outline" size="xs" disabled={updateMsg === "Checking…"} onClick={async () => { setUpdateMsg("Checking…"); setUpdateMsg(await controller.checkUpdates()); }}>Check now</Button>
               <span className={help} role="status">{updateMsg}</span>
+            </div>
+          </div>
+          <div className={frow}>
+            <span className={flab}>Agent access</span>
+            <div className={css({ display: "flex", flexDirection: "column", gap: "1.5" })}>
+              <div className={css({ display: "flex", alignItems: "center", gap: "3" })}>
+                <Checkbox.Root checked={d.agentAccess} onCheckedChange={(x) => set({ agentAccess: x.checked === true })} size="sm">
+                  <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                  <Checkbox.Label>Agent access (MCP)</Checkbox.Label>
+                  <Checkbox.HiddenInput />
+                </Checkbox.Root>
+                {d.agentAccess && <Button variant="outline" size="xs" onClick={() => void controller.copyAgentSetup()}>Copy setup command</Button>}
+              </div>
+              <span className={help}>Lets Claude Code read and edit your notes. Locked notes are never shared; deletes go to the Trash; every change is saved as a revision you can restore.</span>
             </div>
           </div>
           <div className={frow}>

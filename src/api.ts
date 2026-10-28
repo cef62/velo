@@ -8,7 +8,7 @@ export type SaveResult = { kind: "saved"; hash: string; front_matter: string | n
 export type TaskItem = { path: string; title: string; line: number; text: string; due: string | null; done: boolean; done_on: string | null; line_text: string };
 export type TaskView = { overdue: TaskItem[]; today: TaskItem[]; upcoming: TaskItem[]; no_date: TaskItem[]; done: TaskItem[]; due_count: number };
 export type RenameResult = { path: string; rewritten: number };
-export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; header_labels: boolean; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean; capture_target: "inbox" | "daily"; inbox_title: string };
+export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; header_labels: boolean; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean; capture_target: "inbox" | "daily"; inbox_title: string; agent_access: boolean };
 
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<void>("set_settings", { settings });
@@ -35,10 +35,30 @@ export const lockNote = (path: string) => invoke<string>("lock_note", { path });
 export const unlockNote = (path: string) => invoke<string>("unlock_note", { path });
 export const lockAll = () => invoke<void>("lock_all");
 export const deleteNote = (path: string) => invoke<void>("delete_note", { path });
-export type RevisionInfo = { id: string; ts: number; size: number };
+export type RevisionInfo = { id: string; ts: number; size: number; summary?: string | null; agent: boolean };
 export const listRevisions = (path: string) => invoke<RevisionInfo[]>("list_revisions", { path });
 export const readRevision = (path: string, id: string) => invoke<string>("read_revision", { path, id });
+/** An agent write offered to the editor (`agent-write`): `replace` carries the note's whole new text and the hash it was based on. */
+export type AgentWrite = {
+  id: number;
+  path: string;
+  kind: "replace" | "append" | "trash" | "rename" | "renamed" | "flush";
+  /** `replace`: the note's whole new text; `append`: the line to add. */
+  insert?: string;
+  base?: string;
+  summary?: string;
+  /** `renamed`: the new path, null when the rename failed. */
+  to?: string | null;
+  /** `flush`: notes whose links a rename is about to rewrite. */
+  paths?: string[];
+};
+export type AgentReply = { hash: string } | "not-open" | "refused" | "conflict" | "unsaved" | "closed" | "ready" | "flushed" | "ok";
+/** Called right before applying `id`: false once the backend stopped waiting (then leave everything as it is). */
+export const agentWriteClaim = (id: number) => invoke<boolean>("agent_write_claim", { id });
+export const agentWriteDone = (id: number, result: AgentReply) => invoke<void>("agent_write_done", { id, result });
+export const snapshotAgent = (path: string, summary: string) => invoke<void>("snapshot_agent", { path, summary });
 export const snapshotText = (path: string, text: string) => invoke<void>("snapshot_text", { path, text });
+export const agentSetupCommand = () => invoke<string>("agent_setup_command");
 export const hasIdentity = () => invoke<boolean>("has_identity");
 export const setupPassphrase = (passphrase: string) => invoke<string | null>("setup_passphrase", { passphrase });
 export const identityFileExists = () => invoke<boolean>("identity_file_exists");

@@ -75,7 +75,7 @@ modified: 2026-10-27T10:02:41+01:00
 - Everything else in the block (other keys, comments, order) is left byte for byte. velo never overwrites an existing `created:` line, and edits only the first `modified:` line. Other date formats (`2026-10-27`, `2026-10-27 09:14`, quoted) are read; an unreadable value falls back to the file date, shown with a "from file" hint.
 - Turn writing off in Settings, General ("Add created/modified dates to notes"). Existing blocks are still read.
 - The block is hidden in the editor and preview. Show it with the "Show front matter in the editor" checkbox in the info panel, or bind a key to "Show / hide front matter" in Settings (unbound by default).
-- `tags:` and `aliases:` (flow list `[a, b]`, block list or single value) are read, never written. Tags merge with `#tags`. Aliases work as titles for `[[wikilinks]]`, opening by name, and search.
+- `tags:` and `aliases:` (flow list `[a, b]`, block list or single value) are read. velo itself never writes them; only an agent's `add_tags` / `remove_tags` tools change the `tags:` list. Tags merge with `#tags`. Aliases work as titles for `[[wikilinks]]`, opening by name, and search.
 - The list's date and the Recent sort use the modified date from the note.
 
 ## Revisions
@@ -83,6 +83,43 @@ modified: 2026-10-27T10:02:41+01:00
 velo keeps local snapshots of each note: on save when the last one is over 10 minutes old (the version the save replaces), before an external change replaces the editor text, and before a restore. They are kept for 30 days, stored in the app data directory (never in the notes folder, never synced), and encrypted for locked notes.
 
 Press ⌘I (Ctrl+I) for the info panel: created and modified dates, word count, "linked from N notes", tags, aliases and the revision list. Select a revision to preview it, then Restore; the current text is kept as a revision first.
+
+## Agents (MCP)
+
+velo can act as an MCP server, so Claude Code can search, read, create and edit your notes. It is off by default.
+
+**Setup.** Turn on Settings → General → Agent access (MCP), press Copy setup command and paste it into a terminal. It runs `claude mcp add velo -- <path to velo> --mcp`.
+
+**Open or closed.** Claude Code starts `velo --mcp` itself, with no window. If velo is running, the request is forwarded to the app; otherwise velo reads and writes the notes folder directly. The switch is checked on every call.
+
+**Tools (15).**
+
+- `search_notes`: search like the search field, with tag filters and paging (50 per page).
+- `list_tags`: tags with counts.
+- `read_note`: full text, with hash, dates, tags, aliases, links and backlinks.
+- `create_note`: a new note.
+- `append_to_note`: add text at the end (creates the note if missing).
+- `edit_note`: replace text that occurs exactly once.
+- `replace_note`: replace the whole note, guarded by the hash from `read_note`.
+- `add_tags`, `remove_tags`: tag up to 200 notes per call.
+- `list_tasks`: the Tasks view.
+- `add_task`: add a `- [ ]` line to a note, or to the capture target.
+- `set_task_done`: tick or untick a task.
+- `rename_note`: rename, with link updates.
+- `move_to_trash`: move a note to the Trash.
+- `daily_note`: the daily note for a date, created if missing.
+
+**Safety.**
+
+- Locked notes are never listed, searched or returned, and the agent never decrypts anything.
+- Deletes go to the Trash. There is no permanent delete.
+- Edits are anchored (`old_text` must match once) or hash-guarded (`replace_note` fails if the note changed since you read it).
+- A note open in velo is edited through the editor, so nothing is overwritten behind it. If velo does not take the change within 5 seconds the call fails with "velo is busy, retry" and nothing changes. Once velo has taken it, the call waits up to 60 seconds; if no answer comes back, it fails with "velo did not answer; the change may have been applied — read the note before retrying".
+- Off by default. The running app listens on 127.0.0.1 only, and every request needs a random token.
+
+**Seeing and undoing changes.** Every write needs a summary (for `daily_note` it is optional). Before it, velo saves a revision of the note with that summary, marked as an agent change in the info panel (⌘I). Select it and press Restore.
+
+**Platforms.** macOS and Linux. Windows is not supported yet.
 
 ## How it's built
 

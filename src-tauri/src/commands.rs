@@ -1,3 +1,4 @@
+use crate::agent::listener::{self, AgentState, set_access};
 use crate::crypto;
 use crate::index::{Page, Sort, TagCount};
 use crate::revisions::RevisionInfo;
@@ -255,8 +256,23 @@ pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings)
             return Err(e);
         }
     }
-    settings::save(&st.settings_path, &settings).map_err(err)?;
+    let agent = app.state::<AgentState>();
+    let was_running = agent.listener.lock().unwrap().is_some();
+    if settings.agent_access {
+        // before saving: a listener that can't start must not leave access "on" with nothing answering
+        set_access(&agent.listener, true, || listener::start(app.clone())).map_err(|e| e.to_string())?;
+    }
+    if let Err(e) = settings::save(&st.settings_path, &settings) {
+        if !was_running {
+            set_access(&agent.listener, false, || unreachable!()).ok(); // access stays off: no listener
+        }
+        return Err(err(e));
+    }
+    let on = settings.agent_access;
     *st.settings.lock().unwrap() = settings;
+    if !on {
+        set_access(&agent.listener, false, || unreachable!()).ok(); // removes agent.json; later calls see the switch off
+    }
     Ok(())
 }
 
@@ -395,6 +411,24 @@ pub fn snapshot_text(st: State<'_, AppState>, path: String, text: String) -> Res
     with_vault(&st, |v, ident| v.snapshot_text(&path, &text, ident))
 }
 
+/// Agent undo trail for a write the editor applies (`agent-write`): snapshot the saved note with the summary first.
+#[tauri::command(async)]
+pub fn snapshot_agent(st: State<'_, AppState>, path: String, summary: String) -> Res<()> {
+    with_vault(&st, |v, _| v.agent_snapshot(&path, &summary))
+}
+
+/// The webview is about to apply `agent-write` `id`: false once the backend stopped waiting (then it must not).
+#[tauri::command]
+pub fn agent_write_claim(agent: State<'_, AgentState>, id: u64) -> bool {
+    agent.editors.claim(id)
+}
+
+/// The webview's answer to `agent-write` `id`: `{hash}`, "not-open", "refused", "conflict" or "unsaved" (applied, not saved).
+#[tauri::command]
+pub fn agent_write_done(agent: State<'_, AgentState>, id: u64, result: serde_json::Value) {
+    agent.editors.done(id, result);
+}
+
 #[tauri::command(async)]
 pub fn delete_note(st: State<'_, AppState>, path: String) -> Res<()> {
     with_vault(&st, |v, _| v.delete_note(&path))
@@ -484,6 +518,19 @@ pub fn setup_passphrase(app: AppHandle, st: State<'_, AppState>, passphrase: Str
     Ok(warning)
 }
 
+/// The line to paste into a terminal; single-quoted (POSIX) when the path has anything but plain path characters.
+fn setup_command(exe: &Path) -> String {
+    let p = exe.to_string_lossy();
+    let plain = p.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+@:".contains(c));
+    let p = if plain { p.into_owned() } else { format!("'{}'", p.replace('\'', r"'\''")) };
+    format!("claude mcp add velo -- {p} --mcp")
+}
+
+#[tauri::command]
+pub fn agent_setup_command() -> Result<String, String> {
+    std::env::current_exe().map(|e| setup_command(&e)).map_err(|e| e.to_string())
+}
+
 /// A keychain write failure is not fatal: the identity stays in memory for this session.
 fn keychain_warning<E>(needs_set: bool, set: impl FnOnce() -> Result<(), E>) -> Option<String> {
     (needs_set && set().is_err()).then(|| "keychain-unavailable".into())
@@ -492,6 +539,13 @@ fn keychain_warning<E>(needs_set: bool, set: impl FnOnce() -> Result<(), E>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn setup_command_uses_current_exe() {
+        let c = agent_setup_command().unwrap();
+        let exe = std::env::current_exe().unwrap();
+        assert!(c.starts_with("claude mcp add velo -- ") && c.ends_with(" --mcp"));
+        assert!(c.contains(exe.to_str().unwrap()));
+        assert_eq!(setup_command(Path::new("/a b/it's")), r"claude mcp add velo -- '/a b/it'\''s' --mcp");
+    }
     #[test] fn err_maps_io_kinds() {
         let io = |k| anyhow::Error::from(std::io::Error::from(k));
         assert_eq!(err(io(std::io::ErrorKind::NotFound)), "not-found");

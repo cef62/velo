@@ -1,5 +1,5 @@
 import type * as ApiModule from "../api";
-import type { Hit, NoteDoc, Settings, TagCount, TaskItem } from "../api";
+import type { AgentReply, AgentWrite, Hit, NoteDoc, Settings, TagCount, TaskItem } from "../api";
 // Types only: editor.ts loads editortheme.ts, which touches `window` at import time (tests run in node).
 import type { Editor, EditorOpts } from "../editor";
 import type { Preview } from "../preview";
@@ -1178,6 +1178,10 @@ export class Controller {
     }
   }
 
+  async copyAgentSetup() {
+    try { await this.ui.copyText(await this.api.agentSetupCommand()); } catch (e) { this.setErr(errText(e)); }
+  }
+
   /** Save, freeze the editor, then install; the backend relaunches velo. On failure the editor comes back. */
   async installUpdate() {
     const u = this.store.get().update;
@@ -1271,11 +1275,108 @@ export class Controller {
     void this.refreshTags();
     void this.loadTasks();
     const open = this.editor.currentPath();
-    if (open && paths.includes(open)) {
+    // during an agent rename the editor is frozen on the old path: agentRenamed reloads it
+    if (open && paths.includes(open) && this.agentRenaming !== open) {
       // The reload replaces the editor text: keep the old one as a revision (a dirty editor conflicts instead).
       if (!this.editor.isDirty()) await this.api.snapshotText(open, this.editor.getText()).catch((e) => console.warn("snapshot before reload failed:", e));
       this.editor.onExternalChange(open);
     }
+  }
+
+  /** An agent write (via the backend's `agent-write`) to the note open in the editor: applied as a user edit, then saved. */
+  protected agentQueue: Promise<unknown> = Promise.resolve();
+  protected agentRenaming: string | null = null; // the open note's path while the backend renames it (editor frozen)
+
+  /** An agent request (the backend's `agent-write`) about the open note; one at a time, in arrival order. */
+  onAgentWrite(req: AgentWrite): Promise<void> {
+    const run = this.agentQueue.then(async () => {
+      const reply = await this.agentWrite(req).catch((): AgentReply => "refused");
+      if (reply !== null) await this.api.agentWriteDone(req.id, reply); // null: the backend stopped waiting
+    });
+    this.agentQueue = run.catch(() => {});
+    return run;
+  }
+
+  protected async agentWrite(req: AgentWrite): Promise<AgentReply | null> {
+    if (req.kind === "renamed") return this.agentRenamed(req.path, req.to ?? null);
+    if (req.kind === "flush") {
+      // a rename is about to rewrite links in these notes: the open one must be saved first
+      if (!req.paths?.includes(this.editor.currentPath() ?? "")) return "not-open";
+      return (await this.editor.flush()) && !this.editor.isDirty() ? "flushed" : "refused";
+    }
+    const open = () => this.editor.currentPath() === req.path;
+    if (!open()) return "not-open"; // the backend does it itself
+    if (this.busy || !(await this.editor.flush())) return "refused";
+    if (!open()) return "not-open";
+    if (req.kind === "trash" || req.kind === "rename") {
+      if (this.busy || this.editor.isDirty()) return "refused";
+      if (!(await this.api.agentWriteClaim(req.id))) return null;
+      if (!open() || this.busy || this.editor.isDirty()) return "refused";
+      if (req.kind === "rename") {
+        // frozen until `renamed`, so autosave can't recreate the file under its old name
+        this.busy = true;
+        this.editor.suspend();
+        this.agentRenaming = req.path;
+        return "ready";
+      }
+      this.editor.discard(); // clean (flushed): nothing is dropped; autosave can't bring the file back
+      this.closedDoc();
+      this.history.remove(req.path);
+      void this.runSearch(false);
+      void this.refreshTitles();
+      return "closed";
+    }
+    const saved = await this.api.openNote(req.path);
+    // a replace was computed from the saved text `base`; a keystroke or another write since then would be overwritten
+    const check = (): AgentReply | null =>
+      !open() || this.busy
+        ? "refused"
+        : this.editor.isDirty() || saved.text.replace(/\r\n?/g, "\n") !== this.editor.getText() || (req.kind === "replace" && saved.hash !== req.base)
+          ? "conflict"
+          : null;
+    let bad = check();
+    if (bad) return bad;
+    if (!(await this.api.agentWriteClaim(req.id))) return null; // timed out: the agent was told velo is busy
+    await this.api.snapshotAgent(req.path, req.summary ?? "");
+    if ((bad = check())) return bad;
+    const insert = req.insert ?? "";
+    const ok = req.kind === "append" ? this.editor.appendLine(insert) : this.editor.applyChange(changedSpan(this.editor.getText(), insert));
+    if (!ok) return "refused";
+    // applied: from here no failure may invite a retry, which would apply it twice
+    try {
+      if (!(await this.editor.flush())) return "unsaved"; // the edit stays in the editor; its save error or conflict banner shows
+      return { hash: (await this.api.openNote(req.path)).hash };
+    } catch {
+      return "unsaved";
+    }
+  }
+
+  /** The backend finished renaming the open note (`to` null: it failed): unfreeze the editor where the note now is. */
+  protected async agentRenamed(from: string, to: string | null): Promise<AgentReply> {
+    if (this.agentRenaming !== from) return "ok";
+    this.agentRenaming = null;
+    try {
+      if (!to) {
+        this.editor.resume();
+        return "ok";
+      }
+      try {
+        this.history.rename(from, to);
+        const doc = await this.api.openNote(to);
+        this.editor.load(doc); // clean and frozen since `ready`: never refused
+        this.loadedDoc(doc);
+      } catch (e) {
+        this.editor.discard(); // never resume on the old path: a save would recreate it
+        this.closedDoc();
+        this.setErr(errText(e));
+      }
+    } finally {
+      this.busy = false;
+    }
+    void this.runSearch(false);
+    void this.refreshTitles();
+    void this.refreshTags();
+    return "ok";
   }
 
   onIndexProgress(done: number, total: number) {
@@ -1297,4 +1398,13 @@ export class Controller {
     this.setErr(message);
     void this.runSearch(false); // no vault -> shows the setup screen
   }
+}
+
+/** The single change turning `a` into `b`: common prefix and suffix kept, so undo and the caret only touch what changed. */
+export function changedSpan(a: string, b: string) {
+  let s = 0;
+  while (s < a.length && s < b.length && a[s] === b[s]) s++;
+  let e = 0;
+  while (e < a.length - s && e < b.length - s && a[a.length - 1 - e] === b[b.length - 1 - e]) e++;
+  return { from: s, to: a.length - e, insert: b.slice(s, b.length - e) };
 }

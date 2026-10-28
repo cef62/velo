@@ -41,6 +41,8 @@ export interface Editor {
   toggleTask(line: number): boolean;
   /** Append `text` as a new last line (user edit); false if not editable. */
   appendLine(text: string): boolean;
+  /** Replace [from, to) with `insert` as a user edit (undoable, autosaved); false if not editable. */
+  applyChange(change: { from: number; to: number; insert: string }): boolean;
   /** Caret to the start of this 0-based line, scrolled into view (a hidden front matter clamps it to the body). */
   revealLine(line: number): void;
 }
@@ -184,6 +186,11 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       const doc = view.state.doc;
       const sep = doc.length === 0 || doc.sliceString(doc.length - 1) === "\n" ? "" : "\n";
       view.dispatch({ changes: { from: doc.length, insert: sep + text }, selection: { anchor: doc.length + sep.length + text.length } });
+      return true;
+    },
+    applyChange(change) {
+      if (!view.state.facet(EditorView.editable)) return false;
+      view.dispatch({ changes: change });
       return true;
     },
     revealLine(line) {

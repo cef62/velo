@@ -6,7 +6,7 @@ export function clampFont(raw: string, fallback: number): number {
   return raw.trim() === "" || !Number.isFinite(n) ? fallback : Math.min(32, Math.max(10, n));
 }
 
-export interface SettingsForm { layout: string; fontSize: string; sort: string; theme: string; headerLabels: boolean; writeFrontMatter: boolean; autoUpdateCheck: boolean; captureTarget: string; inboxTitle: string; shortcuts: Record<Action, string> }
+export interface SettingsForm { layout: string; fontSize: string; sort: string; theme: string; headerLabels: boolean; writeFrontMatter: boolean; autoUpdateCheck: boolean; agentAccess: boolean; captureTarget: string; inboxTitle: string; shortcuts: Record<Action, string> }
 
 /** Form values -> Settings, keeping `cur` where input is blank or invalid. notes_dir is untouched. */
 export function toSettings(cur: Settings, f: SettingsForm): Settings {
@@ -19,6 +19,7 @@ export function toSettings(cur: Settings, f: SettingsForm): Settings {
     header_labels: f.headerLabels,
     write_front_matter: f.writeFrontMatter,
     auto_update_check: f.autoUpdateCheck,
+    agent_access: f.agentAccess,
     capture_target: f.captureTarget === "daily" ? "daily" : "inbox",
     inbox_title: f.inboxTitle.trim() || "Inbox",
     theme: f.theme === "system" || f.theme === "light" || f.theme === "dark" ? f.theme : cur.theme,
