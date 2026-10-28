@@ -111,9 +111,24 @@ fn cold_build_disk_writes() {
     println!("cold build: {mb:.0} MB written in {secs:.1} s, index {file:.0} MB");
 }
 
+/// Search p50 / p95 / max (ms) over every query, 10 runs each, as the app searches.
+#[cfg(target_os = "macos")]
+fn search_times(v: &velo_lib::vault::Vault) -> (f64, f64, f64) {
+    let mut times = Vec::new();
+    for q in QUERIES {
+        for _ in 0..10 {
+            let t = Instant::now();
+            v.search(q, Sort::Modified, 0, &[]).unwrap();
+            times.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+    }
+    times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    (times[times.len() / 2], times[times.len() * 95 / 100], times[times.len() - 1])
+}
+
 /// Rescan after every note changed on disk (a `git checkout` or sync): re-indexes notes already in the index, which
-/// replaces their rows. Runs it as one call (`velo --mcp`) and as the app does (stale paths, then chunks of 100 with
-/// the vault mutex released between them), printing the longest hold.
+/// replaces their rows. Runs it as the app does (stale paths, a bulk re-index in chunks of 100 with the vault mutex
+/// released between them), printing the longest hold, then search times and the cost of locking one note.
 #[cfg(target_os = "macos")]
 #[test]
 #[ignore]
@@ -130,42 +145,38 @@ fn reindex_existing_notes() {
     }
     let db = tmp.path().join("index.db");
     let mut v = velo_lib::vault::Vault::open_with_progress(dir.clone(), &db, None, &mut |_, _| {}).unwrap();
-    let touch = |secs| {
-        let t = std::time::SystemTime::now() + std::time::Duration::from_secs(secs);
+    let (p50, p95, max) = search_times(&v);
+    println!("search after cold build: p50 {p50:.1} ms, p95 {p95:.1} ms, max {max:.1} ms");
+    let mut paths = vec![];
+    for round in 1..=3 {
+        let t = std::time::SystemTime::now() + std::time::Duration::from_secs(60 * round);
         for e in std::fs::read_dir(&dir).unwrap() {
             std::fs::File::options().append(true).open(e.unwrap().path()).unwrap().set_modified(t).unwrap();
         }
-    };
-    touch(60);
-    let (before, t) = (bytes_written(), Instant::now());
-    let n = v.rescan(None).len();
-    let mb = (bytes_written() - before) as f64 / 1e6;
-    println!("rescan of {n} existing notes, one call: {:.1} s, {mb:.0} MB written", t.elapsed().as_secs_f64());
-    assert!(n > 0, "no fixture notes in {src}");
-    touch(120);
-    let (before, t) = (bytes_written(), Instant::now());
-    let paths = v.stale_paths().unwrap();
-    let mut longest = t.elapsed().as_secs_f64();
-    for chunk in paths.chunks(100) {
+        let (before, t) = (bytes_written(), Instant::now());
+        let replaced;
+        (paths, replaced) = v.stale_paths().unwrap();
+        assert!(replaced >= velo_lib::vault::BULK, "no fixture notes in {src}");
+        v.index.begin_bulk().unwrap();
+        let mut longest = t.elapsed().as_secs_f64();
+        for chunk in paths.chunks(100) {
+            let c = Instant::now();
+            v.apply_fs_changes(chunk, None);
+            longest = longest.max(c.elapsed().as_secs_f64());
+        }
         let c = Instant::now();
-        v.apply_fs_changes(chunk, None);
-        longest = longest.max(c.elapsed().as_secs_f64());
+        v.index.end_bulk().unwrap();
+        let end = c.elapsed().as_secs_f64();
+        let mb = (bytes_written() - before) as f64 / 1e6;
+        let wal = std::fs::metadata(format!("{}-wal", db.display())).map_or(0, |m| m.len());
+        println!(
+            "round {round}: rescan of {} notes in chunks of 100: {:.1} s, {mb:.0} MB written, longest chunk {:.0} ms, end_bulk {:.0} ms, WAL {:.1} MB, index {:.0} MB",
+            paths.len(), t.elapsed().as_secs_f64(), longest * 1000.0, end * 1000.0, wal as f64 / 1e6, std::fs::metadata(&db).unwrap().len() as f64 / 1e6
+        );
+        let (p50, p95, max) = search_times(&v);
+        println!("round {round}: search after re-index: p50 {p50:.1} ms, p95 {p95:.1} ms, max {max:.1} ms");
     }
-    let mb = (bytes_written() - before) as f64 / 1e6;
-    println!("rescan of {} notes in chunks of 100: {:.1} s, {mb:.0} MB written, longest hold {:.0} ms", paths.len(), t.elapsed().as_secs_f64(), longest * 1000.0);
-    let wal = std::fs::metadata(format!("{}-wal", db.display())).map_or(0, |m| m.len());
-    println!("WAL after: {:.1} MB, index {:.0} MB", wal as f64 / 1e6, std::fs::metadata(&db).unwrap().len() as f64 / 1e6);
-    // Deleted entries stay in the FTS index until merged: search must stay fast after re-indexing.
-    let mut times = Vec::new();
-    for q in QUERIES {
-        let t = Instant::now();
-        v.search(q, Sort::Modified, 0, &[]).unwrap();
-        times.push(t.elapsed().as_secs_f64() * 1000.0);
-    }
-    times.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    println!("search after re-index: p50 {:.2} ms, max {:.2} ms", times[times.len() / 2], times[times.len() - 1]);
-    // Locking erases the deleted text from the whole FTS index (`Index::purge`): its cost grows with the vault.
     let (before, t) = (bytes_written(), Instant::now());
     v.lock_note(&paths[0].to_string_lossy(), &velo_lib::crypto::new_identity()).unwrap();
-    println!("lock one note: {:.0} ms, {:.0} MB written", t.elapsed().as_secs_f64() * 1000.0, (bytes_written() - before) as f64 / 1e6);
+    println!("lock one note: {:.0} ms, {:.1} MB written", t.elapsed().as_secs_f64() * 1000.0, (bytes_written() - before) as f64 / 1e6);
 }
