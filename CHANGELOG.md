@@ -1,5 +1,11 @@
 # velo
 
+## 0.8.0
+
+### Minor Changes
+
+- cae0616: Added agent access: with it turned on in Settings, Claude Code could search, read, create and edit notes through velo's MCP server, with every change saved as a revision you could restore.
+
 ## 0.7.0
 
 ### Minor Changes
