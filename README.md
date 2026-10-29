@@ -37,6 +37,7 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | ⌘⇧J | Ctrl+Shift+J | Vertical / horizontal layout |
 | ⌘I | Ctrl+I | Show / hide the note info panel |
 | ⌘⇧X | Ctrl+Shift+X | Switch between Notes and Tasks |
+| ⌘⇧C | Ctrl+Shift+C | Show / hide the Connections view |
 | ⌘⇧D | Ctrl+Shift+D | Open today's daily note |
 | ⌘⇧Space | Ctrl+Shift+Space | Show / hide velo (system-wide) |
 | ⌥⇧⌘N | Ctrl+Alt+Shift+N | Quick capture (system-wide) |
@@ -48,6 +49,16 @@ Fixed: Enter (in search) opens the highlighted note, or creates a note titled wi
 ## Tags
 
 Write `#tag` anywhere in a note (at the start of a line, after a space, or after `(`; letters, digits, `_`, `-`, `/`; at least one letter; not in fenced code blocks; `# Heading` is not a tag). The `#` button next to search (or ⌘⇧T) shows every tag with its note count; click chips to filter the list to notes having all selected tags, combined with the search text. A "Filtered by" line stays visible while tags are selected. In the preview, click a `#tag` to filter by it. Locked notes are not listed in the tag panel.
+
+## Connections
+
+Press ⌘⇧C (Ctrl+Shift+C, remappable in Settings) or use the third segment of the left-pane switch in the header to see the links, backlinks, shared tags and unlinked mentions around the open note. Choose the layout in Settings: Ring, Created or Updated (saved as `connections_sort`).
+
+- Click a note to open it; the graph stays. Double-click it, or press ⇧↩, to re-centre the graph on it. ↩ opens the focused node, and Esc returns to Notes.
+- Click a tag node to filter Notes by that tag.
+- **Link it.** Hover an unlinked mention and press Link it to wrap those words in `[[ ]]`. With the note open, ⌘Z (Ctrl+Z) undoes it. It is never offered for locked notes.
+- **No links.** A chip next to the tag filter lists orphans: notes with no links in or out.
+- **Alias links.** `[[Alias]]` counts as a backlink in the graph, in "Linked from" in the info panel and in the No links filter.
 
 ## Tasks
 
@@ -92,9 +103,10 @@ velo can act as an MCP server, so Claude Code can search, read, create and edit 
 
 **Open or closed.** Claude Code starts `velo --mcp` itself, with no window. If velo is running, the request is forwarded to the app; otherwise velo reads and writes the notes folder directly. The switch is checked on every call.
 
-**Tools (15).**
+**Tools (16).**
 
-- `search_notes`: search like the search field, with tag filters and paging (50 per page).
+- `search_notes`: search like the search field, with tag filters, `no_links` to list orphans, and paging (50 per page).
+- `get_connections`: one hop around a note by title: links, backlinks, shared tags and unlinked mentions. Read-only, titles only, never locked notes. To link a mention, use `edit_note`.
 - `list_tags`: tags with counts.
 - `read_note`: full text, with hash, dates, tags, aliases, links and backlinks.
 - `create_note`: a new note.
