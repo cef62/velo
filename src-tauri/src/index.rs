@@ -532,6 +532,41 @@ impl Index {
         let mut st = self.db.prepare("SELECT DISTINCT src FROM links WHERE dst_folded=? ORDER BY src")?;
         Ok(st.query_map([fold(title)], |r| r.get(0))?.collect::<Result<_, _>>()?)
     }
+
+    /// Sources linking to the note by title or alias, itself excluded. `backlinks` stays title-only (rename).
+    pub fn linked_from(&self, path: &str) -> anyhow::Result<Vec<String>> {
+        let mut st = self.db.prepare(
+            "SELECT src FROM links WHERE src<>?1 AND dst_folded IN (SELECT title_folded FROM notes WHERE path=?1 UNION SELECT alias_folded FROM aliases WHERE path=?1) ORDER BY src",
+        )?;
+        Ok(st.query_map([path], |r| r.get(0))?.collect::<Result<_, _>>()?)
+    }
+
+    /// `(folded name, path)` for every title and alias.
+    pub fn names(&self) -> anyhow::Result<Vec<(String, String)>> {
+        let mut st = self.db.prepare("SELECT title_folded, path FROM notes UNION ALL SELECT alias_folded, path FROM aliases")?;
+        Ok(st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?)
+    }
+
+    /// How many notes carry the tag, and up to `limit` of their paths.
+    pub fn tag_notes(&self, tag_folded: &str, limit: usize) -> anyhow::Result<(usize, Vec<String>)> {
+        let count = self.db.query_row("SELECT COUNT(DISTINCT path) FROM tags WHERE tag_folded=?", [tag_folded], |r| r.get::<_, i64>(0))? as usize;
+        let mut st = self.db.prepare("SELECT DISTINCT path FROM tags WHERE tag_folded=? ORDER BY path LIMIT ?")?;
+        Ok((count, st.query_map(params![tag_folded, limit as i64], |r| r.get(0))?.collect::<Result<_, _>>()?))
+    }
+
+    pub fn node(&self, path: &str) -> anyhow::Result<Option<NodeRow>> {
+        Ok(self.db.query_row("SELECT title, created, modified, preview, encrypted FROM notes WHERE path=?", [path], |r| {
+            Ok(NodeRow { title: r.get(0)?, created: r.get(1)?, modified: r.get(2)?, preview: r.get(3)?, encrypted: r.get(4)? })
+        }).optional()?)
+    }
+}
+
+pub struct NodeRow {
+    pub title: String,
+    pub created: i64,
+    pub modified: i64,
+    pub preview: String,
+    pub encrypted: bool,
 }
 
 #[cfg(unix)]
@@ -790,6 +825,31 @@ mod tests {
         assert_eq!(h.hits.iter().map(|h| h.path.as_str()).collect::<Vec<_>>(), vec!["a.md"]);
         let j = idx(&[("c.md", "nick nick", 9), ("a.md", FM, 1)]);
         assert_eq!(paths(&j, "nick", Sort::Modified, 0, 10, &HashMap::new()), vec!["a.md", "c.md"]);
+    }
+    fn nick() -> Index { idx(&[("Nick.md", "---\naliases: [Nicholas]\n---\n", 1), ("a.md", "[[Nicholas]]", 2), ("b.md", "[[nick]]", 3)]) }
+    #[test] fn linked_from_resolves_aliases() {
+        let i = nick();
+        assert_eq!(i.linked_from("Nick.md").unwrap(), vec!["a.md", "b.md"]);
+        assert_eq!(i.backlinks("Nick").unwrap(), vec!["b.md"]);
+    }
+    #[test] fn linked_from_skips_self_and_unresolved() {
+        let i = idx(&[("Nick.md", "[[Nick]] [[nobody]]", 1)]);
+        assert!(i.linked_from("Nick.md").unwrap().is_empty());
+    }
+    #[test] fn names_lists_titles_and_aliases() {
+        let n = nick().names().unwrap();
+        assert!(n.contains(&("nick".into(), "Nick.md".into())) && n.contains(&("nicholas".into(), "Nick.md".into())));
+    }
+    #[test] fn tag_notes_counts_and_limits() {
+        let notes: Vec<(String, String, i64)> = (0..20).map(|n| (format!("n{n:02}.md"), "#big".into(), n)).collect();
+        let (c, p) = idx_owned(&notes).tag_notes("big", 16).unwrap();
+        assert_eq!((c, p.len()), (20, 16));
+    }
+    #[test] fn node_returns_metadata() {
+        let i = nick();
+        let n = i.node("Nick.md").unwrap().unwrap();
+        assert_eq!((n.title.as_str(), n.encrypted), ("Nick", false));
+        assert!(i.node("zz.md").unwrap().is_none());
     }
     #[test] fn recent_sort_uses_effective_modified() {
         let i = idx(&[("old.md", FM, 99999999999999), ("new.md", "x", 1623053350001)]);

@@ -324,8 +324,8 @@ impl NoteOps for AppOps<'_> {
         self.with(|o| o.note_tags(path))
     }
 
-    fn backlinks(&self, title: &str) -> anyhow::Result<Vec<String>> {
-        self.with(|o| o.backlinks(title))
+    fn backlinks(&self, path: &str) -> anyhow::Result<Vec<String>> {
+        self.with(|o| o.backlinks(path))
     }
 }
 
@@ -383,7 +383,7 @@ mod tests {
         assert_eq!(ops.find("L").unwrap(), None);
         assert_eq!(ops.read(&locked).err().unwrap().to_string(), "not found");
         assert!(ops.note_tags(&locked).is_err());
-        assert!(ops.backlinks("P").unwrap().is_empty());
+        assert!(ops.backlinks(&dir.join("P.md").to_string_lossy()).unwrap().is_empty());
         assert!(ops.write(&locked, "x", "h", "s").is_err());
         assert!(ops.toggle_task(&locked, 1, "- [ ] locked task", "s").is_err());
         assert!(ops.capture_task("L", "x", "s").is_err());

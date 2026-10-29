@@ -174,7 +174,7 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
         "read_note" => {
             let doc = ops.read(&path_of(ops, &a)?).map_err(err)?;
             let links = crate::text::extract_links(crate::frontmatter::body(&doc.text));
-            let backlinks = ops.backlinks(&doc.title).map_err(err)?;
+            let backlinks = ops.backlinks(&doc.path).map_err(err)?;
             let m = &doc.meta;
             Ok(json!({"title": doc.title, "text": doc.text, "hash": doc.hash, "created": iso(m.created), "modified": iso(m.modified), "tags": m.tags, "aliases": m.aliases, "links": links, "backlinks": backlinks}))
         }
@@ -416,6 +416,11 @@ mod tests {
         assert_eq!(r["links"], json!(["b"]));
         assert_eq!(r["backlinks"], json!(["b"]));
         assert!(r["created"].is_string() && r["modified"].is_string());
+    }
+
+    #[test] fn read_note_backlinks_include_alias_links() {
+        let (mut ops, _) = vault(&[("Nick.md", "---\naliases: [Nicholas]\n---\n"), ("a.md", "[[Nicholas]]"), ("b.md", "[[nick]]")]);
+        assert_eq!(call(&mut ops, "read_note", json!({"title": "Nick"})).unwrap()["backlinks"], json!(["a", "b"]));
     }
 
     #[test] fn create_refuses_existing_title_or_alias() {

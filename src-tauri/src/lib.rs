@@ -149,6 +149,7 @@ pub fn run() {
             commands::set_badge,
             commands::rename_note,
             commands::backlink_count,
+            commands::linked_from_count,
             commands::lock_note,
             commands::unlock_note,
             commands::lock_all,

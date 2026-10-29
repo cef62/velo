@@ -41,7 +41,7 @@ pub trait NoteOps {
     /// Tags of one plain note (for search results).
     fn note_tags(&self, path: &str) -> anyhow::Result<Vec<String>>;
     /// Titles of plain notes linking to `title`.
-    fn backlinks(&self, title: &str) -> anyhow::Result<Vec<String>>;
+    fn backlinks(&self, path: &str) -> anyhow::Result<Vec<String>>;
 }
 
 /// An encrypted note, or the plain twin of one (`X.md` beside `X.md.age`: a lock synced in before the delete, or a
@@ -303,8 +303,8 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
         self.vault.index.tags_of(plain(path)?)
     }
 
-    fn backlinks(&self, title: &str) -> anyhow::Result<Vec<String>> {
-        Ok(self.vault.index.backlinks(title)?.iter().filter(|p| !locked(p)).map(|p| title_of(p)).collect())
+    fn backlinks(&self, path: &str) -> anyhow::Result<Vec<String>> {
+        Ok(self.vault.index.linked_from(plain(path)?)?.iter().filter(|p| !locked(p)).map(|p| title_of(p)).collect())
     }
 }
 

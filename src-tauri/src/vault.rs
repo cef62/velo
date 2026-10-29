@@ -421,6 +421,11 @@ impl Vault {
     }
 
     /// Notes whose links a rename of `title` would rewrite (the "Update N links?" count).
+    /// Notes linking here by title or alias (the graph and info panel); rename's `backlink_count` is title-only.
+    pub fn linked_from_count(&self, path: &str) -> anyhow::Result<usize> {
+        Ok(self.index.linked_from(path)?.len())
+    }
+
     pub fn backlink_count(&self, title: &str) -> anyhow::Result<usize> {
         Ok(self.index.backlinks(title)?.iter().filter(|p| self.rewritable(Path::new(p))).count())
     }
@@ -888,6 +893,13 @@ mod tests {
         std::fs::remove_file(dir.join("gone.md")).unwrap(); // deleted, still indexed
         assert_eq!(v.backlink_count("Old").unwrap(), 1);
         assert_eq!(v.rename_note(&dir.join("Old.md").to_string_lossy(), "New", true).unwrap().rewritten, 1);
+    }
+    #[test] fn rename_count_stays_title_only() {
+        let (dir, db) = setup();
+        for (f, t) in [("Nick.md", "---\naliases: [Nicholas]\n---\n"), ("a.md", "[[Nicholas]]"), ("b.md", "[[Nick]]")] { std::fs::write(dir.join(f), t).unwrap(); }
+        let v = open(dir.clone(), &db, None).unwrap();
+        assert_eq!(v.backlink_count("Nick").unwrap(), 1);
+        assert_eq!(v.linked_from_count(&dir.join("Nick.md").to_string_lossy()).unwrap(), 2);
     }
     #[test] fn rename_rewrites_links_to_the_saved_title() {
         let (dir, db) = setup();
