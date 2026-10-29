@@ -33,20 +33,22 @@ pub struct Settings {
     pub inbox_title: String,
     /// let AI agents use the notes through `velo --mcp`; the headless server re-reads this on every tool call
     pub agent_access: bool,
+    /// Connections view ring order: "ring" | "created" | "updated"; anything else reads as "ring"
+    pub connections_sort: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), header_labels: false, shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into(), agent_access: false }
+        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), header_labels: false, shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into(), agent_access: false, connections_sort: "ring".into() }
     }
 }
 
 const DEFAULT_TOGGLE: &str = "Mod+Shift+Space";
 const DEFAULT_CAPTURE: &str = "Mod+Alt+Shift+KeyN"; // canonical modifier order, as the UI's DEFAULTS
 /// Every action id in the UI's `DEFAULTS` (src/shortcuts.ts); a saved id outside it (e.g. the old `next_note`) is ignored there.
-pub const ACTIONS: [&str; 19] = [
+pub const ACTIONS: [&str; 20] = [
     "focus_search", "toggle_preview", "rename", "toggle_lock", "lock_all", "settings", "toggle_sort", "back", "forward", "delete_note",
-    "toggle_tags", "toggle_rich", "toggle_layout", "toggle_window", "toggle_info", "toggle_front_matter", "toggle_tasks", "capture", "daily_note",
+    "toggle_tags", "toggle_rich", "toggle_layout", "toggle_window", "toggle_info", "toggle_front_matter", "toggle_tasks", "toggle_connections", "capture", "daily_note",
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -146,6 +148,9 @@ pub fn load(path: &Path) -> Settings {
     let Some(v) = std::fs::read(path).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()) else { return Settings::default() };
     let legacy = v.get("hotkey").and_then(|h| h.as_str()).map(from_plugin_format); // v1 field
     let mut s: Settings = serde_json::from_value(v).unwrap_or_default();
+    if !["ring", "created", "updated"].contains(&s.connections_sort.as_str()) {
+        s.connections_sort = "ring".into();
+    }
     if let Some(h) = legacy {
         s.shortcuts.entry("toggle_window".into()).or_insert(h);
     }
@@ -203,6 +208,16 @@ mod tests {
         std::fs::write(&p, r#"{"font_size":16}"#).unwrap();
         assert!(!load(&p).agent_access);
         assert!(!Settings::default().agent_access);
+    }
+    #[test] fn connections_sort_defaults_to_ring() {
+        let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");
+        assert_eq!(Settings::default().connections_sort, "ring");
+        std::fs::write(&p, r#"{"font_size":16}"#).unwrap();
+        assert_eq!(load(&p).connections_sort, "ring");
+        std::fs::write(&p, r#"{"connections_sort":"bogus"}"#).unwrap();
+        assert_eq!(load(&p).connections_sort, "ring");
+        std::fs::write(&p, r#"{"connections_sort":"created"}"#).unwrap();
+        assert_eq!(load(&p).connections_sort, "created");
     }
     #[test] fn defaults() { let s = Settings::default(); assert_eq!(s.sort, "modified"); assert_eq!(s.toggle_window_binding(), "Mod+Shift+Space"); }
     #[test] fn from_plugin_format_matches_ui_normalization() {

@@ -22,6 +22,8 @@ import { noInfo, type AppState, type Store } from "./store";
 
 export type Api = typeof ApiModule;
 
+const connectionsSortOf = (v: unknown): Settings["connections_sort"] => (v === "created" || v === "updated" ? v : "ring");
+
 const BUSY_MSG = "Busy — try again in a moment";
 const UPDATE_BUSY = "An update check or install is already running"; // update.rs BUSY
 const TASK_MOVED = "This task changed — refreshed";
@@ -76,7 +78,7 @@ export class Controller {
   ) {
     this.results = new Results((offset) => {
       const s = store.get();
-      return api.search(s.query, s.sort, offset, s.selectedTags);
+      return api.search(s.query, s.sort, offset, s.selectedTags, false);
     });
   }
 
@@ -182,6 +184,7 @@ export class Controller {
       writeFrontMatter: s.write_front_matter !== false,
       showFrontMatter: s.show_front_matter === true,
       infoOpen: s.info_panel === true,
+      connectionsSort: connectionsSortOf(s.connections_sort),
     });
     this.syncStyle();
     if (!s.notes_dir) this.store.set({ phase: "setup" });
@@ -388,11 +391,11 @@ export class Controller {
   protected readonly infoReq = latest();
   /** Backlinks and revisions for the open note; no backend calls while the panel is closed. */
   async loadInfo() {
-    const { infoOpen, openPath, title } = this.store.get();
+    const { infoOpen, openPath } = this.store.get();
     if (!infoOpen || !openPath) return;
     const fresh = this.infoReq();
     try {
-      const [backlinks, revisions] = await Promise.all([this.api.backlinkCount(title), this.api.listRevisions(openPath)]);
+      const [backlinks, revisions] = await Promise.all([this.api.linkedFromCount(openPath), this.api.listRevisions(openPath)]);
       if (fresh() && this.store.get().openPath === openPath) this.store.set((s) => ({ info: { ...s.info, backlinks, revisions } }));
     } catch (e) {
       if (e !== "locked") console.error("info load failed", e);
@@ -899,12 +902,56 @@ export class Controller {
     }, 300);
   }
 
-  setPaneMode(m: "notes" | "tasks") {
+  setPaneMode(m: "notes" | "tasks" | "connections") {
+    if (m === "connections") return void this.showConnections();
     this.store.set({ paneMode: m });
     if (m === "tasks") void this.loadTasks();
     else if (this.listStale) {
       this.listStale = false;
       void this.runSearch(true, "highlight"); // switching modes never changes the open note
+    }
+  }
+
+  protected readonly newConnectionsReq = latest();
+  /** Open the Connections view centred on the open note (flushed first); nothing happens without one. */
+  async showConnections() {
+    const { openPath } = this.store.get();
+    if (!openPath || !(await this.editor.flush())) return;
+    this.store.set({ paneMode: "connections", connections: { centre: openPath, data: null, err: "" } });
+    await this.loadConnections();
+  }
+
+  /** A node picked in the view: the normal open, the centre stays. */
+  openFromGraph(path: string) {
+    return this.show(path);
+  }
+
+  recentre(path: string) {
+    this.store.set((s) => ({ connections: { centre: path, data: s.connections?.data ?? null, err: "" } }));
+    return this.loadConnections();
+  }
+
+  /** (Re)load the graph around the current centre; not called per keystroke (on show, re-centre, Link it). */
+  async loadConnections() {
+    const centre = this.store.get().connections?.centre;
+    if (!centre) return;
+    const fresh = this.newConnectionsReq();
+    try {
+      const data = await this.api.connections(centre);
+      if (fresh()) this.store.set({ connections: { centre, data, err: "" } });
+    } catch (e) {
+      if (fresh()) this.store.set({ connections: { centre, data: null, err: e === "locked" ? "Note is locked" : errText(e) } });
+    }
+  }
+
+  async setConnectionsSort(sort: Settings["connections_sort"]) {
+    try {
+      await this.updateSettings(async (cur) => {
+        await this.api.setSettings({ ...cur, connections_sort: sort });
+        this.store.set({ connectionsSort: sort });
+      });
+    } catch (e) {
+      this.setErr(errText(e));
     }
   }
 
@@ -1146,7 +1193,7 @@ export class Controller {
       return err === "not-found" ? "Folder not found" : String(err);
     }
     this.applyLook(next);
-    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, headerLabels: next.header_labels, writeFrontMatter: next.write_front_matter, showFrontMatter: next.show_front_matter, infoOpen: next.info_panel, settings: null });
+    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, headerLabels: next.header_labels, writeFrontMatter: next.write_front_matter, showFrontMatter: next.show_front_matter, infoOpen: next.info_panel, connectionsSort: connectionsSortOf(next.connections_sort), settings: null });
     this.preview?.refresh(); // watermark shows the binding
     this.syncStyle();
     if (next.notes_dir !== cur.notes_dir) {
@@ -1316,6 +1363,7 @@ export class Controller {
     toggle_layout: () => void this.toggleLayout(),
     daily_note: () => void this.openTitle(localToday(), "enter"),
     toggle_tasks: () => this.setPaneMode(this.store.get().paneMode === "tasks" ? "notes" : "tasks"),
+    toggle_connections: () => this.setPaneMode(this.store.get().paneMode === "connections" ? "notes" : "connections"),
   };
 
   /**

@@ -1,6 +1,6 @@
 // Test fakes for the controller: in-memory backend, editor, preview and UI port. Tests only.
 import { vi } from "vitest";
-import type { Hit, NoteDoc, NoteMeta, Page, RenameResult, RevisionInfo, Settings, TagCount, TaskView } from "../api";
+import type { Connections, Hit, NoteDoc, NoteMeta, Page, RenameResult, RevisionInfo, Settings, TagCount, TaskView } from "../api";
 import type { Editor } from "../editor";
 import type { Preview } from "../preview";
 import type { Api } from "./controller";
@@ -20,6 +20,8 @@ export const PAGE = 2;
 export const noMeta: NoteMeta = { created: 0, created_src: "file", modified: 0, modified_src: "file", tags: [], aliases: [] };
 export const hit = (title: string): Hit => ({ path: `/n/${title}.md`, title, snippet: "", mtime: 0, encrypted: false });
 
+export const emptyConnections: Connections = { centre: { path: "", title: "", created: 0, modified: 0, preview: "", locked: false }, links_out: [], links_in: [], tags: [], mentions: [] };
+
 /** Backend over `notes` (title → text). search ignores the query and pages all notes in insertion order. */
 export function fakeApi(notes: Record<string, string> = {}) {
   const docOf = (path: string): NoteDoc => {
@@ -27,12 +29,12 @@ export function fakeApi(notes: Record<string, string> = {}) {
     if (!(title in notes)) throw "not-found";
     return { path, title, text: notes[title], hash: "h", encrypted: false, meta: noMeta };
   };
-  const settings: Settings = { notes_dir: "/n", layout: "vertical", font_size: 14, sort: "modified", editor_style: "rich", theme: "system", header_labels: false, shortcuts: {}, write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox", inbox_title: "Inbox", agent_access: false };
+  const settings: Settings = { notes_dir: "/n", layout: "vertical", font_size: 14, sort: "modified", editor_style: "rich", theme: "system", header_labels: false, shortcuts: {}, write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox", inbox_title: "Inbox", agent_access: false, connections_sort: "ring" };
   const api = {
     getSettings: vi.fn(async () => ({ ...settings })),
     setSettings: vi.fn(async (_s: Settings) => {}),
     indexStatus: vi.fn(async (): Promise<[number, number] | null> => null),
-    search: vi.fn(async (_q: string, _sort: string, offset: number, _tags: string[]): Promise<Page> => {
+    search: vi.fn(async (_q: string, _sort: string, offset: number, _tags: string[], _noLinks: boolean): Promise<Page> => {
       const all = Object.keys(notes).map(hit);
       return { hits: all.slice(offset, offset + PAGE), has_more: offset + PAGE < all.length, total: offset === 0 ? all.length : 0 };
     }),
@@ -53,6 +55,9 @@ export function fakeApi(notes: Record<string, string> = {}) {
     setBadge: vi.fn(async (_c: number) => {}),
     renameNote: vi.fn(async (_p: string, _t: string, _r: boolean): Promise<RenameResult> => { throw "unset"; }),
     backlinkCount: vi.fn(async () => 0),
+    linkedFromCount: vi.fn(async (_p: string) => 0),
+    connections: vi.fn(async (path: string): Promise<Connections> => ({ ...emptyConnections, centre: { ...emptyConnections.centre, path, title: path.slice(3, -3) } })),
+    linkMention: vi.fn(async (_p: string, _t: string, _n: number, _e: string | null): Promise<string | null> => null),
     lockNote: vi.fn(async (_p: string): Promise<string> => { throw "unset"; }),
     unlockNote: vi.fn(async (_p: string): Promise<string> => { throw "unset"; }),
     lockAll: vi.fn(async () => {}),
