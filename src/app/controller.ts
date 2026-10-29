@@ -283,7 +283,7 @@ export class Controller {
   async startMerge() {
     const path = this.editor.currentPath();
     const s = this.store.get();
-    if (!path) return;
+    if (!path) return this.setErr("Open a note to merge");
     if (s.encrypted) return this.setErr("Can't merge a locked note");
     if (this.busy || s.indexing) return this.setErr(BUSY_MSG);
     if (!(await this.editor.flush())) return this.setErr("Can't merge: unsaved changes couldn't be saved");

@@ -1,5 +1,5 @@
 import { CircleAlert } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { css } from "styled-system/css";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
@@ -44,6 +44,7 @@ function Pick({ m, controller }: { m: Merge; controller: Controller }) {
   const rows = useMemo(() => controller.mergeCandidates(m.query), [controller, m.query]);
   const [active, setActive] = useState(0);
   const at = Math.min(active, rows.length - 1);
+  useEffect(() => document.getElementById(`merge-target-${at}`)?.scrollIntoView({ block: "nearest" }), [at]);
   return (
     <>
       <div className={css({ p: "14px 20px 18px" })}>

@@ -2168,7 +2168,7 @@ test("merge trash failure shows what was not done", async () => {
 });
 
 test("merge refuses encrypted", async () => {
-  const { c, store } = await mergeSetup();
+  const { c, store, editor } = await mergeSetup();
   store.set({ encrypted: true });
   await c.startMerge();
   expect(store.get().merge).toBeNull();
@@ -2177,4 +2177,9 @@ test("merge refuses encrypted", async () => {
   store.set({ encrypted: false });
   await c.startMerge();
   expect(store.get().merge).toBeNull();
+  c.busy = false;
+  editor.discard(); // no open note
+  await c.startMerge();
+  expect(store.get().merge).toBeNull();
+  expect(store.get().err).toBe("Open a note to merge");
 });
