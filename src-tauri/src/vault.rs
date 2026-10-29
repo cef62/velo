@@ -301,8 +301,10 @@ impl Vault {
         if self.find_note(title)?.is_some() || note_path(&dir, title, false).exists() || note_path(&dir, title, true).exists() {
             return Err(anyhow!("already-exists"));
         }
+        // a selection that opens with a `---` block would read as front matter: a leading newline keeps it body
+        let text = if frontmatter::parse(text).is_some() { format!("\n{text}") } else { text.to_string() };
         let now = chrono::Local::now().fixed_offset();
-        let content = if write_fm { frontmatter::stamp(text, now, now) } else { text.to_string() };
+        let content = if write_fm { frontmatter::stamp(&text, now, now) } else { text };
         let p = note_path(&dir, title, false);
         self.store.write_atomic(&p, content.as_bytes())?;
         self.reindex(&p, Some(&content))?;
@@ -1847,6 +1849,16 @@ mod tests {
         let fm = frontmatter::parse(&t).unwrap();
         assert!(fm.created.is_some());
         assert_eq!(&t[fm.end..], "body");
+    }
+    #[test] fn create_from_selection_keeps_a_leading_rule_block_as_body() {
+        let sel = "---\nfoo\n---\nbar";
+        for (title, wfm) in [("A", true), ("B", false)] {
+            let (mut v, _) = nick_vault();
+            let t = std::fs::read_to_string(v.create_from_selection(title, sel, wfm).unwrap()).unwrap();
+            let body = frontmatter::parse(&t).map_or(t.as_str(), |fm| &t[fm.end..]);
+            assert_eq!(body, format!("\n{sel}"), "write_fm={wfm}");
+            assert!(frontmatter::parse(body).is_none(), "write_fm={wfm}");
+        }
     }
     #[test] fn create_from_selection_refuses_existing_title_alias_and_locked() {
         let (mut v, dir) = nick_vault();
