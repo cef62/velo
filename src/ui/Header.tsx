@@ -113,7 +113,7 @@ export function Header({ controller, store }: { controller: Controller; store: S
       {seg("Left pane", paneMode, (v) => controller.setPaneMode(v), [
         { value: "notes", text: "Notes", tip: "Notes", glyph: <FileText size={14} />, action: "toggle_tasks" },
         { value: "tasks", text: "Tasks", tip: "Tasks", glyph: <ListChecks size={14} />, action: "toggle_tasks", count: dueCount },
-        { value: "connections", text: "Connections", tip: "Connections", glyph: <Network size={14} />, action: "toggle_connections", disabled: noNote },
+        { value: "connections", text: "Connections", tip: "Connections", glyph: <Network size={14} />, action: "toggle_connections", disabled: noNote && paneMode !== "connections" },
       ])}
       <SearchField controller={controller} store={store} />
       {icon("Tags", "toggle_tags", <Hash />, () => controller.showTags(!tagPanelOpen), { pressed: tagPanelOpen, controls: "tag-panel", label: "Tags" })}
