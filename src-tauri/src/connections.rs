@@ -24,6 +24,9 @@ pub struct TagGroup {
     /// Notes other than the centre carrying the tag; `notes` is empty above `TAG_MAX`.
     pub count: usize,
     pub notes: Vec<Node>,
+    /// Unlocked encrypted notes included in `count`, so the MCP layer can take them out again.
+    #[serde(skip)]
+    pub unlocked: usize,
 }
 
 #[derive(Serialize, Debug)]
@@ -99,14 +102,16 @@ pub fn build(index: &Index, unlocked: &HashMap<String, String>, path: &str, text
         // the index counts the centre too when it carries the tag there
         let mut count = count.saturating_sub(indexed.contains(&tag) as usize);
         paths.retain(|p| p != path);
+        let mut unlocked = 0;
         for (p, _, t) in &others {
             if t.contains(&tag) {
-                count += 1;
+                unlocked += 1;
                 paths.push(p.to_string());
             }
         }
+        count += unlocked;
         let notes = if count > TAG_MAX { vec![] } else { nodes(index, paths)? };
-        tags.push(TagGroup { tag: display, count, notes });
+        tags.push(TagGroup { tag: display, count, notes, unlocked });
     }
 
     let mut named: HashMap<String, Vec<String>> = HashMap::new();
@@ -222,12 +227,14 @@ mod tests {
         let c = v.connections(&p(&d, "C.md")).unwrap();
         assert_eq!(c.links_out.len(), 1);
         assert_eq!((c.links_out[0].title.as_str(), c.links_out[0].locked), ("L", true));
+        assert_eq!(c.links_out[0].preview, "");
         assert!(c.links_in.is_empty());
-        assert_eq!((c.tags[0].count, c.tags[0].notes.len()), (0, 0));
+        assert_eq!((c.tags[0].count, c.tags[0].notes.len(), c.tags[0].unlocked), (0, 0, 0));
         // unlocked: its links and tags come from memory
         let (v, d) = vault(&files, &id, true);
         let c = v.connections(&p(&d, "C.md")).unwrap();
         assert_eq!(paths(&c.links_in), [p(&d, "L.md.age")]);
         assert_eq!(paths(&c.tags[0].notes), [p(&d, "L.md.age")]);
+        assert_eq!((c.tags[0].count, c.tags[0].unlocked), (1, 1));
     }
 }
