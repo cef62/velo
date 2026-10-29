@@ -2,12 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** velo shows the notes one hop around the open note: links out, backlinks (alias-aware), notes sharing a tag, and unlinked mentions. It offers Ring and time-axis layouts, one-click **Link it**, and a **No links** filter for orphans. Agents get the same data through the MCP tool `get_connections`.
+**Goal:** velo shows the notes one hop around the open note: links out, backlinks (alias-aware), notes sharing a tag, and unlinked mentions. It offers Ring and time-axis layouts, one-click **Link it**, and a **No links** filter for orphans. Agents get the same data through the MCP tool `get_connections`, link mentions with the MCP tool `link_mention`, and find orphans with `search_notes(no_links)`.
 
 **Architecture:**
 - **One Rust function** builds the graph: `connections::build(index, unlocked, path, text) -> Connections`, reached through `Vault::connections(path)`.
   - The Tauri command `connections` calls it.
   - The MCP tool `get_connections` calls it through `NoteOps::connections`. `VaultOps` implements that (headless direct mode, and the app's vault through `AppOps::with`), so forwarded and direct calls run the same code.
+- **One rewrite function**, `text::link_mention_text`. The Tauri `link_mention` command (through `Vault::link_mention`) and the MCP `link_mention` tool both call it. The MCP tool writes through `NoteOps::write`, so it gets the agent revision and the editor routing like `edit_note`.
 - **One mention matcher** in `text.rs` serves both the graph's mentions and Link it's rewrite.
 - **Index:** no schema change. It adds queries over the existing `notes`, `links`, `tags` and `aliases` tables: alias-aware backlinks, names for mention matching, notes per tag, and a `no_links` flag on `search_page`.
 - **Writes:** only Link it writes. When the centre is open in the editor, the rewrite goes through the editor (existing `Editor.applyChange` + `changedSpan`). Otherwise the command saves it through `Vault::save_note`.
@@ -32,7 +33,7 @@
 - **Locked notes:**
   - **UI:** a locked note appears as a node, by filename title, when others link to it. Its own links, tags and mentions come from the unlocked map only. A locked centre that is not unlocked gives `Err("locked")`.
   - **MCP:** a locked centre is `not found` (existing `path_of`). Every node with `ops::locked(path)` is dropped from every group in `VaultOps::connections`.
-- **Link it:** `link_mention(path, target_title, expected_count, editor_text: Option<String>)`.
+- **Link it:** `link_mention(path, target_title, expected_count, editor_text: Option<String>)`. The MCP twin is `link_mention(title, target_title, expected_count, summary)`.
   - A count mismatch gives `Err("mention-moved")`; a locked path gives `Err("locked")`.
   - Only the first match is wrapped, as written: `Velo roadmap` becomes `[[Velo roadmap]]`.
 - **Shortcut:** `toggle_connections` = `Mod+Shift+KeyC`.
@@ -44,7 +45,9 @@
 ## Review Focus
 
 1. **Locked leak through MCP.** In app mode, `get_connections` on a plain note linked to and from an unlocked `*.md.age` returns no trace of it: no title, no tag group entry, no mention. Test in Task 5 (`AppOps`) and Task 3 (direct).
-2. **One implementation.** The Tauri command and the MCP tool both reach `connections::build`; there is no second graph or mention code path. Check in review with grep: `find_mentions` has exactly two callers, `build` and `link_mention_text`.
+2. **One implementation.** The Tauri command and the MCP tool both reach `connections::build`. Both Link it paths reach `text::link_mention_text`. Check in review with grep:
+   - `find_mentions` has exactly two callers, `build` and `link_mention_text`;
+   - `link_mention_text` has exactly two non-test callers, `Vault::link_mention` and the MCP `link_mention` arm.
 3. **Link it versus the editor.** Link it on the centre while it is open with unsaved edits makes no conflict copy, keeps the typed text, and ⌘Z undoes only the link. Test in Task 9 (controller).
 4. **Alias resolution scope.** `[[Nick]]` counts in the graph, the info panel, the orphan filter and `read_note` backlinks. Rename's link count and rewrite stay title-only. Test in Task 1.
 5. **Matcher edge cases.** Code spans, existing links, front matter, CRLF, non-ASCII titles, and overlapping names (`Velo` and `Velo roadmap`: longest wins). Test in Task 2.
@@ -160,7 +163,7 @@
 - [ ] **Step 4: Quality gate.** Expected: PASS.
 - [ ] **Step 5: Commit** `feat(connections): link_mention command`.
 
-### Task 5: MCP tool `get_connections`
+### Task 5: MCP tools `get_connections` and `link_mention`
 
 **Files:**
 - Modify: `src-tauri/src/agent/ops.rs` (trait + `VaultOps`), `src-tauri/src/agent/app_ops.rs`, `src-tauri/src/agent/tools.rs`, `src-tauri/src/agent/mod.rs` (test only)
@@ -174,6 +177,12 @@
   - Description: "Notes one hop around a note: outgoing [[links]], backlinks (alias links included), notes sharing each tag (tags on more than 15 notes give only the count), and unlinked mentions (titles or aliases in this note's text without [[ ]]). To link a mention, read_note then edit_note wrapping the words in [[ ]]."
 - The `"get_connections"` arm in `tools::call` uses `path_of`, then `ops.connections`. Its result is `{title, created, modified, links_out: [{title, created, modified}], links_in: [...], tags: [{tag, count, titles}], mentions: [{title, name, count}]}`, with dates through `iso()` and no paths.
 - It is not added to `is_write`.
+- `ToolSpec { name: "link_mention", … }` with input schema `{"type":"object","properties":{"title":{"type":"string"},"target_title":{"type":"string"},"expected_count":{"type":"integer","minimum":1},"summary":{"type":"string"}},"required":["title","target_title","expected_count","summary"]}`.
+  - Description: "Turn an unlinked mention into a [[link]]: wraps the first unlinked occurrence of `target_title` (a mention `name` from get_connections) in `title`'s text, as written. `expected_count` is the mention's `count`; if the note changed since, nothing changes. Returns the new hash." plus `conventions!()`.
+- The `"link_mention"` arm is added to `is_write`, so `summary` is required.
+  - It calls `path_of(title)`, then `ops.read`, then `text::link_mention_text(&doc.text, target_title, expected_count)`, then `ops.write(&path, &new, &doc.hash, summary)`.
+  - The `mention-moved` error becomes `"mention-moved: call get_connections again. Nothing was changed."`.
+  - It returns `{title, hash}`.
 
 - [ ] **Step 1: Write failing tests:**
   - `tools.rs`, `get_connections_returns_titles_not_paths`: the Task 3 `one_hop_groups` vault via `vault(…)`. Expect the fields above, `links_out[0]["title"] == "A"`, and no `"path"` key anywhere in the JSON (walk the whole value).
@@ -182,15 +191,28 @@
   - `app_ops.rs`, `get_connections_hides_unlocked_locked_notes`: with `state()` (P links `[[L]]`, unlocked L links `[[P]]`), `tools::call(&mut AppOps::new(&st, &never), "get_connections", {"title": "P"})` → `links_out` and `links_in` are empty, and `serde_json::to_string(&r)` contains neither `"L"` nor `"secret"`.
   - `app_ops.rs`, `get_connections_runs_the_same_builder_in_app_mode`: the same vault through `AppOps` and through `DirectOps` gives equal JSON for a plain-only vault.
   - `mod.rs`, `gate_routes_get_connections`: `get_connections` on a direct vault returns `links_out` (proves it is in `TOOL_SPECS` and passes the gate). With `fake_app` running, it returns `{"fake": "get_connections"}`.
+  - `tools.rs`, `link_mention_direct_writes_link_and_revision` (direct mode): `C.md` = `"see Nick and nick"`, `Nick.md` exists. `link_mention({title: "C", target_title: "Nick", expected_count: 2, summary: "s"})`:
+    - the file becomes `"see [[Nick]] and nick"`;
+    - the result's `hash` equals the file's hash;
+    - `agent_revs` lists one revision with summary `"s"`.
+  - `tools.rs`, `link_mention_stale_count_changes_nothing`: `expected_count: 1` on the same note → `Err` starting with `"mention-moved"`. The file bytes are unchanged and no agent revision is left (the existing `unsnapshot`).
+  - `tools.rs`, `link_mention_locked_is_not_found`: `title` naming `L.md.age`, and a plain twin of a locked note → `Err("not found")`, with no write.
+  - `tools.rs`, `link_mention_requires_summary`: without `summary` → the existing "summary is required" error.
+  - `app_ops.rs`, `link_mention_routes_through_the_editor_when_open` (app mode): the route closure answers the `{"kind": "replace", …}` request with `{"hash": "h"}`. Assert:
+    - the request's `insert` is the rewritten text and its `base` is the read hash;
+    - the tool returns `hash == "h"`;
+    - the file on disk is untouched (the editor writes).
+  - `app_ops.rs`, `link_mention_saves_directly_when_not_open` (app mode): the route answers `"not-open"`. The file gains the link, and the path is in `ops.touched`.
+  - `app_ops.rs`, `link_mention_refuses_unlocked_locked_note`: `title: "L"` with `state()` → `Err("not found")`, and the route is never called (`never`).
 - [ ] **Step 2: Run** `cargo test agent::`. Expected: FAIL.
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Quality gate.** Expected: PASS.
-- [ ] **Step 5: Commit** `feat(mcp): get_connections tool`.
+- [ ] **Step 5: Commit** `feat(mcp): get_connections and link_mention tools`.
 
-### Task 6: Orphan filter (backend)
+### Task 6: Orphan filter (backend and `search_notes(no_links)`)
 
 **Files:**
-- Modify: `src-tauri/src/index.rs`, `src-tauri/src/vault.rs`, `src-tauri/src/commands.rs`
+- Modify: `src-tauri/src/index.rs`, `src-tauri/src/vault.rs`, `src-tauri/src/commands.rs`, `src-tauri/src/agent/ops.rs`, `src-tauri/src/agent/app_ops.rs`, `src-tauri/src/agent/tools.rs`
 
 **Interfaces — Produces:**
 - `Index::search_page_where(&self, query, sort, offset, limit, tags, unlocked, no_links: bool) -> anyhow::Result<Page>`. The existing `search_page` becomes a one-line call with `no_links = false`, which keeps its ~30 test call sites unchanged.
@@ -198,14 +220,19 @@
   - It also adds `NOT EXISTS` (an outgoing link resolving to a title or alias) and `NOT EXISTS` (an incoming link to `title_folded` or an alias of the note).
 - `Vault::search_where(…, no_links)`, with `Vault::search` delegating to it in the same way.
 - The Tauri `search` command gains `no_links: bool`.
+- MCP: `NoteOps::search(&self, query, tags, offset, no_links: bool)`.
+  - `VaultOps::search` calls `vault.search_where(…, no_links)`, keeping its locked filtering; `AppOps` passes it through.
+  - The `search_notes` schema gains `"no_links":{"type":"boolean"}`.
+  - The description gains: "`no_links` true keeps only notes with no [[links]] in or out (orphans; alias links count)."
 
 - [ ] **Step 1: Write failing tests** (`index.rs`):
   - `no_links_lists_orphans_only`: in `a.md` → `[[B]]`, `B.md`, `c.md`, `Nick.md` (alias Nicholas), `d.md` → `[[Nicholas]]`, `e.md` → `[[Missing]]`. `no_links` gives `["c.md", "e.md"]`: a link to a missing note doesn't count.
   - `no_links_excludes_locked_and_respects_tags_and_total`: encrypted rows never appear. `total` matches the listed rows. A tag filter still applies.
+  - `agent/tools.rs`, `search_notes_no_links_lists_orphans`: in a vault with `a.md` → `[[B]]`, `B.md`, `c.md`, and a locked `s.md.age`, `search_notes({no_links: true})` titles are `["c"]`. Without the flag, the titles are all three plain notes.
 - [ ] **Step 2: Run** `cargo test no_links`. Expected: FAIL.
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Quality gate.** Expected: PASS.
-- [ ] **Step 5: Commit** `feat(connections): No links filter query`.
+- [ ] **Step 5: Commit** `feat(connections): No links filter query and search_notes(no_links)`.
 
 ### Task 7: Frontend wiring (mode, shortcut, setting, API, info panel)
 
@@ -306,24 +333,24 @@
 - [ ] **Step 1:** README:
   - a "Connections" section: opening it, layouts, Link it, re-centre, keyboard, the No links filter, and alias links;
   - the shortcut in the table;
-  - `get_connections` in the Agents (MCP) tool list.
+  - `get_connections` and `link_mention` in the Agents (MCP) tool list, and `no_links` on `search_notes`.
 - [ ] **Step 2:** Changeset:
   ```md
   ---
   "velo": minor
   ---
 
-  Added a Connections view that showed the links, backlinks, shared tags and unlinked mentions around a note, with one-click Link it, a No links filter for orphans, and a get_connections tool for agents.
+  Added a Connections view that showed the links, backlinks, shared tags and unlinked mentions around a note, with one-click Link it, a No links filter for orphans, and MCP tools for agents to read connections, link mentions and find orphans.
   ```
 - [ ] **Step 3: Full quality gate** (CONTRIBUTING, all five checks): `pnpm exec tsc --noEmit`, `pnpm test`, `cd src-tauri && cargo test`, `pnpm build:app` (or `cargo build --release`), the perf test from Task 3, docs, staleness (no unused deps), and capabilities (no new plugin permissions are expected). Report it as a table.
 - [ ] **Step 4: Commit** `docs(connections): README and changeset`.
 
 ### Task 11: PR and adversarial review
 
-- [ ] **Step 1:** Push `feat/connections` and open the PR: title `feat: Connections view and get_connections MCP tool`, body with `## Summary` and `## Test plan`. The unticked items are the spec's owner checks (section 13).
+- [ ] **Step 1:** Push `feat/connections` and open the PR: title `feat: Connections view and MCP connection tools`, body with `## Summary` and `## Test plan`. The unticked items are the spec's owner checks (section 13).
 - [ ] **Step 2:** Run the adversarial review per CONTRIBUTING. The attack list must cover:
   - every path that could leak a locked note's title, tags or text through `get_connections`, in app mode (unlocked map) and direct mode (plain twin);
-  - every writer to a note during Link it (editor, autosave, the backend save, the watcher reload, an MCP write arriving at the same time);
+  - every writer to a note during Link it (editor, autosave, the backend save, the watcher reload, an MCP `link_mention` or `edit_note` arriving at the same time), in both the UI and the MCP path;
   - matcher inputs: code, links, front matter, CRLF, non-ASCII, overlapping names;
   - alias resolution versus rename.
 - [ ] **Step 3:** Fix findings with regression tests and follow the strike rule. Reply to bot comments. Merging needs the maintainer's go-ahead (`--admin`).

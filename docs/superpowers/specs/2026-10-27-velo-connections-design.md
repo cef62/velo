@@ -113,9 +113,15 @@ Agents get the same data through the shipped MCP server (`src-tauri/src/agent/`)
 - **Locked notes**, exactly as other tools:
   - a locked centre (or a plain twin of one) is "not found", through the existing `path_of`;
   - `VaultOps::connections` drops every node whose path is `locked()` from every group, before any title leaves. This covers unlocked-in-app notes, whose links and tags the app holds in memory.
-- **No `link_mention` tool (my call):** `edit_note` already does it with an exact anchor, a revision with summary, and the editor routing. A dedicated tool would duplicate that. Add it only if agents keep failing the anchor.
-- **No orphan tool or `no_links` search flag for agents (my call):** nobody asked. It would be one more `search_notes` argument over the same `search_page` flag if wanted.
-- **Changed alongside:** `read_note`'s `backlinks` becomes alias-aware, through the same index query as the graph (section 3).
+- **Tool `link_mention(title, target_title, expected_count, summary)`** (owner, 2026-10-29). It is the MCP form of Link it, and a write tool on the existing write conventions.
+  - `title` is the note to edit (the centre of a `get_connections` call). `target_title` is a mention's `name`, and `expected_count` is its `count`, both from `get_connections`.
+  - The rewrite is the same Rust function the Tauri `link_mention` command uses, `text::link_mention_text`. There is no second matcher or rewrite.
+  - The write goes through `NoteOps::write`, like `edit_note`: an agent revision with the `summary`, then the editor routing when the note is open in the app (an undoable edit), else the normal save path, in both app-routed and direct mode.
+  - A stale `expected_count` changes nothing and fails with "mention-moved: call get_connections again".
+  - Locked notes: the edited note is "not found" through `path_of`, as for every tool.
+  - It returns `{ title, hash }`, like the other write tools.
+- **`search_notes` gets `no_links: bool`** (owner, 2026-10-29): the same `search_page` flag as the app's No links filter (section 6). Locked notes are already excluded by both the flag and the tool.
+- **Changed alongside (owner):** `read_note`'s `backlinks` becomes alias-aware, through the same index query as the graph (section 3).
 
 ## 10. Docs and settings
 
@@ -145,7 +151,7 @@ Agents get the same data through the shipped MCP server (`src-tauri/src/agent/`)
 
 ## 14. Changes in the 2026-10-29 amendment
 
-- Added section 9 (MCP).
+- Added section 9 (MCP). Owner answers, 2026-10-29: add the `link_mention` tool and `search_notes(no_links)`; `read_note` backlinks become alias-aware; keep all three layouts; rename stays title-only.
 - Section 2: dropped the separate title-bar button; the switch segment is the button. The Tasks build-order note is done.
 - Section 3: rename stays title-only (alias links survive a rename). Outgoing links come from the text plus the existing `find_titles`; no schema change.
 - Section 5: `Editor.applyChange` and `changedSpan` already exist. Link it saves directly only when the centre isn't open in the editor.
