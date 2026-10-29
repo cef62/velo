@@ -536,7 +536,7 @@ impl Index {
     /// Sources linking to the note by title or alias, itself excluded. `backlinks` stays title-only (rename).
     pub fn linked_from(&self, path: &str) -> anyhow::Result<Vec<String>> {
         let mut st = self.db.prepare(
-            "SELECT src FROM links WHERE src<>?1 AND dst_folded IN (SELECT title_folded FROM notes WHERE path=?1 UNION SELECT alias_folded FROM aliases WHERE path=?1) ORDER BY src",
+            "SELECT DISTINCT src FROM links WHERE src<>?1 AND dst_folded IN (SELECT title_folded FROM notes WHERE path=?1 UNION SELECT alias_folded FROM aliases WHERE path=?1) ORDER BY src",
         )?;
         Ok(st.query_map([path], |r| r.get(0))?.collect::<Result<_, _>>()?)
     }
@@ -831,6 +831,10 @@ mod tests {
         let i = nick();
         assert_eq!(i.linked_from("Nick.md").unwrap(), vec!["a.md", "b.md"]);
         assert_eq!(i.backlinks("Nick").unwrap(), vec!["b.md"]);
+    }
+    #[test] fn linked_from_dedupes_title_and_alias_links() {
+        let i = idx(&[("Nick.md", "---\naliases: [Nicholas]\n---\n", 1), ("a.md", "[[Nick]] [[Nicholas]]", 2)]);
+        assert_eq!(i.linked_from("Nick.md").unwrap(), vec!["a.md"]);
     }
     #[test] fn linked_from_skips_self_and_unresolved() {
         let i = idx(&[("Nick.md", "[[Nick]] [[nobody]]", 1)]);
