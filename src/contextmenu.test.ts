@@ -7,10 +7,15 @@ const item = (m: ReturnType<typeof menuModel>, id: string) => m.find((x) => x !=
 
 test("model order and labels (mac, plain note)", () => {
   const m = menuModel({ encrypted: false, platform: "mac", keys, isMac: true });
-  expect(m.map((x) => (x === "separator" ? "-" : x.id))).toEqual(["open", "rename", "toggle_lock", "copy_link", "reveal", "-", "delete_note"]);
+  expect(m.map((x) => (x === "separator" ? "-" : x.id))).toEqual(["open", "rename", "merge_note", "toggle_lock", "copy_link", "reveal", "-", "delete_note"]);
+  expect(item(m, "merge_note")).toMatchObject({ text: "Merge into…" });
   expect(item(m, "toggle_lock")).toMatchObject({ text: "Lock" });
   expect(item(m, "reveal")).toMatchObject({ text: "Show in Finder" });
   expect(item(m, "delete_note")).toMatchObject({ text: "Move to Trash…", accelerator: "CmdOrCtrl+Backspace" });
+});
+
+test("merge entry hidden for encrypted notes", () => {
+  expect(item(menuModel({ encrypted: true, platform: "mac", keys, isMac: true }), "merge_note")).toBeUndefined();
 });
 
 test("unlock label and platform reveal text", () => {
