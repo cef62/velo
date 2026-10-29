@@ -127,11 +127,35 @@ fn apply_watch(st: &AppState, base: &Path, batch: Option<Vec<PathBuf>>) -> Vec<S
         Some(v) if watch::applies_to(&v.store.dir, base) => Some(f(v)),
         _ => None,
     };
-    let Some(paths) = batch else { return with(&mut |v| v.rescan(id.as_deref())).unwrap_or_default() };
+    // A rescan lists the stale paths under the lock, then applies them in the same chunks; a big one as a bulk
+    // re-index. Saves and locks between its chunks are erased by its `end_bulk`.
+    let (paths, bulk) = match batch {
+        Some(p) => (p, false),
+        None => match st.vault.lock().unwrap().as_ref() {
+            Some(v) if watch::applies_to(&v.store.dir, base) => match v.stale_paths() {
+                Ok((p, replaced)) => {
+                    let bulk = replaced >= crate::vault::BULK && v.index.begin_bulk().is_ok();
+                    (p, bulk)
+                }
+                Err(_) => return vec![],
+            },
+            _ => return vec![],
+        },
+    };
     let mut changed = Vec::new();
-    for chunk in paths.chunks(100) {
-        let Some(c) = with(&mut |v| v.apply_fs_changes(chunk, id.as_deref())) else { break };
+    // A bulk's chunks are bigger, so fewer commits rewrite the same pages (10k notes with `begin_bulk`'s settings:
+    // chunks of 700 write about a third of what 100 do), each held ~0.4 s; a watcher batch stays at 100.
+    for chunk in paths.chunks(if bulk { 700 } else { 100 }) {
+        let Some(c) = with(&mut |v| if bulk { v.apply_bulk_chunk(chunk, id.as_deref()) } else { v.apply_fs_changes(chunk, id.as_deref()) }) else { break };
         changed.extend(c);
+    }
+    if bulk {
+        // a vault switch mid-rescan dropped it: `Index`'s drop ended the bulk
+        with(&mut |v| {
+            v.index.finish_bulk(); // a failure (disk full) is retried by the next lock, or at close or open
+            v.index.checkpoint().ok(); // also after a chunk that ended the bulk itself (a note locked elsewhere)
+            vec![]
+        });
     }
     changed
 }

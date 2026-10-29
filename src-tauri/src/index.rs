@@ -152,7 +152,10 @@ impl Index {
         let db = Connection::open(db_path)?;
         // journal_mode returns a row, so read it instead of executing.
         let _: String = db.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
-        db.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON;")?;
+        // rusqlite already sets busy_timeout to 5 s: a second connection (`velo --mcp` direct mode, a reopen) waits
+        // out a batch chunk. journal_size_limit: an FTS merge can grow the WAL to ~76 MB; shrink it back when the WAL
+        // restarts.
+        db.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON; PRAGMA journal_size_limit=8388608;")?;
         // Older indexes lack tags, dates, aliases or tasks, or parsed front matter differently: drop them so the
         // vault's reconcile reindexes every note.
         // DROP, not DELETE: deleting every FTS5 row one by one took ~1 min at 10k notes.
@@ -164,9 +167,88 @@ impl Index {
             db.execute_batch(&format!("DROP TABLE IF EXISTS tasks_stale; DROP TABLE IF EXISTS tasks; DROP TABLE IF EXISTS notes_fts; DROP TABLE IF EXISTS notes; DROP TABLE IF EXISTS links; DROP TABLE IF EXISTS tags; DROP TABLE IF EXISTS aliases; PRAGMA user_version={SCHEMA_VERSION};"))?;
         }
         db.execute_batch(SCHEMA)?;
-        // FTS5 deletes otherwise leave old segments (all trigrams) in notes_fts_data.
-        db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1);")?;
-        Ok(Index { db })
+        let index = Index { db };
+        if index.bulk_off() {
+            // a bulk re-index was interrupted (crash, kill), or runs in another process: deleted text may sit in the
+            // FTS segments. A failure (disk full) must not keep the vault closed: the next lock retries.
+            index.finish_bulk();
+        } else {
+            index.end_bulk()?; // turns secure-delete on in a new index
+        }
+        Ok(index)
+    }
+
+    /// Before a bulk re-index: FTS5 'secure-delete' made replacing a note's row cost ~13 ms (it rewrites the leaves of
+    /// every trigram of the old body: 135 s for 10k notes). Stored in the index, so a crash leaves it off for `end_bulk`.
+    /// Writes are cut too (10k notes, chunks of 100: 2.2-3 GB; main 0.65 GB): FTS merging is off (the closing rebuild
+    /// throws merged segments away), and this connection's WAL autocheckpoint waits for 16000 pages instead of 1000
+    /// (each checkpoint copies pages that later chunks rewrite again). 64 MB caps the WAL: unbounded it reached ~300 MB,
+    /// enough to fill a nearly full disk; the cap costs ~0.1 GB per 10k-note bulk.
+    pub fn begin_bulk(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(self.room_for_bulk(), "too little free disk space for a bulk re-index");
+        self.autocheckpoint(16000)?;
+        Ok(self.db.execute_batch(
+            "BEGIN IMMEDIATE; INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 0); INSERT INTO notes_fts(notes_fts, rank) VALUES('automerge', 0); INSERT INTO notes_fts(notes_fts, rank) VALUES('crisismerge', 1000); COMMIT;",
+        ).inspect_err(|_| {
+            _ = self.db.execute_batch("ROLLBACK");
+            _ = self.autocheckpoint(1000);
+        })?)
+    }
+
+    /// Turn FTS5 'secure-delete' on (FTS5 deletes otherwise leave old segments, all trigrams, in notes_fts_data). If it
+    /// was off, anything deleted meanwhile (a bulk, or a lock or save during it, on any connection) is still in the
+    /// segments: 'rebuild' the FTS index from the live rows (secure_delete zeroes the freed pages) and truncate the WAL.
+    /// One write transaction, so a failed rebuild (disk full) leaves it off for the next open, and no other connection
+    /// can turn it off between the read and the write.
+    pub fn end_bulk(&self) -> anyhow::Result<()> {
+        self.autocheckpoint(1000)?; // SQLite's default
+        self.db.execute_batch("BEGIN IMMEDIATE")?;
+        let off = (|| -> anyhow::Result<bool> {
+            let off = self.db.query_row("SELECT v FROM notes_fts_config WHERE k='secure-delete'", [], |r| r.get::<_, i64>(0)).optional()? == Some(0);
+            // FTS5's default merge settings, as before `begin_bulk`
+            self.db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1); INSERT INTO notes_fts(notes_fts, rank) VALUES('automerge', 4); INSERT INTO notes_fts(notes_fts, rank) VALUES('crisismerge', 16);")?;
+            if off {
+                self.db.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild');")?;
+            }
+            Ok(off)
+        })()
+        .inspect_err(|_| _ = self.db.execute_batch("ROLLBACK"))?;
+        self.commit()?;
+        if off {
+            // shortcut: a reader (`velo --mcp`) makes this checkpoint a no-op, as on main; the next one copies the zeroed pages
+            self.checkpoint()?;
+        }
+        Ok(())
+    }
+
+    /// `end_bulk` if a bulk left secure-delete off (interrupted, failed, or still running in another process); a
+    /// failure is logged and retried by the next lock or open.
+    pub fn finish_bulk(&self) {
+        self.autocheckpoint(1000).ok(); // another connection may have ended this connection's bulk
+        if self.bulk_off() && let Err(e) = self.end_bulk() {
+            let msg = format!("velo: erasing deleted text from the search index failed, retried at the next lock: {e}");
+            crate::log::line(&msg);
+            eprintln!("{msg}"); // `velo --mcp` direct mode has no velo.log
+        }
+    }
+
+    /// Space for a whole bulk: its WAL (64 MB cap, ~80 MB peak), then at its end the rebuild's WAL (about the index)
+    /// and the checkpoint growing the file. Without it, a bulk could fill the disk, and its finish and a lock's
+    /// checkpoint would fail and keep plaintext until there is room.
+    fn room_for_bulk(&self) -> bool {
+        let Some(path) = self.db.path().map(Path::new) else { return true };
+        let need = (128 << 20) + 2 * std::fs::metadata(path).map_or(0, |m| m.len());
+        free_space(path.parent().unwrap_or(path)).is_none_or(|free| free >= need)
+    }
+
+    fn autocheckpoint(&self, pages: i64) -> anyhow::Result<()> {
+        self.db.query_row(&format!("PRAGMA wal_autocheckpoint={pages}"), [], |_| Ok(()))?;
+        Ok(())
+    }
+
+    /// FTS secure-delete is stored off: a bulk runs (here or in another process) or was cut short.
+    pub fn bulk_off(&self) -> bool {
+        self.db.query_row("SELECT v = 0 FROM notes_fts_config WHERE k='secure-delete'", [], |r| r.get(0)).unwrap_or(false)
     }
 
     /// Fold the WAL into the main file and truncate it (no-op outside WAL mode).
@@ -182,9 +264,22 @@ impl Index {
     }
 
     /// Group the following upserts/removes into one transaction until `commit`: one WAL append per batch, not
-    /// per note. Each note keeps its own savepoint, so a failing note rolls back alone.
+    /// per note. Each note keeps its own savepoint, so a note's SQL error rolls back that note alone; an error that
+    /// aborts the transaction (disk full, I/O) loses the whole batch, and `in_batch` turns false.
     pub fn begin(&self) -> anyhow::Result<()> {
-        Ok(self.db.execute_batch("BEGIN")?)
+        // IMMEDIATE: a batch reads before it writes (twin checks), and upgrading that read lock fails at once under
+        // another writer instead of waiting out busy_timeout.
+        Ok(self.db.execute_batch("BEGIN IMMEDIATE")?)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn raw(&self) -> &Connection {
+        &self.db
+    }
+
+    /// A `begin` batch is open (false after an error aborted it).
+    pub fn in_batch(&self) -> bool {
+        !self.db.is_autocommit()
     }
 
     /// Commit a `begin` batch; on failure roll it back so the connection is usable (the next diff reindexes it).
@@ -235,11 +330,45 @@ impl Index {
     }
 
     pub fn remove(&mut self, path: &str) -> anyhow::Result<()> {
-        let tx = self.db.savepoint()?;
-        for sql in DELETES {
-            tx.execute(sql, [path])?;
+        self.remove_with(path, false)
+    }
+
+    /// `remove` of text that must be erased now (a note being locked). Outside a batch it first ends a bulk (best
+    /// effort, its own transaction: a bulk's unmerged segments made each secure delete ~0.7 s at 10k); a batch's caller
+    /// does that before its batch. If the bulk is still on, FTS secure-delete is on for this delete only, so the
+    /// bulk's own leftovers stay marked for `end_bulk`.
+    pub fn remove_erasing(&mut self, path: &str) -> anyhow::Result<()> {
+        if !self.in_batch() {
+            self.finish_bulk();
         }
-        Ok(tx.commit()?)
+        self.remove_with(path, true)
+    }
+
+    fn remove_with(&mut self, path: &str, erase: bool) -> anyhow::Result<()> {
+        // Holds the write lock before reading (IMMEDIATE, or the caller's IMMEDIATE batch): upgrading a read lock fails
+        // at once under another writer instead of waiting out busy_timeout.
+        let outer = self.db.is_autocommit();
+        self.db.execute_batch(if outer { "BEGIN IMMEDIATE" } else { "SAVEPOINT remove" })?;
+        let r = (|| -> anyhow::Result<()> {
+            let off = erase && self.db.query_row("SELECT v = 0 FROM notes_fts_config WHERE k='secure-delete'", [], |r| r.get(0)).optional()?.unwrap_or(false);
+            if off {
+                self.db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1);")?;
+            }
+            for sql in DELETES {
+                self.db.execute(sql, [path])?;
+            }
+            if off {
+                self.db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 0);")?;
+            }
+            Ok(())
+        })();
+        match r {
+            Ok(()) => Ok(self.db.execute_batch(if outer { "COMMIT" } else { "RELEASE remove" })?),
+            Err(e) => {
+                _ = self.db.execute_batch(if outer { "ROLLBACK" } else { "ROLLBACK TO remove; RELEASE remove" });
+                Err(e)
+            }
+        }
     }
 
     pub fn search_page(&self, query: &str, sort: Sort, offset: usize, limit: usize, tags: &[String], unlocked: &HashMap<String, String>) -> anyhow::Result<Page> {
@@ -402,6 +531,27 @@ impl Index {
     pub fn backlinks(&self, title: &str) -> anyhow::Result<Vec<String>> {
         let mut st = self.db.prepare("SELECT DISTINCT src FROM links WHERE dst_folded=? ORDER BY src")?;
         Ok(st.query_map([fold(title)], |r| r.get(0))?.collect::<Result<_, _>>()?)
+    }
+}
+
+#[cfg(unix)]
+fn free_space(dir: &Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
+    let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
+    (unsafe { libc::statvfs(c.as_ptr(), &mut s) } == 0).then(|| s.f_bavail as u64 * s.f_frsize as u64)
+}
+
+// shortcut: no free-space check on Windows (bulks always run), add GetDiskFreeSpaceExW if full disks show up there
+#[cfg(not(unix))]
+fn free_space(_: &Path) -> Option<u64> {
+    None
+}
+
+/// A bulk cut short (the app switched vaults mid-rescan) ends here, not at this index's next open, which may never come.
+impl Drop for Index {
+    fn drop(&mut self) {
+        self.finish_bulk();
     }
 }
 
@@ -695,5 +845,31 @@ mod tests {
         assert_eq!(stale_marks(&i), 0); // the rolled-back mark is gone too
         drop(i);
         assert_eq!(Index::open(&db).unwrap().known().unwrap().len(), 3); // reopen keeps the index: no rebuild
+    }
+    /// Re-indexing runs every DELETE once per note: a scan instead of an index search is O(notes²) over a rescan.
+    #[test] fn note_deletes_search_an_index() {
+        let i = idx(&[]);
+        for sql in DELETES {
+            let mut st = i.db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let plan: Vec<String> = st.query_map(["x"], |r| r.get(3)).unwrap().map(Result::unwrap).collect();
+            // FTS5 by rowid shows as a virtual-table scan with an equality constraint on the rowid.
+            assert!(plan.iter().all(|p| !p.starts_with("SCAN ") || p.contains("VIRTUAL TABLE INDEX 0:=")), "{sql}: {plan:?}");
+        }
+    }
+    #[test] fn second_connection_waits_for_a_batch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = tmp.path().join("index.db");
+        let (mut a, mut b) = (Index::open(&db).unwrap(), Index::open(&db).unwrap());
+        let nf = |t: &str| NoteFile { title: t.into(), encrypted: false };
+        let meta = Meta { mtime: 1, size: 1, birth: 0 };
+        a.begin().unwrap();
+        a.upsert("a.md", &nf("a"), &meta, Some("alpha")).unwrap();
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            a.commit().unwrap();
+        });
+        b.upsert("b.md", &nf("b"), &meta, Some("beta")).unwrap(); // "database is locked" with busy_timeout 0
+        t.join().unwrap();
+        assert_eq!(b.known().unwrap().len(), 2);
     }
 }

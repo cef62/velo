@@ -170,6 +170,10 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running velo")
         .run(|app, ev| {
+            if let tauri::RunEvent::Exit = ev {
+                // the process exits without dropping state: drop the vault so an interrupted bulk re-index ends here
+                drop(app.state::<commands::AppState>().vault.lock().map(|mut v| v.take()));
+            }
             if let tauri::RunEvent::Exit = ev
                 && let Some(agent) = app.try_state::<agent::listener::AgentState>()
             {
