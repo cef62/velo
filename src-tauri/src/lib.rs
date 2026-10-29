@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod commands;
+pub mod connections;
 pub mod crypto;
 pub mod frontmatter;
 pub mod index;
@@ -150,6 +151,7 @@ pub fn run() {
             commands::rename_note,
             commands::backlink_count,
             commands::linked_from_count,
+            commands::connections,
             commands::lock_note,
             commands::unlock_note,
             commands::lock_all,

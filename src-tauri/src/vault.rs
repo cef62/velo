@@ -1,3 +1,4 @@
+use crate::connections::{self, Connections};
 use crate::crypto;
 use crate::frontmatter;
 use crate::index::{Index, Meta, Page, Sort, TagCount, TaskRow, all_tags, effective_dates};
@@ -424,6 +425,19 @@ impl Vault {
     /// Notes linking here by title or alias (the graph and info panel); rename's `backlink_count` is title-only.
     pub fn linked_from_count(&self, path: &str) -> anyhow::Result<usize> {
         Ok(self.index.linked_from(path)?.len())
+    }
+
+    /// The one-hop graph around `path`; an encrypted note gives `locked` unless unlocked.
+    pub fn connections(&self, path: &str) -> anyhow::Result<Connections> {
+        let p = Path::new(path);
+        let plain;
+        let text = if self.note(p)?.encrypted {
+            self.unlocked.get(path).ok_or_else(|| anyhow!("locked"))?
+        } else {
+            plain = lossy(&self.store.read(p)?);
+            &plain
+        };
+        connections::build(&self.index, &self.unlocked, path, text)
     }
 
     pub fn backlink_count(&self, title: &str) -> anyhow::Result<usize> {
