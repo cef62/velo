@@ -88,3 +88,11 @@ test("tag source ranks by count, label and detail", () => {
   const res = tagSource({ ...source([]), tags: () => tags })(new CompletionContext(s, 8, false)) as CompletionResult;
   expect(res.options.map((o) => [o.label, o.detail])).toEqual([["Project", "3"], ["proj", "1"]]);
 });
+
+test("tagContext null inside inline code", () => expect(tctx("`see #pro`", 9)).toBeNull());
+test("tagContext null inside fenced code", () => expect(tctx("```\nsee #pro")).toBeNull());
+test("tagContext null inside a bare URL or autolink", () => {
+  // "(" is a valid tag start, so only the URL/Autolink node blocks these
+  for (const d of ["http://x.io/(#pro", "<http://x.io/(#pro>"]) expect(tctx(d, d.indexOf("pro") + 3), d).toBeNull();
+});
+test("tagContext opens in plain text (control)", () => expect(tctx("see #pro")).not.toBeNull());
