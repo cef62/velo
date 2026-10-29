@@ -28,6 +28,32 @@ pub fn toggled_text(text: &str, line: usize, expected: &str) -> anyhow::Result<(
     Ok((lines.join("\n"), new.strip_suffix('\r').unwrap_or(&new).to_string()))
 }
 
+/// `target` with `source` merged in: the source's front-matter tags, its aliases and its title as aliases (except one
+/// naming the target), and its body appended under `## {source_title}`. Keeps the target's line endings.
+pub fn merged_text(target: &str, target_title: &str, source: &str, source_title: &str) -> Result<String, String> {
+    let src_fm = frontmatter::parse(source);
+    let (tags, mut aliases) = src_fm.map_or((vec![], vec![]), |f| (f.tags, f.aliases));
+    let t = frontmatter::set_tags(target, &tags, &[], true)?.unwrap_or_else(|| target.to_string());
+    aliases.push(source_title.to_string());
+    aliases.retain(|a| fold(a) != fold(target_title));
+    // the alias block is written even without write_front_matter: it keeps [[Source]] resolving
+    let t = frontmatter::add_aliases(&t, &aliases)?.unwrap_or(t);
+    let eol = if target.contains("\r\n") { "\r\n" } else { "\n" };
+    let src = frontmatter::body(source);
+    let start = src.len() - src.trim_start().len();
+    let src = &src[src[..start].rfind('\n').map_or(0, |i| i + 1)..]; // leading blank lines dropped, indentation kept
+    let src = src.trim_end().replace("\r\n", "\n").replace('\n', eol);
+    let head = t.trim_end();
+    let mut out = head.to_string();
+    if !head.is_empty() {
+        out.push_str(eol);
+        if !frontmatter::body(&t).trim().is_empty() { out.push_str(eol); }
+    }
+    out.push_str(&format!("## {source_title}{eol}"));
+    if !src.is_empty() { out.push_str(&format!("{eol}{src}{eol}")); }
+    Ok(out)
+}
+
 /// Lines in `text`'s front-matter block (0 without one).
 pub fn fm_lines(t: &str) -> usize {
     frontmatter::parse(t).map_or(0, |f| t[..f.end].matches('\n').count())
@@ -66,6 +92,14 @@ pub struct NoteMeta {
 pub struct RenameResult {
     pub path: String,
     pub rewritten: usize,
+}
+
+/// `trash_error`: the source could not be moved to the Trash (the merge itself is done).
+#[derive(Serialize, Debug)]
+pub struct MergeResult {
+    pub path: String,
+    pub rewritten: usize,
+    pub trash_error: Option<String>,
 }
 
 pub struct Vault {
@@ -439,31 +473,64 @@ impl Vault {
         let body = (!nf.encrypted).then(|| lossy(&self.store.read(&to).unwrap_or_default()));
         self.reindex(&to, body.as_deref()).ok();
 
+        let rewritten = if rewrite_links_too { self.rewrite_backlinks(&old.title, &nf.title, "") } else { 0 };
+        Ok(RenameResult { path: to_s, rewritten })
+    }
+
+    /// Rewrite `[[old_title]]` links to `new_title` in every rewritable note but `skip`; returns the links rewritten.
+    /// Never fails: an unreadable or locked source is skipped.
+    fn rewrite_backlinks(&mut self, old_title: &str, new_title: &str, skip: &str) -> usize {
         let mut rewritten = 0;
-        if rewrite_links_too {
-            let batched = self.index.begin().is_ok();
-            let mut done = Vec::new();
-            for src in self.index.backlinks(&old.title).unwrap_or_default() {
-                let sp = Path::new(&src);
-                if !self.rewritable(sp) {
-                    continue;
-                }
-                let Ok(bytes) = self.store.read(sp) else { continue };
-                let (new_text, n) = rewrite_links(&lossy(&bytes), &old.title, &nf.title);
-                if n > 0 && self.store.write_atomic(sp, new_text.as_bytes()).is_ok() {
-                    self.reindex(sp, Some(&new_text)).ok();
-                    rewritten += n;
-                    done.push((src, new_text));
-                }
+        let batched = self.index.begin().is_ok();
+        let mut done = Vec::new();
+        for src in self.index.backlinks(old_title).unwrap_or_default() {
+            let sp = Path::new(&src);
+            if src == skip || !self.rewritable(sp) {
+                continue;
             }
-            if batched && !(self.index.in_batch() && self.index.commit().is_ok()) {
-                // Disk full or I/O error lost the batch; the self-write hides these files from the watcher, so redo them.
-                for (src, text) in &done {
-                    self.reindex(Path::new(src), Some(text)).ok();
-                }
+            let Ok(bytes) = self.store.read(sp) else { continue };
+            let (new_text, n) = rewrite_links(&lossy(&bytes), old_title, new_title);
+            if n > 0 && self.store.write_atomic(sp, new_text.as_bytes()).is_ok() {
+                self.reindex(sp, Some(&new_text)).ok();
+                rewritten += n;
+                done.push((src, new_text));
             }
         }
-        Ok(RenameResult { path: to_s, rewritten })
+        if batched && !(self.index.in_batch() && self.index.commit().is_ok()) {
+            // Disk full or I/O error lost the batch; the self-write hides these files from the watcher, so redo them.
+            for (src, text) in &done {
+                self.reindex(Path::new(src), Some(text)).ok();
+            }
+        }
+        rewritten
+    }
+
+    /// Merge `source` into `target`, rewrite links to the source, and move it to the Trash.
+    pub fn merge_notes(&mut self, source: &str, target: &str, write_fm: bool) -> anyhow::Result<MergeResult> {
+        self.merge_notes_with(source, target, write_fm, move_to_trash)
+    }
+
+    /// `remove` as in `delete_note_with`. Any failure before the target is saved changes nothing; after it, nothing
+    /// is rolled back: links left unrewritten are skipped and a failed trash is reported in `trash_error`.
+    pub fn merge_notes_with(&mut self, source: &str, target: &str, write_fm: bool, remove: impl FnOnce(&Path) -> std::io::Result<()>) -> anyhow::Result<MergeResult> {
+        if source == target {
+            return Err(anyhow!("same-note"));
+        }
+        for p in [source, target] {
+            if self.note(Path::new(p))?.encrypted || self.locked_twin(p) {
+                return Err(anyhow!("locked"));
+            }
+        }
+        let s = self.open_note(source, None)?;
+        let t = self.open_note(target, None)?;
+        let merged = merged_text(&t.text, &t.title, &s.text, &s.title).map_err(|e| anyhow!(e))?;
+        self.snapshot_text(target, &t.text, None)?;
+        if let SaveResult::Conflict { .. } = self.save_note(target, &merged, &t.hash, None, write_fm)? {
+            return Err(anyhow!("conflict"));
+        }
+        let rewritten = self.rewrite_backlinks(&s.title, &t.title, source);
+        let trash_error = self.delete_note_with(source, remove).err().map(|e| e.to_string());
+        Ok(MergeResult { path: target.to_string(), rewritten, trash_error })
     }
 
     /// Notes whose links a rename of `title` would rewrite (the "Update N links?" count).
@@ -1781,5 +1848,83 @@ mod tests {
     #[test] fn create_from_selection_refuses_invalid_title() {
         let (mut v, _) = nick_vault();
         assert_eq!(v.create_from_selection("a/b", "x", false).unwrap_err().to_string(), "invalid-title");
+    }
+
+    #[test] fn merged_text_appends_under_heading_and_unions_front_matter() {
+        let t = merged_text("---\ntags: [a]\naliases: [T2]\n---\nbody T\n", "Target", "---\ntags: [A, b]\naliases: [S2]\n---\nbody S\n", "Source").unwrap();
+        assert_eq!(t, "---\ntags: [a, b]\naliases: [T2, S2, Source]\n---\nbody T\n\n## Source\n\nbody S\n");
+        assert_eq!(merged_text("x", "Target", "---\ntags: []\n---\n\n\n", "Source").unwrap(), "---\naliases: [Source]\n---\nx\n\n## Source\n", "empty source body: the heading only");
+    }
+    #[test] fn merged_text_creates_block_and_keeps_crlf() {
+        let t = merged_text("body T\r\nline2\r\n", "Target", "\nbody S\nmore\n", "Source").unwrap();
+        assert_eq!(t, "---\r\naliases: [Source]\r\n---\r\nbody T\r\nline2\r\n\r\n## Source\r\n\r\nbody S\r\nmore\r\n");
+    }
+    #[test] fn merged_text_empty_target_body() {
+        assert_eq!(merged_text("", "Target", "body S\n", "Source").unwrap(), "---\naliases: [Source]\n---\n## Source\n\nbody S\n");
+    }
+    #[test] fn merged_text_skips_alias_equal_to_target_title() {
+        let t = merged_text("x\n", "Target", "---\naliases: [TARGET, y]\n---\nz\n", "Source").unwrap();
+        assert_eq!(frontmatter::parse(&t).unwrap().aliases, vec!["y", "Source"]);
+    }
+    /// Source.md, Target.md, C.md linking Source twice, and a locked L.md.age linking Source.
+    fn merge_vault(target: &str) -> (Vault, PathBuf, String, String) {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        std::fs::write(dir.join("Source.md"), "---\ntags: [b]\n---\nbody S\n").unwrap();
+        std::fs::write(dir.join("Target.md"), target).unwrap();
+        std::fs::write(dir.join("C.md"), "[[Source]] and [[source]]").unwrap();
+        let mut v = open(dir.clone(), &db, Some(&id)).unwrap();
+        let d = v.open_or_create("L", Some(&id), false).unwrap();
+        v.save_note(&d.path, "see [[Source]]", &d.hash, Some(&id), false).unwrap();
+        v.lock_note(&d.path, &id).unwrap();
+        (v, dir.clone(), s(&dir.join("Source.md")), s(&dir.join("Target.md")))
+    }
+    fn rm(p: &Path) -> std::io::Result<()> { std::fs::remove_file(p) }
+    #[test] fn merge_rewrites_links_and_trashes_source() {
+        let (mut v, dir, src, dst) = merge_vault("body T\n");
+        let locked = std::fs::read(dir.join("L.md.age")).unwrap();
+        let r = v.merge_notes_with(&src, &dst, false, rm).unwrap();
+        assert_eq!((r.path.as_str(), r.rewritten, r.trash_error), (dst.as_str(), 2, None));
+        assert_eq!(std::fs::read_to_string(dir.join("C.md")).unwrap(), "[[Target]] and [[Target]]");
+        assert!(!Path::new(&src).exists());
+        assert_eq!(std::fs::read_to_string(&dst).unwrap(), "---\ntags: [b]\naliases: [Source]\n---\nbody T\n\n## Source\n\nbody S\n");
+        assert_eq!(v.find_note("Source").unwrap(), Some(dst));
+        assert_eq!(std::fs::read(dir.join("L.md.age")).unwrap(), locked);
+    }
+    #[test] fn merge_snapshots_target_first() {
+        let (mut v, _, src, dst) = merge_vault("pre-merge\n");
+        v.merge_notes_with(&src, &dst, false, rm).unwrap();
+        let r = v.list_revisions(&dst).unwrap();
+        assert_eq!(v.read_revision(&dst, &r[0].id, None).unwrap(), "pre-merge\n");
+    }
+    #[test] fn merge_refuses_same_encrypted_and_twin() {
+        let (mut v, dir, src, dst) = merge_vault("body T\n");
+        let locked = s(&dir.join("L.md.age"));
+        let twin = s(&dir.join("L.md"));
+        std::fs::write(&twin, "stale [[Source]]").unwrap(); // a plain twin of the locked note
+        let files = || ["Source.md", "Target.md", "C.md", "L.md", "L.md.age"].map(|f| std::fs::read(dir.join(f)).unwrap());
+        let before = files();
+        let err = |v: &mut Vault, a: &str, b: &str| v.merge_notes_with(a, b, false, rm).unwrap_err().to_string();
+        assert_eq!(err(&mut v, &dst, &dst), "same-note");
+        for (a, b) in [(&locked, &dst), (&src, &locked), (&twin, &dst), (&src, &twin)] {
+            assert_eq!(err(&mut v, a, b), "locked", "{a} into {b}");
+        }
+        assert_eq!(files(), before);
+    }
+    #[test] fn merge_unsupported_layout_changes_nothing() {
+        let (mut v, dir, src, dst) = merge_vault("---\ntags: [a] # c\n---\nbody T\n");
+        let files = || ["Source.md", "Target.md", "C.md"].map(|f| std::fs::read(dir.join(f)).unwrap());
+        let before = files();
+        assert_eq!(v.merge_notes_with(&src, &dst, false, rm).unwrap_err().to_string(), "unsupported tags: layout");
+        assert_eq!(files(), before);
+        assert!(v.list_revisions(&dst).unwrap().is_empty());
+    }
+    #[test] fn merge_trash_failure_is_reported_not_rolled_back() {
+        let (mut v, dir, src, dst) = merge_vault("body T\n");
+        let r = v.merge_notes_with(&src, &dst, false, |_| Err(std::io::Error::other("trash full"))).unwrap();
+        assert_eq!(r.trash_error.as_deref(), Some("trash full"));
+        assert_eq!(r.rewritten, 2);
+        assert!(std::fs::read_to_string(&dst).unwrap().ends_with("## Source\n\nbody S\n"));
+        assert_eq!(std::fs::read_to_string(dir.join("C.md")).unwrap(), "[[Target]] and [[Target]]");
+        assert!(Path::new(&src).exists());
     }
 }

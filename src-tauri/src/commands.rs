@@ -5,7 +5,7 @@ use crate::revisions::RevisionInfo;
 use crate::settings::{self, GlobalAction, Settings};
 use crate::store::{self, SaveResult};
 use crate::tasks::TaskView;
-use crate::vault::{NoteDoc, RenameResult, Vault};
+use crate::vault::{MergeResult, NoteDoc, RenameResult, Vault};
 use crate::watch;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -523,6 +523,12 @@ pub fn agent_write_claim(agent: State<'_, AgentState>, id: u64) -> bool {
 #[tauri::command]
 pub fn agent_write_done(agent: State<'_, AgentState>, id: u64, result: serde_json::Value) {
     agent.editors.done(id, result);
+}
+
+#[tauri::command(async)]
+pub fn merge_notes(st: State<'_, AppState>, source: String, target: String) -> Res<MergeResult> {
+    let fm = st.settings.lock().unwrap().write_front_matter;
+    with_vault(&st, |v, _| v.merge_notes(&source, &target, fm))
 }
 
 #[tauri::command(async)]

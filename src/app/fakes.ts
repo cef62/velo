@@ -1,6 +1,6 @@
 // Test fakes for the controller: in-memory backend, editor, preview and UI port. Tests only.
 import { vi } from "vitest";
-import type { Connections, Hit, NoteDoc, NoteMeta, Page, RenameResult, RevisionInfo, Settings, TagCount, TaskView } from "../api";
+import type { Connections, Hit, MergeResult, NoteDoc, NoteMeta, Page, RenameResult, RevisionInfo, Settings, TagCount, TaskView } from "../api";
 import type { Editor } from "../editor";
 import type { Preview } from "../preview";
 import type { Api } from "./controller";
@@ -60,6 +60,7 @@ export function fakeApi(notes: Record<string, string> = {}) {
     captureDone: vi.fn(async (_hide: boolean) => {}),
     setBadge: vi.fn(async (_c: number) => {}),
     renameNote: vi.fn(async (_p: string, _t: string, _r: boolean): Promise<RenameResult> => { throw "unset"; }),
+    mergeNotes: vi.fn(async (_s: string, _t: string): Promise<MergeResult> => { throw "unset"; }),
     backlinkCount: vi.fn(async () => 0),
     linkedFromCount: vi.fn(async (_p: string) => 0),
     connections: vi.fn(async (path: string): Promise<Connections> => ({ ...emptyConnections, centre: { ...emptyConnections.centre, path, title: path.slice(3, -3) } })),
