@@ -447,8 +447,8 @@ impl Vault {
         Ok(self.index.linked_from(path)?.len())
     }
 
-    /// The one-hop graph around `path`; an encrypted note gives `locked` unless unlocked.
-    pub fn connections(&self, path: &str) -> anyhow::Result<Connections> {
+    /// The one-hop graph around `path`; an encrypted note gives `locked` unless unlocked. `hide`: see `connections::build`.
+    pub fn connections(&self, path: &str, hide: &dyn Fn(&str) -> bool) -> anyhow::Result<Connections> {
         let p = Path::new(path);
         let plain;
         let text = if self.note(p)?.encrypted {
@@ -457,7 +457,7 @@ impl Vault {
             plain = lossy(&self.store.read(p)?);
             &plain
         };
-        connections::build(&self.index, &self.unlocked, path, text)
+        connections::build(&self.index, &self.unlocked, path, text, hide)
     }
 
     pub fn backlink_count(&self, title: &str) -> anyhow::Result<usize> {

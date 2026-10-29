@@ -452,7 +452,7 @@ pub fn linked_from_count(st: State<'_, AppState>, path: String) -> Res<usize> {
 
 #[tauri::command(async)]
 pub fn connections(st: State<'_, AppState>, path: String) -> Res<crate::connections::Connections> {
-    with_vault(&st, |v, _| v.connections(&path))
+    with_vault(&st, |v, _| v.connections(&path, &|_| false))
 }
 
 #[tauri::command(async)]

@@ -311,7 +311,7 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
     }
 
     fn connections(&self, path: &str) -> anyhow::Result<Connections> {
-        let mut c = self.vault.connections(plain(path)?)?;
+        let mut c = self.vault.connections(plain(path)?, &|p| locked(p))?;
         c.links_out.retain(|n| !locked(&n.path));
         c.links_in.retain(|n| !locked(&n.path));
         c.mentions.retain(|m| !locked(&m.node.path));

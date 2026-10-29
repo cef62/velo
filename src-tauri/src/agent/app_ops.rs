@@ -672,7 +672,7 @@ mod tests {
         {
             // the builder itself sees L: the filtering below is what hides it
             let g = st.vault.lock().unwrap();
-            let c = g.as_ref().unwrap().connections(&p).unwrap();
+            let c = g.as_ref().unwrap().connections(&p, &|_| false).unwrap();
             assert_eq!((c.links_out.len(), c.links_in.len()), (1, 1));
             let hidden = c.tags.iter().find(|g| g.tag == "hidden").unwrap();
             assert_eq!((hidden.count, hidden.unlocked), (1, 1));
@@ -695,7 +695,7 @@ mod tests {
         }
         st.vault.lock().unwrap().as_mut().unwrap().rescan(Some(&id));
         let p = dir.join("P.md").to_string_lossy().into_owned();
-        let raw = st.vault.lock().unwrap().as_ref().unwrap().connections(&p).unwrap().tags[0].count;
+        let raw = st.vault.lock().unwrap().as_ref().unwrap().connections(&p, &|_| false).unwrap().tags[0].count;
         assert_eq!(raw, 17, "the builder counts the unlocked L");
         let r = crate::agent::tools::call(&mut AppOps::new(&st, &never), "get_connections", json!({"title": "P"})).unwrap();
         assert_eq!(r["tags"], json!([{"tag": "big", "count": 16, "titles": []}]));

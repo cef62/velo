@@ -558,6 +558,13 @@ mod tests {
         assert_eq!(call(&mut ops, "get_connections", json!({"title": "L"})), Err("not found".to_string()));
     }
 
+    /// A locked note's longer name must not swallow a plain mention inside it (that would reveal the title).
+    #[test] fn get_connections_locked_name_does_not_hide_a_mention() {
+        let (mut ops, _) = vault(&[("C.md", "the Velo roadmap"), ("Velo.md", ""), ("Velo roadmap.md.age", "x")]);
+        let r = call(&mut ops, "get_connections", json!({"title": "C"})).unwrap();
+        assert_eq!(r["mentions"], json!([{"title": "Velo", "name": "Velo", "count": 1}]));
+    }
+
     #[test] fn get_connections_needs_no_summary() {
         let (mut ops, _) = vault(&[("a.md", "x")]);
         assert!(call(&mut ops, "get_connections", json!({"title": "a"})).is_ok());
