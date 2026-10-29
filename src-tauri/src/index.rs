@@ -77,9 +77,6 @@ pub struct Index {
     db: Connection,
 }
 
-/// After a bulk: FTS5 secure-delete back on, and FTS5's default merge settings, as before `begin_bulk`.
-const SECURE_AGAIN: &str = "INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1); INSERT INTO notes_fts(notes_fts, rank) VALUES('automerge', 4); INSERT INTO notes_fts(notes_fts, rank) VALUES('crisismerge', 16);";
-
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS notes(path TEXT PRIMARY KEY, title TEXT NOT NULL, title_folded TEXT NOT NULL,
   mtime INTEGER NOT NULL, size INTEGER NOT NULL, encrypted INTEGER NOT NULL, preview TEXT NOT NULL,
@@ -208,7 +205,8 @@ impl Index {
         self.db.execute_batch("BEGIN IMMEDIATE")?;
         let off = (|| -> anyhow::Result<bool> {
             let off = self.db.query_row("SELECT v FROM notes_fts_config WHERE k='secure-delete'", [], |r| r.get::<_, i64>(0)).optional()? == Some(0);
-            self.db.execute_batch(SECURE_AGAIN)?;
+            // FTS5's default merge settings, as before `begin_bulk`
+            self.db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1); INSERT INTO notes_fts(notes_fts, rank) VALUES('automerge', 4); INSERT INTO notes_fts(notes_fts, rank) VALUES('crisismerge', 16);")?;
             if off {
                 self.db.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild');")?;
             }
@@ -269,7 +267,9 @@ impl Index {
     /// per note. Each note keeps its own savepoint, so a note's SQL error rolls back that note alone; an error that
     /// aborts the transaction (disk full, I/O) loses the whole batch, and `in_batch` turns false.
     pub fn begin(&self) -> anyhow::Result<()> {
-        Ok(self.db.execute_batch("BEGIN")?)
+        // IMMEDIATE: a batch reads before it writes (twin checks), and upgrading that read lock fails at once under
+        // another writer instead of waiting out busy_timeout.
+        Ok(self.db.execute_batch("BEGIN IMMEDIATE")?)
     }
 
     #[cfg(test)]
@@ -333,45 +333,42 @@ impl Index {
         self.remove_with(path, false)
     }
 
-    /// `remove` of text that must be erased now (a note being locked): FTS secure-delete is on for this delete even
-    /// mid-bulk, and goes back off in the same transaction, so the bulk's own leftovers stay marked for `end_bulk`.
+    /// `remove` of text that must be erased now (a note being locked). Outside a batch it first ends a bulk (best
+    /// effort, its own transaction: a bulk's unmerged segments made each secure delete ~0.7 s at 10k); a batch's caller
+    /// does that before its batch. If the bulk is still on, FTS secure-delete is on for this delete only, so the
+    /// bulk's own leftovers stay marked for `end_bulk`.
     pub fn remove_erasing(&mut self, path: &str) -> anyhow::Result<()> {
+        if !self.in_batch() {
+            self.finish_bulk();
+        }
         self.remove_with(path, true)
     }
 
     fn remove_with(&mut self, path: &str, erase: bool) -> anyhow::Result<()> {
-        // A secure delete against a bulk's unmerged segments took ~0.7 s per note at 10k (15 notes locked elsewhere: a
-        // 10 s chunk), so end the bulk first (one rebuild, ~1 s) and the deletes are cheap. If that fails (disk full),
-        // delete securely anyway and leave the bulk marked; unless the error lost the caller's batch, which redoes it.
-        let batch = self.in_batch();
-        let r = self.delete_rows(path, erase, erase);
-        if r.is_err() && erase && self.in_batch() == batch {
-            return self.delete_rows(path, true, false);
+        // Holds the write lock before reading (IMMEDIATE, or the caller's IMMEDIATE batch): upgrading a read lock fails
+        // at once under another writer instead of waiting out busy_timeout.
+        let outer = self.db.is_autocommit();
+        self.db.execute_batch(if outer { "BEGIN IMMEDIATE" } else { "SAVEPOINT remove" })?;
+        let r = (|| -> anyhow::Result<()> {
+            let off = erase && self.db.query_row("SELECT v = 0 FROM notes_fts_config WHERE k='secure-delete'", [], |r| r.get(0)).optional()?.unwrap_or(false);
+            if off {
+                self.db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1);")?;
+            }
+            for sql in DELETES {
+                self.db.execute(sql, [path])?;
+            }
+            if off {
+                self.db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 0);")?;
+            }
+            Ok(())
+        })();
+        match r {
+            Ok(()) => Ok(self.db.execute_batch(if outer { "COMMIT" } else { "RELEASE remove" })?),
+            Err(e) => {
+                _ = self.db.execute_batch(if outer { "ROLLBACK" } else { "ROLLBACK TO remove; RELEASE remove" });
+                Err(e)
+            }
         }
-        r
-    }
-
-    /// DELETES for `path`. `erase`: with FTS secure-delete on even mid-bulk, by `end` (ending the bulk) or by turning
-    /// it on for this delete only, so the bulk stays marked for `end_bulk`.
-    fn delete_rows(&mut self, path: &str, erase: bool, end: bool) -> anyhow::Result<()> {
-        let tx = self.db.savepoint()?;
-        // Read in the delete's own transaction: if another connection changes it first, the write below fails (busy
-        // snapshot) instead of deleting with secure-delete off.
-        let off = erase && tx.query_row("SELECT v = 0 FROM notes_fts_config WHERE k='secure-delete'", [], |r| r.get(0)).optional()?.unwrap_or(false);
-        let toggle = off && !end;
-        if off && end {
-            tx.execute_batch(&format!("{SECURE_AGAIN} INSERT INTO notes_fts(notes_fts) VALUES('rebuild');"))?;
-        }
-        if toggle {
-            tx.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1);")?;
-        }
-        for sql in DELETES {
-            tx.execute(sql, [path])?;
-        }
-        if toggle {
-            tx.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 0);")?;
-        }
-        Ok(tx.commit()?)
     }
 
     pub fn search_page(&self, query: &str, sort: Sort, offset: usize, limit: usize, tags: &[String], unlocked: &HashMap<String, String>) -> anyhow::Result<Page> {

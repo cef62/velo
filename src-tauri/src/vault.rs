@@ -565,7 +565,15 @@ impl Vault {
     fn apply_paths(&mut self, paths: &[PathBuf], identity: Option<&str>, bulk: bool) -> Vec<String> {
         let mut changed = Vec::new();
         let mut lost_plain = false;
-        for chunk in paths.chunks(CHUNK) {
+        // Plain notes being locked elsewhere are deleted securely, in a batch of their own after the rest: a bulk is
+        // ended just before it (a rebuild inside a batch could fail the whole batch on a low disk), so those deletes are
+        // cheap and the rest still runs fast.
+        let (erasing, rest): (Vec<PathBuf>, Vec<PathBuf>) = paths.iter().cloned().partition(|p| !p.exists() && self.locked_twin(&s(p)));
+        let rest_chunks = rest.len().div_ceil(CHUNK);
+        for (i, chunk) in rest.chunks(CHUNK).chain(erasing.chunks(CHUNK)).enumerate() {
+            if i >= rest_chunks && self.index.bulk_off() {
+                self.index.finish_bulk();
+            }
             let mark = changed.len();
             // If `begin` fails, each upsert/remove commits on its own, as before.
             let batched = self.index.begin().is_ok();
@@ -588,11 +596,12 @@ impl Vault {
     /// Drop a note from the index; a plain note whose locked twin exists (on disk, or still indexed: a sync may be
     /// rewriting it) is being locked, so its text is erased now.
     fn remove_note(&mut self, path: &str) -> anyhow::Result<()> {
+        if self.locked_twin(path) { self.index.remove_erasing(path) } else { self.index.remove(path) }
+    }
+
+    fn locked_twin(&self, path: &str) -> bool {
         let twin = parse_note_file(Path::new(path)).filter(|nf| !nf.encrypted).map(|nf| note_path(&self.store.dir, &nf.title, true));
-        match twin {
-            Some(t) if t.exists() || self.index.title_modified(&s(&t)).ok().flatten().is_some() => self.index.remove_erasing(path),
-            _ => self.index.remove(path),
-        }
+        twin.is_some_and(|t| t.exists() || self.index.title_modified(&s(&t)).ok().flatten().is_some())
     }
 
     /// One chunk of a bulk re-index: if something ended the bulk (a lock, another process), start it again, else the
@@ -1581,4 +1590,54 @@ mod tests {
         assert!(!trigram_on_disk(&db, &OLD));
         std::fs::remove_file(ballast).unwrap();
     }
+    /// Another connection (`velo --mcp` direct mode) holds the write lock for `ms`.
+    fn hold_write(db: &Path, ms: u64) -> std::thread::JoinHandle<()> {
+        let c = rusqlite::Connection::open(db).unwrap();
+        c.execute_batch("BEGIN IMMEDIATE").unwrap();
+        std::thread::spawn(move || { std::thread::sleep(std::time::Duration::from_millis(ms)); c.execute_batch("ROLLBACK").unwrap(); })
+    }
+    fn secret_note(v: &mut Vault) -> String {
+        let d = v.open_or_create("s", None, false).unwrap();
+        v.save_note(&d.path, &format!("s {}", OLD[0]), &stat_hash(&d.path), None, false).unwrap();
+        d.path
+    }
+    /// As on main, a lock waits out another writer (busy_timeout) instead of failing with its plaintext row live.
+    #[test] fn lock_under_another_writer() {
+        let (dir, db) = setup();
+        let mut v = open(dir, &db, None).unwrap();
+        let p = secret_note(&mut v);
+        let h = hold_write(&db, 1000);
+        let r = v.lock_note(&p, &crypto::new_identity());
+        h.join().unwrap();
+        assert!(r.is_ok(), "{r:?}");
+        assert!(v.search(OLD[0], Sort::Title, 0, &[]).unwrap().hits.iter().all(|h| h.path != p), "the plain row is still live");
+    }
+    #[test] fn synced_lock_under_another_writer() {
+        let (dir, db) = setup();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let p = secret_note(&mut v);
+        std::fs::write(dir.join("s.md.age"), crypto::encrypt(&crypto::new_identity(), b"x").unwrap()).unwrap();
+        std::fs::remove_file(&p).unwrap();
+        let h = hold_write(&db, 1000);
+        v.apply_fs_changes(&[PathBuf::from(&p)], None);
+        h.join().unwrap();
+        assert!(v.search(OLD[0], Sort::Title, 0, &[]).unwrap().hits.is_empty(), "the locked note's plaintext row is still live");
+    }
+    /// A crash mid-bulk, a note locked elsewhere meanwhile, a low disk: open still works (no rebuild inside its batch).
+    #[test] #[ignore] fn real_full_disk_open_with_a_synced_lock() {
+        let root = ram_root("opensynced");
+        let (v, dir, db, p) = big_mid_bulk(&root);
+        std::mem::forget(v);
+        std::fs::write(dir.join("s.md.age"), crypto::encrypt(&crypto::new_identity(), b"x").unwrap()).unwrap();
+        std::fs::remove_file(&p).unwrap();
+        for free in [3u64, 12] {
+            let ballast = fill_disk(&root, free << 20);
+            let r = open(dir.clone(), &db, None).map(drop);
+            std::fs::remove_file(&ballast).unwrap();
+            assert!(r.is_ok(), "{free} MB free: {r:?}");
+        }
+        drop(open(dir, &db, None).unwrap());
+        assert!(!trigram_on_disk(&db, &OLD), "{:?}", trigram_hits(&db, &OLD));
+    }
+
 }
