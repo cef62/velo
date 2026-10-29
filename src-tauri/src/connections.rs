@@ -153,7 +153,7 @@ mod tests {
         (Vault::open_with_progress(dir.clone(), &db, unlock.then_some(id), &mut |_, _| {}).unwrap(), dir)
     }
 
-    fn p(dir: &PathBuf, name: &str) -> String {
+    fn p(dir: &std::path::Path, name: &str) -> String {
         dir.join(name).to_string_lossy().into_owned()
     }
 
