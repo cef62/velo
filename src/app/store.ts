@@ -82,7 +82,7 @@ export interface AppState {
   showDone: boolean;
   tickUndo: { path: string; line: number; lineText: string; unticked: boolean } | null; // "Ticked · Undo" (or "Unticked") after a backend tick
   extract: { title: string; err: string } | null; // the Move to new note dialog
-  merge: { source: string; sourceTitle: string; query: string; target: { path: string; title: string; count: number } | null; err: string } | null; // the Merge into… dialog; target set = confirm step
+  merge: { source: string; sourceTitle: string; query: string; target: { path: string; title: string; count: number } | null; err: string; pending?: boolean } | null; // the Merge into… dialog; target set = confirm step; pending = merge in flight
   capture: { target: string; err: string } | null; // the search field is in quick-capture mode
 }
 

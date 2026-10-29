@@ -110,9 +110,9 @@ function Confirm({ m, controller }: { m: Merge; controller: Controller }) {
         <Err msg={m.err} />
       </div>
       <div className={footer}>
-        <Button type="button" variant="outline" onClick={() => controller.cancelMerge()}>Cancel</Button>
-        <Button type="button" variant="outline" onClick={() => controller.backMerge()}>Back</Button>
-        <Button type="button" autoFocus onClick={() => void controller.commitMerge()}>Merge</Button>
+        <Button type="button" variant="outline" disabled={m.pending} onClick={() => controller.cancelMerge()}>Cancel</Button>
+        <Button type="button" variant="outline" disabled={m.pending} onClick={() => controller.backMerge()}>Back</Button>
+        <Button type="button" autoFocus disabled={m.pending} onClick={() => void controller.commitMerge()}>Merge</Button>
       </div>
     </>
   );

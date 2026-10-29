@@ -2155,6 +2155,24 @@ test("merge failure puts the note back", async () => {
   expect(store.get().merge?.err).toBe("Pick another note");
 });
 
+test("cancel and back are ignored while a merge is in flight", async () => {
+  const { c, api, store } = await mergeSetup();
+  let reject!: (e: unknown) => void;
+  api.mergeNotes.mockImplementationOnce(() => new Promise((_r, rj) => (reject = rj)));
+  await c.startMerge();
+  await c.chooseMergeTarget(T_ROW);
+  const done = c.commitMerge();
+  await vi.waitFor(() => expect(api.mergeNotes).toHaveBeenCalled());
+  expect(store.get().merge?.pending).toBe(true);
+  c.cancelMerge();
+  c.backMerge();
+  expect(store.get().merge?.target?.path).toBe(P("T"));
+  reject("conflict");
+  await done;
+  expect(store.get().merge?.err).toBe("conflict");
+  expect(store.get().merge?.pending).toBe(false);
+});
+
 test("merge trash failure shows what was not done", async () => {
   const { c, api, editor, store } = await mergeSetup();
   api.mergeNotes.mockResolvedValueOnce({ path: P("T"), rewritten: 0, trash_error: "denied" });

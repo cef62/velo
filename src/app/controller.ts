@@ -313,10 +313,11 @@ export class Controller {
   }
 
   backMerge() {
-    this.store.set((s) => (s.merge ? { merge: { ...s.merge, target: null, err: "" } } : {}));
+    this.store.set((s) => (s.merge && !s.merge.pending ? { merge: { ...s.merge, target: null, err: "" } } : {}));
   }
 
   cancelMerge() {
+    if (this.store.get().merge?.pending) return; // the merge result must still land in the dialog
     this.store.set({ merge: null });
   }
 
@@ -325,11 +326,13 @@ export class Controller {
     const m = this.store.get().merge;
     if (!m?.target || this.busy) return;
     const target = m.target;
-    const fail = (err: string) => this.store.set((s) => (s.merge ? { merge: { ...s.merge, err } } : {}));
+    const patch = (p: { err?: string; pending: boolean }) => this.store.set((s) => (s.merge ? { merge: { ...s.merge, ...p } } : {}));
+    const fail = (err: string) => patch({ err, pending: false });
     const open = this.editor.currentPath();
     let reopen: string | null = null;
     let r: MergeResult | null = null;
     this.busy = true;
+    patch({ pending: true });
     try {
       if (open === m.source || open === target.path) {
         if (!(await this.editor.flush())) return fail("Can't merge: unsaved changes couldn't be saved");
@@ -344,6 +347,7 @@ export class Controller {
       fail(e === "locked" ? "Can't merge a locked note" : e === "same-note" ? "Pick another note" : errText(e));
     } finally {
       this.busy = false;
+      patch({ pending: false });
     }
     if (reopen) await this.show(reopen); // merge failed after detaching: put the note back
     if (!r) return;
