@@ -43,7 +43,7 @@ jobs:
           commit-message: "chore: version packages"
           pr-title: "chore: version packages"
 
-      # The version PR is opened with GITHUB_TOKEN, so its pull_request CI never starts (#25).
+      # The bot-opened version PR gets no pull_request CI (runs fail at startup with 0 jobs, #25).
       - if: steps.changesets.outputs.pr-number != ''
         env:
           GH_TOKEN: ${{ github.token }}

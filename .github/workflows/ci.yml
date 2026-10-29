@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
-  # release.yml starts it on the version PR: PRs opened with GITHUB_TOKEN never trigger pull_request.
+  # release.yml starts it on the version PR, whose pull_request runs fail at startup (#25).
   workflow_dispatch:
 
 concurrency:
