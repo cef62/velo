@@ -210,7 +210,15 @@ pub fn find_mentions(body: &str, names: &HashSet<String>, max_words: usize) -> V
             let word = i < line.len() && sc.step(start + i, c) && !sc.target && c.is_alphanumeric();
             match (word, cur) {
                 (true, None) => cur = Some(i),
-                (false, Some(a)) => { words.push((start + a, start + i, fold(&line[a..i]))); cur = None; }
+                (false, Some(a)) => {
+                    // part of a tag, email, path or URL, not a mention
+                    let rest = &line[i..];
+                    let glued = line[..a].ends_with(['#', '@', '/', '.', ':'])
+                        || rest.starts_with(['@', '/'])
+                        || rest.strip_prefix('.').is_some_and(|r| r.starts_with(char::is_alphanumeric));
+                    if !glued { words.push((start + a, start + i, fold(&line[a..i]))); }
+                    cur = None;
+                }
                 _ => {}
             }
         }
@@ -220,8 +228,8 @@ pub fn find_mentions(body: &str, names: &HashSet<String>, max_words: usize) -> V
     'word: while i < words.len() {
         for k in (1..=max_words.min(words.len() - i)).rev() {
             let run = &words[i..i + k];
-            // words must be separated by whitespace only (one line break at most)
-            if run.windows(2).any(|w| { let gap = &body[w[0].1..w[1].0]; !gap.trim().is_empty() || gap.matches('\n').count() > 1 }) { continue; }
+            // words must be separated by whitespace on one line, so the hit stays a valid `[[...]]`
+            if run.windows(2).any(|w| { let gap = &body[w[0].1..w[1].0]; !gap.trim().is_empty() || gap.contains(['\n', '\r']) }) { continue; }
             let name = run.iter().map(|w| w.2.as_str()).collect::<Vec<_>>().join(" ");
             if name.chars().count() >= 3 && names.contains(&name) {
                 let (start, end) = (run[0].0, run[k - 1].1);
@@ -235,13 +243,15 @@ pub fn find_mentions(body: &str, names: &HashSet<String>, max_words: usize) -> V
     hits
 }
 
-/// Wraps the first mention of `name` in the text after front matter as `[[as written]]`, if there are exactly
+/// Wraps the first mention of `name` (found among all `names`, as the graph finds them) in the text after front matter as `[[as written]]`, if there are exactly
 /// `expected` of them; everything else, CRLF included, stays byte for byte.
-pub fn link_mention_text(full_text: &str, name: &str, expected: usize) -> Result<String, &'static str> {
+pub fn link_mention_text(full_text: &str, name: &str, names: &HashSet<String>, expected: usize) -> Result<String, &'static str> {
     let body = crate::frontmatter::body(full_text);
     let offset = full_text.len() - body.len();
     let want = fold(name);
-    let hits: Vec<_> = find_mentions(body, &HashSet::from([want.clone()]), want.split(' ').count()).into_iter().collect();
+    // the full name set, so overlapping names resolve exactly as in the graph (longest wins)
+    let max_words = names.iter().map(|n| n.split(' ').count()).max().unwrap_or(1);
+    let hits: Vec<_> = find_mentions(body, names, max_words).into_iter().filter(|h| h.name_folded == want).collect();
     if hits.len() != expected || hits.is_empty() { return Err("mention-moved"); }
     let h = &hits[0];
     Ok(format!("{}[[{}]]{}", &full_text[..offset + h.start], h.as_written, &full_text[offset + h.end..]))
@@ -321,10 +331,26 @@ mod tests {
     }
     #[test] fn link_mention_wraps_first_and_checks_count() {
         let t = "---\ntags: [x]\n---\nsee Nick and nick\r\n";
-        assert_eq!(link_mention_text(t, "Nick", 2).unwrap(), "---\ntags: [x]\n---\nsee [[Nick]] and nick\r\n");
-        assert_eq!(link_mention_text(t, "Nick", 1), Err("mention-moved"));
+        assert_eq!(link_mention_text(t, "Nick", &names(&["nick"]), 2).unwrap(), "---\ntags: [x]\n---\nsee [[Nick]] and nick\r\n");
+        assert_eq!(link_mention_text(t, "Nick", &names(&["nick"]), 1), Err("mention-moved"));
     }
     #[test] fn link_mention_ignores_front_matter() {
-        assert_eq!(link_mention_text("---\naliases: [Nick]\n---\nnothing\n", "Nick", 1), Err("mention-moved"));
+        assert_eq!(link_mention_text("---\naliases: [Nick]\n---\nnothing\n", "Nick", &names(&["nick"]), 1), Err("mention-moved"));
+    }
+    #[test] fn link_mention_uses_full_name_set() {
+        let n = names(&["velo", "velo roadmap"]);
+        assert_eq!(link_mention_text("Velo roadmap and Velo", "Velo", &n, 1).unwrap(), "Velo roadmap and [[Velo]]");
+    }
+    #[test] fn mentions_do_not_span_line_breaks() {
+        let n = names(&["velo roadmap"]);
+        assert!(find_mentions("Velo\r\nroadmap", &n, 3).is_empty());
+        assert_eq!(find_mentions("Velo  roadmap", &n, 3).len(), 1);
+    }
+    #[test] fn mentions_skip_tags_emails_and_urls() {
+        let n = names(&["velo"]);
+        for b in ["#velo", "a@velo.io", "http://velo.com/velo", "velo@x.io", "velo/notes", "velo.com"] {
+            assert!(find_mentions(b, &n, 2).is_empty(), "{b}");
+        }
+        assert_eq!(find_mentions("I like velo. And (velo), velo!", &n, 2).len(), 3);
     }
 }
