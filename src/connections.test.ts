@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { Connections, GraphNode } from "./api";
-import { ringLayout, tabOrder, timeLayout } from "./connections";
+import { dateText, nodeKeyAction, nodeLabel, ringLayout, tabOrder, timeLayout } from "./connections";
 
 const day = (d: number, hour = 12) => new Date(2026, 0, d, hour).getTime();
 const n = (path: string, modified: number, created = modified): GraphNode => ({ path, title: path, created, modified, preview: "", locked: false });
@@ -79,4 +79,25 @@ test("tabOrder follows the sort", () => {
   expect(tabOrder(ringLayout(full, 400, 300))).toEqual(["centre", "out:o2.md", "out:o1.md", "in:i1.md", "#work", "#work:t2.md", "#work:t1.md", "mention:m1.md"]);
   // time: by date; the tag node sits at the centre's date
   expect(tabOrder(timeLayout(full, "modified", 400, 300))).toEqual(["out:o1.md", "#work:t1.md", "in:i1.md", "#work:t2.md", "out:o2.md", "mention:m1.md", "centre", "#work"]);
+});
+
+test("node keys: Enter opens, Shift+Enter re-centres, Esc leaves, arrows step", () => {
+  expect(nodeKeyAction("Enter", false)).toBe("open");
+  expect(nodeKeyAction(" ", false)).toBe("open");
+  expect(nodeKeyAction("Enter", true)).toBe("recentre");
+  expect(nodeKeyAction("Escape", false)).toBe("leave");
+  expect(["ArrowRight", "ArrowDown"].map((k) => nodeKeyAction(k, false))).toEqual(["next", "next"]);
+  expect(["ArrowLeft", "ArrowUp"].map((k) => nodeKeyAction(k, false))).toEqual(["prev", "prev"]);
+  expect(nodeKeyAction("Tab", false)).toBe(null); // Tab stays native: DOM order is tabOrder
+});
+
+test("node labels name the kind, the tag and the date", () => {
+  const placed = ringLayout(full, 400, 300);
+  const at = (k: string) => nodeLabel(placed.find((p) => p.key === k)!, full, "modified");
+  expect(at("#work")).toBe("#work, tag, 2 notes");
+  expect(at("#work:t1.md")).toBe(`t1.md, tagged #work, ${dateText(day(2))}`);
+  expect(at("out:o1.md")).toBe(`o1.md, links to, ${dateText(day(1))}`);
+  expect(at("in:i1.md")).toBe(`i1.md, linked from, ${dateText(day(3))}`);
+  const big = conn({ tags: [{ tag: "big", count: 17, notes: [] }] });
+  expect(nodeLabel(ringLayout(big, 400, 300).find((p) => p.key === "#big")!, big, "created")).toBe("#big, tag, 17 notes");
 });

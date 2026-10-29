@@ -4,7 +4,7 @@ import { css } from "styled-system/css";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { SegmentGroup, Spinner } from "@/components/ui";
-import { ringLayout, tabOrder, timeLayout, type Placed } from "../connections";
+import { dateText as date, isTagNode, nodeKeyAction, nodeLabel, ringLayout, tabOrder, timeLayout, type Placed } from "../connections";
 import { useStore } from "./useStore";
 
 // Same box as the note list's scroller, so the divider sizes it the same way.
@@ -57,11 +57,8 @@ const card = css({
   "& p": { mt: "1", lineClamp: "3" },
 });
 
-const KIND = { centre: "centre", out: "links to", in: "linked from", tag: "tag", mention: "mention" } as const;
 const radius = (p: Placed) => (p.kind === "centre" ? 9 : p.key.startsWith("#") && !p.key.includes(":") ? 5 : 6);
-const date = (ms: number) => new Date(ms).toLocaleDateString(undefined, { dateStyle: "medium" });
 const short = (s: string) => (s.length > 18 ? `${s.slice(0, 17)}…` : s);
-const isTagNode = (p: Placed) => p.key.startsWith("#") && !p.key.includes(":");
 // a collapsed tag's title is "+N"; show the tag with it
 const label = (p: Placed) => (isTagNode(p) && p.node.title.startsWith("+") ? `${p.key} ${p.node.title}` : p.node.title);
 /** The node an edge starts from: tag notes hang off their tag node, everything else off the centre. */
@@ -82,7 +79,7 @@ export function ConnectionsView({ controller, store }: { controller: Controller;
   const svg = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [shown, setShown] = useState<string | null>(null); // hovered or focused node key, for the card
-  const focusCentre = useRef(false);
+  const focusCentre = useRef(true); // the view takes focus when it opens, so its keys work at once (not the editor's)
   const marker = useId().replace(/[^\w-]/g, ""); // a plain id: it goes into url(#…)
   // the stage mounts and unmounts with the empty and error states: measure it from its ref
   const box = useCallback((e: HTMLDivElement | null) => {
@@ -99,33 +96,43 @@ export function ConnectionsView({ controller, store }: { controller: Controller;
   }, [data, sort, size]);
   const byKey = useMemo(() => new Map(placed.map((p) => [p.key, p])), [placed]);
 
-  // after a keyboard re-centre, focus follows to the new centre
+  // on open and after a re-centre, focus goes to the centre node
   useEffect(() => {
     if (!focusCentre.current || !placed.length) return;
     focusCentre.current = false;
     svg.current?.querySelector<SVGGElement>('[data-key="centre"]')?.focus();
   }, [placed]);
 
-  const recentre = (p: Placed, viaKeys: boolean) => {
+  const leave = () => {
+    controller.setPaneMode("notes");
+    // the focused node unmounts: hand focus to the note list's selected row, else to search (the list's keyboard home)
+    requestAnimationFrame(() => {
+      const row = document.querySelector<HTMLElement>('[role=listbox] [aria-selected=true]');
+      if (row) row.focus();
+      else controller.focusSearch();
+    });
+  };
+  const recentre = (p: Placed) => {
     if (isTagNode(p) || p.kind === "centre") return;
-    focusCentre.current = viaKeys;
+    focusCentre.current = true;
     void controller.recentre(p.node.path);
   };
   const activate = (p: Placed) => {
     if (isTagNode(p)) {
       controller.setTags([p.key.slice(1)]); // the tag filter shows every note with the tag, also past the 15 drawn
-      controller.setPaneMode("notes");
+      leave();
     } else void controller.openFromGraph(p.node.path);
   };
   const onKey = (e: KeyboardEvent, p: Placed) => {
-    if (e.key === "Enter") e.shiftKey ? recentre(p, true) : activate(p);
-    else if (e.key === " ") activate(p);
-    else if (e.key.startsWith("Arrow")) {
+    const act = nodeKeyAction(e.key, e.shiftKey);
+    if (act === "open") activate(p);
+    else if (act === "recentre") recentre(p);
+    else if (act === "next" || act === "prev") {
       const order = tabOrder(placed);
-      const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : -1;
+      const step = act === "next" ? 1 : -1;
       const next = order[(order.indexOf(p.key) + step + order.length) % order.length];
       svg.current?.querySelector<SVGGElement>(`[data-key="${CSS.escape(next)}"]`)?.focus();
-    } else return;
+    } else return; // Esc bubbles to the pane
     e.preventDefault();
   };
 
@@ -135,7 +142,7 @@ export function ConnectionsView({ controller, store }: { controller: Controller;
   const dates = placed.map((p) => p.node[sort === "created" ? "created" : "modified"]);
 
   return (
-    <div className={pane} onKeyDown={(e) => e.key === "Escape" && controller.setPaneMode("notes")}>
+    <div className={pane} onKeyDown={(e) => nodeKeyAction(e.key, e.shiftKey) === "leave" && leave()}>
       <div className={top}>
         <SegmentGroup.Root size="sm" value={sort} onValueChange={(d) => d.value !== sort && void controller.setConnectionsSort(d.value as typeof sort)} aria-label="Connections layout">
           <SegmentGroup.Indicator />
@@ -199,10 +206,10 @@ export function ConnectionsView({ controller, store }: { controller: Controller;
                   className={node}
                   role="button"
                   tabIndex={0}
-                  aria-label={`${label(p)}, ${KIND[p.kind]}, ${isTagNode(p) ? "tag" : date(p.node[sort === "created" ? "created" : "modified"])}`}
+                  aria-label={nodeLabel(p, data, sort === "created" ? "created" : "modified")}
                   transform={`translate(${p.x} ${p.y})`}
                   onClick={() => activate(p)}
-                  onDoubleClick={() => recentre(p, false)}
+                  onDoubleClick={() => recentre(p)}
                   onKeyDown={(e) => onKey(e, p)}
                   onMouseEnter={() => setShown(p.key)}
                   onMouseLeave={() => setShown(null)}

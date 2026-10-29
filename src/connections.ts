@@ -65,3 +65,24 @@ export function timeLayout(c: Connections, key: "created" | "modified", w: numbe
 
 /** Tab and arrow order: the layouts return nodes in their sort's order. */
 export const tabOrder = (placed: Placed[]): string[] => placed.map((p) => p.key);
+
+export const dateText = (ms: number) => new Date(ms).toLocaleDateString(undefined, { dateStyle: "medium" });
+export const isTagNode = (p: Placed) => p.key.startsWith("#") && !p.key.includes(":");
+const KIND = { centre: "centre", out: "links to", in: "linked from", mention: "mention" } as const;
+
+/** A node's accessible name: "{title}, {kind}, {date}"; a tag node gives its note count, a tag's note names its tag. */
+export function nodeLabel(p: Placed, c: Connections, key: "created" | "modified"): string {
+  if (isTagNode(p)) return `${p.key}, tag, ${c.tags.find((g) => `#${g.tag}` === p.key)?.count ?? 0} notes`;
+  const kind = p.kind === "tag" ? `tagged ${p.key.slice(0, p.key.indexOf(":"))}` : KIND[p.kind];
+  return `${p.node.title}, ${kind}, ${dateText(p.node[key])}`;
+}
+
+/** What a key does on a focused node; Tab stays native (the nodes render in tab order). */
+export function nodeKeyAction(key: string, shift: boolean): "open" | "recentre" | "leave" | "next" | "prev" | null {
+  if (key === "Enter") return shift ? "recentre" : "open";
+  if (key === " ") return "open";
+  if (key === "Escape") return "leave";
+  if (key === "ArrowRight" || key === "ArrowDown") return "next";
+  if (key === "ArrowLeft" || key === "ArrowUp") return "prev";
+  return null;
+}
