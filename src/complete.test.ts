@@ -3,7 +3,7 @@ import { EditorState } from "@codemirror/state";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { linkContext, linkInsert, linkSource, type CompleteSource } from "./complete";
+import { linkContext, linkInsert, linkSource, tagContext, tagInsert, tagSource, type CompleteSource } from "./complete";
 import { prepare } from "./fuzzy";
 import type { LinkTarget } from "./api";
 
@@ -55,4 +55,36 @@ test("alias rows show their title; empty query lists the newest first", () => {
   const src = source([target("Old", "Old", 1), target("Standup", "Daily standup", 5)]);
   const opts = options(src, "[[");
   expect(opts.map((o) => [o.label, o.detail])).toEqual([["Standup", "→ Daily standup"], ["Old", undefined]]);
+});
+
+const tctx = (doc: string, pos = doc.length) => tagContext(st(doc, pos), pos);
+
+test("tagContext mid-sentence", () => {
+  expect(tctx("see #pro")).toEqual({ from: 5, query: "pro" });
+  expect(tctx("(#pro")).toEqual({ from: 2, query: "pro" });
+});
+
+test("tagContext null for headings and non-tag hashes", () => {
+  for (const d of ["# Title", "## x", "#", "[[a#b", "x#pro", "https://x.io/#pro", "`#pro`"]) expect(tctx(d), d).toBeNull();
+  expect(tctx("`#pro`", 5)).toBeNull();
+  const fm = "---\ntags: #pro\n---\n";
+  expect(tctx(fm, fm.indexOf("pro") + 3)).toBeNull();
+});
+
+test("tag apply writes the display spelling and a space", () => {
+  let s = st("see #pro");
+  let r = s.update(tagInsert(s, 5, 8, "Project")).state;
+  expect(r.doc.toString()).toBe("see #Project ");
+  s = st("see #pro next", 8);
+  r = s.update(tagInsert(s, 5, 8, "Project")).state;
+  expect(r.doc.toString()).toBe("see #Project next");
+  s = st("see #prox next", 8); // rest of the word is replaced too
+  expect(s.update(tagInsert(s, 5, 8, "Project")).state.doc.toString()).toBe("see #Project next");
+});
+
+test("tag source ranks by count, label and detail", () => {
+  const tags = prepare([{ tag: "proj", count: 1 }, { tag: "Project", count: 3 }], (t) => t.tag);
+  const s = st("see #pro");
+  const res = tagSource({ ...source([]), tags: () => tags })(new CompletionContext(s, 8, false)) as CompletionResult;
+  expect(res.options.map((o) => [o.label, o.detail])).toEqual([["Project", "3"], ["proj", "1"]]);
 });

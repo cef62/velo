@@ -1981,3 +1981,10 @@ test("rename refreshes titles", async () => {
   expect(api.listTitles).toHaveBeenCalled();
   expect(api.listLinkTargets).toHaveBeenCalled();
 });
+
+test("refreshTags feeds the tag completion source", async () => {
+  const { c, api } = setup({ A: "a" });
+  api.listTags.mockResolvedValue([{ tag: "Project", count: 3 }]);
+  await c.refreshTags();
+  expect(c.editorOpts().complete.tags()).toHaveLength(1);
+});

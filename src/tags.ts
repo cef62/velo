@@ -2,13 +2,18 @@ import type { TagCount } from "./api";
 import { fold } from "./search";
 
 // Mirrors Rust text::extract_tags: '#' at line start or after whitespace/'(', body [alphanumeric _ - /], >=1 letter.
-const BODY = /^[\p{Alphabetic}\p{N}_\-/]+/u;
+export const BODY = /^[\p{Alphabetic}\p{N}_\-/]+/u;
+
+/** True when a '#' at src[i] is in tag position: line start, whitespace or '(' before it. */
+export const tagStartOk = (src: string, i: number): boolean => {
+  const prev = src[i - 1];
+  return prev === undefined || prev === "(" || /\s/.test(prev);
+};
 
 /** The tag whose '#' is at src[i], or null (prefix rule, char class, at least one letter). */
 export function readTag(src: string, i: number): string | null {
   if (src[i] !== "#") return null;
-  const prev = src[i - 1];
-  if (prev !== undefined && prev !== "(" && !/\s/.test(prev)) return null;
+  if (!tagStartOk(src, i)) return null;
   const tag = BODY.exec(src.slice(i + 1))?.[0];
   return tag && /\p{Alphabetic}/u.test(tag) ? tag : null;
 }

@@ -1147,6 +1147,7 @@ export class Controller {
     const selected = this.store.get().selectedTags;
     const kept = pruneSelection(selected, tags);
     const pruned = kept.length !== selected.length;
+    this.tagIndex = prepare(tags, (t) => t.tag);
     this.store.set({ tags, selectedTags: kept });
     if (pruned) {
       this.filterChanged("highlight");
