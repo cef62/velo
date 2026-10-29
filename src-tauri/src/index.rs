@@ -77,6 +77,9 @@ pub struct Index {
     db: Connection,
 }
 
+/// After a bulk: FTS5 secure-delete back on, and FTS5's default merge settings, as before `begin_bulk`.
+const SECURE_AGAIN: &str = "INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1); INSERT INTO notes_fts(notes_fts, rank) VALUES('automerge', 4); INSERT INTO notes_fts(notes_fts, rank) VALUES('crisismerge', 16);";
+
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS notes(path TEXT PRIMARY KEY, title TEXT NOT NULL, title_folded TEXT NOT NULL,
   mtime INTEGER NOT NULL, size INTEGER NOT NULL, encrypted INTEGER NOT NULL, preview TEXT NOT NULL,
@@ -205,11 +208,8 @@ impl Index {
         self.db.execute_batch("BEGIN IMMEDIATE")?;
         let off = (|| -> anyhow::Result<bool> {
             let off = self.db.query_row("SELECT v FROM notes_fts_config WHERE k='secure-delete'", [], |r| r.get::<_, i64>(0)).optional()? == Some(0);
-            // FTS5's default merge settings, as before `begin_bulk`
-            self.db.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1); INSERT INTO notes_fts(notes_fts, rank) VALUES('automerge', 4); INSERT INTO notes_fts(notes_fts, rank) VALUES('crisismerge', 16);")?;
+            self.db.execute_batch(SECURE_AGAIN)?;
             if off {
-                // a rebuild that runs out of space mid-way would only eat the space a lock needs
-                anyhow::ensure!(self.room_for_bulk(), "too little free disk space to rebuild the search index");
                 self.db.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild');")?;
             }
             Ok(off)
@@ -234,11 +234,12 @@ impl Index {
         }
     }
 
-    /// Space for a bulk: its WAL (64 MB cap), then the rebuild's (about the index) and the checkpoint growing the file.
-    /// Without it, a bulk could fill the disk, and a lock's checkpoint would then fail and keep plaintext in the WAL.
+    /// Space for a whole bulk: its WAL (64 MB cap, ~80 MB peak), then at its end the rebuild's WAL (about the index)
+    /// and the checkpoint growing the file. Without it, a bulk could fill the disk, and its finish and a lock's
+    /// checkpoint would fail and keep plaintext until there is room.
     fn room_for_bulk(&self) -> bool {
         let Some(path) = self.db.path().map(Path::new) else { return true };
-        let need = (64 << 20) + 2 * std::fs::metadata(path).map_or(0, |m| m.len());
+        let need = (128 << 20) + 2 * std::fs::metadata(path).map_or(0, |m| m.len());
         free_space(path.parent().unwrap_or(path)).is_none_or(|free| free >= need)
     }
 
@@ -335,18 +336,39 @@ impl Index {
     /// `remove` of text that must be erased now (a note being locked): FTS secure-delete is on for this delete even
     /// mid-bulk, and goes back off in the same transaction, so the bulk's own leftovers stay marked for `end_bulk`.
     pub fn remove_erasing(&mut self, path: &str) -> anyhow::Result<()> {
-        self.remove_with(path, self.bulk_off())
+        self.remove_with(path, true)
     }
 
-    fn remove_with(&mut self, path: &str, secure: bool) -> anyhow::Result<()> {
+    fn remove_with(&mut self, path: &str, erase: bool) -> anyhow::Result<()> {
+        // A secure delete against a bulk's unmerged segments took ~0.7 s per note at 10k (15 notes locked elsewhere: a
+        // 10 s chunk), so end the bulk first (one rebuild, ~1 s) and the deletes are cheap. If that fails (disk full),
+        // delete securely anyway and leave the bulk marked; unless the error lost the caller's batch, which redoes it.
+        let batch = self.in_batch();
+        let r = self.delete_rows(path, erase, erase);
+        if r.is_err() && erase && self.in_batch() == batch {
+            return self.delete_rows(path, true, false);
+        }
+        r
+    }
+
+    /// DELETES for `path`. `erase`: with FTS secure-delete on even mid-bulk, by `end` (ending the bulk) or by turning
+    /// it on for this delete only, so the bulk stays marked for `end_bulk`.
+    fn delete_rows(&mut self, path: &str, erase: bool, end: bool) -> anyhow::Result<()> {
         let tx = self.db.savepoint()?;
-        if secure {
+        // Read in the delete's own transaction: if another connection changes it first, the write below fails (busy
+        // snapshot) instead of deleting with secure-delete off.
+        let off = erase && tx.query_row("SELECT v = 0 FROM notes_fts_config WHERE k='secure-delete'", [], |r| r.get(0)).optional()?.unwrap_or(false);
+        let toggle = off && !end;
+        if off && end {
+            tx.execute_batch(&format!("{SECURE_AGAIN} INSERT INTO notes_fts(notes_fts) VALUES('rebuild');"))?;
+        }
+        if toggle {
             tx.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 1);")?;
         }
         for sql in DELETES {
             tx.execute(sql, [path])?;
         }
-        if secure {
+        if toggle {
             tx.execute_batch("INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 0);")?;
         }
         Ok(tx.commit()?)

@@ -157,7 +157,9 @@ impl Vault {
         }
         v.index.commit()?;
         v.index.finish_bulk(); // ours, or an interrupted one
-        v.index.checkpoint().ok(); // a full disk must not keep the vault closed // don't keep a bulk build's WAL (or a crashed session's) for the whole session
+        // Don't keep a bulk build's WAL (or a crashed session's) for the whole session. Best effort: a full disk must
+        // not keep the vault closed.
+        v.index.checkpoint().ok();
         if let Some(id) = identity {
             for (path, nf, _) in &files {
                 if nf.encrypted {
@@ -556,6 +558,11 @@ impl Vault {
     }
 
     pub fn apply_fs_changes(&mut self, paths: &[PathBuf], identity: Option<&str>) -> Vec<String> {
+        self.apply_paths(paths, identity, false)
+    }
+
+    /// `apply_fs_changes`; `bulk`: a chunk of this process's bulk, whose own finish erases what it deletes.
+    fn apply_paths(&mut self, paths: &[PathBuf], identity: Option<&str>, bulk: bool) -> Vec<String> {
         let mut changed = Vec::new();
         let mut lost_plain = false;
         for chunk in paths.chunks(CHUNK) {
@@ -570,7 +577,8 @@ impl Vault {
                 self.apply_chunk(chunk, identity, false, &mut changed, &mut lost_plain);
             }
         }
-        if lost_plain {
+        // Inside a bulk the delete itself was secure; older versions wait for the bulk's one finish, not one per chunk.
+        if lost_plain && !bulk {
             self.index.finish_bulk(); // as in `lock_note`
             self.index.checkpoint().ok(); // locked on another machine: drop WAL frames holding its plaintext
         }
@@ -593,7 +601,7 @@ impl Vault {
         if !self.index.bulk_off() {
             self.index.begin_bulk().ok();
         }
-        self.apply_fs_changes(paths, identity)
+        self.apply_paths(paths, identity, true)
     }
 
     /// `apply_fs_changes` for one chunk; false (and stop) when an error aborted the `batched` transaction.
@@ -1139,13 +1147,19 @@ mod tests {
         assert!(names().iter().all(|f| f.ends_with(".md.age")));
     }
 
-    /// Some 3-byte FTS trigram of any of `words` in the index files (the vault may still be open). Temp paths are
-    /// blanked first: the random temp dir name can contain a trigram (".tmplmQvNQ" has "plm"; it failed CI on Windows).
+    /// Two or more distinct 3-byte FTS trigrams of `words` in the index files (the vault may still be open). One alone
+    /// can be chance: in A-r3, 5 of 2500 runs matched one trigram in a timestamp's low bytes plus a rowid byte, a WAL
+    /// frame checksum or the WAL salt. A real leak leaves several (each word's trigrams with distinct first letters
+    /// are stored whole). Temp paths and WAL headers are blanked: the random temp dir name holds trigrams too
+    /// (".tmplmQvNQ" has "plm"; it failed CI on Windows).
     fn trigram_on_disk(db: &Path, words: &[&str]) -> bool {
-        !trigram_hits(db, words, true).is_empty()
+        let mut seen: Vec<String> = trigram_hits(db, words).into_iter().map(|h| h.2).collect();
+        seen.sort();
+        seen.dedup();
+        seen.len() >= 2
     }
-    /// Each hit as "file offset trigram context", for failure messages; `first` stops at the first.
-    fn trigram_hits(db: &Path, words: &[&str], first: bool) -> Vec<String> {
+    /// Every hit as (file, offset, trigram, context), for failure messages.
+    fn trigram_hits(db: &Path, words: &[&str]) -> Vec<(&'static str, usize, String, String)> {
         let tmp = s(&std::env::temp_dir());
         let p = tmp.as_bytes();
         let mut hits = vec![];
@@ -1158,10 +1172,16 @@ mod tests {
                 b[i + k..end].fill(0);
                 i = end;
             }
+            if x == "-wal" && b.len() >= 32 {
+                // the WAL header and each frame header: salts and checksums, random bytes
+                let frame = 24 + u32::from_be_bytes(b[8..12].try_into().unwrap()) as usize;
+                b[..32].fill(0);
+                let n = b.len();
+                (32..n).step_by(frame).for_each(|k| b[k..(k + 24).min(n)].fill(0));
+            }
             for g in words.iter().flat_map(|w| w.as_bytes().windows(3)) {
                 for (k, _) in b.windows(3).enumerate().filter(|(_, w)| w == &g) {
-                    hits.push(format!("{x} @{k} {:?} in {:?}", String::from_utf8_lossy(g), String::from_utf8_lossy(&b[k.saturating_sub(16)..(k + 19).min(b.len())])));
-                    if first { return hits; }
+                    hits.push((x, k, String::from_utf8_lossy(g).into_owned(), format!("{:?}", String::from_utf8_lossy(&b[k.saturating_sub(16)..(k + 19).min(b.len())]))));
                 }
             }
         }
@@ -1307,6 +1327,29 @@ mod tests {
         app.index.checkpoint().unwrap();
         assert!(!trigram_on_disk(&db, &OLD[..1]));
     }
+    /// Notes locked elsewhere in a rescan: their `.md.age` come in earlier chunks, which don't end the bulk (a rebuild
+    /// each, ~1 s at 10k); the `.md` deletes come last together, and only the first of them ends it.
+    #[test] fn notes_locked_elsewhere_in_a_rescan_end_the_bulk_once() {
+        let (dir, db) = setup();
+        for i in 0..300 { std::fs::write(dir.join(format!("filler {i}.md")), format!("filler {i} lorem ipsum dolor")).unwrap(); }
+        let plain: Vec<PathBuf> = (0..3).map(|k| dir.join(format!("x{k}.md"))).collect();
+        for (p, w) in plain.iter().zip(OLD) { std::fs::write(p, format!("x {w}")).unwrap(); }
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        v.index.begin_bulk().unwrap();
+        let id = crypto::new_identity();
+        for p in &plain {
+            let age = PathBuf::from(format!("{}.age", p.display()));
+            std::fs::write(&age, crypto::encrypt(&id, b"x").unwrap()).unwrap();
+            std::fs::remove_file(p).unwrap();
+            v.apply_bulk_chunk(&[age], None);
+            assert_eq!(secure_delete(&v), 0, "an .md.age chunk ended the bulk");
+        }
+        v.apply_bulk_chunk(&plain, None);
+        assert_eq!(secure_delete(&v), 1, "the first delete ended the bulk");
+        v.index.finish_bulk();
+        v.index.checkpoint().unwrap();
+        assert!(!trigram_on_disk(&db, &OLD), "{:?}", trigram_hits(&db, &OLD));
+    }
     /// A lock mid-bulk ends the bulk (its rebuild erases older versions); the next chunk starts it again, so the rest
     /// of the rescan doesn't run with secure deletes (seconds per chunk).
     #[test] fn bulk_chunks_restart_the_bulk_after_a_lock() {
@@ -1333,7 +1376,7 @@ mod tests {
         for w in OLD { app.save_note(&t.path, &format!("t {w}"), &stat_hash(&t.path), None, false).unwrap(); }
         assert!(trigram_on_disk(&db, &OLD), "control");
         app.lock_note(&t.path, &crypto::new_identity()).unwrap();
-        assert!(!trigram_on_disk(&db, &OLD), "{:?}", trigram_hits(&db, &OLD, false));
+        assert!(!trigram_on_disk(&db, &OLD), "{:?}", trigram_hits(&db, &OLD));
     }
     /// A bulk cut short without a crash (vault switch, Quit): the dropped index ends it.
     #[test] fn dropping_the_vault_mid_bulk_ends_the_bulk() {
@@ -1351,7 +1394,7 @@ mod tests {
         more_fillers(&mut v, &dir, 3); // the bulk goes on
         v.index.end_bulk().unwrap();
         drop(b);
-        assert!(!trigram_on_disk(&db, &OLD), "{:?}", trigram_hits(&db, &OLD, false));
+        assert!(!trigram_on_disk(&db, &OLD), "{:?}", trigram_hits(&db, &OLD));
         v.index.raw().execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('integrity-check')").unwrap();
         let cold = open(dir.clone(), &tempfile::tempdir().unwrap().keep().join("cold.sqlite"), None).unwrap();
         assert_eq!(dump(&v), dump(&cold));
@@ -1500,6 +1543,29 @@ mod tests {
         std::fs::remove_file(ballast).unwrap();
         drop(open(dir, &db, None).unwrap());
         assert!(!trigram_on_disk(&db, &OLD[..2]), "s's old versions");
+    }
+    /// Just enough room for `begin_bulk`: the bulk's own WAL then eats into it, and its finish must still run (A-r3).
+    #[test] #[ignore] fn real_full_disk_band_still_finishes() {
+        let root = ram_root("band");
+        let words = |seed: u64| { let mut x = seed; (0..250).map(|_| { (0..6).map(|_| { x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); b"acdefgilmnoprstuvy"[((x >> 33) % 18) as usize] as char }).collect::<String>() }).collect::<Vec<_>>().join(" ") };
+        let (dir, db) = (root.join("notes"), root.join("i.sqlite"));
+        for i in 0..1500 { std::fs::write(dir.join(format!("filler {i}.md")), words(i)).unwrap(); }
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let d = v.open_or_create("s", None, false).unwrap();
+        v.index.checkpoint().unwrap();
+        let ballast = fill_disk(&root, (128 << 20) + 2 * std::fs::metadata(&db).unwrap().len() + (4 << 20));
+        v.index.begin_bulk().expect("room for the bulk");
+        for (k, w) in OLD.iter().enumerate() {
+            v.save_note(&d.path, &format!("version {k} {w}"), &stat_hash(&d.path), None, false).unwrap();
+            let fillers: Vec<PathBuf> = (k * 400..k * 400 + 400).map(|i| dir.join(format!("filler {}.md", i % 1500))).collect();
+            for f in &fillers { std::fs::write(f, words(10_000 + i_of(f) + k as u64)).unwrap(); }
+            v.apply_bulk_chunk(&fillers, None);
+        }
+        v.index.end_bulk().expect("the finish runs");
+        v.lock_note(&d.path, &crypto::new_identity()).unwrap();
+        drop(v);
+        std::fs::remove_file(ballast).unwrap();
+        assert!(!trigram_on_disk(&db, &OLD), "{:?}", trigram_hits(&db, &OLD));
     }
     /// Too little room for a bulk's WAL and rebuild: no bulk, so locks work as on main.
     #[test] #[ignore] fn real_full_disk_skips_the_bulk() {

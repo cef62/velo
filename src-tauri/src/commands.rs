@@ -153,6 +153,7 @@ fn apply_watch(st: &AppState, base: &Path, batch: Option<Vec<PathBuf>>) -> Vec<S
         // a vault switch mid-rescan dropped it: `Index`'s drop ended the bulk
         with(&mut |v| {
             v.index.finish_bulk(); // a failure (disk full) is retried by the next lock, or at close or open
+            v.index.checkpoint().ok(); // also after a chunk that ended the bulk itself (a note locked elsewhere)
             vec![]
         });
     }

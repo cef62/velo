@@ -188,3 +188,49 @@ fn reindex_existing_notes() {
     v.lock_note(&paths[1].to_string_lossy(), &velo_lib::crypto::new_identity()).unwrap();
     println!("lock one note: {:.0} ms, {:.1} MB written", t.elapsed().as_secs_f64() * 1000.0, (bytes_written() - before) as f64 / 1e6);
 }
+
+/// A rescan that also brings notes locked on another machine (`X.md.age` new, `X.md` gone), 15 at 10k: the bulk must
+/// still run one rebuild (its finish), not one per chunk. Prints per-chunk holds (R: the chunk ended the bulk).
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore]
+fn reindex_with_notes_locked_elsewhere() {
+    let src = std::env::var("VELO_FIXTURE").unwrap_or_else(|_| "../fixtures/notes".into());
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("notes");
+    std::fs::create_dir(&dir).unwrap();
+    for e in std::fs::read_dir(&src).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().is_some_and(|x| x == "md") {
+            std::fs::copy(&p, dir.join(p.file_name().unwrap())).unwrap();
+        }
+    }
+    let db = tmp.path().join("index.db");
+    let mut v = velo_lib::vault::Vault::open_with_progress(dir.clone(), &db, None, &mut |_, _| {}).unwrap();
+    let t = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
+    let all: Vec<std::path::PathBuf> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).collect();
+    for p in &all {
+        std::fs::File::options().append(true).open(p).unwrap().set_modified(t).unwrap();
+    }
+    let id = velo_lib::crypto::new_identity();
+    for i in 0..15 {
+        let p = &all[i * all.len() / 15];
+        std::fs::write(format!("{}.age", p.display()), velo_lib::crypto::encrypt(&id, &std::fs::read(p).unwrap()).unwrap()).unwrap();
+        std::fs::remove_file(p).unwrap();
+    }
+    let (before, t0) = (bytes_written(), Instant::now());
+    let (paths, _) = v.stale_paths().unwrap();
+    v.index.begin_bulk().unwrap();
+    let mut holds = vec![];
+    for chunk in paths.chunks(700) {
+        let c = Instant::now();
+        v.apply_bulk_chunk(chunk, None);
+        holds.push(format!("{:.0}{}", c.elapsed().as_secs_f64() * 1000.0, if v.index.bulk_off() { "" } else { "R" }));
+    }
+    let c = Instant::now();
+    v.index.finish_bulk();
+    println!(
+        "{} paths with 15 locked elsewhere: {:.1} s, {:.0} MB written, finish {:.0} ms, chunk holds (R: ended the bulk) {}",
+        paths.len(), t0.elapsed().as_secs_f64(), (bytes_written() - before) as f64 / 1e6, c.elapsed().as_secs_f64() * 1000.0, holds.join(" ")
+    );
+}
