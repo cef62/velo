@@ -1,12 +1,12 @@
 use crate::connections::{self, Connections};
 use crate::crypto;
 use crate::frontmatter;
-use crate::index::{Index, Meta, Page, Sort, TagCount, TaskRow, all_tags, effective_dates};
+use crate::index::{Index, LinkTarget, Meta, Page, Sort, TagCount, TaskRow, all_tags, effective_dates};
 use crate::tasks::{TaskView, group_tasks, local_today, parse_tasks, toggle_line};
 
 const PAGE: usize = 200;
 use crate::revisions::{RevisionInfo, Revisions, fnv64};
-use crate::names::{NoteFile, note_path, parse_note_file};
+use crate::names::{NoteFile, note_path, title_ok, parse_note_file};
 use crate::store::{SaveResult, Store, hash, meta_of};
 use crate::text::{fold, link_mention_text, rewrite_links};
 use anyhow::{Context, anyhow};
@@ -252,6 +252,27 @@ impl Vault {
 
     pub fn titles(&self) -> anyhow::Result<Vec<String>> {
         self.index.titles()
+    }
+
+    pub fn link_targets(&self) -> anyhow::Result<Vec<LinkTarget>> {
+        self.index.link_targets()
+    }
+
+    /// A new plain note `title` holding `text`; refuses a title another note (locked ones too) already names. Returns its path.
+    pub fn create_from_selection(&mut self, title: &str, text: &str, write_fm: bool) -> anyhow::Result<String> {
+        if !title_ok(title) {
+            return Err(anyhow!("invalid-title"));
+        }
+        let (title, dir) = (title.trim(), self.store.dir.clone());
+        if self.find_note(title)?.is_some() || note_path(&dir, title, false).exists() || note_path(&dir, title, true).exists() {
+            return Err(anyhow!("already-exists"));
+        }
+        let now = chrono::Local::now().fixed_offset();
+        let content = if write_fm { frontmatter::stamp(text, now, now) } else { text.to_string() };
+        let p = note_path(&dir, title, false);
+        self.store.write_atomic(&p, content.as_bytes())?;
+        self.reindex(&p, Some(&content))?;
+        Ok(s(&p))
     }
 
     pub fn open_note(&mut self, path: &str, identity: Option<&str>) -> anyhow::Result<NoteDoc> {
@@ -1727,4 +1748,38 @@ mod tests {
         assert!(!trigram_on_disk(&db, &OLD), "{:?}", trigram_hits(&db, &OLD));
     }
 
+
+    fn nick_vault() -> (Vault, PathBuf) {
+        let (dir, db) = setup();
+        std::fs::write(dir.join("Nick.md"), "---\naliases: [Nicholas]\n---\n").unwrap();
+        std::fs::write(dir.join("L.md.age"), b"x").unwrap();
+        (open(dir.clone(), &db, None).unwrap(), dir)
+    }
+    #[test] fn create_from_selection_writes_text_and_indexes() {
+        let (mut v, dir) = nick_vault();
+        let p = v.create_from_selection(" New ", "some\ntext", false).unwrap();
+        assert_eq!(p, dir.join("New.md").to_string_lossy());
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "some\ntext");
+        assert_eq!(v.find_note("New").unwrap(), Some(p));
+    }
+    #[test] fn create_from_selection_stamps_front_matter() {
+        let (mut v, _) = nick_vault();
+        let p = v.create_from_selection("New", "body", true).unwrap();
+        let t = std::fs::read_to_string(p).unwrap();
+        let fm = frontmatter::parse(&t).unwrap();
+        assert!(fm.created.is_some());
+        assert_eq!(&t[fm.end..], "body");
+    }
+    #[test] fn create_from_selection_refuses_existing_title_alias_and_locked() {
+        let (mut v, dir) = nick_vault();
+        let list = |d: &PathBuf| { let mut n: Vec<_> = std::fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name()).collect(); n.sort(); n };
+        let before = list(&dir);
+        for t in ["Nick", "nicholas", "L"] { assert_eq!(v.create_from_selection(t, "x", true).unwrap_err().to_string(), "already-exists", "{t}"); }
+        assert_eq!(list(&dir), before);
+        assert_eq!(std::fs::read(dir.join("L.md.age")).unwrap(), b"x");
+    }
+    #[test] fn create_from_selection_refuses_invalid_title() {
+        let (mut v, _) = nick_vault();
+        assert_eq!(v.create_from_selection("a/b", "x", false).unwrap_err().to_string(), "invalid-title");
+    }
 }

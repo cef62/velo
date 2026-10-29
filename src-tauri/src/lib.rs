@@ -139,6 +139,8 @@ pub fn run() {
             commands::search,
             commands::list_tags,
             commands::list_titles,
+            commands::list_link_targets,
+            commands::create_from_selection,
             commands::open_note,
             commands::open_or_create,
             commands::save_note,

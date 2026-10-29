@@ -40,6 +40,12 @@ export function fakeApi(notes: Record<string, string> = {}) {
     }),
     listTags: vi.fn(async (): Promise<TagCount[]> => []),
     listTitles: vi.fn(async () => Object.keys(notes)),
+    listLinkTargets: vi.fn(async () => Object.keys(notes).map((title) => ({ name: title, title, path: `/n/${title}.md`, modified: 0, locked: false }))),
+    createFromSelection: vi.fn(async (title: string, text: string) => {
+      if (title in notes) throw "already-exists";
+      notes[title] = text;
+      return `/n/${title}.md`;
+    }),
     openNote: vi.fn(async (path: string) => docOf(path)),
     openOrCreate: vi.fn(async (title: string) => {
       const created = !(title in notes);

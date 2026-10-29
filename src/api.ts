@@ -17,6 +17,11 @@ export type TagCount = { tag: string; count: number };
 export const search = (query: string, sort: "modified" | "title", offset: number, tags: string[], noLinks: boolean) => invoke<Page>("search", { query, sort, offset, tags, noLinks });
 export const listTags = () => invoke<TagCount[]>("list_tags");
 export const listTitles = () => invoke<string[]>("list_titles");
+/** `name == title` rows are titles, the others aliases. */
+export type LinkTarget = { name: string; title: string; path: string; modified: number; locked: boolean };
+export const listLinkTargets = () => invoke<LinkTarget[]>("list_link_targets");
+/** Creates the note `title` holding `text`; rejects with "already-exists" or "invalid-title". */
+export const createFromSelection = (title: string, text: string) => invoke<string>("create_from_selection", { title, text });
 export const openNote = (path: string) => invoke<NoteDoc>("open_note", { path });
 /** `created`: the file did not exist before this call. */
 export const openOrCreate = (title: string) => invoke<NoteDoc & { created: boolean }>("open_or_create", { title });
