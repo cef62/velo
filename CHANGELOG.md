@@ -1,5 +1,11 @@
 # velo
 
+## 0.9.0
+
+### Minor Changes
+
+- 67da1bb: Added a Connections view that showed the links, backlinks, shared tags and unlinked mentions around a note, with one-click Link it, a No links filter for orphans, and MCP support for agents to read connections and find orphans.
+
 ## 0.8.3
 
 ### Patch Changes
