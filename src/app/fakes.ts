@@ -133,7 +133,9 @@ export class FakeEditor implements Editor {
   revealed: number[] = [];
   revealLine(line: number) { this.revealed.push(line); }
   changes: { from: number; to: number; insert: string }[] = [];
-  applyChange(c: { from: number; to: number; insert: string }) {
+  isolated: boolean[] = [];
+  applyChange(c: { from: number; to: number; insert: string }, isolate = false) {
+    this.isolated.push(isolate);
     if (this.path === null || this.suspended || this.readOnly) return false;
     this.changes.push(c);
     this.text = this.text.slice(0, c.from) + c.insert + this.text.slice(c.to);

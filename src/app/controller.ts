@@ -969,11 +969,14 @@ export class Controller {
         const next = this.busy ? null : await this.api.linkMention(conn.centre, m.name, m.count, text);
         if (next === null) return fail("The note can't be edited right now");
         // typing during the call moved the offsets: the mention is gone or the text changed, so just refresh
-        if (this.editor.getText() === text && !this.editor.applyChange(changedSpan(text, next))) return fail("The note can't be edited right now");
+        const same = this.editor.currentPath() === conn.centre && this.editor.getText() === text;
+        if (same && !this.editor.applyChange(changedSpan(text, next), true)) return fail("The note can't be edited right now");
       } else await this.api.linkMention(conn.centre, m.name, m.count, null);
     } catch (e) {
       if (e !== "mention-moved") return fail(e);
     }
+    // the graph reads the centre from disk: autosave would land after the reload
+    if (this.editor.currentPath() === conn.centre) await this.editor.flush();
     await this.loadConnections();
   }
 

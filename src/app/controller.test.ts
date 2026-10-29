@@ -1909,3 +1909,31 @@ test("no links chip filters the list", async () => {
   expect(store.get().selectedTags).toEqual([]);
   expect(api.search).toHaveBeenLastCalledWith("", "modified", 0, [], false);
 });
+
+test("link it flushes the editor before the graph reloads", async () => {
+  const { c, api, editor } = setup({ A: "see Bee here" });
+  await c.show(P("A"));
+  await c.showConnections();
+  api.linkMention.mockImplementationOnce(async (_p, _t, _n, text) => text!.replace("Bee", "[[Bee]]"));
+  const order: string[] = [];
+  editor.flush.mockImplementationOnce(async () => (order.push("flush"), true));
+  api.connections.mockImplementationOnce(async (p: string) => (order.push("connections"), { ...emptyConnections, centre: { ...emptyConnections.centre, path: p } }));
+  await c.linkMention(mention("Bee"));
+  expect(order).toEqual(["flush", "connections"]);
+});
+
+test("link it is an isolated undo step and skips a different note with the same text", async () => {
+  const { c, api, editor } = setup({ A: "see Bee", B: "see Bee" });
+  await c.show(P("A"));
+  await c.showConnections();
+  api.linkMention.mockImplementationOnce(async (_p, _t, _n, text) => {
+    await c.openFromGraph(P("B")); // switch notes during the call: identical text
+    return text!.replace("Bee", "[[Bee]]");
+  });
+  await c.linkMention(mention("Bee"));
+  expect(editor.changes).toEqual([]);
+  await c.recentre(P("B"));
+  api.linkMention.mockImplementationOnce(async (_p, _t, _n, text) => text!.replace("Bee", "[[Bee]]"));
+  await c.linkMention(mention("Bee"));
+  expect(editor.isolated).toEqual([true]);
+});

@@ -4,7 +4,7 @@ import { writingSetup } from "./editortheme";
 import { refreshRich, richMarkdown, type RichOpts } from "./richmd";
 import { dueInputRule, localToday, toggleTaskAt } from "./tasks";
 import { SaveController } from "./saver";
-import { frontMatterHide, replaceAll, undoHistory } from "./fmhide";
+import { frontMatterHide, ISOLATED, replaceAll, undoHistory } from "./fmhide";
 import { stampChange } from "./frontmatter";
 import { openNote, saveNote, type NoteDoc, type NoteMeta } from "./api";
 
@@ -41,8 +41,8 @@ export interface Editor {
   toggleTask(line: number): boolean;
   /** Append `text` as a new last line (user edit); false if not editable. */
   appendLine(text: string): boolean;
-  /** Replace [from, to) with `insert` as a user edit (undoable, autosaved); false if not editable. */
-  applyChange(change: { from: number; to: number; insert: string }): boolean;
+  /** Replace [from, to) with `insert` as a user edit (undoable, autosaved); false if not editable. `isolate`: its own undo step, never joined to typing. */
+  applyChange(change: { from: number; to: number; insert: string }, isolate?: boolean): boolean;
   /** Caret to the start of this 0-based line, scrolled into view (a hidden front matter clamps it to the body). */
   revealLine(line: number): void;
 }
@@ -188,9 +188,9 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       view.dispatch({ changes: { from: doc.length, insert: sep + text }, selection: { anchor: doc.length + sep.length + text.length } });
       return true;
     },
-    applyChange(change) {
+    applyChange(change, isolate) {
       if (!view.state.facet(EditorView.editable)) return false;
-      view.dispatch({ changes: change });
+      view.dispatch({ changes: change, ...(isolate && ISOLATED) });
       return true;
     },
     revealLine(line) {
