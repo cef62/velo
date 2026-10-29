@@ -1,5 +1,5 @@
 import { Compartment, EditorSelection, EditorState, StateField, Transaction, type Extension, type Text } from "@codemirror/state";
-import { history } from "@codemirror/commands";
+import { history, isolateHistory } from "@codemirror/commands";
 import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
 import { frontMatterRange } from "./frontmatter";
 
@@ -63,3 +63,6 @@ export function frontMatterHide(hidden: boolean): Extension {
   });
   return [field, EditorView.atomicRanges.of((v) => v.state.field(field)), protect, guard];
 }
+
+/** Transaction spec that keeps a change out of the history event of the typing before it, so one undo reverts only it. */
+export const ISOLATED = { annotations: isolateHistory.of("full"), userEvent: "input.link" };

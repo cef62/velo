@@ -1,6 +1,6 @@
 import type { Action } from "./shortcuts";
 
-export type MenuAction = "open" | "rename" | "toggle_lock" | "copy_link" | "reveal" | "delete_note";
+export type MenuAction = "open" | "rename" | "toggle_lock" | "copy_link" | "reveal" | "delete_note" | "link_it";
 export type MenuEntry = { id: MenuAction; text: string; accelerator?: string } | "separator";
 
 const MODS: Record<string, string> = { Mod: "CmdOrCtrl", Ctrl: "Ctrl", Alt: "Alt", Shift: "Shift" };

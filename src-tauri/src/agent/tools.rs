@@ -22,8 +22,8 @@ Always read_note before editing a note. `summary` is a one-line description of t
 pub const TOOL_SPECS: &[ToolSpec] = &[
     ToolSpec {
         name: "search_notes",
-        description: "Search velo notes like the velo search field (titles, aliases, then text). Empty query lists all notes. `tags` keeps notes having every tag. At most 50 results per call; page with `offset`. Returns title, snippet, modified, tags.",
-        input_schema: r#"{"type":"object","properties":{"query":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"limit":{"type":"integer","minimum":1,"maximum":50},"offset":{"type":"integer","minimum":0}}}"#,
+        description: "Search velo notes like the velo search field (titles, aliases, then text). Empty query lists all notes. `tags` keeps notes having every tag. `no_links` true keeps only notes with no [[links]] in or out (orphans; alias links count). At most 50 results per call; page with `offset`. Returns title, snippet, modified, tags.",
+        input_schema: r#"{"type":"object","properties":{"query":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"no_links":{"type":"boolean"},"limit":{"type":"integer","minimum":1,"maximum":50},"offset":{"type":"integer","minimum":0}}}"#,
     },
     ToolSpec {
         name: "list_tags",
@@ -89,6 +89,11 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
         name: "move_to_trash",
         description: concat!("Move a note to the OS Trash (recoverable there; nothing is deleted permanently). Its revisions are kept.", conventions!()),
         input_schema: r#"{"type":"object","properties":{"title":{"type":"string"},"summary":{"type":"string"}},"required":["title","summary"]}"#,
+    },
+    ToolSpec {
+        name: "get_connections",
+        description: "Notes one hop around a note: outgoing [[links]], backlinks (alias links included), notes sharing each tag (tags on more than 15 notes give only the count), and unlinked mentions (titles or aliases in this note's text without [[ ]]). To link a mention, read_note then edit_note wrapping the words in [[ ]].",
+        input_schema: r#"{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}"#,
     },
     ToolSpec {
         name: "daily_note",
@@ -165,7 +170,7 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
     match name {
         "search_notes" => {
             let limit = uint(&a, "limit", PAGE).clamp(1, PAGE);
-            let p = ops.search(a.get("query").and_then(Value::as_str).unwrap_or(""), &strings(&a, "tags"), uint(&a, "offset", 0)).map_err(err)?;
+            let p = ops.search(a.get("query").and_then(Value::as_str).unwrap_or(""), &strings(&a, "tags"), uint(&a, "offset", 0), a.get("no_links").and_then(Value::as_bool).unwrap_or(false)).map_err(err)?;
             let has_more = p.has_more || p.hits.len() > limit;
             let notes = p.hits.iter().take(limit).map(|h| Ok(json!({"title": h.title, "snippet": h.snippet, "modified": iso(h.mtime), "tags": ops.note_tags(&h.path)?}))).collect::<anyhow::Result<Vec<_>>>().map_err(err)?;
             Ok(json!({"notes": notes, "has_more": has_more}))
@@ -174,9 +179,20 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
         "read_note" => {
             let doc = ops.read(&path_of(ops, &a)?).map_err(err)?;
             let links = crate::text::extract_links(crate::frontmatter::body(&doc.text));
-            let backlinks = ops.backlinks(&doc.title).map_err(err)?;
+            let backlinks = ops.backlinks(&doc.path).map_err(err)?;
             let m = &doc.meta;
             Ok(json!({"title": doc.title, "text": doc.text, "hash": doc.hash, "created": iso(m.created), "modified": iso(m.modified), "tags": m.tags, "aliases": m.aliases, "links": links, "backlinks": backlinks}))
+        }
+        "get_connections" => {
+            let c = ops.connections(&path_of(ops, &a)?).map_err(err)?;
+            let note = |n: &crate::connections::Node| json!({"title": n.title, "created": iso(n.created), "modified": iso(n.modified)});
+            Ok(json!({
+                "title": c.centre.title, "created": iso(c.centre.created), "modified": iso(c.centre.modified),
+                "links_out": c.links_out.iter().map(note).collect::<Vec<_>>(),
+                "links_in": c.links_in.iter().map(note).collect::<Vec<_>>(),
+                "tags": c.tags.iter().map(|g| json!({"tag": g.tag, "count": g.count, "titles": g.notes.iter().map(|n| &n.title).collect::<Vec<_>>()})).collect::<Vec<_>>(),
+                "mentions": c.mentions.iter().map(|m| json!({"title": m.node.title, "name": m.name, "count": m.count})).collect::<Vec<_>>(),
+            }))
         }
         "create_note" => {
             let doc = ops.create(title_arg(&a, "title")?, arg(&a, "text")?, summary).map_err(err)?;
@@ -394,6 +410,11 @@ mod tests {
         v["notes"].as_array().unwrap().iter().map(|n| n["title"].as_str().unwrap().to_string()).collect()
     }
 
+    #[test] fn search_notes_no_links_lists_orphans() {
+        let (mut ops, _) = vault(&[("a.md", "[[B]]"), ("B.md", ""), ("c.md", ""), ("s.md.age", "x")]);
+        assert_eq!(titles(&call(&mut ops, "search_notes", json!({"no_links": true})).unwrap()), vec!["c"]);
+        assert_eq!(titles(&call(&mut ops, "search_notes", json!({})).unwrap()).len(), 3);
+    }
     #[test] fn search_and_read_skip_locked() {
         let (mut ops, _) = vault(&[("a.md", "zebra #shared"), ("zebra secret.md.age", "zebra #secret")]);
         let got = call(&mut ops, "search_notes", json!({"query": "zebra"})).unwrap();
@@ -416,6 +437,11 @@ mod tests {
         assert_eq!(r["links"], json!(["b"]));
         assert_eq!(r["backlinks"], json!(["b"]));
         assert!(r["created"].is_string() && r["modified"].is_string());
+    }
+
+    #[test] fn read_note_backlinks_include_alias_links() {
+        let (mut ops, _) = vault(&[("Nick.md", "---\naliases: [Nicholas]\n---\n"), ("a.md", "[[Nicholas]]"), ("b.md", "[[nick]]")]);
+        assert_eq!(call(&mut ops, "read_note", json!({"title": "Nick"})).unwrap()["backlinks"], json!(["a", "b"]));
     }
 
     #[test] fn create_refuses_existing_title_or_alias() {
@@ -507,6 +533,46 @@ mod tests {
         let p3 = call(&mut ops, "search_notes", json!({"limit": 5})).unwrap();
         assert_eq!(titles(&p3).len(), 5);
         assert_eq!(p3["has_more"], true);
+    }
+
+    /// Every object key anywhere in `v`.
+    fn keys(v: &Value) -> Vec<String> {
+        match v {
+            Value::Object(m) => m.iter().flat_map(|(k, v)| std::iter::once(k.clone()).chain(keys(v))).collect(),
+            Value::Array(a) => a.iter().flat_map(keys).collect(),
+            _ => vec![],
+        }
+    }
+
+    #[test] fn get_connections_returns_titles_not_paths() {
+        let (mut ops, _) = vault(&[("C.md", "see [[A]] #t and Delta"), ("A.md", ""), ("B.md", "[[C]]"), ("D.md", "#t"), ("Delta.md", "")]);
+        let r = call(&mut ops, "get_connections", json!({"title": "C"})).unwrap();
+        assert_eq!(r["title"], "C");
+        assert!(r["created"].is_string() && r["modified"].is_string());
+        assert_eq!(r["links_out"][0]["title"], "A");
+        assert!(r["links_out"][0]["created"].is_string() && r["links_out"][0]["modified"].is_string());
+        assert_eq!(r["links_in"][0]["title"], "B");
+        assert_eq!(r["tags"], json!([{"tag": "t", "count": 1, "titles": ["D"]}]));
+        assert_eq!(r["mentions"], json!([{"title": "Delta", "name": "Delta", "count": 1}]));
+        assert!(!keys(&r).contains(&"path".to_string()), "{r}");
+    }
+
+    #[test] fn get_connections_unknown_or_locked_is_not_found() {
+        let (mut ops, _) = vault(&[("a.md", "[[L]]"), ("L.md.age", "x")]);
+        assert_eq!(call(&mut ops, "get_connections", json!({"title": "nope"})), Err("not found".to_string()));
+        assert_eq!(call(&mut ops, "get_connections", json!({"title": "L"})), Err("not found".to_string()));
+    }
+
+    /// A locked note's longer name must not swallow a plain mention inside it (that would reveal the title).
+    #[test] fn get_connections_locked_name_does_not_hide_a_mention() {
+        let (mut ops, _) = vault(&[("C.md", "the Velo roadmap"), ("Velo.md", ""), ("Velo roadmap.md.age", "x")]);
+        let r = call(&mut ops, "get_connections", json!({"title": "C"})).unwrap();
+        assert_eq!(r["mentions"], json!([{"title": "Velo", "name": "Velo", "count": 1}]));
+    }
+
+    #[test] fn get_connections_needs_no_summary() {
+        let (mut ops, _) = vault(&[("a.md", "x")]);
+        assert!(call(&mut ops, "get_connections", json!({"title": "a"})).is_ok());
     }
 
     #[test] fn unknown_tool_errors() {

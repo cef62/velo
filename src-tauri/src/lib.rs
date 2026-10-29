@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod commands;
+pub mod connections;
 pub mod crypto;
 pub mod frontmatter;
 pub mod index;
@@ -141,6 +142,7 @@ pub fn run() {
             commands::open_note,
             commands::open_or_create,
             commands::save_note,
+            commands::link_mention,
             commands::tasks,
             commands::toggle_task,
             commands::capture_task,
@@ -149,6 +151,8 @@ pub fn run() {
             commands::set_badge,
             commands::rename_note,
             commands::backlink_count,
+            commands::linked_from_count,
+            commands::connections,
             commands::lock_note,
             commands::unlock_note,
             commands::lock_all,

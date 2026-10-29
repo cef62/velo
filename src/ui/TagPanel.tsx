@@ -18,6 +18,7 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
   const total = useStore(store, (s) => s.total);
   const keys = useStore(store, (s) => s.keys);
   const isMac = useStore(store, (s) => s.isMac);
+  const noLinks = useStore(store, (s) => s.noLinks);
   const tags = useStore(store, (s) => s.tags);
   const group = useRef<HTMLDivElement>(null);
   const [cur, setCur] = useState(0); // roving tab stop: Tab enters the group once, arrows move inside
@@ -48,7 +49,7 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
           {selectedTags.length > 0 && `${selectedTags.length} selected · `}
           {total} notes
         </span>
-        <Button variant="plain" size="sm" marginLeft="auto" disabled={selectedTags.length === 0} onClick={() => controller.setTags([])}>
+        <Button variant="plain" size="sm" marginLeft="auto" disabled={selectedTags.length === 0 && !noLinks} onClick={() => controller.clearFilters()}>
           Clear
         </Button>
         {keys.toggle_tags !== NONE && (
@@ -70,11 +71,14 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
           e.preventDefault();
         }}
       >
+        <button type="button" className={tagChip({ selected: noLinks }).root} aria-pressed={noLinks} tabIndex={cur === 0 ? 0 : -1} onFocus={() => setCur(0)} onClick={() => controller.setNoLinks(!noLinks)}>
+          No links
+        </button>
         {tags.map((t, i) => {
           const on = selectedTags.some((x) => fold(x) === fold(t.tag));
           const c = tagChip({ selected: on });
           return (
-            <button key={t.tag} type="button" className={c.root} aria-pressed={on} tabIndex={i === Math.min(cur, tags.length - 1) ? 0 : -1} onFocus={() => setCur(i)} onClick={() => controller.toggleTagFilter(t.tag)}>
+            <button key={t.tag} type="button" className={c.root} aria-pressed={on} tabIndex={i + 1 === Math.min(cur, tags.length) ? 0 : -1} onFocus={() => setCur(i + 1)} onClick={() => controller.toggleTagFilter(t.tag)}>
               #{t.tag} <span className={c.count}>{t.count}</span>
             </button>
           );

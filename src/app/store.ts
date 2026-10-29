@@ -1,4 +1,4 @@
-import type { NoteMeta, RevisionInfo, Settings, TagCount, TaskView } from "../api";
+import type { Connections, NoteMeta, RevisionInfo, Settings, TagCount, TaskView } from "../api";
 import { resolve, type Action } from "../shortcuts";
 
 /** Minimal observable state: React reads it through useSyncExternalStore, the controller writes it. */
@@ -70,10 +70,13 @@ export interface AppState {
   tags: TagCount[];
   selectedTags: string[];
   tagPanelOpen: boolean;
+  noLinks: boolean; // the No links chip: only notes with no wikilinks in or out
   exactTitleMatch: boolean; // drives the ⇧↩ Create hint
   settings: Settings | null; // non-null = the Settings dialog is open on these saved settings
   update: { version: string; status: "available" | "current" | "installing" | "failed"; message?: string } | null; // the update banner; message: install progress or the failure
-  paneMode: "notes" | "tasks"; // what the left pane lists
+  paneMode: "notes" | "tasks" | "connections"; // what the left pane lists
+  connections: { centre: string; data: Connections | null; err: string } | null; // the Connections view; centre stays put while notes open from it
+  connectionsSort: "ring" | "created" | "updated";
   taskView: TaskView | null; // filtered by query/selectedTags like the notes list
   dueCount: number; // overdue + today, unfiltered: the Tasks switch count and the Dock badge
   showDone: boolean;
@@ -120,6 +123,9 @@ export const initialState = (isMac: boolean): AppState => ({
   settings: null,
   update: null,
   paneMode: "notes",
+  connections: null,
+  connectionsSort: "ring",
+  noLinks: false,
   taskView: null,
   dueCount: 0,
   showDone: false,

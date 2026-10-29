@@ -1,4 +1,4 @@
-import { ArrowDownAZ, Clock, Code, Eye, FileText, FolderLock, Hash, ListChecks, Lock, LockOpen, Settings, Trash2, Type } from "lucide-react";
+import { ArrowDownAZ, Clock, Code, Eye, FileText, FolderLock, Hash, ListChecks, Lock, LockOpen, Network, Settings, Trash2, Type } from "lucide-react";
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { css } from "styled-system/css";
 import { previewPill } from "styled-system/recipes";
@@ -90,11 +90,11 @@ export function Header({ controller, store }: { controller: Controller; store: S
   };
   const noNote = openPath === null;
   const iconOnly = mode !== "full";
-  const seg = <V extends string>(name: string, value: V, set: () => void, items: { value: V; text: string; tip: string; glyph: ReactNode; action: Action; count?: number }[]) => (
-    <SegmentGroup.Root size="sm" value={value} onValueChange={(d) => d.value !== value && set()} aria-label={name}>
+  const seg = <V extends string>(name: string, value: V, set: (v: V) => void, items: { value: V; text: string; tip: string; glyph: ReactNode; action: Action; count?: number; disabled?: boolean }[]) => (
+    <SegmentGroup.Root size="sm" value={value} onValueChange={(d) => d.value !== value && set(d.value as V)} aria-label={name}>
       <SegmentGroup.Indicator />
       {items.map((it) => (
-        <SegmentGroup.Item key={it.value} value={it.value} className={segHover}>
+        <SegmentGroup.Item key={it.value} value={it.value} disabled={it.disabled} className={segHover}>
           {it.glyph}
           {!iconOnly && <SegmentGroup.ItemText>{it.text}</SegmentGroup.ItemText>}
           {!!it.count && <Badge size="sm" variant="solid" colorPalette="red" aria-label={`${it.count} due`}>{it.count}</Badge>}
@@ -110,9 +110,10 @@ export function Header({ controller, store }: { controller: Controller; store: S
 
   return (
     <header className={bar} data-tauri-drag-region={isMac || undefined} style={{ paddingLeft: isMac ? 96 : 14 }}>
-      {seg("Left pane", paneMode, () => controller.setPaneMode(paneMode === "tasks" ? "notes" : "tasks"), [
+      {seg("Left pane", paneMode, (v) => controller.setPaneMode(v), [
         { value: "notes", text: "Notes", tip: "Notes", glyph: <FileText size={14} />, action: "toggle_tasks" },
         { value: "tasks", text: "Tasks", tip: "Tasks", glyph: <ListChecks size={14} />, action: "toggle_tasks", count: dueCount },
+        { value: "connections", text: "Connections", tip: "Connections", glyph: <Network size={14} />, action: "toggle_connections", disabled: noNote && paneMode !== "connections" },
       ])}
       <SearchField controller={controller} store={store} />
       {icon("Tags", "toggle_tags", <Hash />, () => controller.showTags(!tagPanelOpen), { pressed: tagPanelOpen, controls: "tag-panel", label: "Tags" })}

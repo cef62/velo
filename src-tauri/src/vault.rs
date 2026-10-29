@@ -1,3 +1,4 @@
+use crate::connections::{self, Connections};
 use crate::crypto;
 use crate::frontmatter;
 use crate::index::{Index, Meta, Page, Sort, TagCount, TaskRow, all_tags, effective_dates};
@@ -7,10 +8,10 @@ const PAGE: usize = 200;
 use crate::revisions::{RevisionInfo, Revisions, fnv64};
 use crate::names::{NoteFile, note_path, parse_note_file};
 use crate::store::{SaveResult, Store, hash, meta_of};
-use crate::text::{fold, rewrite_links};
+use crate::text::{fold, link_mention_text, rewrite_links};
 use anyhow::{Context, anyhow};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// `text` with the task on `line` (0-based) flipped, if that line still reads `expected`; and the flipped line.
@@ -222,7 +223,11 @@ impl Vault {
     }
 
     pub fn search(&self, query: &str, sort: Sort, offset: usize, tags: &[String]) -> anyhow::Result<Page> {
-        self.index.search_page(query, sort, offset, PAGE, tags, &self.unlocked)
+        self.search_where(query, sort, offset, tags, false)
+    }
+
+    pub fn search_where(&self, query: &str, sort: Sort, offset: usize, tags: &[String], no_links: bool) -> anyhow::Result<Page> {
+        self.index.search_page_where(query, sort, offset, PAGE, tags, &self.unlocked, no_links)
     }
 
     /// Open and recent tasks; unlocked notes' tasks come from memory, so they never reach SQLite.
@@ -375,6 +380,26 @@ impl Vault {
         Ok(res)
     }
 
+    /// Wrap the first mention of `target` in `path` as a link. With the editor's `editor_text` it only returns the
+    /// rewritten text (the editor saves it); otherwise it saves through `save_note` and returns None.
+    /// A locked note, or the plain twin of one, is never rewritten from here.
+    pub fn link_mention(&mut self, path: &str, target: &str, expected: usize, editor_text: Option<&str>, write_fm: bool) -> anyhow::Result<Option<String>> {
+        if self.note(Path::new(path))?.encrypted || self.locked_twin(path) {
+            return Err(anyhow!("locked"));
+        }
+        let names: HashSet<String> = self.index.names()?.into_iter().map(|(n, _)| n).collect();
+        let rewrite = |text: &str| link_mention_text(text, target, &names, expected).map_err(|e| anyhow!(e));
+        if let Some(text) = editor_text {
+            return rewrite(text).map(Some);
+        }
+        let doc = self.open_note(path, None)?;
+        let text = rewrite(&doc.text)?;
+        match self.save_note(path, &text, &doc.hash, None, write_fm)? {
+            SaveResult::Saved { .. } => Ok(None),
+            SaveResult::Conflict { .. } => Err(anyhow!("conflict")),
+        }
+    }
+
     pub fn rename_note(&mut self, path: &str, new_title: &str, rewrite_links_too: bool) -> anyhow::Result<RenameResult> {
         let from = Path::new(path);
         let old = self.note(from)?;
@@ -421,6 +446,24 @@ impl Vault {
     }
 
     /// Notes whose links a rename of `title` would rewrite (the "Update N links?" count).
+    /// Notes linking here by title or alias (the graph and info panel); rename's `backlink_count` is title-only.
+    pub fn linked_from_count(&self, path: &str) -> anyhow::Result<usize> {
+        Ok(self.index.linked_from(path)?.len())
+    }
+
+    /// The one-hop graph around `path`; an encrypted note gives `locked` unless unlocked. `hide`: see `connections::build`.
+    pub fn connections(&self, path: &str, hide: &dyn Fn(&str) -> bool) -> anyhow::Result<Connections> {
+        let p = Path::new(path);
+        let plain;
+        let text = if self.note(p)?.encrypted {
+            self.unlocked.get(path).ok_or_else(|| anyhow!("locked"))?
+        } else {
+            plain = lossy(&self.store.read(p)?);
+            &plain
+        };
+        connections::build(&self.index, &self.unlocked, path, text, hide)
+    }
+
     pub fn backlink_count(&self, title: &str) -> anyhow::Result<usize> {
         Ok(self.index.backlinks(title)?.iter().filter(|p| self.rewritable(Path::new(p))).count())
     }
@@ -779,6 +822,43 @@ mod tests {
         assert!(v.tags().unwrap().is_empty());
         assert_eq!(v.search("", Sort::Title, 0, &["zqxjvkplmwqbyfh".to_string()]).unwrap().hits.len(), 1);
     }
+    #[test] fn link_mention_saves_when_not_open() {
+        let (dir, db) = setup();
+        std::fs::write(dir.join("Nick.md"), "").unwrap(); std::fs::write(dir.join("C.md"), "see Nick").unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let (c, n) = (s(&dir.join("C.md")), s(&dir.join("Nick.md")));
+        assert_eq!(v.linked_from_count(&n).unwrap(), 0);
+        assert_eq!(v.link_mention(&c, "Nick", 1, None, false).unwrap(), None);
+        assert_eq!(std::fs::read_to_string(dir.join("C.md")).unwrap(), "see [[Nick]]");
+        assert_eq!(v.linked_from_count(&n).unwrap(), 1);
+    }
+    #[test] fn link_mention_with_editor_text_writes_nothing() {
+        let (dir, db) = setup();
+        std::fs::write(dir.join("Nick.md"), "").unwrap(); std::fs::write(dir.join("C.md"), "see Nick").unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let got = v.link_mention(&s(&dir.join("C.md")), "Nick", 1, Some("typed Nick"), false).unwrap();
+        assert_eq!(got.as_deref(), Some("typed [[Nick]]"));
+        assert_eq!(std::fs::read_to_string(dir.join("C.md")).unwrap(), "see Nick");
+    }
+    #[test] fn link_mention_count_mismatch() {
+        let (dir, db) = setup();
+        std::fs::write(dir.join("Nick.md"), "").unwrap(); std::fs::write(dir.join("C.md"), "see Nick").unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        assert_eq!(v.link_mention(&s(&dir.join("C.md")), "Nick", 2, None, false).unwrap_err().to_string(), "mention-moved");
+        assert_eq!(std::fs::read_to_string(dir.join("C.md")).unwrap(), "see Nick");
+    }
+    #[test] fn link_mention_refuses_locked() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, Some(&id)).unwrap();
+        let d = v.open_or_create("L", Some(&id), false).unwrap();
+        v.save_note(&d.path, "see Nick", &d.hash, Some(&id), false).unwrap();
+        let plain = d.path.clone();
+        let locked = v.lock_note(&d.path, &id).unwrap();
+        let e = v.link_mention(&locked, "Nick", 1, None, false).unwrap_err();
+        assert_eq!(e.to_string(), "locked");
+        std::fs::write(&plain, "see Nick").unwrap(); // a plain twin of a locked note
+        assert_eq!(v.link_mention(&plain, "Nick", 1, None, false).unwrap_err().to_string(), "locked");
+    }
     #[test] fn save_to_plain_path_refused_when_locked_sibling_exists() {
         let (dir, db) = setup(); let id = crypto::new_identity();
         let mut v = open(dir.clone(), &db, Some(&id)).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
@@ -888,6 +968,13 @@ mod tests {
         std::fs::remove_file(dir.join("gone.md")).unwrap(); // deleted, still indexed
         assert_eq!(v.backlink_count("Old").unwrap(), 1);
         assert_eq!(v.rename_note(&dir.join("Old.md").to_string_lossy(), "New", true).unwrap().rewritten, 1);
+    }
+    #[test] fn rename_count_stays_title_only() {
+        let (dir, db) = setup();
+        for (f, t) in [("Nick.md", "---\naliases: [Nicholas]\n---\n"), ("a.md", "[[Nicholas]]"), ("b.md", "[[Nick]]")] { std::fs::write(dir.join(f), t).unwrap(); }
+        let v = open(dir.clone(), &db, None).unwrap();
+        assert_eq!(v.backlink_count("Nick").unwrap(), 1);
+        assert_eq!(v.linked_from_count(&dir.join("Nick.md").to_string_lossy()).unwrap(), 2);
     }
     #[test] fn rename_rewrites_links_to_the_saved_title() {
         let (dir, db) = setup();

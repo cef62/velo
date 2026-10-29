@@ -35,6 +35,11 @@ pub fn extract_links(body: &str) -> Vec<String> {
         .collect()
 }
 
+/// Chars a `#tag` runs over after the `#`.
+fn tag_char(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '_' | '-' | '/')
+}
+
 /// `(folded, display)` for each `#tag` outside fenced code, first spelling kept, in order of appearance.
 pub fn extract_tags(body: &str) -> Vec<(String, String)> {
     let mut seen = HashSet::new();
@@ -52,7 +57,7 @@ pub fn extract_tags(body: &str) -> Vec<(String, String)> {
         let mut prev = None;
         for (i, c) in line.char_indices() {
             if c == '#' && prev.is_none_or(|p: char| p.is_whitespace() || p == '(') {
-                let tag: String = line[i + 1..].chars().take_while(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '/')).collect();
+                let tag: String = line[i + 1..].chars().take_while(|&c| tag_char(c)).collect();
                 if tag.chars().any(char::is_alphabetic) && seen.insert(fold(&tag)) {
                     out.push((fold(&tag), tag));
                 }
@@ -89,36 +94,83 @@ fn span_closes(rest: &str) -> bool {
     rest.split_inclusive('\n').enumerate().take_while(|(i, l)| *i == 0 || !l.trim().is_empty()).any(|(_, l)| l.contains('`'))
 }
 
+/// One line of `body` for the prose scanner; `skip` marks fenced code, indented code and blank lines.
+struct Line<'a> { start: usize, raw: &'a str, line: &'a str, skip: bool }
+
+/// The scanner rules shared by `remove_inline_tag` and `find_mentions`: fenced and indented code skip whole lines,
+/// `step` tracks inline code spans (which may run over the lines of one paragraph) and `[...]` / `[[...]]` depth.
+struct Scanner<'a> {
+    body: &'a str,
+    pos: usize,
+    fenced: bool,
+    after_blank: bool,
+    icode: bool,
+    code: bool,
+    depth: usize,
+    after_close: bool,
+    /// the last `step` char was part of a `(...)` link target
+    target: bool,
+}
+
+impl<'a> Scanner<'a> {
+    fn new(body: &'a str) -> Self {
+        Scanner { body, pos: 0, fenced: false, after_blank: true, icode: false, code: false, depth: 0, after_close: false, target: false }
+    }
+
+    fn next_line(&mut self) -> Option<Line<'a>> {
+        let raw = self.body[self.pos..].split_inclusive('\n').next()?;
+        let start = self.pos;
+        self.pos += raw.len();
+        let line = raw.trim_end_matches(['\n', '\r']);
+        let t = line.trim_start();
+        if t.starts_with("```") || t.starts_with("~~~") { self.fenced = !self.fenced; }
+        // indented code: 4+ spaces (or a tab) after a blank line or more code; an indented list item is not code
+        let indented = (line.starts_with("    ") || line.starts_with('\t')) && !t.is_empty();
+        self.icode = indented && (self.after_blank || self.icode) && !bare_marker(t.split(' ').next().unwrap_or(""));
+        self.after_blank = t.is_empty();
+        let skip = self.fenced || self.icode || t.is_empty() || t.starts_with("```") || t.starts_with("~~~");
+        if skip { self.code = false; }
+        (self.depth, self.after_close, self.target) = (0, false, false);
+        Some(Line { start, raw, line, skip })
+    }
+
+    /// Feeds the char at byte `at` of the body; true when it is prose: outside inline code and `[...]` text.
+    /// `self.target` says whether it also sits in a `(...)` link target.
+    fn step(&mut self, at: usize, c: char) -> bool {
+        let closing = c == ']' && self.depth == 1;
+        let prose = if c == '`' {
+            // a backtick opens a span only if another one closes it within the paragraph; otherwise it is literal
+            self.code = !self.code && span_closes(&self.body[at + 1..]);
+            false
+        } else if self.code {
+            false
+        } else if c == '[' {
+            self.depth += 1;
+            false
+        } else if c == ']' {
+            self.depth = self.depth.saturating_sub(1);
+            false
+        } else {
+            self.depth == 0
+        };
+        self.target = if self.target { c != ')' || { self.after_close = false; false } } else { self.after_close && c == '(' && !self.code };
+        if !self.target { self.after_close = closing && !self.code; }
+        prose
+    }
+}
+
 /// Removes each exact `#tag` word (same scanner rules as `extract_tags`) outside fenced and indented code, inline code
 /// spans, `[...]` link text, `[[...]]` links and `](#...)` link targets; returns the new text and the count. A line
 /// left empty, or left as a bare list or task marker, is dropped.
 pub fn remove_inline_tag(body: &str, tag_folded: &str) -> (String, usize) {
-    let (mut out, mut n, mut fenced, mut after_blank, mut icode) = (String::new(), 0, false, true, false);
-    // inside an inline code span, which may run over the lines of one paragraph
-    let (mut code, mut pos) = (false, 0);
-    for raw in body.split_inclusive('\n') {
-        let start = pos;
-        pos += raw.len();
-        let line = raw.trim_end_matches(['\n', '\r']);
-        let t = line.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") { fenced = !fenced; }
-        // indented code: 4+ spaces (or a tab) after a blank line or more code; an indented list item is not code
-        let indented = (line.starts_with("    ") || line.starts_with('\t')) && !t.is_empty();
-        icode = indented && (after_blank || icode) && !bare_marker(t.split(' ').next().unwrap_or(""));
-        after_blank = t.is_empty();
-        if fenced || icode || t.is_empty() || t.starts_with("```") || t.starts_with("~~~") { code = false; out.push_str(raw); continue; }
-        let (mut cuts, mut prev, mut prev2, mut depth) = (vec![], None, None::<char>, 0usize);
+    let (mut out, mut n) = (String::new(), 0);
+    let mut sc = Scanner::new(body);
+    while let Some(Line { start, raw, line, skip }) = sc.next_line() {
+        if skip { out.push_str(raw); continue; }
+        let (mut cuts, mut prev, mut prev2) = (vec![], None, None::<char>);
         for (i, c) in line.char_indices() {
-            if c == '`' {
-                // a backtick opens a span only if another one closes it within the paragraph; otherwise it is literal
-                code = !code && span_closes(&body[start + i + 1..]);
-            } else if code {
-            } else if c == '[' {
-                depth += 1;
-            } else if c == ']' {
-                depth = depth.saturating_sub(1);
-            } else if c == '#' && depth == 0 && prev.is_none_or(|p: char| p.is_whitespace() || p == '(') && !(prev == Some('(') && prev2 == Some(']')) {
-                let tag: String = line[i + 1..].chars().take_while(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '/')).collect();
+            if sc.step(start + i, c) && c == '#' && prev.is_none_or(|p: char| p.is_whitespace() || p == '(') && !(prev == Some('(') && prev2 == Some(']')) {
+                let tag: String = line[i + 1..].chars().take_while(|&c| tag_char(c)).collect();
                 if tag.chars().any(char::is_alphabetic) && fold(&tag) == tag_folded { cuts.push((i, i + 1 + tag.len())); }
             }
             prev2 = prev;
@@ -142,6 +194,91 @@ pub fn remove_inline_tag(body: &str, tag_folded: &str) -> (String, usize) {
         if !l.trim().is_empty() && !(item && l.trim() == marker) { out.push_str(&l); out.push_str(&raw[line.len()..]); }
     }
     (out, n)
+}
+
+/// Whether the word at `line[a..i]` sits in a `#tag` (the `extract_tags` rules) or in a URL or email token: a
+/// whitespace-delimited run containing `://` or `@`, or starting with `?`.
+fn in_tag_or_url(line: &str, a: usize, i: usize) -> bool {
+    let ts = line[..a].char_indices().rev().find(|(_, c)| c.is_whitespace()).map_or(0, |(k, c)| k + c.len_utf8());
+    let token = &line[ts..i + line[i..].find(char::is_whitespace).unwrap_or(line.len() - i)];
+    token.contains("://") || token.contains('@') || token.starts_with('?')
+        || line[ts..a].match_indices('#').any(|(h, _)| {
+            let (h, prev) = (ts + h, line[..ts + h].chars().next_back());
+            let tag: String = line[h + 1..].chars().take_while(|&c| tag_char(c)).collect();
+            prev.is_none_or(|p| p.is_whitespace() || p == '(') && h + 1 + tag.len() >= i && tag.chars().any(char::is_alphabetic)
+        })
+}
+
+/// A title or alias found in prose: `name_folded` as given in the set, `as_written` and byte offsets in the text scanned.
+#[derive(Debug, PartialEq)]
+pub struct MentionHit { pub name_folded: String, pub as_written: String, pub start: usize, pub end: usize }
+
+/// Whole-word, folded occurrences of `names` (each a folded string of words joined by single spaces) in prose, with the
+/// scanner rules of `remove_inline_tag`; also outside `(...)` link targets. At each word the longest run of up to
+/// `max_words` words wins and hits never overlap. Names under 3 characters are ignored. Words in a `#tag`, URL or
+/// email are skipped; in prose a hyphen splits words, so `velo-roadmap` can mention both `velo` and `roadmap`.
+/// shortcut: a word is a run of alphanumerics, so names with punctuation ("C++", "Dr. Smith") never match.
+pub fn find_mentions(body: &str, names: &HashSet<String>, max_words: usize) -> Vec<MentionHit> {
+    // prose words as (start, end, folded), in order
+    let mut words: Vec<(usize, usize, String)> = vec![];
+    let mut sc = Scanner::new(body);
+    while let Some(Line { start, line, skip, .. }) = sc.next_line() {
+        if skip { continue; }
+        let mut cur: Option<usize> = None;
+        for (i, c) in line.char_indices().chain([(line.len(), ' ')]) {
+            let word = i < line.len() && sc.step(start + i, c) && !sc.target && c.is_alphanumeric();
+            match (word, cur) {
+                (true, None) => cur = Some(i),
+                (false, Some(a)) => {
+                    // part of a tag, email, path or URL, not a mention
+                    let rest = &line[i..];
+                    let glued = line[..a].ends_with(['#', '@', '/', '.', ':'])
+                        || rest.starts_with(['@', '/'])
+                        || rest.strip_prefix('.').is_some_and(|r| r.starts_with(char::is_alphanumeric))
+                        || in_tag_or_url(line, a, i);
+                    if !glued { words.push((start + a, start + i, fold(&line[a..i]))); }
+                    cur = None;
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut hits = vec![];
+    let mut i = 0;
+    'word: while i < words.len() {
+        for k in (1..=max_words.min(words.len() - i)).rev() {
+            let run = &words[i..i + k];
+            // words must be separated by whitespace on one line, so the hit stays a valid `[[...]]`
+            if run.windows(2).any(|w| { let gap = &body[w[0].1..w[1].0]; !gap.trim().is_empty() || gap.contains(['\n', '\r']) }) { continue; }
+            let name = run.iter().map(|w| w.2.as_str()).collect::<Vec<_>>().join(" ");
+            if name.chars().count() >= 3 && names.contains(&name) {
+                let (start, end) = (run[0].0, run[k - 1].1);
+                hits.push(MentionHit { name_folded: name, as_written: body[start..end].into(), start, end });
+                i += k;
+                continue 'word;
+            }
+        }
+        i += 1;
+    }
+    hits
+}
+
+/// The `max_words` both the graph and Link it give `find_mentions`: the longest name in words, at most 8.
+pub fn mention_max_words(names: &HashSet<String>) -> usize {
+    names.iter().map(|n| n.split(' ').count()).max().unwrap_or(1).min(8)
+}
+
+/// Wraps the first mention of `name` (found among all `names`, as the graph finds them) in the text after front matter as `[[as written]]`, if there are exactly
+/// `expected` of them; everything else, CRLF included, stays byte for byte.
+pub fn link_mention_text(full_text: &str, name: &str, names: &HashSet<String>, expected: usize) -> Result<String, &'static str> {
+    let body = crate::frontmatter::body(full_text);
+    let offset = full_text.len() - body.len();
+    let want = fold(name);
+    // the full name set and the same word cap, so overlapping names resolve exactly as in the graph (longest wins)
+    let hits: Vec<_> = find_mentions(body, names, mention_max_words(names)).into_iter().filter(|h| h.name_folded == want).collect();
+    if hits.len() != expected || hits.is_empty() { return Err("mention-moved"); }
+    let h = &hits[0];
+    Ok(format!("{}[[{}]]{}", &full_text[..offset + h.start], h.as_written, &full_text[offset + h.end..]))
 }
 
 #[cfg(test)]
@@ -192,5 +329,59 @@ mod tests {
     #[test] fn remove_inline_tag_drops_bare_markers() {
         let b = "Some paragraph\n- #work\n- [ ] #work\n1. #work\n- keep #work\n-\n";
         assert_eq!(remove_inline_tag(b, "work").0, "Some paragraph\n- keep\n-\n");
+    }
+    fn names(n: &[&str]) -> HashSet<String> { n.iter().map(|s| fold(s)).collect() }
+    #[test] fn mentions_whole_words_folded() {
+        let h = find_mentions("Read velo Roadmap; velociraptor.", &names(&["velo roadmap", "velo"]), 3);
+        assert_eq!(h.len(), 1);
+        assert_eq!((h[0].as_written.as_str(), h[0].name_folded.as_str()), ("velo Roadmap", "velo roadmap"));
+        assert_eq!((h[0].start, h[0].end), (5, 17));
+    }
+    #[test] fn mentions_skip_code_links_and_short_names() {
+        let b = "`Velo` [[Velo]] [x](Velo)\n```\nVelo\n```\nab Velo";
+        let h = find_mentions(b, &names(&["velo", "ab"]), 3);
+        assert_eq!(h.len(), 1);
+        assert_eq!(h[0].start, b.len() - 4);
+    }
+    #[test] fn mentions_non_ascii() {
+        let h = find_mentions("Un Résumé è qui", &names(&["resume"]), 2);
+        assert_eq!((h.len(), h[0].as_written.as_str()), (1, "Résumé"));
+        assert_eq!(&"Un Résumé è qui"[h[0].start..h[0].end], "Résumé");
+    }
+    #[test] fn mentions_longest_wins_no_overlap() {
+        let h = find_mentions("Velo roadmap and Velo", &names(&["velo", "velo roadmap"]), 3);
+        let w: Vec<_> = h.iter().map(|m| m.as_written.as_str()).collect();
+        assert_eq!(w, vec!["Velo roadmap", "Velo"]);
+    }
+    #[test] fn link_mention_wraps_first_and_checks_count() {
+        let t = "---\ntags: [x]\n---\nsee Nick and nick\r\n";
+        assert_eq!(link_mention_text(t, "Nick", &names(&["nick"]), 2).unwrap(), "---\ntags: [x]\n---\nsee [[Nick]] and nick\r\n");
+        assert_eq!(link_mention_text(t, "Nick", &names(&["nick"]), 1), Err("mention-moved"));
+    }
+    #[test] fn link_mention_ignores_front_matter() {
+        assert_eq!(link_mention_text("---\naliases: [Nick]\n---\nnothing\n", "Nick", &names(&["nick"]), 1), Err("mention-moved"));
+    }
+    #[test] fn link_mention_uses_full_name_set() {
+        let n = names(&["velo", "velo roadmap"]);
+        assert_eq!(link_mention_text("Velo roadmap and Velo", "Velo", &n, 1).unwrap(), "Velo roadmap and [[Velo]]");
+    }
+    #[test] fn mentions_do_not_span_line_breaks() {
+        let n = names(&["velo roadmap"]);
+        assert!(find_mentions("Velo\r\nroadmap", &n, 3).is_empty());
+        assert_eq!(find_mentions("Velo  roadmap", &n, 3).len(), 1);
+    }
+    #[test] fn mentions_skip_tags_emails_and_urls() {
+        let n = names(&["velo"]);
+        for b in ["#velo", "a@velo.io", "http://velo.com/velo", "velo@x.io", "velo/notes", "velo.com"] {
+            assert!(find_mentions(b, &n, 2).is_empty(), "{b}");
+        }
+        assert_eq!(find_mentions("I like velo. And (velo), velo!", &n, 2).len(), 3);
+        let n = names(&["velo", "roadmap"]);
+        for b in ["#proj-roadmap", "#my_velo", "(#a/velo-x)", "https://x/velo-roadmap", "?q=velo", "a@velo.io", "see https://x.com/?q=velo&r=roadmap"] {
+            assert!(find_mentions(b, &n, 2).is_empty(), "{b}");
+        }
+        assert_eq!(link_mention_text("#proj-roadmap then roadmap", "roadmap", &n, 1).unwrap(), "#proj-roadmap then [[roadmap]]");
+        // in prose a hyphen splits words, so each half is a mention of its own
+        assert_eq!(find_mentions("the velo-roadmap", &n, 2).len(), 2);
     }
 }

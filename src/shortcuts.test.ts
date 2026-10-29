@@ -94,6 +94,14 @@ test("capture is a global action with a non-conflicting default", () => {
   expect(Object.values(DEFAULTS).filter((b) => b === DEFAULTS.capture)).toHaveLength(1);
 });
 
+test("toggle_connections defaults to Mod+Shift+KeyC and does not clash", () => {
+  expect(DEFAULTS.toggle_connections).toBe("Mod+Shift+KeyC");
+  expect(LABELS.toggle_connections).toBe("Connections");
+  const all = Object.values(DEFAULTS).filter((b) => b !== "none");
+  expect(new Set(all).size).toBe(all.length);
+  expect(validateBinding(DEFAULTS, "toggle_connections", DEFAULTS.toggle_connections)).toEqual({ ok: true });
+});
+
 test("upgrade: a saved binding equal to a new default wins, the new action gets none", () => {
   const m = resolve({ toggle_sort: "Mod+Shift+KeyD", toggle_window: "Mod+Shift+Alt+KeyN", rename: "Mod+Shift+KeyX" });
   expect(m).toMatchObject({ toggle_sort: "Mod+Shift+KeyD", daily_note: "none", toggle_window: "Mod+Alt+Shift+KeyN", capture: "none", rename: "Mod+Shift+KeyX", toggle_tasks: "none" });

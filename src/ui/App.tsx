@@ -8,6 +8,7 @@ import { EditorHost } from "./EditorHost";
 import { PreviewHost } from "./PreviewHost";
 import { NoteList } from "./NoteList";
 import { TaskList } from "./TaskList";
+import { ConnectionsView } from "./ConnectionsView";
 import { TitleBar } from "./TitleBar";
 import { ConflictBanner } from "./ConflictBanner";
 import { UpdateBanner } from "./UpdateBanner";
@@ -59,7 +60,13 @@ export function App({ controller, store }: { controller: Controller; store: Stor
         <TagPanel controller={controller} store={store} />
         <FilterLine controller={controller} store={store} />
       </div>
-      {paneMode === "tasks" ? <TaskList controller={controller} store={store} /> : <NoteList controller={controller} store={store} />}
+      {paneMode === "tasks" ? (
+        <TaskList controller={controller} store={store} />
+      ) : paneMode === "connections" ? (
+        <ConnectionsView controller={controller} store={store} />
+      ) : (
+        <NoteList controller={controller} store={store} />
+      )}
       <Divider store={store} app={root} />
       <div className={pane}>
       <section className={note}>

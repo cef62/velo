@@ -234,3 +234,28 @@ fn reindex_with_notes_locked_elsewhere() {
         paths.len(), t0.elapsed().as_secs_f64(), (bytes_written() - before) as f64 / 1e6, c.elapsed().as_secs_f64() * 1000.0, holds.join(" ")
     );
 }
+
+/// `Vault::connections` on 50 notes picked across the seed (a fixed LCG, so runs compare), as the app calls it.
+#[test]
+#[ignore]
+fn connections_under_50ms() {
+    let dir = std::env::var("VELO_FIXTURE").unwrap_or_else(|_| "../fixtures/notes".into());
+    let tmp = tempfile::tempdir().unwrap();
+    let v = velo_lib::vault::Vault::open_with_progress(dir.clone().into(), &tmp.path().join("index.db"), None, &mut |_, _| {}).unwrap();
+    let mut paths: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|x| x == "md")).map(|p| p.to_string_lossy().into_owned()).collect();
+    paths.sort();
+    assert!(!paths.is_empty(), "no fixture notes in {dir}");
+    let mut seed: u64 = 42;
+    let mut times = Vec::new();
+    for _ in 0..50 {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let p = &paths[(seed >> 33) as usize % paths.len()];
+        let t = Instant::now();
+        v.connections(p, &|_| false).unwrap();
+        times.push(t.elapsed().as_secs_f64() * 1000.0);
+    }
+    times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let p95 = times[times.len() * 95 / 100];
+    println!("{} notes connections: p50 {:.2} ms, p95 {p95:.2} ms, max {:.2} ms", paths.len(), times[times.len() / 2], times[times.len() - 1]);
+    assert!(p95 < 50.0, "connections p95 {p95:.2} ms");
+}

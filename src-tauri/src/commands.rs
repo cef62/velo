@@ -330,8 +330,8 @@ pub fn index_status(st: State<'_, AppState>) -> Option<(usize, usize)> {
 }
 
 #[tauri::command(async)]
-pub fn search(st: State<'_, AppState>, query: String, sort: Sort, offset: usize, tags: Vec<String>) -> Res<Page> {
-    with_vault(&st, |v, _| v.search(&query, sort, offset, &tags))
+pub fn search(st: State<'_, AppState>, query: String, sort: Sort, offset: usize, tags: Vec<String>, no_links: Option<bool>) -> Res<Page> {
+    with_vault(&st, |v, _| v.search_where(&query, sort, offset, &tags, no_links.unwrap_or(false)))
 }
 
 #[tauri::command(async)]
@@ -374,6 +374,12 @@ pub fn open_or_create(st: State<'_, AppState>, agent: State<'_, AgentState>, tit
 pub fn save_note(st: State<'_, AppState>, path: String, text: String, base_hash: String) -> Res<SaveResult> {
     let fm = st.settings.lock().unwrap().write_front_matter;
     with_vault(&st, |v, id| v.save_note(&path, &text, &base_hash, id, fm))
+}
+
+#[tauri::command(async)]
+pub fn link_mention(st: State<'_, AppState>, path: String, target_title: String, expected_count: usize, editor_text: Option<String>) -> Res<Option<String>> {
+    let fm = st.settings.lock().unwrap().write_front_matter;
+    with_vault(&st, |v, _| v.link_mention(&path, &target_title, expected_count, editor_text.as_deref(), fm))
 }
 
 #[tauri::command(async)]
@@ -437,6 +443,16 @@ pub fn set_badge(app: AppHandle, count: u32) {
 #[tauri::command(async)]
 pub fn rename_note(st: State<'_, AppState>, path: String, new_title: String, rewrite_links: bool) -> Res<RenameResult> {
     with_vault(&st, |v, _| v.rename_note(&path, &new_title, rewrite_links))
+}
+
+#[tauri::command(async)]
+pub fn linked_from_count(st: State<'_, AppState>, path: String) -> Res<usize> {
+    with_vault(&st, |v, _| v.linked_from_count(&path))
+}
+
+#[tauri::command(async)]
+pub fn connections(st: State<'_, AppState>, path: String) -> Res<crate::connections::Connections> {
+    with_vault(&st, |v, _| v.connections(&path, &|_| false))
 }
 
 #[tauri::command(async)]

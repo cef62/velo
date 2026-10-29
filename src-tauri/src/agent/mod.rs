@@ -148,6 +148,15 @@ mod tests {
         assert!(!std::fs::read_dir(&data).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with("index-")), "no direct vault");
         drop(notes);
     }
+    #[test] fn gate_routes_get_connections() {
+        let (_t, p, data, notes) = setup(true);
+        std::fs::write(notes.join("a.md"), "[[b]]").unwrap();
+        std::fs::write(notes.join("b.md"), "").unwrap();
+        let call = gate(p, data.clone());
+        assert_eq!(call("get_connections", serde_json::json!({"title": "a"})).unwrap()["links_out"][0]["title"], "b");
+        fake_app(&data, std::process::id(), true);
+        assert_eq!(call("get_connections", serde_json::json!({"title": "a"})), Ok(serde_json::json!({"fake": "get_connections"})));
+    }
     #[test] fn busy_when_pid_alive_but_unreachable() {
         let (_t, p, data, notes) = setup(true); fake_app(&data, std::process::id(), false); // listener dropped: port closed
         std::fs::write(notes.join("a.md"), "x").unwrap();

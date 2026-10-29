@@ -1,5 +1,6 @@
 //! Note operations the MCP tools run on. `DirectOps` works on the notes folder itself (velo closed); Task 7 adds the
 //! forwarding implementation. Locked notes (`*.md.age`) never come out of here, and no identity is ever passed.
+use crate::connections::{self, Connections, TAG_MAX};
 use crate::index::{Page, Sort, TagCount};
 use crate::names::{note_path, parse_note_file};
 use crate::settings::{self, Settings};
@@ -23,7 +24,7 @@ pub trait NoteOps {
     fn write(&mut self, path: &str, new_text: &str, base_hash: &str, summary: &str) -> anyhow::Result<String>;
     fn create(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<NoteDoc>;
     /// Up to `PAGE` plain hits starting at plain hit `offset`.
-    fn search(&self, query: &str, tags: &[String], offset: usize) -> anyhow::Result<Page>;
+    fn search(&self, query: &str, tags: &[String], offset: usize, no_links: bool) -> anyhow::Result<Page>;
     fn tags(&self) -> anyhow::Result<Vec<TagCount>>;
     fn tasks(&self, query: &str, tags: &[String], show_done: bool) -> anyhow::Result<TaskView>;
     /// Returns the new path.
@@ -40,8 +41,10 @@ pub trait NoteOps {
     fn settings(&self) -> Settings;
     /// Tags of one plain note (for search results).
     fn note_tags(&self, path: &str) -> anyhow::Result<Vec<String>>;
-    /// Titles of plain notes linking to `title`.
-    fn backlinks(&self, title: &str) -> anyhow::Result<Vec<String>>;
+    /// Titles of plain notes linking to the note at `path`, by title or alias.
+    fn backlinks(&self, path: &str) -> anyhow::Result<Vec<String>>;
+    /// The one-hop graph around the plain note at `path`, without locked notes.
+    fn connections(&self, path: &str) -> anyhow::Result<Connections>;
 }
 
 /// An encrypted note, or the plain twin of one (`X.md` beside `X.md.age`: a lock synced in before the delete, or a
@@ -159,12 +162,12 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
         r.map_err(|_| anyhow!(NO_ANSWER))
     }
 
-    fn search(&self, query: &str, tags: &[String], offset: usize) -> anyhow::Result<Page> {
+    fn search(&self, query: &str, tags: &[String], offset: usize, no_links: bool) -> anyhow::Result<Page> {
         let sort = if self.settings().sort == "title" { Sort::Title } else { Sort::Modified };
         let (mut hits, mut skip, mut at) = (Vec::new(), offset, 0);
         // `offset` counts plain hits, so walk the vault's pages from the start, dropping locked ones
         loop {
-            let p = self.vault.search(query, sort, at, tags)?;
+            let p = self.vault.search_where(query, sort, at, tags, no_links)?;
             let (more, n) = (p.has_more, p.hits.len());
             at += n;
             for h in p.hits.into_iter().filter(|h| !locked(&h.path)) {
@@ -303,8 +306,29 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
         self.vault.index.tags_of(plain(path)?)
     }
 
-    fn backlinks(&self, title: &str) -> anyhow::Result<Vec<String>> {
-        Ok(self.vault.index.backlinks(title)?.iter().filter(|p| !locked(p)).map(|p| title_of(p)).collect())
+    fn backlinks(&self, path: &str) -> anyhow::Result<Vec<String>> {
+        Ok(self.vault.index.linked_from(plain(path)?)?.iter().filter(|p| !locked(p)).map(|p| title_of(p)).collect())
+    }
+
+    fn connections(&self, path: &str) -> anyhow::Result<Connections> {
+        let mut c = self.vault.connections(plain(path)?, &|p| locked(p))?;
+        c.links_out.retain(|n| !locked(&n.path));
+        c.links_in.retain(|n| !locked(&n.path));
+        c.mentions.retain(|m| !locked(&m.node.path));
+        for g in &mut c.tags {
+            let collapsed = g.notes.is_empty();
+            g.notes.retain(|n| !locked(&n.path));
+            // not even a count of unlocked notes may leave
+            // shortcut: a plain twin of a locked note still counts in a collapsed group (only a number), fix if twins matter
+            g.count = if collapsed { g.count - g.unlocked } else { g.notes.len() };
+            // a group only unlocked notes pushed over the cap would betray them by its empty list: list the rest
+            if collapsed && g.count <= TAG_MAX {
+                let (_, paths) = self.vault.index.tag_notes(&fold(&g.tag), TAG_MAX + 1)?;
+                g.notes = connections::nodes(&self.vault.index, paths.into_iter().filter(|p| p != path && !locked(p)))?;
+                g.count = g.notes.len();
+            }
+        }
+        Ok(c)
     }
 }
 

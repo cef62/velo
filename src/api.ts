@@ -8,13 +8,13 @@ export type SaveResult = { kind: "saved"; hash: string; front_matter: string | n
 export type TaskItem = { path: string; title: string; line: number; text: string; due: string | null; done: boolean; done_on: string | null; line_text: string };
 export type TaskView = { overdue: TaskItem[]; today: TaskItem[]; upcoming: TaskItem[]; no_date: TaskItem[]; done: TaskItem[]; due_count: number };
 export type RenameResult = { path: string; rewritten: number };
-export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; header_labels: boolean; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean; capture_target: "inbox" | "daily"; inbox_title: string; agent_access: boolean };
+export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; header_labels: boolean; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean; capture_target: "inbox" | "daily"; inbox_title: string; agent_access: boolean; connections_sort: "ring" | "created" | "updated" };
 
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<void>("set_settings", { settings });
 export type Page = { hits: Hit[]; has_more: boolean; total: number };
 export type TagCount = { tag: string; count: number };
-export const search = (query: string, sort: "modified" | "title", offset: number, tags: string[]) => invoke<Page>("search", { query, sort, offset, tags });
+export const search = (query: string, sort: "modified" | "title", offset: number, tags: string[], noLinks: boolean) => invoke<Page>("search", { query, sort, offset, tags, noLinks });
 export const listTags = () => invoke<TagCount[]>("list_tags");
 export const listTitles = () => invoke<string[]>("list_titles");
 export const openNote = (path: string) => invoke<NoteDoc>("open_note", { path });
@@ -32,6 +32,15 @@ export const captureTargetTitle = () => invoke<{ title: string; path: string | n
 export const captureDone = (hide: boolean) => invoke<void>("capture_done", { hide });
 export const setBadge = (count: number) => invoke<void>("set_badge", { count });
 export const renameNote = (path: string, newTitle: string, rewriteLinks: boolean) => invoke<RenameResult>("rename_note", { path, newTitle, rewriteLinks });
+export type GraphNode = { path: string; title: string; created: number; modified: number; preview: string; locked: boolean };
+export type TagGroup = { tag: string; count: number; notes: GraphNode[] };
+export type Mention = { node: GraphNode; name: string; count: number };
+export type Connections = { centre: GraphNode; links_out: GraphNode[]; links_in: GraphNode[]; tags: TagGroup[]; mentions: Mention[] };
+export const connections = (path: string) => invoke<Connections>("connections", { path });
+/** Wraps the first mention in [[…]]; with editorText: resolves to the rewritten text (the editor applies it); without: saves and resolves null. Rejects "mention-moved" | "locked" | "conflict". */
+export const linkMention = (path: string, targetTitle: string, expectedCount: number, editorText: string | null) => invoke<string | null>("link_mention", { path, targetTitle, expectedCount, editorText });
+/** Notes linking to this one by title or alias: the info panel's "Linked from". */
+export const linkedFromCount = (path: string) => invoke<number>("linked_from_count", { path });
 export const backlinkCount = (title: string) => invoke<number>("backlink_count", { title });
 export const lockNote = (path: string) => invoke<string>("lock_note", { path });
 export const unlockNote = (path: string) => invoke<string>("unlock_note", { path });
