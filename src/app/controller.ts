@@ -1,5 +1,5 @@
 import type * as ApiModule from "../api";
-import type { AgentReply, AgentWrite, GraphNode, Hit, Mention, NoteDoc, Settings, TagCount, TaskItem } from "../api";
+import type { AgentReply, AgentWrite, GraphNode, Hit, LinkTarget, Mention, NoteDoc, Settings, TagCount, TaskItem } from "../api";
 // Types only: editor.ts loads editortheme.ts, which touches `window` at import time (tests run in node).
 import type { Editor, EditorOpts } from "../editor";
 import type { Preview } from "../preview";
@@ -17,10 +17,13 @@ import { formatBinding, matches, resolve, type Action, type GLOBAL_ACTIONS } fro
 import { isMenuKey, linkFor, menuModel, type MenuAction } from "../contextmenu";
 import { isLockedPath } from "../passphrase";
 import { localToday } from "../tasks";
+import { prepare, type Ranked } from "../fuzzy";
 import type { MenuSpec, UiPort } from "./ports";
 import { noInfo, type AppState, type Store } from "./store";
 
 export type Api = typeof ApiModule;
+
+export const INVALID_TITLE = 'A title can\'t contain / \\ : * ? " < > | or start with a dot';
 
 const connectionsSortOf = (v: unknown): Settings["connections_sort"] => (v === "created" || v === "updated" ? v : "ring");
 
@@ -52,6 +55,8 @@ export class Controller {
   // One-shot notice (e.g. keychain unavailable) that survives the next err reset.
   protected notice = "";
   protected titles = new Set<string>(); // folded titles of all notes, for wikilink existence
+  protected linkIndex: Ranked<LinkTarget>[] = []; // [[ autocomplete
+  protected tagIndex: Ranked<TagCount>[] = []; // # autocomplete
   protected readonly newShow = latest();
   protected searchSeq = 0;
   protected searching: Promise<void> = Promise.resolve(); // latest list reset, awaited by Enter so it never acts on stale rows
@@ -98,6 +103,8 @@ export class Controller {
         this.textInfo();
         void this.loadInfo();
       },
+      complete: { links: () => this.linkIndex, tags: () => this.tagIndex, onCreate: (t) => void this.createLinked(t) },
+      onFocus: () => void this.loadLinkTargets(),
     };
   }
 
@@ -201,6 +208,7 @@ export class Controller {
   }
 
   async refreshTitles() {
+    void this.loadLinkTargets();
     try {
       this.titles = new Set((await this.api.listTitles()).map(fold));
       this.preview?.refresh();
@@ -208,6 +216,25 @@ export class Controller {
     } catch (e) {
       console.error("title cache refresh failed", e);
     }
+  }
+
+  async loadLinkTargets() {
+    try {
+      this.linkIndex = prepare(await this.api.listLinkTargets(), (t) => t.name);
+    } catch (e) {
+      console.error("link target refresh failed", e);
+    }
+  }
+
+  /** The Create row of [[ autocomplete: an empty note; the open note stays open. */
+  async createLinked(title: string) {
+    try {
+      await this.api.createFromSelection(title, "");
+    } catch (e) {
+      return this.setErr(e === "already-exists" ? "A note with this title exists" : e === "invalid-title" ? INVALID_TITLE : errText(e));
+    }
+    void this.refreshTitles();
+    await this.runSearch(false);
   }
 
   focusSearch() {
@@ -871,6 +898,7 @@ export class Controller {
     }
     if (renamed) {
       await this.runSearch(false);
+      void this.refreshTitles();
       void this.refreshTags();
     }
     this.editor.focus();

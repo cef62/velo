@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import type { Page, TaskItem, TaskView } from "../api";
-import { Controller, type KeyEventLike } from "./controller";
+import { Controller, INVALID_TITLE, type KeyEventLike } from "./controller";
 import { emptyConnections, FakeEditor, FakePreview, deferred, fakeApi, fakeUi, hit, noMeta, settle } from "./fakes";
 import { createStore, initialState } from "./store";
 import { localToday, toggleTaskLine } from "../tasks";
@@ -1936,4 +1936,48 @@ test("link it is an isolated undo step and skips a different note with the same 
   api.linkMention.mockImplementationOnce(async (_p, _t, _n, text) => text!.replace("Bee", "[[Bee]]"));
   await c.linkMention(mention("Bee"));
   expect(editor.isolated).toEqual([true]);
+});
+
+test("link targets load on refreshTitles and editor focus", async () => {
+  const { c, api } = setup();
+  await c.start();
+  await settle();
+  expect(api.listLinkTargets).toHaveBeenCalledTimes(1);
+  c.editorOpts().onFocus();
+  await settle();
+  expect(api.listLinkTargets).toHaveBeenCalledTimes(2);
+});
+
+test("createLinked creates an empty note and keeps the open note", async () => {
+  const { c, api, editor } = setup();
+  await c.runSearch(true);
+  await settle();
+  const open = editor.currentPath();
+  api.listLinkTargets.mockClear();
+  await c.createLinked("Brand new idea");
+  expect(api.createFromSelection).toHaveBeenCalledWith("Brand new idea", "");
+  expect(editor.currentPath()).toBe(open);
+  expect(api.listLinkTargets).toHaveBeenCalled();
+});
+
+test("createLinked shows invalid-title", async () => {
+  const { c, api, store } = setup();
+  api.createFromSelection.mockRejectedValueOnce("invalid-title");
+  await c.createLinked("a/b");
+  expect(store.get().err).toBe(INVALID_TITLE);
+});
+
+test("rename refreshes titles", async () => {
+  const { c, api } = setup();
+  await c.runSearch(true);
+  await settle();
+  api.listTitles.mockClear();
+  api.listLinkTargets.mockClear();
+  api.renameNote.mockResolvedValueOnce({ path: P("Z"), rewritten: 0 });
+  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta });
+  c.startRename();
+  await c.commitRename("Z");
+  await settle();
+  expect(api.listTitles).toHaveBeenCalled();
+  expect(api.listLinkTargets).toHaveBeenCalled();
 });
