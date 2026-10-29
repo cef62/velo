@@ -8,7 +8,7 @@ use super::client::NO_ANSWER;
 use crate::store::{SaveResult, hash};
 use crate::tasks::TaskView;
 use crate::text::fold;
-use crate::vault::{NoteDoc, Toggled, Vault};
+use crate::vault::{MergeResult, NoteDoc, Toggled, Vault};
 use anyhow::anyhow;
 use std::ops::DerefMut;
 use std::path::{Path, PathBuf};
@@ -30,6 +30,8 @@ pub trait NoteOps {
     /// Returns the new path.
     fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<String>;
     fn trash(&mut self, path: &str, summary: &str) -> anyhow::Result<()>;
+    /// Appends `source` to `target`, rewrites links to it and trashes it (see `Vault::merge_notes_with`).
+    fn merge(&mut self, source: &str, target: &str, summary: &str) -> anyhow::Result<MergeResult>;
     /// Flips the task at `line` (checked against `expected`); snapshots first.
     fn toggle_task(&mut self, path: &str, line: usize, expected: &str, summary: &str) -> anyhow::Result<Toggled>;
     /// Appends `- [ ] text` to the plain note `title` (created if missing); returns its path.
@@ -122,6 +124,17 @@ impl<V: DerefMut<Target = Vault>> VaultOps<V> {
         }
     }
 
+    /// Agent snapshots (into `snaps`) of the notes whose [[title]] links a rewrite changes, `skip` aside.
+    fn snapshot_link_sources(&mut self, title: &str, skip: &[&str], summary: &str, snaps: &mut Vec<(String, Option<String>)>) -> anyhow::Result<()> {
+        // a source the index lists but that is gone or unreadable is skipped by the rewrite too
+        let srcs: Vec<String> = self.vault.index.backlinks(title)?.into_iter().filter(|p| !skip.contains(&p.as_str()) && self.vault.rewritable(Path::new(p))).collect();
+        for src in srcs {
+            let id = self.vault.agent_snapshot(&src, summary)?;
+            snaps.push((src, id));
+        }
+        Ok(())
+    }
+
     pub fn dir(&self) -> &Path {
         &self.vault.store.dir
     }
@@ -210,28 +223,12 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
     fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<String> {
         let path = plain(path)?;
         let mut snaps = vec![(path.to_string(), self.vault.agent_snapshot(path, summary)?)];
-        let mut r = Ok(String::new());
-        if rewrite_links {
-            // the link rewrite changes these notes too: each gets its agent revision first
-            // a source the index lists but that is gone or unreadable is skipped by the rewrite too
-            let srcs: Vec<String> = self.vault.index.backlinks(&title_of(path))?.into_iter().filter(|p| p != path && self.vault.rewritable(Path::new(p))).collect();
-            for src in srcs {
-                match self.vault.agent_snapshot(&src, summary) {
-                    Ok(id) => snaps.push((src, id)),
-                    Err(e) => {
-                        r = Err(e);
-                        break;
-                    }
-                }
-            }
-        }
-        if r.is_ok() {
-            r = match self.vault.rename_note(path, new_title, rewrite_links) {
-                Ok(r) => Ok(r.path),
-                Err(e) if e.downcast_ref::<std::io::Error>().is_some_and(|e| e.kind() == std::io::ErrorKind::AlreadyExists) => Err(anyhow!("a note with that title already exists")),
-                Err(e) => Err(e),
-            };
-        }
+        let r = if rewrite_links { self.snapshot_link_sources(&title_of(path), &[path], summary, &mut snaps) } else { Ok(()) };
+        let r = r.and_then(|()| match self.vault.rename_note(path, new_title, rewrite_links) {
+            Ok(r) => Ok(r.path),
+            Err(e) if e.downcast_ref::<std::io::Error>().is_some_and(|e| e.kind() == std::io::ErrorKind::AlreadyExists) => Err(anyhow!("a note with that title already exists")),
+            Err(e) => Err(e),
+        });
         self.unsnapshot(&snaps, &r); // nothing moved when the rename failed
         r
     }
@@ -242,6 +239,20 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
         let before = hash_of(Path::new(path));
         let r = landed(self.vault.delete_note_with(path, self.remove), Path::new(path), before.as_deref());
         self.unsnapshot(&[(path.to_string(), snap)], &r);
+        r
+    }
+
+    fn merge(&mut self, source: &str, target: &str, summary: &str) -> anyhow::Result<MergeResult> {
+        let (source, target) = (plain(source)?, plain(target)?);
+        let mut snaps = vec![(target.to_string(), self.vault.agent_snapshot(target, summary)?)];
+        let r = self.vault.agent_snapshot(source, summary).map(|id| snaps.push((source.to_string(), id)));
+        let r = r.and_then(|()| self.snapshot_link_sources(&title_of(source), &[source, target], summary, &mut snaps));
+        let r = r.and_then(|()| {
+            let wfm = self.settings().write_front_matter;
+            let before = hash_of(Path::new(target));
+            landed(self.vault.merge_notes_with(source, target, wfm, self.remove), Path::new(target), before.as_deref())
+        });
+        self.unsnapshot(&snaps, &r); // a failed merge changed nothing
         r
     }
 

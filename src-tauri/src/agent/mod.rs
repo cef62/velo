@@ -157,6 +157,17 @@ mod tests {
         fake_app(&data, std::process::id(), true);
         assert_eq!(call("get_connections", serde_json::json!({"title": "a"})), Ok(serde_json::json!({"fake": "get_connections"})));
     }
+    #[test] fn gate_routes_merge_notes() {
+        let (_t, p, data, notes) = setup(true);
+        std::fs::write(notes.join("a.md"), "a\n").unwrap();
+        std::fs::write(notes.join("b.md"), "b\n").unwrap();
+        assert!(tools::TOOL_SPECS.iter().any(|t| t.name == "merge_notes"));
+        let call = gate(p, data.clone());
+        // passes the gate: the handler answers (same-note), not "unknown tool"
+        assert_eq!(call("merge_notes", serde_json::json!({"source": "a", "target": "a", "summary": "s"})), Err("same-note".to_string()));
+        fake_app(&data, std::process::id(), true);
+        assert_eq!(call("merge_notes", serde_json::json!({"source": "a", "target": "b", "summary": "s"})), Ok(serde_json::json!({"fake": "merge_notes"})));
+    }
     #[test] fn busy_when_pid_alive_but_unreachable() {
         let (_t, p, data, notes) = setup(true); fake_app(&data, std::process::id(), false); // listener dropped: port closed
         std::fs::write(notes.join("a.md"), "x").unwrap();

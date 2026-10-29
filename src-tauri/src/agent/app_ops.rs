@@ -8,7 +8,7 @@ use crate::commands::AppState;
 use crate::index::{Page, TagCount};
 use crate::settings::Settings;
 use crate::tasks::TaskView;
-use crate::vault::{NoteDoc, Toggled, Vault, fm_lines, toggled_text};
+use crate::vault::{MergeResult, NoteDoc, Toggled, Vault, fm_lines, toggled_text};
 use anyhow::anyhow;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -276,6 +276,38 @@ impl NoteOps for AppOps<'_> {
             // the note left the editor but is still there: say why, or it just vanishes from view
             let title = parse_note_file(Path::new(path)).map(|n| n.title);
             (self.route)(json!({"path": path, "kind": "trash-failed", "title": title, "error": e.to_string()})).ok();
+        }
+        r
+    }
+
+    /// Saves the target and link sources first (as `rename`), then the open source is closed like `trash`.
+    fn merge(&mut self, source: &str, target: &str, summary: &str) -> anyhow::Result<MergeResult> {
+        let (source, target) = (plain(source)?, plain(target)?);
+        if source == target {
+            return Err(anyhow!("same-note")); // before the editor closes the note
+        }
+        let title = parse_note_file(Path::new(source)).map(|n| n.title).unwrap_or_default();
+        let sources: Vec<String> = self.with(|o| o.vault.index.backlinks(&title))?.into_iter().filter(|p| !locked(p) && p != source && p != target).collect();
+        let paths: Vec<&str> = std::iter::once(target).chain(sources.iter().map(String::as_str)).collect();
+        let flushed = (self.route)(json!({"kind": "flush", "paths": paths}));
+        // shortcut: holds end at the flush reply, as in `rename`
+        paths.iter().for_each(|p| (self.release)(p));
+        if flushed? == "refused" {
+            return Err(anyhow!("note is open in velo with unsaved changes"));
+        }
+        let closed = self.ask_editor(json!({"path": source, "kind": "trash", "summary": summary}), &["closed", "not-open"])? == "closed";
+        let r = self.with(|o| o.merge(source, target, summary));
+        // the target and sources were saved clean above: notes-changed reloads the open one
+        self.touched.extend([source.to_string(), target.to_string()]);
+        self.touched.extend(sources);
+        (self.release)(source);
+        let failed = match &r {
+            Err(e) => Some(e.to_string()),
+            Ok(m) => m.trash_error.clone(),
+        };
+        if let (true, Some(e)) = (closed, failed) {
+            // the source left the editor but is still there: say why, or it just vanishes from view
+            (self.route)(json!({"path": source, "kind": "trash-failed", "title": title, "error": e})).ok();
         }
         r
     }
@@ -755,5 +787,45 @@ mod tests {
         assert!(call(&mut ops, "read_note", json!({"title": "P"})).is_empty(), "reads touch nothing");
         // and the watcher indeed drops them (so nothing else would refresh the UI)
         assert!(st.vault.lock().unwrap().as_mut().unwrap().apply_fs_changes(&[PathBuf::from(path("P"))], None).is_empty());
+    }
+
+    #[test] fn merge_of_open_source_closes_it_then_merges() {
+        let (st, dir) = state();
+        let (p, a) = (dir.join("P.md").to_string_lossy().into_owned(), dir.join("A.md").to_string_lossy().into_owned());
+        std::fs::write(&a, "a text\n").unwrap();
+        st.vault.lock().unwrap().as_mut().unwrap().rescan(None);
+        let seen = Mutex::new(Vec::new());
+        let route = |req: Value| { seen.lock().unwrap().push(req.clone()); Ok(json!(if req["kind"] == "flush" { "flushed" } else { "closed" })) };
+        let mut ops = AppOps::new(&st, &route);
+        ops.remove = |p| std::fs::remove_file(p);
+        let r = crate::agent::tools::call(&mut ops, "merge_notes", json!({"source": "P", "target": "A", "summary": "s"})).unwrap();
+        assert_eq!(r["trashed"], true);
+        let kinds: Vec<String> = seen.lock().unwrap().iter().map(|r| r["kind"].as_str().unwrap().to_string()).collect();
+        assert_eq!(kinds, ["flush", "trash"]);
+        assert!(!std::path::Path::new(&p).exists());
+        assert!(std::fs::read_to_string(&a).unwrap().contains("plain zebra"));
+        assert!(ops.touched.contains(&a) && ops.touched.contains(&p));
+    }
+    #[test] fn merge_refused_when_flush_refused() {
+        let (st, dir) = state();
+        let (p, a) = (dir.join("P.md"), dir.join("A.md"));
+        std::fs::write(&a, "a text\n").unwrap();
+        st.vault.lock().unwrap().as_mut().unwrap().rescan(None);
+        let (pb, ab) = (std::fs::read(&p).unwrap(), std::fs::read(&a).unwrap());
+        let route = |req: Value| Ok(json!(if req["kind"] == "flush" { "refused" } else { "not-open" }));
+        let mut ops = AppOps::new(&st, &route);
+        ops.remove = |p| std::fs::remove_file(p);
+        let e = crate::agent::tools::call(&mut ops, "merge_notes", json!({"source": "P", "target": "A", "summary": "s"})).unwrap_err();
+        assert!(e.contains("unsaved changes"), "{e}");
+        assert_eq!((std::fs::read(&p).unwrap(), std::fs::read(&a).unwrap()), (pb, ab));
+    }
+    #[test] fn merge_hides_unlocked_locked_notes() {
+        let (st, dir) = state();
+        let l = dir.join("L.md.age");
+        let before = std::fs::read(&l).unwrap();
+        let mut ops = AppOps::new(&st, &never);
+        let r = crate::agent::tools::call(&mut ops, "merge_notes", json!({"source": "L", "target": "P", "summary": "s"}));
+        assert_eq!(r, Err("not found".to_string()));
+        assert_eq!(std::fs::read(&l).unwrap(), before);
     }
 }
