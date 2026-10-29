@@ -180,7 +180,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
           </div>
           <div className={frow}>
             <span className={flab}>Connections order</span>
-            <div>{seg("Connections order", d.connectionsSort, [["ring", "Grouped"], ["created", "Created"], ["updated", "Updated"]], (v) => set({ connectionsSort: v }))}</div>
+            <div>{seg("Connections order", d.connectionsSort, [["ring", "Ring"], ["created", "Created"], ["updated", "Updated"]], (v) => set({ connectionsSort: v }))}</div>
           </div>
           <div className={frow}>
             <span className={flab}>Quick capture goes to</span>
