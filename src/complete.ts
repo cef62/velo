@@ -81,7 +81,7 @@ export const linkSource =
           src.onCreate(title);
         },
       });
-    return { from: c.from, options, filter: false };
+    return options.length ? { from: c.from, options, filter: false } : null; // an empty result keeps an invisible popup that eats Esc
   };
 
 const byCountDesc = (a: TagCount, b: TagCount) => b.count - a.count;
@@ -96,7 +96,7 @@ export const tagSource =
       detail: String(t.count),
       apply: (view, _c, from, to) => view.dispatch(tagInsert(view.state, from, to, t.tag)),
     }));
-    return { from: c.from, options, filter: false };
+    return options.length ? { from: c.from, options, filter: false } : null;
   };
 
 /** `[[` link and `#` tag autocompletion for the note editor. */

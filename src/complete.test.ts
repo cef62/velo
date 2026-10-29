@@ -96,3 +96,11 @@ test("tagContext null inside a bare URL or autolink", () => {
   for (const d of ["http://x.io/(#pro", "<http://x.io/(#pro>"]) expect(tctx(d, d.indexOf("pro") + 3), d).toBeNull();
 });
 test("tagContext opens in plain text (control)", () => expect(tctx("see #pro")).not.toBeNull());
+
+test("no rows means no popup, so Esc is not swallowed", () => {
+  const at = (doc: string) => new CompletionContext(st(doc), doc.length, false);
+  expect(linkSource(source([]))(at("[["))).toBeNull();
+  expect(tagSource(source([]))(at("see #brandnew"))).toBeNull();
+  expect(tagSource(source([]))(at("see #123"))).toBeNull();
+  expect(options(source([]), "[[New").map((o) => o.label)).toEqual(['Create "New"']); // create row still offered
+});
