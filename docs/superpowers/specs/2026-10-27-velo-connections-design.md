@@ -115,7 +115,7 @@ Agents get the same data through the shipped MCP server (`src-tauri/src/agent/`)
   - `VaultOps::connections` drops every node whose path is `locked()` from every group, before any title leaves. This covers unlocked-in-app notes, whose links and tags the app holds in memory.
 - **No `link_mention` tool (owner, 2026-10-29):** `edit_note` already does it with an exact anchor, a revision with summary, and the editor routing. `get_connections`' description tells agents to use it.
 - **`search_notes` gets `no_links: bool`** (owner, 2026-10-29): the same `search_page` flag as the app's No links filter (section 6). Locked notes are already excluded by both the flag and the tool.
-- **Changed alongside (owner):** `read_note`'s `backlinks` becomes alias-aware, through the same index query as the graph (section 3).
+- **Changed alongside (my call):** `read_note`'s `backlinks` becomes alias-aware, through the same index query as the graph (section 3).
 
 ## 10. Docs and settings
 
@@ -145,7 +145,7 @@ Agents get the same data through the shipped MCP server (`src-tauri/src/agent/`)
 
 ## 14. Changes in the 2026-10-29 amendment
 
-- Added section 9 (MCP). Owner answers, 2026-10-29: no `link_mention` tool (agents use `edit_note`); add `search_notes(no_links)`; `read_note` backlinks become alias-aware; keep all three layouts; rename stays title-only.
+- Added section 9 (MCP). Owner answers, 2026-10-29: no `link_mention` tool (agents use `edit_note`); add `search_notes(no_links)`. My calls, 2026-10-29: `read_note` backlinks become alias-aware; keep all three layouts; rename stays title-only.
 - Section 2: dropped the separate title-bar button; the switch segment is the button. The Tasks build-order note is done.
 - Section 3: rename stays title-only (alias links survive a rename). Outgoing links come from the text plus the existing `find_titles`; no schema change.
 - Section 5: `Editor.applyChange` and `changedSpan` already exist. Link it saves directly only when the centre isn't open in the editor.
