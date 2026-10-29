@@ -40,7 +40,7 @@ pub trait NoteOps {
     fn settings(&self) -> Settings;
     /// Tags of one plain note (for search results).
     fn note_tags(&self, path: &str) -> anyhow::Result<Vec<String>>;
-    /// Titles of plain notes linking to `title`.
+    /// Titles of plain notes linking to the note at `path`, by title or alias.
     fn backlinks(&self, path: &str) -> anyhow::Result<Vec<String>>;
 }
 
