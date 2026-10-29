@@ -13,6 +13,7 @@ import { TitleBar } from "./TitleBar";
 import { ConflictBanner } from "./ConflictBanner";
 import { UpdateBanner } from "./UpdateBanner";
 import { PreviewStrip } from "./PreviewStrip";
+import { TagBar } from "./TagBar";
 import { Divider } from "./Divider";
 import { TagPanel } from "./TagPanel";
 import { FilterLine } from "./FilterLine";
@@ -74,6 +75,7 @@ export function App({ controller, store }: { controller: Controller; store: Stor
         <UpdateBanner controller={controller} store={store} />
         <ConflictBanner controller={controller} store={store} />
         <PreviewStrip store={store} />
+        <TagBar controller={controller} store={store} />
         <EditorHost controller={controller} />
         <PreviewHost controller={controller} />
         {/* the editor stays mounted under the first-run screen */}

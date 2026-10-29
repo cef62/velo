@@ -42,3 +42,7 @@ export const toggleTag = (sel: string[], tag: string): string[] =>
 export const pruneSelection = (sel: string[], available: TagCount[]): string[] =>
   sel.filter((s) => available.some((a) => fold(a.tag) === fold(s)));
 
+
+/** Chips for the tag bar: note tags in order, flagged when in the active filter. */
+export const tagBarItems = (tags: string[], selected: string[]): { tag: string; selected: boolean }[] =>
+  tags.map((tag) => ({ tag, selected: selected.some((s) => fold(s) === fold(tag)) }));

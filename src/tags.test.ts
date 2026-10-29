@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { extractTags, pruneSelection, toggleTag } from "./tags";
+import { extractTags, pruneSelection, tagBarItems, toggleTag } from "./tags";
 
 test("toggle is fold-insensitive", () => {
   expect(toggleTag(["Work"], "work")).toEqual([]);
@@ -11,3 +11,10 @@ test("extractTags mirrors Rust extract_tags_rules", () => {
   const b = "#Work and #idea, (#nested/path) C# x#y #1 #2024 http://h.com/#frag\n# Heading\n```\n#incode\n```\n#Café #work";
   expect(extractTags(b)).toEqual(["Work", "idea", "nested/path", "Café"]);
 });
+test("tagBarItems marks selected tags case- and accent-insensitively", () => {
+  expect(tagBarItems(["Proj", "café"], ["proj", "CAFE"])).toEqual([
+    { tag: "Proj", selected: true },
+    { tag: "café", selected: true },
+  ]);
+});
+test("tagBarItems with no tags is empty", () => expect(tagBarItems([], ["x"])).toEqual([]));
