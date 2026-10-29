@@ -12,12 +12,13 @@ import { History } from "../history";
 import { errText } from "../errtext";
 import { enterAction, fold, moveSelection } from "../search";
 import { extractTags, pruneSelection, toggleTag } from "../tags";
-import { stripFrontMatter, wordCount } from "../frontmatter";
+import { frontMatterRange, stripFrontMatter, wordCount } from "../frontmatter";
 import { formatBinding, matches, resolve, type Action, type GLOBAL_ACTIONS } from "../shortcuts";
 import { isMenuKey, linkFor, menuModel, type MenuAction } from "../contextmenu";
 import { isLockedPath } from "../passphrase";
 import { localToday } from "../tasks";
 import { prepare, type Ranked } from "../fuzzy";
+import { extractTitle } from "../writing";
 import type { MenuSpec, UiPort } from "./ports";
 import { noInfo, type AppState, type Store } from "./store";
 
@@ -235,6 +236,47 @@ export class Controller {
     }
     void this.refreshTitles();
     await this.runSearch(false);
+  }
+
+  protected extractFrom: { path: string; from: number; to: number; text: string } | null = null;
+
+  /** Move to new note: ask for a title for the selection. Nothing changes until commitExtract. */
+  startExtract() {
+    const path = this.editor.currentPath();
+    const sel = path ? this.editor.getSelection() : null;
+    const s = this.store.get();
+    if (!path) return;
+    if (s.encrypted) return this.setErr("Can't move text out of a locked note");
+    if (this.busy || s.indexing) return this.setErr(BUSY_MSG);
+    if (!sel) return this.setErr("Select the text to move first");
+    if (sel.from < (frontMatterRange(this.editor.getText())?.to ?? 0)) return this.setErr("Select text below the front matter");
+    this.extractFrom = { path, ...sel };
+    this.store.set({ extract: { title: extractTitle(sel.text), err: "" } });
+  }
+
+  /** The dialog finished: a title on Enter, null on Cancel. The note is created first; the source changes only after that. */
+  async commitExtract(input: string | null) {
+    const from = this.extractFrom;
+    if (!from || input === null) {
+      this.extractFrom = null;
+      return this.store.set({ extract: null });
+    }
+    const title = input.trim();
+    const fail = (err: string) => this.store.set({ extract: { title: input, err } });
+    if (!title) return fail("Title required");
+    try {
+      await this.api.createFromSelection(title, from.text);
+    } catch (e) {
+      return fail(e === "already-exists" ? "A note with this title exists" : e === "invalid-title" ? INVALID_TITLE : errText(e));
+    }
+    this.extractFrom = null;
+    this.store.set({ extract: null });
+    const same = this.editor.currentPath() === from.path && this.editor.getText().slice(from.from, from.to) === from.text;
+    if (!same || !this.editor.applyChange({ from: from.from, to: from.to, insert: `[[${title}]]` }, true))
+      this.setErr(`Created “${title}”; the selection changed, so the text was left in place`);
+    void this.refreshTitles();
+    await this.runSearch(false);
+    this.editor.focus();
   }
 
   focusSearch() {
@@ -1435,6 +1477,7 @@ export class Controller {
     toggle_rich: () => void this.toggleStyle(),
     toggle_layout: () => void this.toggleLayout(),
     daily_note: () => void this.openTitle(localToday(), "enter"),
+    extract_note: () => this.startExtract(),
     toggle_tasks: () => this.setPaneMode(this.store.get().paneMode === "tasks" ? "notes" : "tasks"),
     toggle_connections: () => this.setPaneMode(this.store.get().paneMode === "connections" ? "notes" : "connections"),
   };

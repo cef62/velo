@@ -45,6 +45,8 @@ export interface Editor {
   appendLine(text: string): boolean;
   /** Replace [from, to) with `insert` as a user edit (undoable, autosaved); false if not editable. `isolate`: its own undo step, never joined to typing. */
   applyChange(change: { from: number; to: number; insert: string }, isolate?: boolean): boolean;
+  /** The main selection, or null when it is empty. */
+  getSelection(): { from: number; to: number; text: string } | null;
   /** Caret to the start of this 0-based line, scrolled into view (a hidden front matter clamps it to the body). */
   revealLine(line: number): void;
 }
@@ -200,6 +202,10 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       if (!view.state.facet(EditorView.editable)) return false;
       view.dispatch({ changes: change, ...(isolate && ISOLATED) });
       return true;
+    },
+    getSelection() {
+      const { from, to } = view.state.selection.main;
+      return from === to ? null : { from, to, text: view.state.sliceDoc(from, to) };
     },
     revealLine(line) {
       const doc = view.state.doc;

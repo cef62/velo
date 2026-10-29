@@ -102,6 +102,13 @@ test("toggle_connections defaults to Mod+Shift+KeyC and does not clash", () => {
   expect(validateBinding(DEFAULTS, "toggle_connections", DEFAULTS.toggle_connections)).toEqual({ ok: true });
 });
 
+test("extract_note defaults to Mod+Shift+KeyN and does not clash", () => {
+  expect(DEFAULTS.extract_note).toBe("Mod+Shift+KeyN");
+  expect(LABELS.extract_note).toBe("Move to new note");
+  const all = Object.values(DEFAULTS).filter((b) => b !== "none");
+  expect(new Set(all).size).toBe(all.length);
+});
+
 test("upgrade: a saved binding equal to a new default wins, the new action gets none", () => {
   const m = resolve({ toggle_sort: "Mod+Shift+KeyD", toggle_window: "Mod+Shift+Alt+KeyN", rename: "Mod+Shift+KeyX" });
   expect(m).toMatchObject({ toggle_sort: "Mod+Shift+KeyD", daily_note: "none", toggle_window: "Mod+Alt+Shift+KeyN", capture: "none", rename: "Mod+Shift+KeyX", toggle_tasks: "none" });

@@ -148,6 +148,10 @@ export class FakeEditor implements Editor {
     this.dirty = true;
     return true;
   }
+  selection: { from: number; to: number } | null = null;
+  getSelection() {
+    return this.selection && { ...this.selection, text: this.text.slice(this.selection.from, this.selection.to) };
+  }
   appended: string[] = [];
   appendLine(text: string) {
     this.appended.push(text);

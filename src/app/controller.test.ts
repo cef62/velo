@@ -1988,3 +1988,82 @@ test("refreshTags feeds the tag completion source", async () => {
   await c.refreshTags();
   expect(c.editorOpts().complete.tags()).toHaveLength(1);
 });
+
+async function extractSetup(text = "Big idea\nbody", sel: [number, number] = [0, text.length]) {
+  const s = setup({ A: text });
+  await s.c.runSearch(true);
+  await settle();
+  s.editor.selection = { from: sel[0], to: sel[1] };
+  return s;
+}
+
+test("extract creates the note then links the selection", async () => {
+  const { c, api, editor, store, notes } = await extractSetup();
+  let linkedAfterCreate = false;
+  api.createFromSelection.mockImplementationOnce(async (t: string, x: string) => {
+    linkedAfterCreate = editor.changes.length === 0;
+    notes[t] = x;
+    return P(t);
+  });
+  c.startExtract();
+  expect(store.get().extract).toEqual({ title: "Big idea", err: "" });
+  await c.commitExtract("Big idea");
+  expect(api.createFromSelection).toHaveBeenCalledWith("Big idea", "Big idea\nbody");
+  expect(linkedAfterCreate).toBe(true);
+  expect(editor.changes).toEqual([{ from: 0, to: 13, insert: "[[Big idea]]" }]);
+  expect(editor.isolated).toEqual([true]);
+  expect(editor.currentPath()).toBe(P("A"));
+  expect(store.get().extract).toBeNull();
+});
+
+test("extract refuses encrypted, empty selection, front matter, busy", async () => {
+  const refused = async (arrange: (s: Awaited<ReturnType<typeof extractSetup>>) => void) => {
+    const s = await extractSetup("---\nt: 1\n---\nbody", [14, 18]);
+    arrange(s);
+    s.c.startExtract();
+    expect(s.store.get().extract).toBeNull();
+    expect(s.store.get().err).not.toBe("");
+    expect(s.api.createFromSelection).not.toHaveBeenCalled();
+  };
+  await refused((s) => s.store.set({ encrypted: true }));
+  await refused((s) => (s.editor.selection = null));
+  await refused((s) => (s.editor.selection = { from: 0, to: 12 })); // starts inside the front matter
+  await refused((s) => (s.c.busy = true));
+  await refused((s) => s.store.set({ indexing: { done: 0, total: 1 } }));
+});
+
+test("extract existing title keeps the dialog open", async () => {
+  const { c, api, editor, store } = await extractSetup();
+  api.createFromSelection.mockRejectedValueOnce("already-exists");
+  c.startExtract();
+  await c.commitExtract("Big idea");
+  expect(store.get().extract?.err).toBe("A note with this title exists");
+  expect(editor.changes).toEqual([]);
+  api.createFromSelection.mockRejectedValueOnce("invalid-title");
+  await c.commitExtract("a/b");
+  expect(store.get().extract?.err).toBe(INVALID_TITLE);
+  await c.commitExtract("  ");
+  expect(store.get().extract?.err).toBe("Title required");
+  await c.commitExtract(null);
+  expect(store.get().extract).toBeNull();
+});
+
+test("extract failure leaves the source untouched", async () => {
+  const { c, api, editor } = await extractSetup();
+  api.createFromSelection.mockRejectedValueOnce("boom");
+  c.startExtract();
+  await c.commitExtract("Big idea");
+  expect(editor.changes).toEqual([]);
+  expect(editor.text).toBe("Big idea\nbody");
+});
+
+test("extract after the text moved never replaces the wrong range", async () => {
+  const { c, editor, store, notes } = await extractSetup();
+  c.startExtract();
+  editor.text = "XX" + editor.text;
+  await c.commitExtract("Big idea");
+  expect(editor.changes).toEqual([]);
+  expect(store.get().err).toContain("left in place");
+  expect(notes["Big idea"]).toBe("Big idea\nbody");
+  expect(store.get().extract).toBeNull();
+});

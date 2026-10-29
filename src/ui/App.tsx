@@ -20,6 +20,7 @@ import { FilterLine } from "./FilterLine";
 import { FirstRun } from "./FirstRun";
 import { SettingsDialog } from "./SettingsDialog";
 import { InfoPanel } from "./InfoPanel";
+import { ExtractDialog } from "./ExtractDialog";
 import { PassphraseDialog } from "./PassphraseDialog";
 
 // Layout per design README: vertical = header / list / divider / note; horizontal = header over [list | divider | note].
@@ -84,6 +85,7 @@ export function App({ controller, store }: { controller: Controller; store: Stor
       <InfoPanel controller={controller} store={store} />
       </div>
       <SettingsDialog controller={controller} store={store} />
+      <ExtractDialog controller={controller} store={store} />
       <PassphraseDialog />
     </div>
   );
