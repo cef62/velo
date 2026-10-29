@@ -91,6 +91,11 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
         input_schema: r#"{"type":"object","properties":{"title":{"type":"string"},"summary":{"type":"string"}},"required":["title","summary"]}"#,
     },
     ToolSpec {
+        name: "get_connections",
+        description: "Notes one hop around a note: outgoing [[links]], backlinks (alias links included), notes sharing each tag (tags on more than 15 notes give only the count), and unlinked mentions (titles or aliases in this note's text without [[ ]]). To link a mention, read_note then edit_note wrapping the words in [[ ]].",
+        input_schema: r#"{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}"#,
+    },
+    ToolSpec {
         name: "daily_note",
         description: "The daily note for a date (`date` YYYY-MM-DD, default today, local time): title, text and whether this call created it (no template; optional `summary` describes the creation in the note's revisions).",
         input_schema: r#"{"type":"object","properties":{"date":{"type":"string","pattern":"^\\d{4}-\\d{2}-\\d{2}$"},"summary":{"type":"string"}}}"#,
@@ -177,6 +182,17 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
             let backlinks = ops.backlinks(&doc.path).map_err(err)?;
             let m = &doc.meta;
             Ok(json!({"title": doc.title, "text": doc.text, "hash": doc.hash, "created": iso(m.created), "modified": iso(m.modified), "tags": m.tags, "aliases": m.aliases, "links": links, "backlinks": backlinks}))
+        }
+        "get_connections" => {
+            let c = ops.connections(&path_of(ops, &a)?).map_err(err)?;
+            let note = |n: &crate::connections::Node| json!({"title": n.title, "created": iso(n.created), "modified": iso(n.modified)});
+            Ok(json!({
+                "title": c.centre.title, "created": iso(c.centre.created), "modified": iso(c.centre.modified),
+                "links_out": c.links_out.iter().map(note).collect::<Vec<_>>(),
+                "links_in": c.links_in.iter().map(note).collect::<Vec<_>>(),
+                "tags": c.tags.iter().map(|g| json!({"tag": g.tag, "count": g.count, "titles": g.notes.iter().map(|n| &n.title).collect::<Vec<_>>()})).collect::<Vec<_>>(),
+                "mentions": c.mentions.iter().map(|m| json!({"title": m.node.title, "name": m.name, "count": m.count})).collect::<Vec<_>>(),
+            }))
         }
         "create_note" => {
             let doc = ops.create(title_arg(&a, "title")?, arg(&a, "text")?, summary).map_err(err)?;
@@ -512,6 +528,39 @@ mod tests {
         let p3 = call(&mut ops, "search_notes", json!({"limit": 5})).unwrap();
         assert_eq!(titles(&p3).len(), 5);
         assert_eq!(p3["has_more"], true);
+    }
+
+    /// Every object key anywhere in `v`.
+    fn keys(v: &Value) -> Vec<String> {
+        match v {
+            Value::Object(m) => m.iter().flat_map(|(k, v)| std::iter::once(k.clone()).chain(keys(v))).collect(),
+            Value::Array(a) => a.iter().flat_map(keys).collect(),
+            _ => vec![],
+        }
+    }
+
+    #[test] fn get_connections_returns_titles_not_paths() {
+        let (mut ops, _) = vault(&[("C.md", "see [[A]] #t and Delta"), ("A.md", ""), ("B.md", "[[C]]"), ("D.md", "#t"), ("Delta.md", "")]);
+        let r = call(&mut ops, "get_connections", json!({"title": "C"})).unwrap();
+        assert_eq!(r["title"], "C");
+        assert!(r["created"].is_string() && r["modified"].is_string());
+        assert_eq!(r["links_out"][0]["title"], "A");
+        assert!(r["links_out"][0]["created"].is_string() && r["links_out"][0]["modified"].is_string());
+        assert_eq!(r["links_in"][0]["title"], "B");
+        assert_eq!(r["tags"], json!([{"tag": "t", "count": 1, "titles": ["D"]}]));
+        assert_eq!(r["mentions"], json!([{"title": "Delta", "name": "Delta", "count": 1}]));
+        assert!(!keys(&r).contains(&"path".to_string()), "{r}");
+    }
+
+    #[test] fn get_connections_unknown_or_locked_is_not_found() {
+        let (mut ops, _) = vault(&[("a.md", "[[L]]"), ("L.md.age", "x")]);
+        assert_eq!(call(&mut ops, "get_connections", json!({"title": "nope"})), Err("not found".to_string()));
+        assert_eq!(call(&mut ops, "get_connections", json!({"title": "L"})), Err("not found".to_string()));
+    }
+
+    #[test] fn get_connections_needs_no_summary() {
+        let (mut ops, _) = vault(&[("a.md", "x")]);
+        assert!(call(&mut ops, "get_connections", json!({"title": "a"})).is_ok());
     }
 
     #[test] fn unknown_tool_errors() {

@@ -1,5 +1,6 @@
 //! Note operations the MCP tools run on. `DirectOps` works on the notes folder itself (velo closed); Task 7 adds the
 //! forwarding implementation. Locked notes (`*.md.age`) never come out of here, and no identity is ever passed.
+use crate::connections::Connections;
 use crate::index::{Page, Sort, TagCount};
 use crate::names::{note_path, parse_note_file};
 use crate::settings::{self, Settings};
@@ -42,6 +43,8 @@ pub trait NoteOps {
     fn note_tags(&self, path: &str) -> anyhow::Result<Vec<String>>;
     /// Titles of plain notes linking to the note at `path`, by title or alias.
     fn backlinks(&self, path: &str) -> anyhow::Result<Vec<String>>;
+    /// The one-hop graph around the plain note at `path`, without locked notes.
+    fn connections(&self, path: &str) -> anyhow::Result<Connections>;
 }
 
 /// An encrypted note, or the plain twin of one (`X.md` beside `X.md.age`: a lock synced in before the delete, or a
@@ -305,6 +308,21 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
 
     fn backlinks(&self, path: &str) -> anyhow::Result<Vec<String>> {
         Ok(self.vault.index.linked_from(plain(path)?)?.iter().filter(|p| !locked(p)).map(|p| title_of(p)).collect())
+    }
+
+    fn connections(&self, path: &str) -> anyhow::Result<Connections> {
+        let mut c = self.vault.connections(plain(path)?)?;
+        c.links_out.retain(|n| !locked(&n.path));
+        c.links_in.retain(|n| !locked(&n.path));
+        c.mentions.retain(|m| !locked(&m.node.path));
+        for g in &mut c.tags {
+            let collapsed = g.notes.is_empty();
+            g.notes.retain(|n| !locked(&n.path));
+            // not even a count of unlocked notes may leave
+            // shortcut: a plain twin of a locked note still counts in a collapsed group (only a number), fix if twins matter
+            g.count = if collapsed { g.count - g.unlocked } else { g.notes.len() };
+        }
+        Ok(c)
     }
 }
 

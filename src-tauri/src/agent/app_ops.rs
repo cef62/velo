@@ -327,6 +327,10 @@ impl NoteOps for AppOps<'_> {
     fn backlinks(&self, path: &str) -> anyhow::Result<Vec<String>> {
         self.with(|o| o.backlinks(path))
     }
+
+    fn connections(&self, path: &str) -> anyhow::Result<crate::connections::Connections> {
+        self.with(|o| o.connections(path))
+    }
 }
 
 #[cfg(test)]
@@ -351,19 +355,23 @@ mod tests {
         std::fs::write(dir.join("L.md.age"), crate::crypto::encrypt(&id, b"secret zebra #hidden\n- [ ] locked task\n[[P]]\n").unwrap()).unwrap();
         let v = Vault::open_with_progress(dir.clone(), &t.join("i.sqlite"), Some(&id), &mut |_, _| {}).unwrap();
         assert_eq!(v.search("zebra", Sort::Modified, 0, &[]).unwrap().hits.len(), 2, "unlocked in memory");
-        let st = AppState {
+        (app_state(v, Some(id), t), dir)
+    }
+
+    /// App state over the open vault `v`, with its data in `t`.
+    fn app_state(v: Vault, id: Option<String>, t: PathBuf) -> AppState {
+        AppState {
             settings: Mutex::new(Settings::default()),
             vault: Mutex::new(Some(v)),
             watcher: Mutex::new(None),
-            identity: Mutex::new(Some(id)),
+            identity: Mutex::new(id),
             indexing: Mutex::new(None),
             open_gen: Default::default(),
             locked: Default::default(),
             capture_was_hidden: Default::default(),
             settings_path: t.join("settings.json"),
-            data_dir: t.clone(),
-        };
-        (st, dir)
+            data_dir: t,
+        }
     }
 
     fn never(_: Value) -> anyhow::Result<Value> {
@@ -653,6 +661,60 @@ mod tests {
         assert!(ops.tags().unwrap().iter().all(|t| t.tag != "twin"));
         assert_eq!(ops.tasks("", &[], true).unwrap().no_date.len(), 1);
         assert_eq!(crate::agent::tools::call(&mut ops, "move_to_trash", json!({"title": "L", "summary": "s"})), Err("not found".to_string()));
+    }
+
+    #[test] fn get_connections_hides_unlocked_locked_notes() {
+        let (st, dir) = state();
+        // P and the unlocked L now share #hidden
+        std::fs::write(dir.join("P.md"), "plain zebra #shared #hidden\n- [ ] open task\n[[L]]\n").unwrap();
+        st.vault.lock().unwrap().as_mut().unwrap().rescan(None);
+        let p = dir.join("P.md").to_string_lossy().into_owned();
+        {
+            // the builder itself sees L: the filtering below is what hides it
+            let g = st.vault.lock().unwrap();
+            let c = g.as_ref().unwrap().connections(&p).unwrap();
+            assert_eq!((c.links_out.len(), c.links_in.len()), (1, 1));
+            let hidden = c.tags.iter().find(|g| g.tag == "hidden").unwrap();
+            assert_eq!((hidden.count, hidden.unlocked), (1, 1));
+        }
+        let r = crate::agent::tools::call(&mut AppOps::new(&st, &never), "get_connections", json!({"title": "P"})).unwrap();
+        assert_eq!(r["links_out"], json!([]));
+        assert_eq!(r["links_in"], json!([]));
+        assert_eq!(r["tags"], json!([{"tag": "shared", "count": 0, "titles": []}, {"tag": "hidden", "count": 0, "titles": []}]));
+        let s = serde_json::to_string(&r).unwrap();
+        assert!(!s.contains("\"L\"") && !s.contains("secret"), "{s}");
+    }
+
+    #[test] fn get_connections_collapsed_tag_count_omits_unlocked_locked_notes() {
+        let (st, dir) = state();
+        let id = st.identity.lock().unwrap().clone().unwrap();
+        std::fs::write(dir.join("L.md.age"), crate::crypto::encrypt(&id, b"#big\n").unwrap()).unwrap();
+        std::fs::write(dir.join("P.md"), "#big\n").unwrap();
+        for i in 0..16 {
+            std::fs::write(dir.join(format!("n{i}.md")), "#big\n").unwrap();
+        }
+        st.vault.lock().unwrap().as_mut().unwrap().rescan(Some(&id));
+        let p = dir.join("P.md").to_string_lossy().into_owned();
+        let raw = st.vault.lock().unwrap().as_ref().unwrap().connections(&p).unwrap().tags[0].count;
+        assert_eq!(raw, 17, "the builder counts the unlocked L");
+        let r = crate::agent::tools::call(&mut AppOps::new(&st, &never), "get_connections", json!({"title": "P"})).unwrap();
+        assert_eq!(r["tags"], json!([{"tag": "big", "count": 16, "titles": []}]));
+    }
+
+    #[test] fn get_connections_runs_the_same_builder_in_app_mode() {
+        let t = tempfile::tempdir().unwrap().keep();
+        let dir = t.join("notes");
+        std::fs::create_dir_all(&dir).unwrap();
+        for (f, text) in [("C.md", "see [[A]] #t and Delta"), ("A.md", "[[C]]"), ("D.md", "#t"), ("Delta.md", "")] {
+            std::fs::write(dir.join(f), text).unwrap();
+        }
+        let v = Vault::open_with_progress(dir.clone(), &t.join("i.sqlite"), None, &mut |_, _| {}).unwrap();
+        let st = app_state(v, None, t.clone());
+        let args = json!({"title": "C"});
+        let app = crate::agent::tools::call(&mut AppOps::new(&st, &never), "get_connections", args.clone()).unwrap();
+        let mut direct = crate::agent::ops::DirectOps::open(dir, &t.join("d.sqlite"), t.join("settings.json")).unwrap();
+        assert_eq!(app, crate::agent::tools::call(&mut direct, "get_connections", args).unwrap());
+        assert_eq!(app["links_in"][0]["title"], "A");
     }
 
     #[test] fn backend_writes_are_reported_for_notes_changed() {
