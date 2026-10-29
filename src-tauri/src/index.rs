@@ -372,6 +372,11 @@ impl Index {
     }
 
     pub fn search_page(&self, query: &str, sort: Sort, offset: usize, limit: usize, tags: &[String], unlocked: &HashMap<String, String>) -> anyhow::Result<Page> {
+        self.search_page_where(query, sort, offset, limit, tags, unlocked, false)
+    }
+
+    /// `no_links` keeps only plain notes with no resolving [[link]] in or out (title or alias, as `linked_from`); the unlocked map is ignored.
+    pub fn search_page_where(&self, query: &str, sort: Sort, offset: usize, limit: usize, tags: &[String], unlocked: &HashMap<String, String>, no_links: bool) -> anyhow::Result<Page> {
         let folded = fold(query);
         let terms: Vec<&str> = folded.split_whitespace().collect();
         let order = match sort {
@@ -379,7 +384,17 @@ impl Index {
             Sort::Title => "title_folded ASC, path ASC",
         };
         let tags: Vec<String> = tags.iter().map(|t| fold(t)).collect();
-        let tag_cond = |p: &str| tags.iter().map(|_| format!(" AND EXISTS (SELECT 1 FROM tags t WHERE t.path = {p}path AND t.tag_folded = ?)")).collect::<String>();
+        let tag_cond = |p: &str| {
+            let mut c: String = tags.iter().map(|_| format!(" AND EXISTS (SELECT 1 FROM tags t WHERE t.path = {p}path AND t.tag_folded = ?)")).collect();
+            if no_links {
+                c += &format!(
+                    " AND {p}encrypted = 0 \
+                     AND NOT EXISTS (SELECT 1 FROM links l WHERE l.src = {p}path AND EXISTS (SELECT 1 FROM notes m WHERE m.path <> l.src AND m.title_folded = l.dst_folded UNION ALL SELECT 1 FROM aliases a WHERE a.path <> l.src AND a.alias_folded = l.dst_folded)) \
+                     AND NOT EXISTS (SELECT 1 FROM links l WHERE l.src <> {p}path AND (l.dst_folded = {p}title_folded OR l.dst_folded IN (SELECT alias_folded FROM aliases WHERE path = {p}path)))"
+                );
+            }
+            c
+        };
         let cols = "path, title, preview, modified, encrypted, title_folded, rowid";
         let esc: Vec<String> = terms.iter().map(|t| like_escape(t)).collect();
         let (union, args, long): (String, Vec<String>, Vec<usize>) = if terms.is_empty() {
@@ -418,7 +433,7 @@ impl Index {
         // Group 2: unlocked encrypted bodies (memory only, not in FTS), after every SQL row.
         let unlocked_hits = || -> Vec<(String, String, i64, Hit)> {
             let mut g2 = vec![];
-            if !terms.is_empty() || !tags.is_empty() {
+            if !no_links && (!terms.is_empty() || !tags.is_empty()) {
             let wanted: Vec<&str> = tags.iter().map(String::as_str).collect();
             for (path, plain) in unlocked {
                 let row = self.db.query_row("SELECT title, title_folded, modified FROM notes WHERE path=?", [path], |r| {
@@ -839,6 +854,22 @@ mod tests {
     #[test] fn linked_from_skips_self_and_unresolved() {
         let i = idx(&[("Nick.md", "[[Nick]] [[nobody]]", 1)]);
         assert!(i.linked_from("Nick.md").unwrap().is_empty());
+    }
+    fn orphans(i: &Index, tags: &[String]) -> Page { i.search_page_where("", Sort::Title, 0, 10, tags, &HashMap::new(), true).unwrap() }
+    #[test] fn no_links_lists_orphans_only() {
+        let i = idx(&[("a.md", "[[B]]", 1), ("B.md", "", 2), ("c.md", "", 3), ("Nick.md", "---\naliases: [Nicholas]\n---\n", 4), ("d.md", "[[Nicholas]]", 5), ("e.md", "[[Missing]]", 6)]);
+        assert_eq!(orphans(&i, &[]).hits.into_iter().map(|h| h.path).collect::<Vec<_>>(), vec!["c.md", "e.md"]);
+    }
+    #[test] fn no_links_excludes_locked_and_respects_tags_and_total() {
+        let mut i = idx(&[("a.md", "[[B]]", 1), ("B.md", "", 2), ("c.md", "#t", 3), ("e.md", "", 4)]);
+        i.upsert("s.md.age", &NoteFile { title: "s".into(), encrypted: true }, &Meta { mtime: 5, size: 0, birth: 0 }, None).unwrap();
+        let p = orphans(&i, &[]);
+        assert_eq!(p.hits.iter().map(|h| h.path.as_str()).collect::<Vec<_>>(), vec!["c.md", "e.md"]);
+        assert_eq!(p.total, 2);
+        let unlocked = HashMap::from([("s.md.age".to_string(), "plain".to_string())]);
+        assert_eq!(i.search_page_where("", Sort::Title, 0, 10, &[], &unlocked, true).unwrap().total, 2, "unlocked map not merged");
+        let p = orphans(&i, &["t".to_string()]);
+        assert_eq!((p.hits.len(), p.total, p.hits[0].path.as_str()), (1, 1, "c.md"));
     }
     #[test] fn names_lists_titles_and_aliases() {
         let n = nick().names().unwrap();

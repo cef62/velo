@@ -330,8 +330,8 @@ pub fn index_status(st: State<'_, AppState>) -> Option<(usize, usize)> {
 }
 
 #[tauri::command(async)]
-pub fn search(st: State<'_, AppState>, query: String, sort: Sort, offset: usize, tags: Vec<String>) -> Res<Page> {
-    with_vault(&st, |v, _| v.search(&query, sort, offset, &tags))
+pub fn search(st: State<'_, AppState>, query: String, sort: Sort, offset: usize, tags: Vec<String>, no_links: Option<bool>) -> Res<Page> {
+    with_vault(&st, |v, _| v.search_where(&query, sort, offset, &tags, no_links.unwrap_or(false)))
 }
 
 #[tauri::command(async)]

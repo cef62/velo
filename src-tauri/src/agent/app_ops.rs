@@ -214,8 +214,8 @@ impl NoteOps for AppOps<'_> {
         r
     }
 
-    fn search(&self, query: &str, tags: &[String], offset: usize) -> anyhow::Result<Page> {
-        self.with(|o| o.search(query, tags, offset))
+    fn search(&self, query: &str, tags: &[String], offset: usize, no_links: bool) -> anyhow::Result<Page> {
+        self.with(|o| o.search(query, tags, offset, no_links))
     }
 
     fn tags(&self) -> anyhow::Result<Vec<TagCount>> {
@@ -383,7 +383,7 @@ mod tests {
         let ops = AppOps::new(&st, &never);
         let mut ops = ops;
         let locked = dir.join("L.md.age").to_string_lossy().into_owned();
-        assert_eq!(ops.search("zebra", &[], 0).unwrap().hits.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(), ["P"]);
+        assert_eq!(ops.search("zebra", &[], 0, false).unwrap().hits.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(), ["P"]);
         let tasks = ops.tasks("", &[], true).unwrap();
         assert!([&tasks.overdue, &tasks.today, &tasks.upcoming, &tasks.no_date, &tasks.done].iter().all(|g| g.iter().all(|t| !t.path.ends_with(".age"))));
         assert_eq!(tasks.no_date.len(), 1);
@@ -657,7 +657,7 @@ mod tests {
         let mut ops = AppOps::new(&st, &never);
         assert_eq!(ops.find("L").unwrap(), None);
         assert_eq!(ops.read(&dir.join("L.md").to_string_lossy()).err().unwrap().to_string(), "not found");
-        assert_eq!(ops.search("zebra", &[], 0).unwrap().hits.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(), ["P"]);
+        assert_eq!(ops.search("zebra", &[], 0, false).unwrap().hits.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(), ["P"]);
         assert!(ops.tags().unwrap().iter().all(|t| t.tag != "twin"));
         assert_eq!(ops.tasks("", &[], true).unwrap().no_date.len(), 1);
         assert_eq!(crate::agent::tools::call(&mut ops, "move_to_trash", json!({"title": "L", "summary": "s"})), Err("not found".to_string()));

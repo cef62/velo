@@ -22,8 +22,8 @@ Always read_note before editing a note. `summary` is a one-line description of t
 pub const TOOL_SPECS: &[ToolSpec] = &[
     ToolSpec {
         name: "search_notes",
-        description: "Search velo notes like the velo search field (titles, aliases, then text). Empty query lists all notes. `tags` keeps notes having every tag. At most 50 results per call; page with `offset`. Returns title, snippet, modified, tags.",
-        input_schema: r#"{"type":"object","properties":{"query":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"limit":{"type":"integer","minimum":1,"maximum":50},"offset":{"type":"integer","minimum":0}}}"#,
+        description: "Search velo notes like the velo search field (titles, aliases, then text). Empty query lists all notes. `tags` keeps notes having every tag. `no_links` true keeps only notes with no [[links]] in or out (orphans; alias links count). At most 50 results per call; page with `offset`. Returns title, snippet, modified, tags.",
+        input_schema: r#"{"type":"object","properties":{"query":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"no_links":{"type":"boolean"},"limit":{"type":"integer","minimum":1,"maximum":50},"offset":{"type":"integer","minimum":0}}}"#,
     },
     ToolSpec {
         name: "list_tags",
@@ -170,7 +170,7 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
     match name {
         "search_notes" => {
             let limit = uint(&a, "limit", PAGE).clamp(1, PAGE);
-            let p = ops.search(a.get("query").and_then(Value::as_str).unwrap_or(""), &strings(&a, "tags"), uint(&a, "offset", 0)).map_err(err)?;
+            let p = ops.search(a.get("query").and_then(Value::as_str).unwrap_or(""), &strings(&a, "tags"), uint(&a, "offset", 0), a.get("no_links").and_then(Value::as_bool).unwrap_or(false)).map_err(err)?;
             let has_more = p.has_more || p.hits.len() > limit;
             let notes = p.hits.iter().take(limit).map(|h| Ok(json!({"title": h.title, "snippet": h.snippet, "modified": iso(h.mtime), "tags": ops.note_tags(&h.path)?}))).collect::<anyhow::Result<Vec<_>>>().map_err(err)?;
             Ok(json!({"notes": notes, "has_more": has_more}))
@@ -410,6 +410,11 @@ mod tests {
         v["notes"].as_array().unwrap().iter().map(|n| n["title"].as_str().unwrap().to_string()).collect()
     }
 
+    #[test] fn search_notes_no_links_lists_orphans() {
+        let (mut ops, _) = vault(&[("a.md", "[[B]]"), ("B.md", ""), ("c.md", ""), ("s.md.age", "x")]);
+        assert_eq!(titles(&call(&mut ops, "search_notes", json!({"no_links": true})).unwrap()), vec!["c"]);
+        assert_eq!(titles(&call(&mut ops, "search_notes", json!({})).unwrap()).len(), 3);
+    }
     #[test] fn search_and_read_skip_locked() {
         let (mut ops, _) = vault(&[("a.md", "zebra #shared"), ("zebra secret.md.age", "zebra #secret")]);
         let got = call(&mut ops, "search_notes", json!({"query": "zebra"})).unwrap();

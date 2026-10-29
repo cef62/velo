@@ -223,7 +223,11 @@ impl Vault {
     }
 
     pub fn search(&self, query: &str, sort: Sort, offset: usize, tags: &[String]) -> anyhow::Result<Page> {
-        self.index.search_page(query, sort, offset, PAGE, tags, &self.unlocked)
+        self.search_where(query, sort, offset, tags, false)
+    }
+
+    pub fn search_where(&self, query: &str, sort: Sort, offset: usize, tags: &[String], no_links: bool) -> anyhow::Result<Page> {
+        self.index.search_page_where(query, sort, offset, PAGE, tags, &self.unlocked, no_links)
     }
 
     /// Open and recent tasks; unlocked notes' tasks come from memory, so they never reach SQLite.

@@ -24,7 +24,7 @@ pub trait NoteOps {
     fn write(&mut self, path: &str, new_text: &str, base_hash: &str, summary: &str) -> anyhow::Result<String>;
     fn create(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<NoteDoc>;
     /// Up to `PAGE` plain hits starting at plain hit `offset`.
-    fn search(&self, query: &str, tags: &[String], offset: usize) -> anyhow::Result<Page>;
+    fn search(&self, query: &str, tags: &[String], offset: usize, no_links: bool) -> anyhow::Result<Page>;
     fn tags(&self) -> anyhow::Result<Vec<TagCount>>;
     fn tasks(&self, query: &str, tags: &[String], show_done: bool) -> anyhow::Result<TaskView>;
     /// Returns the new path.
@@ -162,12 +162,12 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
         r.map_err(|_| anyhow!(NO_ANSWER))
     }
 
-    fn search(&self, query: &str, tags: &[String], offset: usize) -> anyhow::Result<Page> {
+    fn search(&self, query: &str, tags: &[String], offset: usize, no_links: bool) -> anyhow::Result<Page> {
         let sort = if self.settings().sort == "title" { Sort::Title } else { Sort::Modified };
         let (mut hits, mut skip, mut at) = (Vec::new(), offset, 0);
         // `offset` counts plain hits, so walk the vault's pages from the start, dropping locked ones
         loop {
-            let p = self.vault.search(query, sort, at, tags)?;
+            let p = self.vault.search_where(query, sort, at, tags, no_links)?;
             let (more, n) = (p.has_more, p.hits.len());
             at += n;
             for h in p.hits.into_iter().filter(|h| !locked(&h.path)) {
