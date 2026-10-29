@@ -505,14 +505,13 @@ impl Vault {
         rewritten
     }
 
-    /// Merge `source` into `target`, rewrite links to the source, and move it to the Trash.
-    pub fn merge_notes(&mut self, source: &str, target: &str, write_fm: bool) -> anyhow::Result<MergeResult> {
-        self.merge_notes_with(source, target, write_fm, move_to_trash)
+    /// Every refusal `merge_notes` would give before it writes anything, without writing.
+    pub fn merge_check(&mut self, source: &str, target: &str) -> anyhow::Result<()> {
+        self.merge_plan(source, target).map(|_| ())
     }
 
-    /// `remove` as in `delete_note_with`. Any failure before the target is saved changes nothing; after it, nothing
-    /// is rolled back: links left unrewritten are skipped and a failed trash is reported in `trash_error`.
-    pub fn merge_notes_with(&mut self, source: &str, target: &str, write_fm: bool, remove: impl FnOnce(&Path) -> std::io::Result<()>) -> anyhow::Result<MergeResult> {
+    /// The source, the target and the merged target text; or the refusal.
+    fn merge_plan(&mut self, source: &str, target: &str) -> anyhow::Result<(NoteDoc, NoteDoc, String)> {
         if source == target {
             return Err(anyhow!("same-note"));
         }
@@ -524,6 +523,18 @@ impl Vault {
         let s = self.open_note(source, None)?;
         let t = self.open_note(target, None)?;
         let merged = merged_text(&t.text, &t.title, &s.text, &s.title).map_err(|e| anyhow!(e))?;
+        Ok((s, t, merged))
+    }
+
+    /// Merge `source` into `target`, rewrite links to the source, and move it to the Trash.
+    pub fn merge_notes(&mut self, source: &str, target: &str, write_fm: bool) -> anyhow::Result<MergeResult> {
+        self.merge_notes_with(source, target, write_fm, move_to_trash)
+    }
+
+    /// `remove` as in `delete_note_with`. Any failure before the target is saved changes nothing; after it, nothing
+    /// is rolled back: links left unrewritten are skipped and a failed trash is reported in `trash_error`.
+    pub fn merge_notes_with(&mut self, source: &str, target: &str, write_fm: bool, remove: impl FnOnce(&Path) -> std::io::Result<()>) -> anyhow::Result<MergeResult> {
+        let (s, t, merged) = self.merge_plan(source, target)?;
         self.snapshot_text(target, &t.text, None)?;
         if let SaveResult::Conflict { .. } = self.save_note(target, &merged, &t.hash, None, write_fm)? {
             return Err(anyhow!("conflict"));

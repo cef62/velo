@@ -295,6 +295,7 @@ impl NoteOps for AppOps<'_> {
         if flushed? == "refused" {
             return Err(anyhow!("note is open in velo with unsaved changes"));
         }
+        self.with(|o| o.vault.merge_check(source, target))?; // refuse before the editor closes the source
         let closed = self.ask_editor(json!({"path": source, "kind": "trash", "summary": summary}), &["closed", "not-open"])? == "closed";
         let r = self.with(|o| o.merge(source, target, summary));
         // the target and sources were saved clean above: notes-changed reloads the open one
@@ -805,6 +806,21 @@ mod tests {
         assert!(!std::path::Path::new(&p).exists());
         assert!(std::fs::read_to_string(&a).unwrap().contains("plain zebra"));
         assert!(ops.touched.contains(&a) && ops.touched.contains(&p));
+    }
+    #[test] fn merge_validates_before_closing_the_source() {
+        let (st, dir) = state();
+        let (p, a) = (dir.join("P.md"), dir.join("A.md"));
+        std::fs::write(&a, "---\ntags: [a] # c\n---\nbody\n").unwrap();
+        st.vault.lock().unwrap().as_mut().unwrap().rescan(None);
+        let (pb, ab) = (std::fs::read(&p).unwrap(), std::fs::read(&a).unwrap());
+        let seen = Mutex::new(Vec::new());
+        let route = |req: Value| { seen.lock().unwrap().push(req["kind"].as_str().unwrap().to_string()); Ok(json!(if req["kind"] == "flush" { "flushed" } else { "closed" })) };
+        let mut ops = AppOps::new(&st, &route);
+        ops.remove = |p| std::fs::remove_file(p);
+        let e = crate::agent::tools::call(&mut ops, "merge_notes", json!({"source": "P", "target": "A", "summary": "s"})).unwrap_err();
+        assert!(e.contains("unsupported tags: layout"), "{e}");
+        assert!(!seen.lock().unwrap().iter().any(|k| k == "trash" || k == "trash-failed"), "{:?}", seen.lock().unwrap());
+        assert_eq!((std::fs::read(&p).unwrap(), std::fs::read(&a).unwrap()), (pb, ab));
     }
     #[test] fn merge_refused_when_flush_refused() {
         let (st, dir) = state();
