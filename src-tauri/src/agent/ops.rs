@@ -1,6 +1,6 @@
 //! Note operations the MCP tools run on. `DirectOps` works on the notes folder itself (velo closed); Task 7 adds the
 //! forwarding implementation. Locked notes (`*.md.age`) never come out of here, and no identity is ever passed.
-use crate::connections::Connections;
+use crate::connections::{self, Connections, TAG_MAX};
 use crate::index::{Page, Sort, TagCount};
 use crate::names::{note_path, parse_note_file};
 use crate::settings::{self, Settings};
@@ -321,6 +321,12 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
             // not even a count of unlocked notes may leave
             // shortcut: a plain twin of a locked note still counts in a collapsed group (only a number), fix if twins matter
             g.count = if collapsed { g.count - g.unlocked } else { g.notes.len() };
+            // a group only unlocked notes pushed over the cap would betray them by its empty list: list the rest
+            if collapsed && g.count <= TAG_MAX {
+                let (_, paths) = self.vault.index.tag_notes(&fold(&g.tag), TAG_MAX + 1)?;
+                g.notes = connections::nodes(&self.vault.index, paths.into_iter().filter(|p| p != path && !locked(p)))?;
+                g.count = g.notes.len();
+            }
         }
         Ok(c)
     }

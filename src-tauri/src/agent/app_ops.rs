@@ -701,6 +701,25 @@ mod tests {
         assert_eq!(r["tags"], json!([{"tag": "big", "count": 16, "titles": []}]));
     }
 
+    #[test] fn get_connections_tag_group_an_unlocked_note_pushed_over_the_cap_lists_the_rest() {
+        let (st, dir) = state();
+        let id = st.identity.lock().unwrap().clone().unwrap();
+        std::fs::write(dir.join("L.md.age"), crate::crypto::encrypt(&id, b"#big\n").unwrap()).unwrap();
+        std::fs::write(dir.join("P.md"), "#big\n").unwrap();
+        for i in 0..15 {
+            std::fs::write(dir.join(format!("n{i}.md")), "#big\n").unwrap();
+        }
+        st.vault.lock().unwrap().as_mut().unwrap().rescan(Some(&id));
+        let p = dir.join("P.md").to_string_lossy().into_owned();
+        assert!(st.vault.lock().unwrap().as_ref().unwrap().connections(&p, &|_| false).unwrap().tags[0].notes.is_empty(), "16 with L: collapsed");
+        let r = crate::agent::tools::call(&mut AppOps::new(&st, &never), "get_connections", json!({"title": "P"})).unwrap();
+        let mut titles: Vec<String> = r["tags"][0]["titles"].as_array().unwrap().iter().map(|t| t.as_str().unwrap().to_string()).collect();
+        titles.sort();
+        let mut want: Vec<String> = (0..15).map(|i| format!("n{i}")).collect();
+        want.sort();
+        assert_eq!((r["tags"][0]["count"].as_u64(), titles), (Some(15), want));
+    }
+
     #[test] fn get_connections_runs_the_same_builder_in_app_mode() {
         let t = tempfile::tempdir().unwrap().keep();
         let dir = t.join("notes");

@@ -556,9 +556,9 @@ impl Index {
         Ok(st.query_map([path], |r| r.get(0))?.collect::<Result<_, _>>()?)
     }
 
-    /// `(folded name, path)` for every title and alias.
+    /// `(folded name, path)` for every title and alias, once each (an alias may fold to its own title).
     pub fn names(&self) -> anyhow::Result<Vec<(String, String)>> {
-        let mut st = self.db.prepare("SELECT title_folded, path FROM notes UNION ALL SELECT alias_folded, path FROM aliases")?;
+        let mut st = self.db.prepare("SELECT title_folded, path FROM notes UNION SELECT alias_folded, path FROM aliases")?;
         Ok(st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?)
     }
 

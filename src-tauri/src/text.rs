@@ -35,6 +35,11 @@ pub fn extract_links(body: &str) -> Vec<String> {
         .collect()
 }
 
+/// Chars a `#tag` runs over after the `#`.
+fn tag_char(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '_' | '-' | '/')
+}
+
 /// `(folded, display)` for each `#tag` outside fenced code, first spelling kept, in order of appearance.
 pub fn extract_tags(body: &str) -> Vec<(String, String)> {
     let mut seen = HashSet::new();
@@ -52,7 +57,7 @@ pub fn extract_tags(body: &str) -> Vec<(String, String)> {
         let mut prev = None;
         for (i, c) in line.char_indices() {
             if c == '#' && prev.is_none_or(|p: char| p.is_whitespace() || p == '(') {
-                let tag: String = line[i + 1..].chars().take_while(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '/')).collect();
+                let tag: String = line[i + 1..].chars().take_while(|&c| tag_char(c)).collect();
                 if tag.chars().any(char::is_alphabetic) && seen.insert(fold(&tag)) {
                     out.push((fold(&tag), tag));
                 }
@@ -165,7 +170,7 @@ pub fn remove_inline_tag(body: &str, tag_folded: &str) -> (String, usize) {
         let (mut cuts, mut prev, mut prev2) = (vec![], None, None::<char>);
         for (i, c) in line.char_indices() {
             if sc.step(start + i, c) && c == '#' && prev.is_none_or(|p: char| p.is_whitespace() || p == '(') && !(prev == Some('(') && prev2 == Some(']')) {
-                let tag: String = line[i + 1..].chars().take_while(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '/')).collect();
+                let tag: String = line[i + 1..].chars().take_while(|&c| tag_char(c)).collect();
                 if tag.chars().any(char::is_alphabetic) && fold(&tag) == tag_folded { cuts.push((i, i + 1 + tag.len())); }
             }
             prev2 = prev;
@@ -191,13 +196,27 @@ pub fn remove_inline_tag(body: &str, tag_folded: &str) -> (String, usize) {
     (out, n)
 }
 
+/// Whether the word at `line[a..i]` sits in a `#tag` (the `extract_tags` rules) or in a URL or email token: a
+/// whitespace-delimited run containing `://` or `@`, or starting with `?`.
+fn in_tag_or_url(line: &str, a: usize, i: usize) -> bool {
+    let ts = line[..a].char_indices().rev().find(|(_, c)| c.is_whitespace()).map_or(0, |(k, c)| k + c.len_utf8());
+    let token = &line[ts..i + line[i..].find(char::is_whitespace).unwrap_or(line.len() - i)];
+    token.contains("://") || token.contains('@') || token.starts_with('?')
+        || line[ts..a].match_indices('#').any(|(h, _)| {
+            let (h, prev) = (ts + h, line[..ts + h].chars().next_back());
+            let tag: String = line[h + 1..].chars().take_while(|&c| tag_char(c)).collect();
+            prev.is_none_or(|p| p.is_whitespace() || p == '(') && h + 1 + tag.len() >= i && tag.chars().any(char::is_alphabetic)
+        })
+}
+
 /// A title or alias found in prose: `name_folded` as given in the set, `as_written` and byte offsets in the text scanned.
 #[derive(Debug, PartialEq)]
 pub struct MentionHit { pub name_folded: String, pub as_written: String, pub start: usize, pub end: usize }
 
 /// Whole-word, folded occurrences of `names` (each a folded string of words joined by single spaces) in prose, with the
 /// scanner rules of `remove_inline_tag`; also outside `(...)` link targets. At each word the longest run of up to
-/// `max_words` words wins and hits never overlap. Names under 3 characters are ignored.
+/// `max_words` words wins and hits never overlap. Names under 3 characters are ignored. Words in a `#tag`, URL or
+/// email are skipped; in prose a hyphen splits words, so `velo-roadmap` can mention both `velo` and `roadmap`.
 /// shortcut: a word is a run of alphanumerics, so names with punctuation ("C++", "Dr. Smith") never match.
 pub fn find_mentions(body: &str, names: &HashSet<String>, max_words: usize) -> Vec<MentionHit> {
     // prose words as (start, end, folded), in order
@@ -215,7 +234,8 @@ pub fn find_mentions(body: &str, names: &HashSet<String>, max_words: usize) -> V
                     let rest = &line[i..];
                     let glued = line[..a].ends_with(['#', '@', '/', '.', ':'])
                         || rest.starts_with(['@', '/'])
-                        || rest.strip_prefix('.').is_some_and(|r| r.starts_with(char::is_alphanumeric));
+                        || rest.strip_prefix('.').is_some_and(|r| r.starts_with(char::is_alphanumeric))
+                        || in_tag_or_url(line, a, i);
                     if !glued { words.push((start + a, start + i, fold(&line[a..i]))); }
                     cur = None;
                 }
@@ -243,15 +263,19 @@ pub fn find_mentions(body: &str, names: &HashSet<String>, max_words: usize) -> V
     hits
 }
 
+/// The `max_words` both the graph and Link it give `find_mentions`: the longest name in words, at most 8.
+pub fn mention_max_words(names: &HashSet<String>) -> usize {
+    names.iter().map(|n| n.split(' ').count()).max().unwrap_or(1).min(8)
+}
+
 /// Wraps the first mention of `name` (found among all `names`, as the graph finds them) in the text after front matter as `[[as written]]`, if there are exactly
 /// `expected` of them; everything else, CRLF included, stays byte for byte.
 pub fn link_mention_text(full_text: &str, name: &str, names: &HashSet<String>, expected: usize) -> Result<String, &'static str> {
     let body = crate::frontmatter::body(full_text);
     let offset = full_text.len() - body.len();
     let want = fold(name);
-    // the full name set, so overlapping names resolve exactly as in the graph (longest wins)
-    let max_words = names.iter().map(|n| n.split(' ').count()).max().unwrap_or(1);
-    let hits: Vec<_> = find_mentions(body, names, max_words).into_iter().filter(|h| h.name_folded == want).collect();
+    // the full name set and the same word cap, so overlapping names resolve exactly as in the graph (longest wins)
+    let hits: Vec<_> = find_mentions(body, names, mention_max_words(names)).into_iter().filter(|h| h.name_folded == want).collect();
     if hits.len() != expected || hits.is_empty() { return Err("mention-moved"); }
     let h = &hits[0];
     Ok(format!("{}[[{}]]{}", &full_text[..offset + h.start], h.as_written, &full_text[offset + h.end..]))
@@ -352,5 +376,12 @@ mod tests {
             assert!(find_mentions(b, &n, 2).is_empty(), "{b}");
         }
         assert_eq!(find_mentions("I like velo. And (velo), velo!", &n, 2).len(), 3);
+        let n = names(&["velo", "roadmap"]);
+        for b in ["#proj-roadmap", "#my_velo", "(#a/velo-x)", "https://x/velo-roadmap", "?q=velo", "a@velo.io", "see https://x.com/?q=velo&r=roadmap"] {
+            assert!(find_mentions(b, &n, 2).is_empty(), "{b}");
+        }
+        assert_eq!(link_mention_text("#proj-roadmap then roadmap", "roadmap", &n, 1).unwrap(), "#proj-roadmap then [[roadmap]]");
+        // in prose a hyphen splits words, so each half is a mention of its own
+        assert_eq!(find_mentions("the velo-roadmap", &n, 2).len(), 2);
     }
 }

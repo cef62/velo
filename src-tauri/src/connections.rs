@@ -1,6 +1,6 @@
 use crate::frontmatter;
 use crate::index::{Index, all_tags};
-use crate::text::{extract_links, find_mentions, fold};
+use crate::text::{extract_links, find_mentions, fold, mention_max_words};
 use anyhow::anyhow;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -47,15 +47,12 @@ pub struct Connections {
     pub mentions: Vec<Mention>,
 }
 
-/// Longest name the mention matcher tries, in words.
-const MAX_WORDS: usize = 8;
-
 fn node(index: &Index, path: &str) -> anyhow::Result<Option<Node>> {
     Ok(index.node(path)?.map(|r| Node { path: path.into(), title: r.title, created: r.created, modified: r.modified, preview: r.preview, locked: r.encrypted }))
 }
 
 /// Nodes for `paths` still in the index, most recently modified first.
-fn nodes(index: &Index, paths: impl IntoIterator<Item = String>) -> anyhow::Result<Vec<Node>> {
+pub(crate) fn nodes(index: &Index, paths: impl IntoIterator<Item = String>) -> anyhow::Result<Vec<Node>> {
     let mut out = vec![];
     for p in paths {
         out.extend(node(index, &p)?);
@@ -120,7 +117,7 @@ pub fn build(index: &Index, unlocked: &HashMap<String, String>, path: &str, text
         named.entry(name).or_default().push(p);
     }
     let names: HashSet<String> = named.keys().cloned().collect();
-    let max_words = names.iter().map(|n| n.split(' ').count()).max().unwrap_or(1).min(MAX_WORDS);
+    let max_words = mention_max_words(&names);
     // per target note, in order of first hit: (path, folded name, as written, hits of that name)
     let mut found: Vec<(&String, String, String, usize)> = vec![];
     for h in find_mentions(body, &names, max_words) {
@@ -208,6 +205,23 @@ mod tests {
         let mut got: Vec<_> = c.mentions.iter().map(|m| (m.node.path.clone(), m.name.as_str(), m.count)).collect();
         got.sort();
         assert_eq!(got, [(p(&d, "Other.md"), "velo roadmap", 2), (p(&d, "Velo roadmap.md"), "velo roadmap", 2)]);
+    }
+
+    #[test] fn alias_equal_to_title_counts_once_and_links() {
+        let (mut v, d) = vault(&[("C.md", "see Résumé"), ("Resume.md", "---\naliases: [Résumé]\n---\n")], "", false);
+        let c = v.connections(&p(&d, "C.md"), &|_| false).unwrap();
+        assert_eq!(c.mentions.iter().map(|m| (m.name.as_str(), m.count)).collect::<Vec<_>>(), [("Résumé", 1)]);
+        v.link_mention(&p(&d, "C.md"), &c.mentions[0].name, c.mentions[0].count, None, false).unwrap();
+        assert_eq!(std::fs::read_to_string(d.join("C.md")).unwrap(), "see [[Résumé]]");
+    }
+
+    #[test] fn link_it_accepts_what_the_graph_shows_past_the_word_cap() {
+        // the 9-word title is past the cap, so only "alpha" is a mention, in the graph and in Link it alike
+        let (mut v, d) = vault(&[("C.md", "alpha b c d e f g h i"), ("alpha.md", ""), ("alpha b c d e f g h i.md", "")], "", false);
+        let c = v.connections(&p(&d, "C.md"), &|_| false).unwrap();
+        assert_eq!(c.mentions.iter().map(|m| (m.name.as_str(), m.count)).collect::<Vec<_>>(), [("alpha", 1)]);
+        v.link_mention(&p(&d, "C.md"), "alpha", 1, None, false).unwrap();
+        assert_eq!(std::fs::read_to_string(d.join("C.md")).unwrap(), "[[alpha]] b c d e f g h i");
     }
 
     #[test] fn locked_centre_refused_until_unlocked() {
