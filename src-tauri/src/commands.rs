@@ -377,6 +377,12 @@ pub fn save_note(st: State<'_, AppState>, path: String, text: String, base_hash:
 }
 
 #[tauri::command(async)]
+pub fn link_mention(st: State<'_, AppState>, path: String, target_title: String, expected_count: usize, editor_text: Option<String>) -> Res<Option<String>> {
+    let fm = st.settings.lock().unwrap().write_front_matter;
+    with_vault(&st, |v, _| v.link_mention(&path, &target_title, expected_count, editor_text.as_deref(), fm))
+}
+
+#[tauri::command(async)]
 pub fn tasks(st: State<'_, AppState>, query: String, tags: Vec<String>, show_done: bool) -> Res<TaskView> {
     with_vault(&st, |v, _| v.tasks(&query, &tags, show_done))
 }

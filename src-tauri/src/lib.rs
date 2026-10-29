@@ -142,6 +142,7 @@ pub fn run() {
             commands::open_note,
             commands::open_or_create,
             commands::save_note,
+            commands::link_mention,
             commands::tasks,
             commands::toggle_task,
             commands::capture_task,
