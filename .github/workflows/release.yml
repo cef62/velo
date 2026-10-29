@@ -43,6 +43,12 @@ jobs:
           commit-message: "chore: version packages"
           pr-title: "chore: version packages"
 
+      # The version PR is opened with GITHUB_TOKEN, so its pull_request CI never starts (#25).
+      - if: steps.changesets.outputs.pr-number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --ref changeset-release/main
+
       # A tag pushed with GITHUB_TOKEN never triggers `on: push: tags`, so start the
       # build explicitly for the tag that was just created.
       - if: steps.changesets.outputs.published == 'true'
