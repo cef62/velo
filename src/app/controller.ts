@@ -1,5 +1,5 @@
 import type * as ApiModule from "../api";
-import type { AgentReply, AgentWrite, Hit, NoteDoc, Settings, TagCount, TaskItem } from "../api";
+import type { AgentReply, AgentWrite, GraphNode, Hit, Mention, NoteDoc, Settings, TagCount, TaskItem } from "../api";
 // Types only: editor.ts loads editortheme.ts, which touches `window` at import time (tests run in node).
 import type { Editor, EditorOpts } from "../editor";
 import type { Preview } from "../preview";
@@ -78,7 +78,7 @@ export class Controller {
   ) {
     this.results = new Results((offset) => {
       const s = store.get();
-      return api.search(s.query, s.sort, offset, s.selectedTags, false);
+      return api.search(s.query, s.sort, offset, s.selectedTags, s.noLinks);
     });
   }
 
@@ -887,6 +887,17 @@ export class Controller {
     this.filterChanged(true);
   }
 
+  setNoLinks(on: boolean) {
+    this.store.set({ noLinks: on });
+    this.filterChanged(true);
+  }
+
+  /** The filter line's Clear: tags and the No links chip. */
+  clearFilters() {
+    this.store.set({ selectedTags: [], noLinks: false });
+    this.filterChanged(true);
+  }
+
   toggleTagFilter(tag: string) {
     this.setTags(toggleTag(this.store.get().selectedTags, tag));
   }
@@ -942,6 +953,36 @@ export class Controller {
     } catch (e) {
       if (fresh()) this.store.set({ connections: { centre, data: null, err: e === "locked" ? "Note is locked" : errText(e) } });
     }
+  }
+
+  /**
+   * Link it: wrap the mention in [[…]]. The open centre is rewritten through the editor (one undoable change, autosave
+   * persists it, typed text kept); a closed one by the backend. A mention that moved only refreshes the graph.
+   */
+  async linkMention(m: Mention) {
+    const conn = this.store.get().connections;
+    if (!conn || conn.data?.centre.locked) return;
+    const fail = (e: unknown) => this.store.set((s) => ({ connections: s.connections && { ...s.connections, err: errText(e) } }));
+    try {
+      if (this.editor.currentPath() === conn.centre) {
+        const text = this.editor.getText();
+        const next = this.busy ? null : await this.api.linkMention(conn.centre, m.name, m.count, text);
+        if (next === null) return fail("The note can't be edited right now");
+        // typing during the call moved the offsets: the mention is gone or the text changed, so just refresh
+        if (this.editor.getText() === text && !this.editor.applyChange(changedSpan(text, next))) return fail("The note can't be edited right now");
+      } else await this.api.linkMention(conn.centre, m.name, m.count, null);
+    } catch (e) {
+      if (e !== "mention-moved") return fail(e);
+    }
+    await this.loadConnections();
+  }
+
+  /** Native menu for a node in the view. */
+  async openNodeMenu(node: GraphNode, mention: Mention | null) {
+    const locked = this.store.get().connections?.data?.centre.locked;
+    const items: MenuSpec[] = [{ id: "open", text: "Open in editor", action: () => void this.openFromGraph(node.path) }];
+    if (mention && !locked) items.push({ id: "link_it", text: "Link it", action: () => void this.linkMention(mention) });
+    await this.ui.popupMenu(items, null).catch((e) => this.setErr(errText(e)));
   }
 
   async setConnectionsSort(sort: Settings["connections_sort"]) {
@@ -1228,7 +1269,7 @@ export class Controller {
     try {
       if (!(await this.select(i)) || this.editor.currentPath() !== h.path) return;
       const open = () => this.editor.currentPath(); // actions use the note open when picked
-      const run: Record<MenuAction, () => void | Promise<void>> = {
+      const run: Record<Exclude<MenuAction, "link_it">, () => void | Promise<void>> = {
         open: () => this.settleAfterOpen(false, "enter"),
         rename: () => this.startRename(),
         toggle_lock: () => this.toggleLock(),
@@ -1238,7 +1279,7 @@ export class Controller {
       };
       const { keys, isMac } = this.store.get();
       const items: MenuSpec[] = menuModel({ encrypted: h.encrypted, platform: this.opts.platform, keys, isMac }).map((m) =>
-        m === "separator" ? m : { ...m, action: () => void Promise.resolve(run[m.id]()).catch((e) => this.setErr(errText(e))) },
+        m === "separator" ? m : { ...m, action: () => void Promise.resolve(run[m.id as keyof typeof run]()).catch((e) => this.setErr(errText(e))) },
       );
       await this.ui.popupMenu(items, atRow ? this.ui.rowAnchor(this.store.get().sel) : null);
     } catch (e) {

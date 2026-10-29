@@ -37,7 +37,7 @@ export type TagGroup = { tag: string; count: number; notes: GraphNode[] };
 export type Mention = { node: GraphNode; name: string; count: number };
 export type Connections = { centre: GraphNode; links_out: GraphNode[]; links_in: GraphNode[]; tags: TagGroup[]; mentions: Mention[] };
 export const connections = (path: string) => invoke<Connections>("connections", { path });
-/** Wraps the first mention in [[…]]; resolves to the note's new text hash, or null when nothing was written. Rejects "mention-moved" | "locked" | "conflict". */
+/** Wraps the first mention in [[…]]; with editorText: resolves to the rewritten text (the editor applies it); without: saves and resolves null. Rejects "mention-moved" | "locked" | "conflict". */
 export const linkMention = (path: string, targetTitle: string, expectedCount: number, editorText: string | null) => invoke<string | null>("link_mention", { path, targetTitle, expectedCount, editorText });
 /** Notes linking to this one by title or alias: the info panel's "Linked from". */
 export const linkedFromCount = (path: string) => invoke<number>("linked_from_count", { path });

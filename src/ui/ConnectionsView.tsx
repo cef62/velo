@@ -4,6 +4,7 @@ import { css } from "styled-system/css";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { SegmentGroup, Spinner } from "@/components/ui";
+import { isMenuKey } from "../contextmenu";
 import { dateText as date, isTagNode, nodeKeyAction, nodeLabel, ringLayout, tabOrder, timeLayout, type Placed } from "../connections";
 import { useStore } from "./useStore";
 
@@ -22,6 +23,14 @@ const centreTitle = css({ truncate: true, minW: "0", fontSize: "uiSm", color: "v
 const stage = css({ position: "relative", flex: "1", minH: "0", overflow: "hidden" });
 const empty = css({ h: "full", display: "flex", alignItems: "center", justifyContent: "center", gap: "2", p: "4", textAlign: "center", color: "velo.fgMuted", fontSize: "uiSm" });
 const edge = css({ stroke: "velo.border", strokeWidth: "1.25", fill: "none", "&[data-kind=mention]": { stroke: "velo.fgMuted", strokeDasharray: "3 3", opacity: "0.5" } });
+// hovering a mention edge reveals Link it at its midpoint; the button sits in the group so the hover survives the move onto it
+const mentionEdge = css({
+  "& .hit": { stroke: "transparent", strokeWidth: "14", pointerEvents: "stroke" },
+  "& .link": { opacity: "0", cursor: "pointer", pointerEvents: "none" },
+  "&:hover .link": { opacity: "1", pointerEvents: "all" },
+  "& .link rect": { fill: "velo.panel", stroke: "velo.accentBorder" },
+  "& .link text": { fill: "velo.accentText", fontSize: "uiXs" },
+});
 const arrow = css({ fill: "velo.border" });
 const axis = css({ stroke: "velo.divider", strokeWidth: "1" });
 const axisText = css({ fill: "velo.fgMuted", fontSize: "uiXs" });
@@ -123,7 +132,13 @@ export function ConnectionsView({ controller, store }: { controller: Controller;
       leave();
     } else void controller.openFromGraph(p.node.path);
   };
+  const mentionOf = (p: Placed) => (p.kind === "mention" ? data?.mentions.find((m) => m.node.path === p.node.path) ?? null : null);
+  const menu = (p: Placed) => !isTagNode(p) && p.kind !== "centre" && void controller.openNodeMenu(p.node, mentionOf(p));
   const onKey = (e: KeyboardEvent, p: Placed) => {
+    if (isMenuKey(e.nativeEvent)) {
+      e.preventDefault();
+      return menu(p);
+    }
     const act = nodeKeyAction(e.key, e.shiftKey);
     if (act === "open") activate(p);
     else if (act === "recentre") recentre(p);
@@ -194,8 +209,22 @@ export function ConnectionsView({ controller, store }: { controller: Controller;
                   if (p.kind === "centre" || !from) return null;
                   // links in point at the centre; links out away from it
                   const s = p.kind === "in" ? segment(p, from) : segment(from, p);
+                  const m = data.centre.locked ? null : mentionOf(p);
                   const head = p.kind === "out" || p.kind === "in" ? `url(#${marker})` : undefined;
-                  return <line key={p.key} {...s} className={edge} data-kind={p.kind} markerEnd={head} />;
+                  const line = <line {...s} className={edge} data-kind={p.kind} markerEnd={head} />;
+                  if (!m) return <g key={p.key}>{line}</g>;
+                  const [mx, my] = [(s.x1 + s.x2) / 2, (s.y1 + s.y2) / 2];
+                  return (
+                    <g key={p.key} className={mentionEdge}>
+                      <line {...s} className="hit" />
+                      {line}
+                      <g className="link" transform={`translate(${mx} ${my})`} onClick={() => void controller.linkMention(m)}>
+                        <title>{`Wrap the first of ${m.count} in [[${m.name}]]`}</title>
+                        <rect x={-24} y={-9} width={48} height={18} rx={9} />
+                        <text textAnchor="middle" y={4}>Link it</text>
+                      </g>
+                    </g>
+                  );
                 })}
               </g>
               {placed.map((p) => (
@@ -209,6 +238,10 @@ export function ConnectionsView({ controller, store }: { controller: Controller;
                   aria-label={nodeLabel(p, data, sort === "created" ? "created" : "modified")}
                   transform={`translate(${p.x} ${p.y})`}
                   onClick={() => activate(p)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    menu(p);
+                  }}
                   onDoubleClick={() => recentre(p)}
                   onKeyDown={(e) => onKey(e, p)}
                   onMouseEnter={() => setShown(p.key)}

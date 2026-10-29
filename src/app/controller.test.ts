@@ -1841,3 +1841,71 @@ test("filter results are never replaced by an older load's reply (#15 simplifica
   await settle();
   expect(store.get().taskView!.no_date.map((t) => t.path)).toEqual([P("B")]);
 });
+
+const mention = (title: string, count = 1) => ({ node: { ...emptyConnections.centre, path: P(title), title }, name: title, count });
+
+test("link it on the open centre goes through the editor", async () => {
+  const { c, api, store, editor } = setup({ A: "see Bee here" });
+  await c.show(P("A"));
+  await c.showConnections();
+  editor.replaceText("typed see Bee here"); // unsaved typing
+  api.linkMention.mockImplementationOnce(async (_p, _t, _n, text) => text!.replace("Bee", "[[Bee]]"));
+  api.connections.mockClear();
+  await c.linkMention(mention("Bee"));
+  expect(api.linkMention).toHaveBeenCalledWith(P("A"), "Bee", 1, "typed see Bee here");
+  expect(editor.changes).toHaveLength(1);
+  expect(editor.getText()).toBe("typed see [[Bee]] here"); // the typed text is kept
+  expect(api.saveNote).not.toHaveBeenCalled();
+  expect(store.get().conflict).toBeNull();
+  expect(api.connections).toHaveBeenCalledTimes(1);
+});
+
+test("link it on a closed centre calls the backend", async () => {
+  const { c, api, store } = setup();
+  await c.show(P("A"));
+  await c.showConnections();
+  await c.openFromGraph(P("B"));
+  await c.recentre(P("A")); // A is the centre, B is open
+  await c.openFromGraph(P("B"));
+  api.connections.mockClear();
+  await c.linkMention(mention("C", 2));
+  expect(api.linkMention).toHaveBeenCalledWith(P("A"), "C", 2, null);
+  expect(api.connections).toHaveBeenCalledTimes(1);
+  expect(store.get().connections?.err).toBe("");
+});
+
+test("mention-moved refreshes silently, other errors show", async () => {
+  const { c, api, store } = setup();
+  await c.show(P("A"));
+  await c.showConnections();
+  api.linkMention.mockRejectedValueOnce("mention-moved");
+  api.connections.mockClear();
+  await c.linkMention(mention("B"));
+  expect(api.connections).toHaveBeenCalledTimes(1);
+  expect(store.get().connections?.err).toBe("");
+  api.linkMention.mockRejectedValueOnce("conflict");
+  await c.linkMention(mention("B"));
+  expect(store.get().connections?.err).not.toBe("");
+});
+
+test("link it never runs on a locked centre", async () => {
+  const { c, api, store } = setup();
+  await c.show(P("A"));
+  await c.showConnections();
+  store.set((s) => ({ connections: { ...s.connections!, data: { ...emptyConnections, centre: { ...emptyConnections.centre, locked: true } } } }));
+  await c.linkMention(mention("B"));
+  expect(api.linkMention).not.toHaveBeenCalled();
+});
+
+test("no links chip filters the list", async () => {
+  const { c, api, store } = setup();
+  c.setNoLinks(true);
+  await settle();
+  expect(api.search).toHaveBeenLastCalledWith("", "modified", 0, [], true);
+  c.setTags(["x"]);
+  c.clearFilters();
+  await settle();
+  expect(store.get().noLinks).toBe(false);
+  expect(store.get().selectedTags).toEqual([]);
+  expect(api.search).toHaveBeenLastCalledWith("", "modified", 0, [], false);
+});

@@ -70,6 +70,7 @@ export interface AppState {
   tags: TagCount[];
   selectedTags: string[];
   tagPanelOpen: boolean;
+  noLinks: boolean; // the No links chip: only notes with no wikilinks in or out
   exactTitleMatch: boolean; // drives the ⇧↩ Create hint
   settings: Settings | null; // non-null = the Settings dialog is open on these saved settings
   update: { version: string; status: "available" | "current" | "installing" | "failed"; message?: string } | null; // the update banner; message: install progress or the failure
@@ -124,6 +125,7 @@ export const initialState = (isMac: boolean): AppState => ({
   paneMode: "notes",
   connections: null,
   connectionsSort: "ring",
+  noLinks: false,
   taskView: null,
   dueCount: 0,
   showDone: false,
