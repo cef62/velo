@@ -5,7 +5,7 @@ use crate::revisions::RevisionInfo;
 use crate::settings::{self, GlobalAction, Settings};
 use crate::store::{self, SaveResult};
 use crate::tasks::TaskView;
-use crate::vault::{MergeResult, NoteDoc, RenameResult, Vault};
+use crate::vault::{MergeResult, NoteDoc, RenameResult, TimelineBy, TimelineRow, Vault};
 use crate::watch;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -327,6 +327,11 @@ fn needs_reopen(old: &Option<PathBuf>, new: &Option<PathBuf>, no_vault: bool, in
 #[tauri::command(async)]
 pub fn index_status(st: State<'_, AppState>) -> Option<(usize, usize)> {
     *st.indexing.lock().unwrap()
+}
+
+#[tauri::command(async)]
+pub fn timeline(st: State<'_, AppState>, query: String, tags: Vec<String>, no_links: bool, by: TimelineBy, since_ms: Option<i64>) -> Res<Vec<TimelineRow>> {
+    with_vault(&st, |v, _| v.timeline(&query, &tags, no_links, by, since_ms))
 }
 
 #[tauri::command(async)]

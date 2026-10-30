@@ -17,6 +17,8 @@ export const setSettings = (settings: Settings) => invoke<void>("set_settings", 
 export type Page = { hits: Hit[]; has_more: boolean; total: number };
 export type TagCount = { tag: string; count: number };
 export const search = (query: string, sort: "modified" | "title", offset: number, tags: string[], noLinks: boolean) => invoke<Page>("search", { query, sort, offset, tags, noLinks });
+export type TimelineRow = { path: string; title: string; date: number; snippet: string; locked: boolean };
+export const timeline = (query: string, tags: string[], noLinks: boolean, by: "created" | "updated", sinceMs: number | null) => invoke<TimelineRow[]>("timeline", { query, tags, noLinks, by, sinceMs });
 export const listTags = () => invoke<TagCount[]>("list_tags");
 export const listTitles = () => invoke<string[]>("list_titles");
 /** `name == title` rows are titles, the others aliases. */

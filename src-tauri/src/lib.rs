@@ -137,6 +137,7 @@ pub fn run() {
             commands::set_settings,
             commands::index_status,
             commands::search,
+            commands::timeline,
             commands::list_tags,
             commands::list_titles,
             commands::list_link_targets,
