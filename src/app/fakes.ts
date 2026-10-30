@@ -20,7 +20,7 @@ export const PAGE = 2;
 export const noMeta: NoteMeta = { created: 0, created_src: "file", modified: 0, modified_src: "file", tags: [], aliases: [] };
 export const hit = (title: string): Hit => ({ path: `/n/${title}.md`, title, snippet: "", mtime: 0, encrypted: false });
 
-export const emptyConnections: Connections = { centre: { path: "", title: "", created: 0, modified: 0, preview: "", locked: false }, links_out: [], links_in: [], tags: [], mentions: [] };
+export const emptyConnections: Connections = { centre: { path: "", title: "", created: 0, modified: 0, preview: "", locked: false, context: "" }, links_out: [], links_in: [], tags: [], mentions: [], missing: [] };
 
 /** Backend over `notes` (title → text). search ignores the query and pages all notes in insertion order. */
 export function fakeApi(notes: Record<string, string> = {}) {

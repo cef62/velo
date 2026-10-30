@@ -38,7 +38,7 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | ⌘⇧J | Ctrl+Shift+J | Vertical / horizontal layout |
 | ⌘I | Ctrl+I | Show / hide the side panel (note info) |
 | ⌘⇧X | Ctrl+Shift+X | Switch between Notes and Tasks |
-| ⌘⇧C | Ctrl+Shift+C | Show / hide the Connections view |
+| ⌘⇧C | Ctrl+Shift+C | Related notes: the side panel on its Related tab |
 | ⌘⇧D | Ctrl+Shift+D | Open today's daily note |
 | ⌘⇧L | Ctrl+Shift+L | Show / hide the timeline |
 | ⌘⇧Space | Ctrl+Shift+Space | Show / hide velo (system-wide) |
@@ -69,58 +69,20 @@ Press ⌘⇧L (Ctrl+Shift+L) or the Timeline tab of the left pane to list notes 
 
 The Export button in the Timeline bar (or the Export action, which has no default shortcut) exports exactly what the timeline shows; the dialog states that scope (date, range and filters). Choose Markdown (a save dialog) or PDF (the system print dialog: choose Save as PDF), and Full notes or Tasks only. The file starts with a task summary, the open tasks and the tasks done within the range with their `@done` date, then one section per note. Locked notes are never exported, even while unlocked, and are counted as left out. An export holds at most 1,000 notes (the newest).
 
-## Connections
+## Related notes
 
-Press ⌘⇧C (Ctrl+Shift+C, remappable in Settings) or run Connections from the command palette (⌘P) to see the links, backlinks, shared tags and unlinked mentions around the open note. Choose the layout in Settings: Ring, Created or Updated (saved as `connections_sort`).
+Press ⌘⇧C (Ctrl+Shift+C, remappable in Settings), the side-panel button in the title bar, or ⌘I to open the side panel; its **Related** tab follows the open note:
 
-- Click a note to open it; the graph stays. Double-click it, or press ⇧↩, to re-centre the graph on it. ↩ opens the focused node, and Esc returns to Notes.
-- Click a tag node to filter Notes by that tag.
-- **Link it.** Hover an unlinked mention and press Link it to wrap those words in `[[ ]]`. With the note open, ⌘Z (Ctrl+Z) undoes it. It is never offered for locked notes.
-- **No links.** A chip next to the tag filter lists orphans: notes with no links in or out.
-- **Alias links.** `[[Alias]]` counts as a backlink in the graph, in "Linked from" in the info panel and in the No links filter.
-
-## Writing helpers
-
-- **Tag bar.** A bar under the note title lists the note's tags; click one to filter the list by it.
-- **`[[` autocomplete.** Typing `[[` opens a popup of notes, matched by title or alias (up to 20 rows). A Create row makes a new note with the typed title. Esc closes it.
-- **`#` autocomplete.** Typing `#` in tag position opens a popup of existing tags with their note counts. Esc closes it.
-- **Move to new note (⌘⇧N).** Moves the selected text into a new note, leaves a `[[link]]` in its place, and stamps the new note with created / updated front matter when that Settings option is on. The new note is written before the source changes. Encrypted notes are refused. ⌘Z undoes it in the source.
-- **Merge into… (command, no default shortcut; set one in Settings).** Appends the open note to another note, rewrites `[[Title]]` links to point at the target (piped `[[Title|label]]` links are not supported by velo, so they are left alone), adds the source's title as an alias of the target, and moves the source to the Trash. The target is snapshotted first, so its Revisions list can restore the pre-merge text. Encrypted notes are refused on either side.
-
-## Tasks
-
-Any markdown task line is a task: `- [ ] buy milk` (also `*`, `+`, numbered lists and quotes; not inside fenced code blocks).
-
-- Add a due date with `📅 2026-10-30`. Typing `due:` and a space in the editor turns into `📅 ` as a typing aid; you type the date. velo never writes a due date itself.
-- Ticking a task through velo (the checkbox in the editor, in the preview or in the Tasks view) appends `@done(YYYY-MM-DD)` (local date); unticking removes it. An Obsidian-style `✅ YYYY-MM-DD` is still read as the done date. Typing `x` by hand adds no date.
-- The Tasks view (⌘⇧X, or the Tasks tab of the left pane) lists open tasks from every note, grouped Overdue, Today, Upcoming and No date. Search and the tag filter apply to it. "Show done" in the Tasks bar adds tasks ticked in the last 7 days. Ticking or unticking a task of a note that is not open shows a "Ticked · Undo" (or "Unticked · Undo") toast for 5 seconds. A tick in the open note goes through the editor: undo it there with ⌘Z. Click a task to jump to its line; Enter in the search field opens the first task listed.
-- The Dock icon shows the count of overdue and due-today tasks on macOS; other platforms show the count inside the app.
-- Quick capture (⌥⇧⌘N, system-wide) shows velo with the search field in capture mode (`→ Inbox`); type the task, press Enter, and velo appends `- [ ] text` to your Inbox note, or to today's daily note. Choose in Settings, General. The Inbox note is called `Inbox` unless you rename it there.
-- The daily note (⌘⇧D) opens or creates a note titled with today's date, `YYYY-MM-DD`.
-
-## Dates and front matter
-
-Notes sync through Drive, Dropbox, iCloud or git, which reset or rewrite file dates. So velo stores each note's dates inside the note, in a YAML front-matter block at the top:
-
-```
----
-created: 2026-10-27T09:14:05+01:00
-modified: 2026-10-27T10:02:41+01:00
----
-```
-
-- New notes start with both dates. Saving a note without a block prepends one (`created` from the file's date, `modified` now); saving a note with a block updates `modified` and adds `created` if missing. Locked notes are stamped before encryption.
-- Everything else in the block (other keys, comments, order) is left byte for byte. velo never overwrites an existing `created:` line, and edits only the first `modified:` line. Other date formats (`2026-10-27`, `2026-10-27 09:14`, quoted) are read; an unreadable value falls back to the file date, shown with a "from file" hint.
-- Turn writing off in Settings, General ("Add created/modified dates to notes"). Existing blocks are still read.
-- The block is hidden in the editor and preview. Show it with "Show front matter" in the note's ⋯ menu (title bar) or the checkbox in the info panel, or bind a key to "Show / hide front matter" in Settings (unbound by default).
-- `tags:` and `aliases:` (flow list `[a, b]`, block list or single value) are read. velo writes them only when merging notes (the source's tags and aliases, plus its title as an alias, go to the target); otherwise only an agent's `add_tags` / `remove_tags` tools change the `tags:` list. Tags merge with `#tags`. Aliases work as titles for `[[wikilinks]]`, opening by name, and search.
-- The list's date and the Recent sort use the modified date from the note.
-
-## Revisions
+- **Linked from** — notes that link here, each with the sentence that links; **Links to** — the notes this one links to, with a missing target in red (⇧↩ creates it); **Mentions** — notes whose title or alias this note mentions without a link, with **Link it** (⇧↩, or the button) to wrap the words in `[[ ]]` (with the note open, ⌘Z undoes it; never offered for locked notes); **Shared tags** — one group per tag with its three most recent notes, then "All N in the list", which applies that tag filter.
+- Keyboard: one Tab stop for the tabs and one for the tree; ↑/↓ move (section headers included), ←/→ collapse and expand, ↩ opens the note and keeps you in the panel so you can walk from note to note (the trail row at the top goes back, ⌘J), ⌘↩ opens and jumps to the editor, Space peeks at a note in place, Esc returns to the editor.
+- The panel docks beside the note when the note keeps at least 480 px; otherwise it opens over the note and Esc closes it.
+- **No links.** A chip in the Filters panel lists orphans: notes with no links in or out.
+- **Alias links.** `[[Alias]]` counts as a backlink in Related and in the No links filter.
+- Locked notes show their title only: no line of a locked note's text is ever shown, unlocked or not.
 
 velo keeps local snapshots of each note: on save when the last one is over 10 minutes old (the version the save replaces), before an external change replaces the editor text, and before a restore. They are kept for 30 days, stored in the app data directory (never in the notes folder, never synced), and encrypted for locked notes.
 
-Press ⌘I (Ctrl+I) for the info panel: created and modified dates, word count, "linked from N notes", tags, aliases and the revision list. Select a revision to preview it, then Restore; the current text is kept as a revision first.
+Press ⌘I (Ctrl+I) for the side panel; its **Info** tab shows created and modified dates, word count, aliases and the revision list. Select a revision to preview it, then Restore; the current text is kept as a revision first.
 
 ## Agents (MCP)
 

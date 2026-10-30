@@ -589,6 +589,17 @@ impl Index {
         Ok(st.query_map([path], |r| r.get(0))?.collect::<Result<_, _>>()?)
     }
 
+    /// The indexed body (after front matter) of a plain note; None for a locked or unknown one.
+    pub fn body(&self, path: &str) -> anyhow::Result<Option<String>> {
+        Ok(self.db.query_row("SELECT body FROM notes_fts WHERE rowid = (SELECT rowid FROM notes WHERE path=?)", [path], |r| r.get(0)).optional()?)
+    }
+
+    /// The folded title and aliases a `[[link]]` to this note may use.
+    pub fn names_of(&self, path: &str) -> anyhow::Result<Vec<String>> {
+        let mut st = self.db.prepare("SELECT title_folded FROM notes WHERE path=?1 UNION SELECT alias_folded FROM aliases WHERE path=?1")?;
+        Ok(st.query_map([path], |r| r.get(0))?.collect::<Result<_, _>>()?)
+    }
+
     /// `(folded name, path)` for every title and alias, once each (an alias may fold to its own title).
     pub fn names(&self) -> anyhow::Result<Vec<(String, String)>> {
         let mut st = self.db.prepare("SELECT title_folded, path FROM notes UNION SELECT alias_folded, path FROM aliases")?;

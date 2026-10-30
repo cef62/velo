@@ -1,5 +1,5 @@
 import type * as ApiModule from "../api";
-import type { AgentReply, AgentWrite, ExportRequest, GraphNode, Hit, LinkTarget, MergeResult, Mention, NoteDoc, SavedSearch, Settings, TagCount, TaskItem } from "../api";
+import type { AgentReply, AgentWrite, ExportRequest, Hit, LinkTarget, MergeResult, Mention, NoteDoc, SavedSearch, Settings, TagCount, TaskItem } from "../api";
 // Types only: editor.ts loads editortheme.ts, which touches `window` at import time (tests run in node).
 import type { Editor, EditorOpts } from "../editor";
 import type { Preview } from "../preview";
@@ -31,7 +31,6 @@ export type Api = typeof ApiModule;
 
 export const INVALID_TITLE = 'A title can\'t contain / \\ : * ? " < > | ] or start with a dot';
 
-const connectionsSortOf = (v: unknown): Settings["connections_sort"] => (v === "created" || v === "updated" ? v : "ring");
 
 const BUSY_MSG = "Busy — try again in a moment";
 const UPDATE_BUSY = "An update check or install is already running"; // update.rs BUSY
@@ -197,7 +196,6 @@ export class Controller {
       writeFrontMatter: s.write_front_matter !== false,
       showFrontMatter: s.show_front_matter === true,
       infoOpen: s.info_panel === true,
-      connectionsSort: connectionsSortOf(s.connections_sort),
       savedSearches: s.saved_searches ?? [],
       timeline: { ...this.store.get().timeline, by: s.timeline_sort === "created" ? "created" : "updated" },
     });
@@ -551,6 +549,7 @@ export class Controller {
   protected readonly infoReq = latest();
   /** Backlinks and revisions for the open note; no backend calls while the panel is closed. */
   async loadInfo() {
+    void this.loadRelated();
     const { infoOpen, openPath } = this.store.get();
     if (!infoOpen || !openPath) return;
     const fresh = this.infoReq();
@@ -988,7 +987,7 @@ export class Controller {
       clearTimeout(this.undoTimer);
       this.store.set({ taskView: null, tickUndo: null });
       void this.loadTasks(); // a new request: older replies are stale
-      void this.loadConnections(); // the graph's links and tags may come from now-locked notes
+      void this.loadRelated(); // its links and tags may come from now-locked notes
       void this.refreshTitles(); // link targets carry each note's locked flag
       if (path && isLockedPath(path)) {
         this.editor.unload(); // drop the decrypted text from the editor and stop autosave re-caching it
@@ -1188,7 +1187,6 @@ export class Controller {
   }
 
   setPaneMode(m: AppState["paneMode"]) {
-    if (m === "connections") return void this.showConnections();
     const into = m === "timeline" && this.store.get().paneMode !== "timeline";
     // re-entering: show loading, not rows of the filters the timeline last loaded with
     this.store.set((s) => (into ? { paneMode: m, timeline: { ...s.timeline, rows: null, sel: null } } : { paneMode: m }));
@@ -1338,80 +1336,72 @@ export class Controller {
     }
   }
 
-  protected readonly newConnectionsReq = latest();
-  /** Open the Connections view centred on the open note (flushed first); nothing happens without one. */
-  async showConnections() {
-    const { openPath } = this.store.get();
-    if (!openPath || !(await this.editor.flush())) return;
-    this.store.set({ paneMode: "connections", connections: { centre: openPath, data: null, err: "" } });
-    await this.loadConnections();
-  }
-
-  /** A node picked in the view: the normal open, the centre stays. */
-  openFromGraph(path: string) {
-    return this.show(path);
-  }
-
-  recentre(path: string) {
-    this.store.set((s) => ({ connections: { centre: path, data: s.connections?.data ?? null, err: "" } }));
-    return this.loadConnections();
-  }
-
-  /** (Re)load the graph around the current centre; not called per keystroke (on show, re-centre, Link it). */
-  async loadConnections() {
-    const centre = this.store.get().connections?.centre;
-    if (!centre) return;
-    const fresh = this.newConnectionsReq();
+  protected readonly newRelatedReq = latest();
+  /** The Related tab follows the open note; loads only while the panel shows it. */
+  async loadRelated() {
+    const { infoOpen, sideTab, openPath } = this.store.get();
+    if (!infoOpen || sideTab !== "related" || !openPath) return;
+    const fresh = this.newRelatedReq();
     try {
-      const data = await this.api.connections(centre);
-      if (fresh()) this.store.set({ connections: { centre, data, err: "" } });
+      const data = await this.api.connections(openPath);
+      if (fresh()) this.store.set({ related: { centre: openPath, data, err: "" } });
     } catch (e) {
-      if (fresh()) this.store.set({ connections: { centre, data: null, err: e === "locked" ? "Note is locked" : errText(e) } });
+      if (fresh()) this.store.set({ related: { centre: openPath, data: null, err: e === "locked" ? "Note is locked" : errText(e) } });
     }
+  }
+
+  setSideTab(tab: AppState["sideTab"]) {
+    this.store.set({ sideTab: tab });
+    void this.loadRelated();
+  }
+
+  /** ⌘⇧C: the side panel on Related; pressed again there, it closes. */
+  async toggleRelated() {
+    const { infoOpen, sideTab } = this.store.get();
+    if (infoOpen && sideTab === "related") return this.toggleInfo();
+    this.store.set({ sideTab: "related" });
+    if (!infoOpen) return this.toggleInfo();
+    await this.loadRelated();
+  }
+
+  /** The trail row: where ⌘J would go. */
+  previousPath(): string | null {
+    return this.history.previous();
+  }
+
+  focusEditor() {
+    this.editor.focus();
+  }
+
+  /** ⇧↩ on a missing [[target]]: the note is created and opened. */
+  createMissing(title: string) {
+    return this.openTitle(title, "enter");
   }
 
   /**
-   * Link it: wrap the mention in [[…]]. The open centre is rewritten through the editor (one undoable change, autosave
-   * persists it, typed text kept); a closed one by the backend. A mention that moved only refreshes the graph.
+   * Link it: wrap the mention in [[…]]. The open note is rewritten through the editor (one undoable change, autosave
+   * persists it, typed text kept). A mention that moved only refreshes the panel.
    */
   async linkMention(m: Mention) {
-    const conn = this.store.get().connections;
-    if (!conn || conn.data?.centre.locked) return;
-    const fail = (e: unknown) => this.store.set((s) => ({ connections: s.connections && { ...s.connections, err: errText(e) } }));
+    const path = this.store.get().openPath;
+    const rel = this.store.get().related;
+    if (!path || rel?.centre !== path || rel.data?.centre.locked) return;
+    const fail = (e: unknown) => this.store.set((s) => ({ related: s.related && { ...s.related, err: errText(e) } }));
     try {
-      if (this.editor.currentPath() === conn.centre) {
+      if (this.editor.currentPath() === path) {
         const text = this.editor.getText();
-        const next = this.busy ? null : await this.api.linkMention(conn.centre, m.name, m.count, text);
+        const next = this.busy ? null : await this.api.linkMention(path, m.name, m.count, text);
         if (next === null) return fail("The note can't be edited right now");
         // typing during the call moved the offsets: the mention is gone or the text changed, so just refresh
-        const same = this.editor.currentPath() === conn.centre && this.editor.getText() === text;
+        const same = this.editor.currentPath() === path && this.editor.getText() === text;
         if (same && !this.editor.applyChange(changedSpan(text, next), true)) return fail("The note can't be edited right now");
-      } else await this.api.linkMention(conn.centre, m.name, m.count, null);
+      } else await this.api.linkMention(path, m.name, m.count, null);
     } catch (e) {
       if (e !== "mention-moved") return fail(e);
     }
-    // the graph reads the centre from disk: autosave would land after the reload
-    if (this.editor.currentPath() === conn.centre) await this.editor.flush();
-    await this.loadConnections();
-  }
-
-  /** Native menu for a node in the view. */
-  async openNodeMenu(node: GraphNode, mention: Mention | null) {
-    const locked = this.store.get().connections?.data?.centre.locked;
-    const items: MenuSpec[] = [{ id: "open", text: "Open in editor", action: () => void this.openFromGraph(node.path) }];
-    if (mention && !locked) items.push({ id: "link_it", text: "Link it", action: () => void this.linkMention(mention) });
-    await this.ui.popupMenu(items, null).catch((e) => this.setErr(errText(e)));
-  }
-
-  async setConnectionsSort(sort: Settings["connections_sort"]) {
-    try {
-      await this.updateSettings(async (cur) => {
-        await this.api.setSettings({ ...cur, connections_sort: sort });
-        this.store.set({ connectionsSort: sort });
-      });
-    } catch (e) {
-      this.setErr(errText(e));
-    }
+    // the panel reads the note from disk: autosave would land after the reload
+    if (this.editor.currentPath() === path) await this.editor.flush();
+    await this.loadRelated();
   }
 
   async toggleShowDone() {
@@ -1679,7 +1669,7 @@ export class Controller {
       return err === "not-found" ? "Folder not found" : String(err);
     }
     this.applyLook(next);
-    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, headerLabels: next.header_labels, writeFrontMatter: next.write_front_matter, showFrontMatter: next.show_front_matter, infoOpen: next.info_panel, connectionsSort: connectionsSortOf(next.connections_sort), savedSearches: next.saved_searches ?? [], settings: null });
+    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, headerLabels: next.header_labels, writeFrontMatter: next.write_front_matter, showFrontMatter: next.show_front_matter, infoOpen: next.info_panel, savedSearches: next.saved_searches ?? [], settings: null });
     this.preview?.refresh(); // watermark shows the binding
     this.syncStyle();
     if (next.notes_dir !== cur.notes_dir) {
@@ -1879,7 +1869,7 @@ export class Controller {
     extract_note: () => this.startExtract(),
     merge_note: () => void this.startMerge(),
     toggle_tasks: () => this.setPaneMode(this.store.get().paneMode === "tasks" ? "notes" : "tasks"),
-    toggle_connections: () => this.setPaneMode(this.store.get().paneMode === "connections" ? "notes" : "connections"),
+    toggle_connections: () => void this.toggleRelated(),
     toggle_timeline: () => this.setPaneMode(this.store.get().paneMode === "timeline" ? "notes" : "timeline"),
     export: () => void this.startExport(),
     save_search: () => this.startSaveSearch(),
@@ -1921,6 +1911,7 @@ export class Controller {
   async onNotesChanged(paths: string[]) {
     await this.runSearch(false);
     void this.refreshTitles();
+    void this.loadRelated(); // backlinks and mentions live in other notes
     void this.refreshTags();
     void this.loadTasks();
     const open = this.editor.currentPath();

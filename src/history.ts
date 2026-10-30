@@ -38,6 +38,11 @@ export class History {
     return this.e[this.i];
   }
 
+  /** Where ⌘J would go: the entry before the cursor (the cursor entry itself for an auto-shown note). The Related trail row. */
+  previous(): string | null {
+    return (this.offTrail ? this.e[this.i] : this.e[this.i - 1]) ?? null;
+  }
+
   /** Put the cursor back where the last back/forward found it (that step's load was refused). */
   undo() { this.i = this.prev; }
 

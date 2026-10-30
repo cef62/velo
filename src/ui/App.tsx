@@ -9,7 +9,6 @@ import { PreviewHost } from "./PreviewHost";
 import { NoteList } from "./NoteList";
 import { PaneBar } from "./PaneBar";
 import { TaskList } from "./TaskList";
-import { ConnectionsView } from "./ConnectionsView";
 import { TimelineView } from "./TimelineView";
 import { TitleBar } from "./TitleBar";
 import { ConflictBanner } from "./ConflictBanner";
@@ -18,7 +17,7 @@ import { Divider } from "./Divider";
 import { FiltersPanel } from "./FiltersPanel";
 import { FirstRun } from "./FirstRun";
 import { SettingsDialog } from "./SettingsDialog";
-import { InfoPanel } from "./InfoPanel";
+import { SidePanel } from "./SidePanel";
 import { ExtractDialog } from "./ExtractDialog";
 import { MergeDialog } from "./MergeDialog";
 import { SaveSearchDialog } from "./SaveSearchDialog";
@@ -42,7 +41,7 @@ const app = css({
     gridTemplateRows: "auto minmax(0, 1fr)",
   },
 });
-const pane = css({ flex: "1", minH: "0", minW: "0", display: "flex" });
+const pane = css({ flex: "1", minH: "0", minW: "0", display: "flex", position: "relative" }); // the side panel overlays inside it when the note would get too narrow
 // The left pane: one bar over one list, the same box in every mode; the divider sizes it through --list-h / --list-w.
 const leftPane = css({ h: "var(--list-h, 30%)", flex: "none", display: "flex", flexDirection: "column", minH: "0", minW: "0", "[data-layout=horizontal] &": { h: "auto" } });
 const note = css({ flex: "1", minH: "0", minW: "0", display: "flex", flexDirection: "column", position: "relative" });
@@ -67,14 +66,10 @@ export function App({ controller, store }: { controller: Controller; store: Stor
         <Header controller={controller} store={store} />
         <FiltersPanel controller={controller} store={store} />
       </div>
-      {paneMode === "connections" ? (
-        <ConnectionsView controller={controller} store={store} />
-      ) : (
-        <div className={leftPane}>
-          <PaneBar controller={controller} store={store} />
-          {paneMode === "tasks" ? <TaskList controller={controller} store={store} /> : paneMode === "timeline" ? <TimelineView controller={controller} store={store} /> : <NoteList controller={controller} store={store} />}
-        </div>
-      )}
+      <div className={leftPane}>
+        <PaneBar controller={controller} store={store} />
+        {paneMode === "tasks" ? <TaskList controller={controller} store={store} /> : paneMode === "timeline" ? <TimelineView controller={controller} store={store} /> : <NoteList controller={controller} store={store} />}
+      </div>
       <Divider store={store} app={root} />
       <div className={pane}>
       <section className={note}>
@@ -87,7 +82,7 @@ export function App({ controller, store }: { controller: Controller; store: Stor
         <PassphraseDialog />
         <FirstRun controller={controller} store={store} />
       </section>
-      <InfoPanel controller={controller} store={store} />
+      <SidePanel controller={controller} store={store} />
       </div>
       <SettingsDialog controller={controller} store={store} />
       <ExtractDialog controller={controller} store={store} />

@@ -62,7 +62,6 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
     agentAccess: cur.agent_access === true,
     captureTarget: cur.capture_target === "daily" ? "daily" : "inbox",
     inboxTitle: cur.inbox_title ?? "Inbox",
-    connectionsSort: (cur.connections_sort ?? "ring") as string,
     shortcuts: resolve(cur.shortcuts, isMac),
   }));
   const set = (p: Partial<typeof d>) => setD((x) => ({ ...x, ...p }));
@@ -177,10 +176,6 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
               <Checkbox.Label>Add created/modified dates to notes (front matter)</Checkbox.Label>
               <Checkbox.HiddenInput />
             </Checkbox.Root>
-          </div>
-          <div className={frow}>
-            <span className={flab}>Connections order</span>
-            <div>{seg("Connections order", d.connectionsSort, [["ring", "Ring"], ["created", "Created"], ["updated", "Updated"]], (v) => set({ connectionsSort: v }))}</div>
           </div>
           <div className={frow}>
             <span className={flab}>Quick capture goes to</span>

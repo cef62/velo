@@ -1,6 +1,6 @@
 use crate::frontmatter;
 use crate::index::{Index, all_tags};
-use crate::text::{extract_links, find_mentions, fold, mention_max_words};
+use crate::text::{context_line, extract_links, find_mentions, fold, link_spans, mention_max_words};
 use anyhow::anyhow;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -16,7 +16,12 @@ pub struct Node {
     pub modified: i64,
     pub preview: String,
     pub locked: bool,
+    /// For `links_in`: the line holding the link (trimmed, cut around it); "" elsewhere and for locked sources.
+    pub context: String,
 }
+
+/// How much of a line a context keeps.
+pub const CONTEXT_CHARS: usize = 120;
 
 #[derive(Serialize, Debug)]
 pub struct TagGroup {
@@ -36,6 +41,8 @@ pub struct Mention {
     pub name: String,
     /// Unlinked occurrences of that name: Link it's `expected_count`.
     pub count: usize,
+    /// The line holding the first occurrence; "" when the centre is locked.
+    pub context: String,
 }
 
 #[derive(Serialize, Debug)]
@@ -45,10 +52,12 @@ pub struct Connections {
     pub links_in: Vec<Node>,
     pub tags: Vec<TagGroup>,
     pub mentions: Vec<Mention>,
+    /// `[[targets]]` in the centre with no note: ⇧↩ in the Related panel creates them.
+    pub missing: Vec<String>,
 }
 
 fn node(index: &Index, path: &str) -> anyhow::Result<Option<Node>> {
-    Ok(index.node(path)?.map(|r| Node { path: path.into(), title: r.title, created: r.created, modified: r.modified, preview: r.preview, locked: r.encrypted }))
+    Ok(index.node(path)?.map(|r| Node { path: path.into(), title: r.title, created: r.created, modified: r.modified, preview: r.preview, locked: r.encrypted, context: String::new() }))
 }
 
 /// Nodes for `paths` still in the index, most recently modified first.
@@ -61,13 +70,23 @@ pub(crate) fn nodes(index: &Index, paths: impl IntoIterator<Item = String>) -> a
     Ok(out)
 }
 
-/// Every note the wikilinks in `body` name (title or alias).
-fn targets(index: &Index, body: &str) -> anyhow::Result<HashSet<String>> {
+/// Every note the wikilinks in `body` name (title or alias), and the link texts naming none.
+fn targets(index: &Index, body: &str) -> anyhow::Result<(HashSet<String>, Vec<String>)> {
     let mut out = HashSet::new();
+    let mut missing = vec![];
     for l in extract_links(body) {
-        out.extend(index.find_titles(&l)?);
+        let found = index.find_titles(&l)?;
+        if found.is_empty() { missing.push(l) } else { out.extend(found) }
     }
-    Ok(out)
+    Ok((out, missing))
+}
+
+/// The line of the first `[[link]]` in a plain source that names the centre; "" when none is found.
+fn link_context(body: &str, names: &[String]) -> String {
+    link_spans(body)
+        .into_iter()
+        .find(|&(a, b)| names.iter().any(|n| *n == fold(body[a..b].trim())))
+        .map_or_else(String::new, |(a, b)| context_line(body, a.saturating_sub(2), (b + 2).min(body.len()), CONTEXT_CHARS))
 }
 
 /// The one-hop graph around `path`, whose text is `text`. Locked notes' own links and tags come only from `unlocked`.
@@ -83,13 +102,21 @@ pub fn build(index: &Index, unlocked: &HashMap<String, String>, path: &str, text
         .map(|(p, t)| (p, frontmatter::body(t), all_tags(frontmatter::body(t), frontmatter::parse(t).as_ref()).into_iter().map(|(f, _)| f).collect()))
         .collect();
 
-    let mut out = targets(index, body)?;
+    let (mut out, missing) = targets(index, body)?;
     out.remove(path);
 
     let mut sources: HashSet<String> = index.linked_from(path)?.into_iter().collect();
     for (p, b, _) in &others {
-        if targets(index, b)?.contains(path) {
+        if targets(index, b)?.0.contains(path) {
             sources.insert(p.to_string());
+        }
+    }
+    // the sentence that links here, from plain sources only: a locked source shows its title and nothing else, unlocked or not
+    let centre_names = index.names_of(path)?;
+    let mut links_in = nodes(index, sources)?;
+    for n in &mut links_in {
+        if !n.locked {
+            if let Some(b) = index.body(&n.path)? { n.context = link_context(&b, &centre_names); }
         }
     }
 
@@ -118,25 +145,27 @@ pub fn build(index: &Index, unlocked: &HashMap<String, String>, path: &str, text
     }
     let names: HashSet<String> = named.keys().cloned().collect();
     let max_words = mention_max_words(&names);
-    // per target note, in order of first hit: (path, folded name, as written, hits of that name)
-    let mut found: Vec<(&String, String, String, usize)> = vec![];
+    // per target note, in order of first hit: (path, folded name, as written, hits of that name, first hit's span)
+    let mut found: Vec<(&String, String, String, usize, (usize, usize))> = vec![];
     for h in find_mentions(body, &names, max_words) {
         // a name two notes share mentions both
         for p in named[&h.name_folded].iter().filter(|p| *p != path && !out.contains(*p)) {
             match found.iter_mut().find(|f| f.0 == p) {
                 Some(f) if f.1 == h.name_folded => f.3 += 1,
                 Some(_) => {}
-                None => found.push((p, h.name_folded.clone(), h.as_written.clone(), 1)),
+                None => found.push((p, h.name_folded.clone(), h.as_written.clone(), 1, (h.start, h.end))),
             }
         }
     }
     let mut mentions = vec![];
-    for (p, _, name, count) in found {
-        mentions.extend(node(index, p)?.map(|node| Mention { node, name, count }));
+    for (p, _, name, count, (a, b)) in found {
+        // the centre's own text: never shown for a locked centre, unlocked or not
+        let context = if centre.locked { String::new() } else { context_line(body, a, b, CONTEXT_CHARS) };
+        mentions.extend(node(index, p)?.map(|node| Mention { node, name, count, context }));
     }
     mentions.sort_by_key(|m| std::cmp::Reverse(m.node.modified));
 
-    Ok(Connections { centre, links_out: nodes(index, out)?, links_in: nodes(index, sources)?, tags, mentions })
+    Ok(Connections { centre, links_out: nodes(index, out)?, links_in, tags, mentions, missing })
 }
 
 #[cfg(test)]
@@ -175,6 +204,28 @@ mod tests {
         assert_eq!(paths(&c.tags[0].notes), [p(&d, "D.md")]);
         assert_eq!(c.mentions.len(), 1);
         assert_eq!((c.mentions[0].node.path.clone(), c.mentions[0].name.as_str(), c.mentions[0].count), (p(&d, "Delta.md"), "Delta", 1));
+    }
+
+    #[test] fn backlink_and_mention_carry_their_line_but_never_a_locked_notes_text() {
+        let id = crypto::new_identity();
+        let (v, d) = vault(&[("C.md", "intro\nDelta came up in the Q4 planning\n"), ("B.md", "# B\nfirst line\nSee [[C]] for the header plan\n"), ("Delta.md", ""), ("L.md.age", "secret [[C]] text")], &id, true);
+        let c = v.connections(&p(&d, "C.md"), &|_| false).unwrap();
+        let by_path: std::collections::HashMap<_, _> = c.links_in.iter().map(|n| (n.path.clone(), n.context.clone())).collect();
+        assert_eq!(by_path[&p(&d, "B.md")], "See [[C]] for the header plan");
+        assert_eq!(by_path[&p(&d, "L.md.age")], "", "an unlocked locked source shows no text");
+        assert_eq!(c.mentions[0].context, "Delta came up in the Q4 planning");
+        assert!(c.links_out.iter().all(|n| n.context.is_empty()));
+        // a locked centre: mention lines come from its own text, so none
+        let (v, d) = vault(&[("L.md.age", "Delta came up"), ("Delta.md", "")], &id, true);
+        let c = v.connections(&p(&d, "L.md.age"), &|_| false).unwrap();
+        assert_eq!(c.mentions.len(), 1);
+        assert_eq!(c.mentions[0].context, "");
+    }
+
+    #[test] fn missing_link_targets_are_listed() {
+        let (v, d) = vault(&[("C.md", "see [[A]] and [[Nowhere]] and [[ nowhere ]]"), ("A.md", "")], "", false);
+        let c = v.connections(&p(&d, "C.md"), &|_| false).unwrap();
+        assert_eq!(c.missing, ["Nowhere"]);
     }
 
     #[test] fn alias_link_is_a_backlink() {
