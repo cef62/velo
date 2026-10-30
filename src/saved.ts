@@ -10,6 +10,10 @@ const tagSet = (tags: string[]) => [...new Set(tags.map(fold))].sort().join("\n"
 export const sameFilters = (s: SavedSearch, f: Filters): boolean =>
   s.query.trim() === f.query.trim() && tagSet(s.tags) === tagSet(f.tags) && s.no_links === f.noLinks;
 
+/** Filters shown as active in the header: a saved search counts as one, else each tag and the No links chip. */
+export const activeFilterCount = (saved: SavedSearch[], f: Filters): number =>
+  f.tags.length + (f.noLinks ? 1 : 0) === 0 ? 0 : saved.some((s) => sameFilters(s, f)) ? 1 : f.tags.length + (f.noLinks ? 1 : 0);
+
 /** Trimmed name, or null when empty or over 60 characters. */
 export function cleanName(raw: string): string | null {
   const n = raw.trim();

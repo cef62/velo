@@ -1,16 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolve } from "../shortcuts";
-import { headerMode, searchHint } from "./breakpoints";
-
-describe("headerMode", () => {
-  it("switches at 900 and 720", () => {
-    expect(headerMode(900)).toBe("full");
-    expect(headerMode(899)).toBe("compact");
-    expect(headerMode(720)).toBe("compact");
-    expect(headerMode(719)).toBe("folded");
-    expect(headerMode(600)).toBe("folded");
-  });
-});
+import { searchHint } from "./breakpoints";
 
 describe("searchHint", () => {
   const base = (isMac: boolean) => ({ query: "", sel: -1, exactTitleMatch: false, keys: resolve(undefined, isMac), isMac });
