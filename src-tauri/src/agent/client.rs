@@ -63,7 +63,8 @@ pub fn forward(data_dir: &Path, name: &str, args: &Value) -> Option<Result<Value
 }
 
 fn attempt(port: u16, token: &Value, name: &str, args: &Value) -> Sent {
-    let mut conn = match TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), Duration::from_millis(500)) {
+    // 3 s: Windows retries a refused loopback connect for about 2 s before reporting it; a live app accepts at once
+    let mut conn = match TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), Duration::from_secs(3)) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => return Sent::Refused,
         Err(_) => return Sent::No,
