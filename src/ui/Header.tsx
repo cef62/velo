@@ -1,4 +1,4 @@
-import { Hash, Settings } from "lucide-react";
+import { Command, Hash, Settings } from "lucide-react";
 import { type ReactElement, type ReactNode } from "react";
 import { css } from "styled-system/css";
 import type { Controller } from "../app/controller";
@@ -6,13 +6,11 @@ import type { AppState, Store } from "../app/store";
 import { IconButton, Tooltip } from "@/components/ui";
 import { activeFilterCount } from "../saved";
 import { formatBinding, NONE, type Action } from "../shortcuts";
-import { OverflowMenu } from "./OverflowMenu";
 import { SearchField } from "./SearchField";
 import { UpdatePill } from "./UpdatePill";
 import { useStore } from "./useStore";
 
-// v2 header (design/park-ui/v2/README.md §2): search, Filters, Settings, in one row at every width; it never folds.
-// The ⋯ menu holds what nothing else shows yet (Connections, Lock all) until the command palette takes them.
+// v2 header (design/park-ui/v2/README.md §2): search, Filters, the command palette and Settings, in one row at every width; it never folds.
 const bar = css({
   display: "flex",
   alignItems: "center",
@@ -65,7 +63,7 @@ export function Header({ controller, store }: { controller: Controller; store: S
         controls: "filters-panel",
         label: filters > 0 ? `Filters, ${filters} active` : "Filters",
       })}
-      <OverflowMenu controller={controller} store={store} />
+      {icon("Command palette", "command_palette", <Command />, () => controller.openPalette())}
       {icon("Settings", "settings", <Settings />, () => void controller.openSettings())}
     </header>
   );

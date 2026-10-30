@@ -134,3 +134,11 @@ test("timeline, export and save_search actions", () => {
   expect(DEFAULTS.save_search).toBe(NONE);
   expect([LABELS.toggle_timeline, LABELS.export, LABELS.save_search]).toEqual(["Timeline", "Export…", "Save search…"]);
 });
+
+test("command_palette defaults to Mod+KeyP and does not clash", () => {
+  expect(DEFAULTS.command_palette).toBe("Mod+KeyP");
+  expect(LABELS.command_palette).toBe("Command palette");
+  const all = Object.values(DEFAULTS).filter((b) => b !== "none");
+  expect(new Set(all).size).toBe(all.length);
+  expect(validateBinding(DEFAULTS, "command_palette", DEFAULTS.command_palette)).toEqual({ ok: true });
+});

@@ -90,6 +90,8 @@ export interface AppState {
   saveSearch: { name: string; err: string; confirmReplace: boolean; renaming?: string } | null; // the Save search dialog; renaming = the saved search being renamed; confirmReplace = asking "Replace?" for name
   exporting: { counts: ExportCounts | null; format: "md" | "pdf"; tasksOnly: boolean; err: string; pending: boolean } | null; // the Export dialog; counts null = preview loading; pending = save in flight
   printHtml: string | null; // the rendered export in the print-only container while the print dialog is up
+  palette: boolean; // the command palette (⌘P) is open
+  recentActions: Action[]; // the palette's Recent group, this session only
 }
 
 export const initialState = (isMac: boolean): AppState => ({
@@ -147,4 +149,6 @@ export const initialState = (isMac: boolean): AppState => ({
   saveSearch: null,
   exporting: null,
   printHtml: null,
+  palette: false,
+  recentActions: [],
 });

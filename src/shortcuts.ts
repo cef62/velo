@@ -2,7 +2,7 @@
 // Mod = ⌘ on macOS, Ctrl elsewhere. Ctrl = physical Control (macOS only).
 export type Action =
   | "focus_search" | "toggle_preview" | "rename" | "toggle_lock"
-  | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "delete_note" | "toggle_tags" | "toggle_rich" | "toggle_layout" | "toggle_window" | "toggle_info" | "toggle_front_matter" | "toggle_tasks" | "toggle_connections" | "capture" | "daily_note" | "extract_note" | "merge_note" | "toggle_timeline" | "export" | "save_search" | "context_menu";
+  | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "delete_note" | "toggle_tags" | "toggle_rich" | "toggle_layout" | "toggle_window" | "toggle_info" | "toggle_front_matter" | "toggle_tasks" | "toggle_connections" | "capture" | "daily_note" | "extract_note" | "merge_note" | "toggle_timeline" | "export" | "save_search" | "context_menu" | "command_palette";
 
 /** Handled by the OS-level shortcut in the backend, never by the in-app key handler. */
 export const GLOBAL_ACTIONS = ["toggle_window", "capture"] as const;
@@ -37,6 +37,7 @@ export const DEFAULTS: Record<Action, string> = {
   export: NONE,
   save_search: NONE,
   context_menu: "Shift+F10",
+  command_palette: "Mod+KeyP", // free in DEFAULTS and not reserved; Ctrl+P is "print" by convention, which Export covers
 };
 
 export const LABELS: Record<Action, string> = {
@@ -66,6 +67,7 @@ export const LABELS: Record<Action, string> = {
   export: "Export…",
   save_search: "Save search…",
   context_menu: "Open context menu",
+  command_palette: "Command palette",
 };
 
 type Ev = Pick<KeyboardEvent, "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">;

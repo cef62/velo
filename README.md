@@ -31,6 +31,7 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | ⌘⌫ | Ctrl+Backspace | Move the current note to the Trash, after confirming (from the list or an empty search box; in the editor and in a non-empty search box ⌘⌫ keeps its editing meaning) |
 | ⌘⇧S | Ctrl+Shift+S | Toggle sort (last modified / title; also the Sort menu in the Notes bar) |
 | ⌘J / ⌘K | Ctrl+J / Ctrl+K | Back / forward through visited notes (also from the editor; ↑/↓ in search move in the list) |
+| ⌘P | Ctrl+P | Command palette: every action by name, with its shortcut |
 | ⌘, | Ctrl+, | Settings |
 | ⌘⇧T | Ctrl+Shift+T | Show / hide the Filters panel (saved searches and tags) |
 | ⌘⇧R | Ctrl+Shift+R | Rich / plain editing |
@@ -70,7 +71,7 @@ The Export button in the Timeline bar (or the Export action, which has no defaul
 
 ## Connections
 
-Press ⌘⇧C (Ctrl+Shift+C, remappable in Settings) or choose Connections under Left pane in the header's ⋯ menu to see the links, backlinks, shared tags and unlinked mentions around the open note. Choose the layout in Settings: Ring, Created or Updated (saved as `connections_sort`).
+Press ⌘⇧C (Ctrl+Shift+C, remappable in Settings) or run Connections from the command palette (⌘P) to see the links, backlinks, shared tags and unlinked mentions around the open note. Choose the layout in Settings: Ring, Created or Updated (saved as `connections_sort`).
 
 - Click a note to open it; the graph stays. Double-click it, or press ⇧↩, to re-centre the graph on it. ↩ opens the focused node, and Esc returns to Notes.
 - Click a tag node to filter Notes by that tag.
