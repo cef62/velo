@@ -1014,7 +1014,7 @@ export class Controller {
       this.history.loaded(r.path, "explicit");
       renamed = true;
     } catch (e) {
-      this.setErr(e === "already-exists" ? "A note with that title exists" : errText(e));
+      this.setErr(e === "already-exists" ? "A note with that title exists" : e === "invalid-title" ? INVALID_TITLE : errText(e));
     } finally {
       this.busy = false;
     }
