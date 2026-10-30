@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>v2 touched dialogs</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+<link rel="stylesheet" href="/_blob/329926fd862e3266351f7732d64d519e">
+<link rel="stylesheet" href="/_blob/8b1593304e554f9b2505124be1ddcde5">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+.bar{height:10px;border-radius:5px;background:var(--g4)}
+.scope{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:8px;background:var(--g2);border:1px solid var(--g5);font-size:13px}
+.scope .chips{display:flex;flex-wrap:wrap;gap:6px}
+.scope .chip{height:22px;padding:0 8px;cursor:default}
+.cbrow{display:flex;align-items:center;gap:8px;font-size:13px}
+.cbrow .bx{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--g8);box-sizing:border-box;flex:none;display:inline-flex;align-items:center;justify-content:center}
+.cbrow .bx.on{background:var(--a9);border-color:var(--a9);color:#fff}
+.tabs{display:flex;gap:4px;padding:0 14px;border-bottom:1px solid var(--g4);flex:none}
+.tab{display:inline-flex;align-items:center;height:38px;padding:0 8px;margin-bottom:-1px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--g11);font:500 13px/1 Inter,system-ui,sans-serif}
+.tab[aria-selected="true"]{color:var(--g12);border-bottom-color:var(--a9)}
+</style>
+</helmet>
+<div class="board" style="width: 2160px; height: 1460px; padding: 46px 60px; display: flex; flex-direction: column; gap: 18px">
+  <div style="display: flex; flex-direction: column; gap: 6px">
+    <h2 class="h-sec">Touched dialogs</h2>
+    <p class="anno" style="font-size: 13px; max-width: 1700px"><b>Export</b> states its scope up front (it is whatever the Timeline shows) instead of leaving you to remember it. <b>Save search</b> shows what will be saved. <b>Settings › General</b> loses “Show labels on header buttons” and Sort (both moot now). Passphrase create, Extract and Merge are unchanged; unlock moved inline (see the title bar board).</p>
+  </div>
+  <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <p class="lbl">{{t.label}}</p>
+      <div style="display: flex; gap: 60px">
+
+        <div class="{{t.cls}} scene" style="width: 640px; height: 600px">
+          <div class="hdr"><div class="tl" aria-hidden="true"><i></i><i></i><i></i></div><div class="bar" style="width: 280px; height: 32px; border-radius: 6px"></div></div>
+          <div style="padding: 16px; display: flex; flex-direction: column; gap: 14px"><div class="bar" style="width: 70%"></div><div class="bar" style="width: 52%"></div></div>
+          <div class="ovl">
+            <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="ex-{{t.cls}}" style="width: 460px">
+              <div style="display: flex; align-items: center; padding: 16px 20px 6px"><h2 id="ex-{{t.cls}}">Export</h2><button class="ib" aria-label="Close (Esc)" style="margin-left: auto"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+              <div style="padding: 6px 20px 18px; display: flex; flex-direction: column; gap: 14px">
+                <div class="scope" role="group" aria-label="What will be exported">
+                  <span style="font-weight: 600">37 notes from the Timeline</span>
+                  <span style="color: var(--g11); font-size: 12px">Updated in the last 30 days · matching “roadmap”</span>
+                  <div class="chips"><span class="chip">#work</span></div>
+                </div>
+                <div class="frow" style="grid-template-columns: 90px minmax(0, 1fr)"><span class="flab">Format</span><div class="seg" role="radiogroup" aria-label="Format" style="width: fit-content"><button role="radio" aria-checked="true">Markdown</button><button role="radio" aria-checked="false" tabindex="-1">PDF</button></div></div>
+                <div class="frow" style="grid-template-columns: 90px minmax(0, 1fr)"><span class="flab">Content</span><div class="seg" role="radiogroup" aria-label="Content" style="width: fit-content"><button role="radio" aria-checked="true">Full notes</button><button role="radio" aria-checked="false" tabindex="-1">Tasks only</button></div></div>
+                <p class="help">12 open tasks · 4 done · 2 locked notes are skipped</p>
+              </div>
+              <div class="dfoot"><button class="btn outline">Cancel</button><button class="btn solid">Export…</button></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="{{t.cls}} scene" style="width: 640px; height: 600px">
+          <div class="hdr"><div class="tl" aria-hidden="true"><i></i><i></i><i></i></div><div class="bar" style="width: 280px; height: 32px; border-radius: 6px"></div></div>
+          <div style="padding: 16px; display: flex; flex-direction: column; gap: 14px"><div class="bar" style="width: 70%"></div><div class="bar" style="width: 52%"></div></div>
+          <div class="ovl">
+            <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="ss-{{t.cls}}" style="width: 420px">
+              <div style="display: flex; align-items: center; padding: 16px 20px 6px"><h2 id="ss-{{t.cls}}">Save search</h2><button class="ib" aria-label="Close (Esc)" style="margin-left: auto"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+              <div style="padding: 6px 20px 18px; display: flex; flex-direction: column; gap: 14px">
+                <div class="fld"><label for="sn-{{t.cls}}">Name</label><span class="inp f"><input id="sn-{{t.cls}}" value="velo · open work"></span></div>
+                <div class="scope" role="group" aria-label="Saved filters">
+                  <span style="color: var(--g11); font-size: 12px">Saves</span>
+                  <div class="chips"><span class="chip">#velo</span><span class="chip">#work</span><span class="chip">“open”</span></div>
+                </div>
+                <p class="help">Appears in Filters (⌘⇧T) and in the palette. Rename or delete it from its chip’s context menu.</p>
+              </div>
+              <div class="dfoot"><button class="btn outline">Cancel</button><button class="btn solid">Save</button></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="{{t.cls}} scene" style="width: 640px; height: 600px">
+          <div class="hdr"><div class="tl" aria-hidden="true"><i></i><i></i><i></i></div><div class="bar" style="width: 280px; height: 32px; border-radius: 6px"></div></div>
+          <div class="ovl">
+            <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="sg-{{t.cls}}" style="width: 580px">
+              <div style="display: flex; align-items: center; padding: 16px 20px 8px"><h2 id="sg-{{t.cls}}">Settings</h2><button class="ib" aria-label="Close (Esc)" style="margin-left: auto"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+              <div class="tabs" role="tablist" aria-label="Settings sections"><button class="tab" role="tab" aria-selected="true">General</button><button class="tab" role="tab" aria-selected="false" tabindex="-1">Keyboard shortcuts</button></div>
+              <div style="padding: 16px 20px; display: flex; flex-direction: column; gap: 8px">
+                <div class="frow"><span class="flab">Notes folder</span><div style="display: flex; gap: 8px"><span class="inp ro" style="flex: 1"><input aria-label="Notes folder" value="~/Notes" readonly></span><button class="btn outline">Change…</button></div></div>
+                <div class="frow"><span class="flab">Layout</span><div class="seg" role="radiogroup" aria-label="Layout" style="width: fit-content"><button role="radio" aria-checked="false" tabindex="-1">Vertical</button><button role="radio" aria-checked="true">Horizontal</button></div></div>
+                <div class="frow"><span class="flab">Theme</span><div class="seg" role="radiogroup" aria-label="Theme" style="width: fit-content"><button role="radio" aria-checked="true">System</button><button role="radio" aria-checked="false" tabindex="-1">Light</button><button role="radio" aria-checked="false" tabindex="-1">Dark</button></div></div>
+                <div class="frow"><span class="flab">Font size</span><div style="display: flex; align-items: center; gap: 10px"><span class="inp" style="width: 72px"><input type="number" aria-label="Font size" value="14" style="text-align: right"></span><span class="help">px · 10–32</span></div></div>
+                <div class="frow"><span class="flab">Quick capture</span><div class="seg" role="radiogroup" aria-label="Quick capture goes to" style="width: fit-content"><button role="radio" aria-checked="true">Inbox note</button><button role="radio" aria-checked="false" tabindex="-1">Daily note</button></div></div>
+                <div class="frow" style="align-items: start"><span class="flab" style="padding-top: 2px">Notes &amp; app</span><div style="display: flex; flex-direction: column; gap: 10px">
+                  <span class="cbrow"><span class="bx on" aria-hidden="true"><svg class="i s" viewBox="0 0 24 24" style="width: 12px; height: 12px"><path d="M20 6 9 17l-5-5"/></svg></span>Add created / modified dates to notes</span>
+                  <span class="cbrow"><span class="bx on" aria-hidden="true"><svg class="i s" viewBox="0 0 24 24" style="width: 12px; height: 12px"><path d="M20 6 9 17l-5-5"/></svg></span>Check for updates daily</span>
+                  <span class="cbrow"><span class="bx" aria-hidden="true"></span>Agent access (MCP)</span>
+                </div></div>
+              </div>
+              <div class="dfoot"><button class="btn outline">Cancel</button><button class="btn solid">Save</button></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2160,"height":1460}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { themes: [{ label: 'Light', cls: 'vl' }, { label: 'Dark', cls: 'vd' }] };
+  }
+}
+</script>
+</body>
+</html>

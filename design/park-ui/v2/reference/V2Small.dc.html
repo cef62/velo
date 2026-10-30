@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>v2 small window</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+<link rel="stylesheet" href="/_blob/329926fd862e3266351f7732d64d519e">
+<link rel="stylesheet" href="/_blob/8b1593304e554f9b2505124be1ddcde5">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+.sheetp{position:absolute;top:0;right:0;bottom:0;width:280px;box-shadow:var(--shadow);z-index:4}
+.sech{display:flex;align-items:center;gap:6px;padding:10px 10px 4px;font:600 11px/1 Inter,system-ui,sans-serif;text-transform:uppercase;letter-spacing:.05em;color:var(--g11)}
+.sech .n{font-weight:500;letter-spacing:0}
+</style>
+</helmet>
+<div class="board" style="width: 1400px; height: 1060px; padding: 48px 60px; display: flex; flex-direction: column; gap: 30px">
+  <div style="display: flex; flex-direction: column; gap: 12px">
+    <p class="lbl">600 × 400 · vertical — nothing folds in the header; the list bar keeps its labels</p>
+    <div style="display: flex; gap: 80px">
+      <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+        <div class="{{t.cls}} win" style="width: 600px; height: 400px">
+          <header class="hdr hdr2" style="padding-left: 82px; position: relative">
+            <div class="tl" aria-hidden="true" style="position: absolute; left: 14px"><i></i><i></i><i></i></div>
+            <label class="inp srch2"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input aria-label="Search or create" placeholder="Search or create…"></label>
+            <button class="ib" aria-label="Filters (⌘⇧T)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></svg></button>
+            <button class="ib" aria-label="Command palette (⌘P)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></svg></button>
+            <button class="ib" aria-label="Settings (⌘,)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+          </header>
+          <div class="lpane" style="height: 132px; flex: none">
+            <div class="pbar">
+              <div class="ptabs" role="tablist" aria-label="Left pane">
+                <button class="ptab" role="tab" aria-selected="false" tabindex="-1"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M16 13H8M16 17H8"/></svg>Notes</button>
+                <button class="ptab" role="tab" aria-selected="true" aria-label="Tasks, 3 due"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 17 2 2 4-4M3 7l2 2 4-4M13 6h8M13 12h8M13 18h8"/></svg>Tasks<span class="cnt">3</span></button>
+                <button class="ptab" role="tab" aria-selected="false" tabindex="-1"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>Timeline</button>
+              </div>
+              <span class="sp"></span>
+              <button class="mbtn" aria-pressed="false">Show done</button>
+            </div>
+            <div class="list" role="list" aria-label="Tasks" style="gap: 0">
+              <div class="sec" aria-hidden="true">Overdue</div>
+              <div class="trow sel" role="listitem" tabindex="0"><span class="cbx" aria-hidden="true"></span><span class="tx">Renew broadband contract</span><span class="nt">Broadband contract</span><span class="due late">Oct 28</span></div>
+              <div class="trow" role="listitem" tabindex="-1"><span class="cbx" aria-hidden="true"></span><span class="tx">Conflict banner copy</span><span class="nt">Velo roadmap</span><span class="due late">Oct 29</span></div>
+            </div>
+          </div>
+          <div class="split-h" role="separator" aria-label="Resize list" tabindex="0"></div>
+          <div class="tbar tbar2" style="padding-left: 16px">
+            <h2 class="ttl">Broadband contract</h2>
+            <div class="seg sm" role="radiogroup" aria-label="View"><button role="radio" aria-checked="true">Rich</button><button role="radio" aria-checked="false" tabindex="-1">Plain</button><button role="radio" aria-checked="false" tabindex="-1">Preview</button></div>
+            <button class="ib" aria-label="Lock note (⌘⇧E)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg></button>
+            <button class="ib" aria-pressed="false" aria-label="Side panel (⌘I)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg></button>
+            <button class="ib" aria-haspopup="menu" aria-label="Note actions"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+          </div>
+          <div class="edw"><div class="col md" style="padding: 16px 20px"><ul><li class="task"><input type="checkbox" class="cb" aria-label="Renew broadband contract"><span>Renew broadband contract @due(2026-10-28)</span></li></ul></div></div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 12px">
+    <p class="lbl">600 × 400 · horizontal — list 200, note 391; the side panel opens over the note</p>
+    <div style="display: flex; gap: 80px">
+      <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+        <div class="{{t.cls}} win" style="width: 600px; height: 400px">
+          <header class="hdr hdr2" style="padding-left: 82px; position: relative">
+            <div class="tl" aria-hidden="true" style="position: absolute; left: 14px"><i></i><i></i><i></i></div>
+            <label class="inp srch2"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input aria-label="Search or create" placeholder="Search or create…"></label>
+            <button class="ib" aria-label="Filters (⌘⇧T)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></svg></button>
+            <button class="ib" aria-label="Command palette (⌘P)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></svg></button>
+            <button class="ib" aria-label="Settings (⌘,)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+          </header>
+          <div style="flex: 1; display: flex; min-height: 0">
+            <div class="lpane" style="width: 200px; flex: none">
+              <div class="pbar">
+                <div class="ptabs" role="tablist" aria-label="Left pane">
+                  <button class="ptab" role="tab" aria-selected="true"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M16 13H8M16 17H8"/></svg>Notes</button>
+                  <button class="ptab" role="tab" aria-selected="false" tabindex="-1" aria-label="Tasks, 3 due" style="padding: 0 6px"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 17 2 2 4-4M3 7l2 2 4-4M13 6h8M13 12h8M13 18h8"/></svg><span class="cnt">3</span></button>
+                  <button class="ptab" role="tab" aria-selected="false" tabindex="-1" aria-label="Timeline" style="padding: 0 6px"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg></button>
+                </div>
+                <span class="sp"></span>
+                <button class="mbtn" aria-label="Sort: Recent (⌘⇧S)" style="padding: 0 4px"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></button>
+              </div>
+              <div class="list" role="listbox" aria-label="Notes">
+                <div class="row row2 sel2" role="option" aria-selected="true"><div class="l1"><span class="tt">Velo roadmap</span><span class="dt">now</span></div><span class="sn">Ship the 1.0 refresh…</span></div>
+                <div class="row row2" role="option" aria-selected="false"><div class="l1"><span class="tt">Reading list</span><span class="dt">3h</span></div><span class="sn">Piranesi, The Overstory</span></div>
+                <div class="row row2" role="option" aria-selected="false"><div class="l1"><span class="tt">Design sync</span><span class="dt">2d</span></div><span class="sn">Header collapse rules</span></div>
+              </div>
+            </div>
+            <div class="split-v" role="separator" aria-label="Resize list" tabindex="0"></div>
+            <div style="flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative">
+              <div class="tbar tbar2" style="padding-left: 16px">
+                <h2 class="ttl">Velo roadmap</h2>
+                <button class="mbtn" aria-label="View: Rich" aria-haspopup="menu">Rich<svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+                <button class="ib" aria-pressed="true" aria-label="Side panel (⌘I)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg></button>
+                <button class="ib" aria-haspopup="menu" aria-label="Note actions"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+              </div>
+              <div class="edw"><div class="col md" style="padding: 16px 20px"><p>Ship the <strong>1.0</strong> refresh before the winter break.</p></div></div>
+              <aside class="side sheetp" aria-label="Side panel" style="top: 48px">
+                <div class="stabs" role="tablist" aria-label="Side panel"><button class="stab" role="tab" aria-selected="true">Related</button><button class="stab" role="tab" aria-selected="false" tabindex="-1">Info</button><button class="ib xs" aria-label="Close panel (Esc)" style="margin-left: auto"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+                <div class="sbody">
+                  <div class="sech">Linked from <span class="n">4</span></div>
+                  <div class="rrow"><div class="l1"><span class="tt">Design sync — Oct 24</span><span class="dt">2d</span></div><span class="sn">…revisit the <b>velo roadmap</b> order</span></div>
+                  <div class="rrow"><div class="l1"><span class="tt">Q4 planning</span><span class="dt">1w</span></div><span class="sn">Ties into the <b>velo roadmap</b></span></div>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div class="vl sheet" style="padding: 14px 20px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; font-size: 12px; line-height: 1.5">
+    <p style="margin: 0"><b>Header</b> — never folds. Below 720 px the ⌘L hint hides; search keeps ≥ 180 px.</p>
+    <p style="margin: 0"><b>List bar</b> — pane ≥ 380 px: every tab labelled. Narrower: only the active tab has a label; Sort goes icon-only below 240 px.</p>
+    <p style="margin: 0"><b>Title bar</b> — note &lt; 560 px: the view switch becomes a “Rich ▾” menu button. &lt; 420 px: Lock moves into ⋯.</p>
+    <p style="margin: 0"><b>Side panel</b> — if docking it would leave the note under 480 px, it opens over the note instead. Esc closes it. <span class="yours">my call</span></p>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1400,"height":1060}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { themes: [{ label: 'Light', cls: 'vl' }, { label: 'Dark', cls: 'vd' }] };
+  }
+}
+</script>
+</body>
+</html>

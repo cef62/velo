@@ -1,0 +1,62 @@
+/* velo v2 "clear" — grayscale theme layered on velo-park.css + velo-v2.css (load last).
+   Gray: Radix gray (Park UI grayColor "neutral"). The old indigo accent becomes graphite.
+   Color is kept for meaning only: red = errors / overdue / missing link, green = positive (primary action, done, update). */
+
+.vl{
+--g1:#fcfcfc;--g2:#f9f9f9;--g3:#f0f0f0;--g4:#e8e8e8;--g5:#e0e0e0;--g6:#d9d9d9;--g7:#cecece;--g8:#bbbbbb;--g9:#8d8d8d;--g10:#838383;--g11:#646464;--g12:#202020;
+--a1:#fcfcfc;--a2:#f9f9f9;--a3:#f0f0f0;--a4:#dcdcdc;--a5:#e0e0e0;--a6:#cecece;--a7:#bbbbbb;--a8:#8d8d8d;--a9:#3b3b3b;--a10:#2a2a2a;--a11:#202020;--a12:#111111;--ona:#ffffff;
+--y2:#f9f9f9;--y3:#f0f0f0;--y6:#d9d9d9;--y11:#646464;--y12:#202020;
+--p3:#e9f6e9;--p6:#b2ddb5;--p9:#218358;--p10:#1d754f;--p11:#18794e;--onp:#ffffff;
+--bg:#ffffff;--chrome:#f7f7f7;--panel:#ffffff;--segon:#ffffff;--mark:#646464;
+--sel:#646464;--sel-fg:#ffffff;--sel-mu:#e8e8e8;--sel2:#e8e8e8;
+--hair:rgba(0,0,0,.09);--hl:rgba(255,255,255,.85);
+--shadow:0 0 0 1px rgba(0,0,0,.06),0 12px 32px rgba(0,0,0,.14);--overlay:rgba(20,20,20,.32);
+color:var(--g12)}
+
+.vd{
+--g1:#111111;--g2:#191919;--g3:#222222;--g4:#2a2a2a;--g5:#313131;--g6:#3a3a3a;--g7:#484848;--g8:#606060;--g9:#6e6e6e;--g10:#7b7b7b;--g11:#b4b4b4;--g12:#eeeeee;
+--a1:#111111;--a2:#191919;--a3:#222222;--a4:#3a3a3a;--a5:#313131;--a6:#484848;--a7:#606060;--a8:#7b7b7b;--a9:#d4d4d4;--a10:#eeeeee;--a11:#eeeeee;--a12:#ffffff;--ona:#111111;
+--y2:#191919;--y3:#222222;--y6:#3a3a3a;--y11:#b4b4b4;--y12:#eeeeee;
+--p3:#132d21;--p6:#20573e;--p9:#3dd68c;--p10:#4fe39b;--p11:#3dd68c;--onp:#0b2a1c;
+--bg:#111111;--chrome:#1c1c1c;--panel:#1c1c1c;--segon:#3a3a3a;--mark:#959595;
+--sel:#5a5a5a;--sel-fg:#ffffff;--sel-mu:#d9d9d9;--sel2:#313131;
+--hair:rgba(255,255,255,.08);--hl:rgba(255,255,255,.07);
+--shadow:0 0 0 1px rgba(255,255,255,.07),0 16px 40px rgba(0,0,0,.6);--overlay:rgba(0,0,0,.6);
+color:var(--g12)}
+
+/* clear surfaces: hairlines + a top highlight instead of tinted fills */
+.vl .win,.vd .win{border-color:var(--hair)}
+.vl .hdr,.vd .hdr,.vl .side,.vd .side,.vl .fpanel,.vd .fpanel{box-shadow:inset 0 1px 0 var(--hl)}
+.seg{background:var(--g3);border-color:var(--hair)}
+.seg button[aria-checked="true"]{box-shadow:0 0 0 1px var(--hair),0 1px 2px rgba(0,0,0,.12),inset 0 1px 0 var(--hl)}
+.ib[aria-pressed="true"],.ptab[aria-selected="true"],.mbtn[aria-pressed="true"],.mbtn[aria-expanded="true"]{background:var(--a4);color:var(--g12);box-shadow:inset 0 0 0 1px var(--hair),inset 0 1px 0 var(--hl)}
+.inp{border-color:var(--g7)}
+.kbd{background:var(--g2);border-color:var(--hair);box-shadow:inset 0 -1px 0 var(--g6)}
+
+/* graphite selected states: text color follows the fill */
+.chip[aria-pressed="true"],.chip[aria-pressed="true"] .n{color:var(--ona)}
+.pv-on,.seg button[aria-checked="true"].pv{background:var(--a9);color:var(--ona)}
+.pv-on i{background:var(--ona)}
+.ib .dot{color:var(--ona)}
+.schip{border:1px solid var(--hair);background:var(--g3);color:var(--g12)}
+.schip.saved{background:var(--g4)}
+.schip.more{background:transparent;border-style:dashed;border-color:var(--g8);color:var(--g11);padding:0 8px;cursor:pointer}
+.tg{box-shadow:inset 0 0 0 1px var(--hair)}
+mark.q{background:var(--g6);font-weight:600}
+.tagh{color:var(--g12)!important}
+
+/* links read as links by their underline, not by color */
+.md a,.lnk{color:var(--g12);text-decoration-color:var(--g8)}
+.wl{color:var(--g12);border-bottom-color:var(--g8)}
+
+/* positive accent: primary action, done, update, Link it */
+.btn.solid{background:var(--p9);color:var(--onp)}
+.btn.solid:hover,.btn.solid.h{background:var(--p10)}
+.btn.subtle{background:var(--p3);color:var(--p11)}
+.trow .cbx.on{background:var(--p9);border-color:var(--p9);color:var(--onp)}
+.md .cb{accent-color:var(--p9)}
+.uppill{background:var(--p3);border-color:var(--p6);color:var(--p11)}
+
+/* warning surfaces become neutral: only errors are red */
+.banner{background:var(--g3);border-bottom-color:var(--g6);color:var(--g12)}
+.banner a{color:var(--g12)}

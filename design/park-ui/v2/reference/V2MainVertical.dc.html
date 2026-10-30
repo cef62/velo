@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>v2 main window vertical</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+<link rel="stylesheet" href="/_blob/329926fd862e3266351f7732d64d519e">
+<link rel="stylesheet" href="/_blob/8b1593304e554f9b2505124be1ddcde5">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+.tagbar{display:flex;flex-wrap:wrap;gap:6px;padding:6px 20px;border-bottom:1px solid var(--g4);flex:none}
+.tagbar .chip{height:22px;padding:0 8px}
+mark.q:empty{display:none}
+</style>
+</helmet>
+<div class="board" style="width: 2200px; height: 860px; padding: 56px 60px; display: flex; gap: 80px">
+  <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+    <div style="display: flex; flex-direction: column; gap: 16px">
+      <div style="display: flex; justify-content: space-between; align-items: baseline"><p class="lbl">{{t.label}} · 1000 × 700 · vertical · writing (focus in editor)</p><p class="cap">Wide list → every tab shows its label</p></div>
+      <div class="{{t.cls}} win" style="width: 1000px; height: 700px">
+        <header class="hdr hdr2" style="padding-left: 96px; position: relative">
+          <div class="tl" aria-hidden="true" style="position: absolute; left: 14px"><i></i><i></i><i></i></div>
+          <label class="inp srch2"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input aria-label="Search or create" placeholder="Search or create…"><span class="kbd">⌘L</span></label>
+          <span class="grow"></span>
+          <button class="ib" aria-label="Filters (⌘⇧T)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></svg></button>
+          <button class="ib" aria-label="Command palette (⌘P)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></svg></button>
+          <button class="ib" aria-label="Settings (⌘,)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+        </header>
+        <div class="lpane" style="height: 262px; flex: none">
+          <div class="pbar">
+            <div class="ptabs" role="tablist" aria-label="Left pane">
+              <button class="ptab" role="tab" aria-selected="true"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M16 13H8M16 17H8"/></svg>Notes</button>
+              <button class="ptab" role="tab" aria-selected="false" tabindex="-1" aria-label="Tasks, 3 due"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 17 2 2 4-4M3 7l2 2 4-4M13 6h8M13 12h8M13 18h8"/></svg>Tasks<span class="cnt">3</span></button>
+              <button class="ptab" role="tab" aria-selected="false" tabindex="-1"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>Timeline</button>
+            </div>
+            <span class="sp"></span>
+            <span class="meta">1,204 notes</span>
+            <button class="mbtn" aria-label="Sort: Recent (⌘⇧S)" aria-haspopup="menu"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>Recent<svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+          </div>
+          <div class="list" role="listbox" aria-label="Notes">
+            <sc-for list="{{rows}}" as="r" hint-placeholder-count="7">
+              <div class="row {{r.cls}}" role="option" aria-selected="{{r.on}}">
+                <sc-if value="{{r.locked}}" hint-placeholder-val="{{false}}"><span class="lk"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span></sc-if>
+                <span class="tt">{{r.t}}</span><span class="sn">{{r.s}}</span><span class="dt">{{r.d}}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div class="split-h" role="separator" aria-orientation="horizontal" aria-label="Resize list" tabindex="0"></div>
+        <div class="tbar tbar2">
+          <h2 class="ttl">Velo roadmap</h2>
+          <div class="seg sm" role="radiogroup" aria-label="View"><button role="radio" aria-checked="true">Rich</button><button role="radio" aria-checked="false" tabindex="-1">Plain</button><button role="radio" aria-checked="false" tabindex="-1">Preview</button></div>
+          <button class="ib" aria-label="Lock note (⌘⇧E)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg></button>
+          <button class="ib" aria-pressed="false" aria-label="Side panel (⌘I)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg></button>
+          <button class="ib" aria-haspopup="menu" aria-label="Note actions"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+        </div>
+        <div class="tagbar" role="group" aria-label="Note tags"><button class="chip" aria-pressed="false">#work</button><button class="chip" aria-pressed="false">#idea</button></div>
+        <div class="edw">
+          <div class="col md">
+            <h2 style="margin-top: 0">This week</h2>
+            <ul>
+              <li>Declutter the header — four controls, nothing cut off</li>
+              <li class="task"><input type="checkbox" class="cb" checked aria-label="Saved searches"><span class="done">Saved searches</span></li>
+              <li class="task"><input type="checkbox" class="cb" aria-label="Related panel"><span>Related panel<span class="caret"></span></span></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2200,"height":860}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const r = (t, s, d, cls, locked) => ({ t, s, d, cls: cls || '', locked: !!locked, on: cls === 'sel2' ? 'true' : 'false' });
+    return {
+      themes: [{ label: 'Light', cls: 'vl' }, { label: 'Dark', cls: 'vd' }],
+      rows: [
+        r('Velo roadmap', 'Ship the 1.0 refresh before the winter break. Speed first, then polish.', 'now', 'sel2'),
+        r('Reading list', 'Piranesi, The Overstory, Hyperion, Tomorrow and Tomorrow and Tomorrow', '3h'),
+        r('2026-10-30', 'Daily note — standup, call with the accountant moved to Tuesday', '4h'),
+        r('Ragù alla bolognese', 'Soffritto low and slow, 20 min. Whole milk before the tomatoes.', '5h'),
+        r('Design sync — Oct 24', 'Header collapse rules, divider affordance, focus ring audit', '2d'),
+        r('Journal 2026', '', '5d', '', true),
+        r('Panda CSS notes', 'Recipes vs. slot recipes; tokens resolve at build time', '2w')
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

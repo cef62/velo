@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>v2 title bar and lock</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+<link rel="stylesheet" href="/_blob/329926fd862e3266351f7732d64d519e">
+<link rel="stylesheet" href="/_blob/8b1593304e554f9b2505124be1ddcde5">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+.frame{border:1px solid var(--g5);border-radius:8px;overflow:hidden;background:var(--bg);position:relative}
+.sh{font:600 12px/1 Inter,system-ui,sans-serif;color:var(--g11);margin:0}
+.ib.enc{background:var(--a4);color:var(--a11)}
+.mi .ck{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;border:1.5px solid var(--g8);box-sizing:border-box}
+.mi.danger{color:var(--r11)}
+.mi.danger svg{color:var(--r11)}
+</style>
+</helmet>
+<div class="board" style="width: 1840px; height: 1260px; padding: 50px 60px; display: flex; gap: 80px">
+  <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+    <div class="{{t.cls}} sheet" style="width: 820px; padding: 24px; display: flex; flex-direction: column; gap: 12px; flex: none">
+      <h2 class="h-sec" style="margin-bottom: 4px">{{t.label}}</h2>
+
+      <p class="sh">Default — view switch, lock, side panel, note menu</p>
+      <div class="frame"><div class="tbar tbar2"><h2 class="ttl">Velo roadmap</h2>
+        <div class="seg sm" role="radiogroup" aria-label="View"><button role="radio" aria-checked="true">Rich</button><button role="radio" aria-checked="false" tabindex="-1">Plain</button><button role="radio" aria-checked="false" tabindex="-1">Preview</button></div>
+        <button class="ib" aria-label="Lock note (⌘⇧E)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg></button>
+        <button class="ib" aria-pressed="false" aria-label="Side panel (⌘I)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg></button>
+        <button class="ib" aria-haspopup="menu" aria-label="Note actions"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+      </div></div>
+
+      <p class="sh">Preview on — the selected segment turns solid; no strip, no caret <span class="yours">my call</span></p>
+      <div class="frame"><div class="tbar tbar2"><h2 class="ttl">Velo roadmap</h2>
+        <div class="seg sm" role="radiogroup" aria-label="View"><button role="radio" aria-checked="false" tabindex="-1">Rich</button><button role="radio" aria-checked="false" tabindex="-1">Plain</button><button role="radio" aria-checked="true" class="pv">Preview</button></div>
+        <button class="ib" aria-label="Lock note (⌘⇧E)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg></button>
+        <button class="ib" aria-pressed="false" aria-label="Side panel (⌘I)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg></button>
+        <button class="ib" aria-haspopup="menu" aria-label="Note actions"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+      </div></div>
+
+      <p class="sh">Encrypted note, unlocked for this session — lock shows the state; pressing it removes encryption</p>
+      <div class="frame"><div class="tbar tbar2"><h2 class="ttl">Journal 2026</h2><span class="st">Encrypted</span>
+        <div class="seg sm" role="radiogroup" aria-label="View"><button role="radio" aria-checked="true">Rich</button><button role="radio" aria-checked="false" tabindex="-1">Plain</button><button role="radio" aria-checked="false" tabindex="-1">Preview</button></div>
+        <button class="ib enc" aria-label="Remove encryption (⌘⇧E)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
+        <button class="ib" aria-pressed="false" aria-label="Side panel (⌘I)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg></button>
+        <button class="ib" aria-haspopup="menu" aria-label="Note actions"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+      </div></div>
+
+      <p class="sh">Narrow note (&lt; 560 px) — the view switch becomes a menu button</p>
+      <div class="frame" style="width: 480px"><div class="tbar tbar2" style="padding-left: 16px"><h2 class="ttl">Velo roadmap</h2>
+        <button class="mbtn" aria-haspopup="menu" aria-label="View: Rich">Rich<svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+        <button class="ib" aria-label="Lock note (⌘⇧E)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg></button>
+        <button class="ib" aria-pressed="false" aria-label="Side panel (⌘I)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg></button>
+        <button class="ib" aria-haspopup="menu" aria-label="Note actions"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+      </div></div>
+
+      <p class="sh">Note menu (⋯) — everything that acts on this note</p>
+      <div class="frame" style="height: 300px"><div class="tbar tbar2"><h2 class="ttl">Velo roadmap</h2>
+        <div class="seg sm" role="radiogroup" aria-label="View"><button role="radio" aria-checked="true">Rich</button><button role="radio" aria-checked="false" tabindex="-1">Plain</button><button role="radio" aria-checked="false" tabindex="-1">Preview</button></div>
+        <button class="ib" aria-label="Lock note (⌘⇧E)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg></button>
+        <button class="ib" aria-pressed="false" aria-label="Side panel (⌘I)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg></button>
+        <span style="position: relative; display: inline-flex">
+          <button class="ib" aria-haspopup="menu" aria-expanded="true" aria-pressed="true" aria-label="Note actions"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+          <div class="menu" role="menu" aria-label="Note actions" style="top: 38px; right: 0; min-width: 248px">
+            <button class="mi h" role="menuitem">Rename<span class="kbd">⌘R</span></button>
+            <button class="mi" role="menuitem">Move selection to new note<span class="kbd">⌘⇧N</span></button>
+            <button class="mi" role="menuitem">Merge into…</button>
+            <div class="msep" role="separator"></div>
+            <button class="mi" role="menuitemcheckbox" aria-checked="false"><span class="ck" aria-hidden="true"></span>Show front matter</button>
+            <div class="msep" role="separator"></div>
+            <button class="mi danger" role="menuitem"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>Move to Trash<span class="kbd">⌘⌫</span></button>
+          </div>
+        </span>
+      </div></div>
+
+      <p class="sh">Opening a locked note — unlock right where you were going to read <span class="yours">my call</span></p>
+      <div class="frame" style="height: 300px; display: flex; flex-direction: column">
+        <div class="tbar tbar2"><h2 class="ttl">Journal 2026</h2><span class="st">Locked</span></div>
+        <div style="flex: 1; position: relative"><div class="lockscreen">
+          <form class="lockcard" aria-labelledby="lk-{{t.cls}}">
+            <span style="width: 40px; height: 40px; border-radius: 10px; background: var(--a3); color: var(--a11); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
+            <strong id="lk-{{t.cls}}" style="font-size: 15px; color: var(--g12)">This note is locked</strong>
+            <div style="display: flex; gap: 8px; width: 100%">
+              <span class="inp bad f" style="flex: 1"><input type="password" value="hunter22" aria-label="Passphrase" aria-invalid="true" aria-describedby="lke-{{t.cls}}"></span>
+              <button class="btn solid" type="submit">Unlock</button>
+            </div>
+            <p class="ferr" id="lke-{{t.cls}}" role="alert" style="align-self: flex-start">Wrong passphrase — try again</p>
+          </form>
+        </div></div>
+      </div>
+      <p class="anno" style="color: var(--g11)">Focus lands in the field; ↩ unlocks, Esc returns to the list. Creating a lock (⌘⇧E on a plain note) keeps the confirm dialog. Saving / Indexing / error status stay as in v1, left of the view switch.</p>
+    </div>
+  </sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1840,"height":1260}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { themes: [{ label: 'Light', cls: 'vl' }, { label: 'Dark', cls: 'vd' }] };
+  }
+}
+</script>
+</body>
+</html>
