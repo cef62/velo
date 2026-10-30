@@ -23,6 +23,7 @@ import { menuButton } from "./velo/menu-button";
 import { paneBar } from "./velo/pane-bar";
 import { countBadge, sectionHeader } from "./velo/section-header";
 import { lockScreen } from "./velo/lock-screen";
+import { searchChip } from "./velo/search-chip";
 import { searchMatch } from "./velo/search-match";
 import { tagChip } from "./velo/tag-chip";
 import { titleBar } from "./velo/title-bar";
@@ -36,6 +37,7 @@ export const recipes = {
   menuButton,
   sectionHeader,
   countBadge,
+  searchChip,
   searchMatch,
   button,
   group,

@@ -37,7 +37,7 @@ export function Header({ controller, store }: { controller: Controller; store: S
   const keys = useStore(store, (s) => s.keys);
   const isMac = useStore(store, (s) => s.isMac);
   const tagPanelOpen = useStore(store, (s) => s.tagPanelOpen);
-  const filters = useStore(store, (s) => activeFilterCount(s.savedSearches, { query: s.query, tags: s.selectedTags, noLinks: s.noLinks }));
+  const filters = useStore(store, (s) => activeFilterCount(s.savedSearches, s.appliedSaved, { query: s.query, tags: s.selectedTags, noLinks: s.noLinks }));
   const tip = (text: string, action: Action | null, child: ReactElement) => {
     const b = action && keys[action] !== NONE ? formatBinding(keys[action], isMac) : "";
     return (
@@ -62,7 +62,7 @@ export function Header({ controller, store }: { controller: Controller; store: S
       <UpdatePill controller={controller} store={store} />
       {icon("Filters", "toggle_tags", <><Hash />{filters > 0 && <span className={dot} aria-hidden="true">{filters}</span>}</>, () => controller.showTags(!tagPanelOpen), {
         pressed: tagPanelOpen,
-        controls: "tag-panel",
+        controls: "filters-panel",
         label: filters > 0 ? `Filters, ${filters} active` : "Filters",
       })}
       <OverflowMenu controller={controller} store={store} />

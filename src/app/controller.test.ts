@@ -1,6 +1,7 @@
 import { expect, test, vi } from "vitest";
 import type { Page, TaskItem, TaskView, TimelineRow } from "../api";
 import { Controller, INVALID_TITLE, type KeyEventLike } from "./controller";
+import { chipsFor } from "../searchChips";
 import { emptyConnections, FakeEditor, FakePreview, deferred, fakeApi, fakeUi, hit, noMeta, settle } from "./fakes";
 import { createStore, initialState } from "./store";
 import { localToday, toggleTaskLine } from "../tasks";
@@ -298,6 +299,35 @@ test("opening a locked note asks inline; a newer open under the field wins and c
   expect(store.get().openPath).toBe(P("B")); // A is not reopened over B
   expect(api.openNote.mock.calls.length).toBe(opened);
   expect(store.get().err).toBe("");
+});
+
+test("removeFilterChip drops the last chip, a saved chip as one; clearFilterChips clears the applied saved search's text too", async () => {
+  const { c, store } = setup();
+  store.set({ savedSearches: [{ name: "w", query: "todo", tags: ["work"], no_links: false }] });
+  c.setTags(["work", "idea"]);
+  c.setNoLinks(true);
+  c.removeFilterChip(); // the last chip is No links
+  expect(store.get()).toMatchObject({ selectedTags: ["work", "idea"], noLinks: false });
+  c.removeFilterChip({ kind: "tag", label: "#work", tag: "work" });
+  expect(store.get().selectedTags).toEqual(["idea"]);
+  c.applySaved("w");
+  expect(store.get()).toMatchObject({ query: "todo", selectedTags: ["work"], appliedSaved: "w" });
+  c.setQuery("todo list"); // typing narrows the applied search: still one chip
+  expect(chipsFor(store.get().savedSearches, store.get().appliedSaved, { query: "todo list", tags: ["work"], noLinks: false })).toHaveLength(1);
+  c.setQuery(""); // its text erased: the chip is gone, the tag stays as a plain chip
+  expect(chipsFor(store.get().savedSearches, store.get().appliedSaved, { query: "", tags: ["work"], noLinks: false })).toEqual([{ kind: "tag", label: "#work", tag: "work" }]);
+  c.setQuery("todo");
+  c.removeFilterChip(); // the saved chip clears as one, text included
+  expect(store.get()).toMatchObject({ query: "", selectedTags: [], noLinks: false });
+  c.applySaved("w");
+  c.clearFilterChips();
+  expect(store.get()).toMatchObject({ query: "", selectedTags: [] });
+  c.setTags(["x"]);
+  c.clearFilterChips();
+  expect(store.get().selectedTags).toEqual([]);
+  c.applySaved("w");
+  c.setTags(["work", "idea"]); // a tag change ends the applied search
+  expect(store.get().appliedSaved).toBeNull();
 });
 
 test("a slow auto-show doesn't replace the note Enter just opened", async () => {

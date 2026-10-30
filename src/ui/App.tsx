@@ -15,8 +15,7 @@ import { TitleBar } from "./TitleBar";
 import { ConflictBanner } from "./ConflictBanner";
 import { TagBar } from "./TagBar";
 import { Divider } from "./Divider";
-import { TagPanel } from "./TagPanel";
-import { FilterLine } from "./FilterLine";
+import { FiltersPanel } from "./FiltersPanel";
 import { FirstRun } from "./FirstRun";
 import { SettingsDialog } from "./SettingsDialog";
 import { InfoPanel } from "./InfoPanel";
@@ -46,7 +45,7 @@ const pane = css({ flex: "1", minH: "0", minW: "0", display: "flex" });
 // The left pane: one bar over one list, the same box in every mode; the divider sizes it through --list-h / --list-w.
 const leftPane = css({ h: "var(--list-h, 30%)", flex: "none", display: "flex", flexDirection: "column", minH: "0", minW: "0", "[data-layout=horizontal] &": { h: "auto" } });
 const note = css({ flex: "1", minH: "0", minW: "0", display: "flex", flexDirection: "column", position: "relative" });
-// Header, tag panel and filter line stack as one block; in the horizontal grid it spans both columns.
+// Header and Filters panel stack as one block; in the horizontal grid it spans both columns.
 const top = css({ flex: "none", minW: "0", "[data-layout=horizontal] &": { gridColumn: "1 / -1" } });
 
 export function App({ controller, store }: { controller: Controller; store: Store<AppState> }) {
@@ -65,8 +64,7 @@ export function App({ controller, store }: { controller: Controller; store: Stor
     <div ref={root} className={app} data-preview-on={previewOn || undefined}>
       <div className={top}>
         <Header controller={controller} store={store} />
-        <TagPanel controller={controller} store={store} />
-        <FilterLine controller={controller} store={store} />
+        <FiltersPanel controller={controller} store={store} />
       </div>
       {paneMode === "connections" ? (
         <ConnectionsView controller={controller} store={store} />

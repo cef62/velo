@@ -10,7 +10,7 @@ Inspired by nvALT and Notational Velocity; not affiliated with or endorsed by th
 - Plain files you own: a flat folder of `.md` / `.txt` notes, edited in a CodeMirror editor with autosave.
 - `[[wikilinks]]`: following a link to a missing note creates it; renaming a note rewrites links to it.
 - Markdown preview with clickable wikilinks and external links.
-- Note counts next to every tag and in the filter line; the Filters button in the header shows how many filters are active; a Retry button when a save fails.
+- Note counts next to every tag; active filters show as chips inside the search field and the Filters button in the header shows how many there are; a Retry button when a save fails.
 - Theme: System (follows the OS), Light or Dark, in Settings.
 - Rich editing (default): markdown marks are hidden except on the line you are editing; ⌘/Ctrl-click opens links, wikilinks and tags; task checkboxes are clickable. Choose Rich, Plain or Preview in the title bar's view switch, or press ⌘⇧R / ⌘⇧P. The file text is never changed by the display.
 - Per-note encryption with [age](https://age-encryption.org); locked notes are never written to disk or to the index as plaintext.
@@ -32,7 +32,7 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | ⌘⇧S | Ctrl+Shift+S | Toggle sort (last modified / title; also the Sort menu in the Notes bar) |
 | ⌘J / ⌘K | Ctrl+J / Ctrl+K | Back / forward through visited notes (also from the editor; ↑/↓ in search move in the list) |
 | ⌘, | Ctrl+, | Settings |
-| ⌘⇧T | Ctrl+Shift+T | Show / hide the tag panel |
+| ⌘⇧T | Ctrl+Shift+T | Show / hide the Filters panel (saved searches and tags) |
 | ⌘⇧R | Ctrl+Shift+R | Rich / plain editing |
 | ⌘⇧J | Ctrl+Shift+J | Vertical / horizontal layout |
 | ⌘I | Ctrl+I | Show / hide the side panel (note info) |
@@ -54,11 +54,11 @@ Fixed: Enter (in search) opens the highlighted note, or creates a note titled wi
 
 ## Tags
 
-Write `#tag` anywhere in a note (at the start of a line, after a space, or after `(`; letters, digits, `_`, `-`, `/`; at least one letter; not in fenced code blocks; `# Heading` is not a tag). The Filters button in the header (or ⌘⇧T) shows every tag with its note count; click chips to filter the list to notes having all selected tags, combined with the search text. A "Filtered by" line stays visible while tags are selected. In the preview, click a `#tag` to filter by it. Locked notes are not listed in the tag panel.
+Write `#tag` anywhere in a note (at the start of a line, after a space, or after `(`; letters, digits, `_`, `-`, `/`; at least one letter; not in fenced code blocks; `# Heading` is not a tag). The Filters button in the header (or ⌘⇧T) shows every tag with its note count; click chips to filter the list to notes having all selected tags, combined with the search text. Active filters show as chips inside the search box: Backspace at the start of the box removes the last one, the × at its right clears them, and when there is no room the rest fold into a "+N" chip (or, while you type, a single "N filters" chip) that opens the Filters panel.
 
 ## Saved searches
 
-Keep a search you use often. With a search text, tags or the No links chip active, choose "Save search…" in the filter banner or in the tag panel (⌘⇧T) and give it a name of 1 to 60 characters; a name already in use asks to replace the old one. Saved searches sit as a row of chips above the tags in the tag panel. Click one to apply its search text, tags and No links, replacing the current filters; click the active one to clear them. Right-click a chip, or press Shift+F10 / the Menu key on it, for Rename… and Delete (which asks first). They are stored per machine in the settings. The list, Tasks, the timeline and export all follow the filters.
+Keep a search you use often. With a search text, tags or the No links chip active, choose "Save search…" in the Filters panel (⌘⇧T) and give it a name of 1 to 60 characters; a name already in use asks to replace the old one. Saved searches sit as a dashed row of chips above the tags in the Filters panel; the applied one shows as a single chip in the search field. Click one to apply its search text, tags and No links, replacing the current filters; click the active one to clear them. Right-click a chip, or press Shift+F10 / the Menu key on it, for Rename… and Delete (which asks first). They are stored per machine in the settings. The list, Tasks, the timeline and export all follow the filters.
 
 ## Timeline
 
