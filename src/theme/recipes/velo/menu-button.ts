@@ -26,7 +26,7 @@ export const menuButton = defineRecipe({
     '& svg': { w: '14px', h: '14px', flex: 'none' },
   },
   variants: {
-    iconOnly: { true: { px: '1', '& [data-label], & [data-chevron]': { display: 'none' } } },
+    iconOnly: { true: { px: '1', flex: 'none', '& [data-label], & [data-chevron]': { display: 'none' } } }, // never shrinks below its icon
   },
   staticCss: [{ iconOnly: ['true'] }],
 })

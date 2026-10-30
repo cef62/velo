@@ -3,7 +3,7 @@
 // Width thresholds are component widths; the pixel sizes live in panda.config.ts (sizes.paneBar, searchMin, …).
 const W = {
   paneLabelsAll: 380, // left pane ≥ this: every tab shows its label; else only the active one
-  paneSortIconOnly: 240, // left pane < this: Sort / Timeline menu buttons go icon-only
+  paneSortIconOnly: 300, // left pane < this: Sort / Timeline menu buttons go icon-only (labels would truncate to "…" at the 260px default)
   noteViewMenu: 560, // note < this: the Rich · Plain · Preview switch becomes a menu button
   noteLockInMenu: 420, // note < this: Lock moves into the ⋯ note menu
   noteMinWithPanel: 480, // docking the side panel would leave the note below this: overlay instead

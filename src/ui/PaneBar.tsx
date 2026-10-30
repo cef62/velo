@@ -79,7 +79,7 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
       <span className={c.spacer} />
       {cur === "notes" && (
         <>
-          {total > 0 && <span className={c.meta} title={`${total.toLocaleString("en-US")} notes`}>{total.toLocaleString("en-US")}</span>}
+          {total > 0 && !mode.menusIconOnly && <span className={c.meta} title={`${total.toLocaleString("en-US")} notes`}>{total.toLocaleString("en-US")}</span>}
           <Menu.Root positioning={{ placement: "bottom-end" }}>
             <Menu.Trigger asChild>{menuBtn(sort === "title" ? "Title A→Z" : "Recent", `Sort: ${sort === "title" ? "title" : "recent"}`, sort === "title" ? <ArrowDownAZ /> : <Clock />)}</Menu.Trigger>
             <Menu.Positioner>
@@ -104,7 +104,7 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
         <>
           <Menu.Root positioning={{ placement: "bottom-end" }}>
             <Menu.Trigger asChild>
-              {menuBtn(`${tl.by === "created" ? "Created" : "Updated"} · ${tl.range === "all" ? "All" : `${tl.range}d`}`, `Timeline: by ${tl.by}, ${tl.range === "all" ? "all time" : `last ${tl.range} days`}`, null)}
+              {menuBtn(`${tl.by === "created" ? "Created" : "Updated"} · ${tl.range === "all" ? "All" : `${tl.range}d`}`, `Timeline: by ${tl.by}, ${tl.range === "all" ? "all time" : `last ${tl.range} days`}`, mode.menusIconOnly ? <CalendarDays /> : null)}
             </Menu.Trigger>
             <Menu.Positioner>
               <Menu.Content minW="200px">
