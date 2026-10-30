@@ -14,6 +14,7 @@ export const printGlobalCss = {
       fontFamily: 'body',
       fontSize: '11pt',
       lineHeight: '1.55',
+      px: '4mm', // fallback side margin if the print path ignores @page margins
       '& h1': { fontSize: '1.6em', lineHeight: '1.25', fontWeight: '700', m: '0 0 0.55em' },
       '& h2': { fontSize: '1.25em', lineHeight: '1.3', fontWeight: '650', m: '1.4em 0 0.45em', breakAfter: 'avoid' },
       '& h3, & h4, & h5, & h6': { fontSize: '1.05em', fontWeight: '650', m: '1.2em 0 0.4em', breakAfter: 'avoid' },
@@ -37,6 +38,8 @@ export const printGlobalCss = {
       '& .footnotes': { fontSize: '0.9em', color: muted },
     },
   },
+  // wry's print() passes zero NSPrintInfo margins (tauri exposes no print options): the page margin comes from CSS
+  '@page': { margin: '16mm' },
   '@media print': {
     // an open dialog's scroll lock sets overflow:hidden on body inline: it would cut the PDF to one page
     'html, body': { overflow: 'visible !important', height: 'auto !important', background: '#fff' },
