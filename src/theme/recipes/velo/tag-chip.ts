@@ -1,7 +1,7 @@
 import { defineSlotRecipe } from '@pandacss/dev'
 import { focusRing } from './focus-ring'
 
-// Toggle button "#tag 12" in the tag panel.
+// Toggle button "#tag 12" in the Filters panel.
 export const tagChip = defineSlotRecipe({
   className: 'tagChip',
   slots: ['root', 'count'],

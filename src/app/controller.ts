@@ -21,7 +21,7 @@ import { sinceMs } from "../timeline";
 import { exportFileName } from "../export";
 import { prepare, rank, type Ranked } from "../fuzzy";
 import { extractTitle } from "../writing";
-import { cleanName, defaultName, removeFrom, renameIn, sameFilters, upsert, type Filters } from "../saved";
+import { appliedSearch, cleanName, defaultName, removeFrom, renameIn, sameFilters, upsert, type Filters } from "../saved";
 import { chipsFor, type Chip } from "../searchChips";
 import { pushRecent } from "../palette";
 import type { MenuSpec, UiPort } from "./ports";
@@ -1061,19 +1061,19 @@ export class Controller {
 
   /** Tag filter changed: fresh first page, keeping the open note selected if it is still listed. */
   setTags(next: string[]) {
-    this.store.set({ selectedTags: next });
+    this.store.set({ selectedTags: next, appliedSaved: null });
     this.filterChanged(true);
   }
 
   setNoLinks(on: boolean) {
-    this.store.set({ noLinks: on });
+    this.store.set({ noLinks: on, appliedSaved: null });
     this.filterChanged(true);
   }
 
   /** Backspace at the start of the search field, or a chip's ×: drop that filter (the applied saved search drops as one). */
   removeFilterChip(chip?: Chip) {
     const f = this.filters();
-    const chips = chipsFor(this.store.get().savedSearches, f);
+    const chips = chipsFor(this.store.get().savedSearches, this.store.get().appliedSaved, f);
     const c = chip ?? chips[chips.length - 1];
     if (!c) return;
     if (c.kind === "saved") return this.applySaved(c.name); // already applied: clears it
@@ -1083,14 +1083,14 @@ export class Controller {
 
   /** The search field's ×: every chip (the applied saved search clears as one, search text included). */
   clearFilterChips() {
-    const chips = chipsFor(this.store.get().savedSearches, this.filters());
+    const chips = chipsFor(this.store.get().savedSearches, this.store.get().appliedSaved, this.filters());
     if (chips[0]?.kind === "saved") return this.applySaved(chips[0].name);
     this.clearFilters();
   }
 
   /** The Filters panel's Clear: tags and the No links chip. */
   clearFilters() {
-    this.store.set({ selectedTags: [], noLinks: false });
+    this.store.set({ selectedTags: [], noLinks: false, appliedSaved: null });
     this.filterChanged(true);
   }
 
@@ -1123,6 +1123,7 @@ export class Controller {
       else {
         const f = this.filters();
         await this.writeSaved((l) => upsert(l, { name, query: f.query.trim(), tags: [...f.tags], no_links: f.noLinks }));
+        this.store.set({ appliedSaved: name }); // the search just saved is the one applied: one chip
       }
       this.store.set({ saveSearch: null });
     } catch (e) {
@@ -1143,9 +1144,9 @@ export class Controller {
     const s = this.store.get();
     const saved = s.savedSearches.find((x) => fold(x.name) === fold(name));
     if (!saved || s.capture) return; // the search field holds capture text, not a search
-    const on = sameFilters(saved, this.filters());
+    const on = appliedSearch(s.savedSearches, s.appliedSaved, this.filters()) === saved || sameFilters(saved, this.filters()); // applied, or typed out exactly
     this.keptCapture = false;
-    this.store.set(on ? { query: "", selectedTags: [], noLinks: false } : { query: saved.query, selectedTags: [...saved.tags], noLinks: saved.no_links });
+    this.store.set(on ? { query: "", selectedTags: [], noLinks: false, appliedSaved: null } : { query: saved.query, selectedTags: [...saved.tags], noLinks: saved.no_links, appliedSaved: saved.name });
     this.filterChanged(false);
   }
 
@@ -1159,14 +1160,16 @@ export class Controller {
     await this.ui.popupMenu(items, atChip ? this.ui.focusAnchor() : null).catch((e) => this.setErr(errText(e)));
   }
 
-  renameSaved(from: string, to: string): Promise<void> {
-    return this.writeSaved((l) => renameIn(l, from, to));
+  async renameSaved(from: string, to: string): Promise<void> {
+    await this.writeSaved((l) => renameIn(l, from, to));
+    this.store.set((s) => (s.appliedSaved !== null && fold(s.appliedSaved) === fold(from) ? { appliedSaved: to } : {}));
   }
 
   async deleteSaved(name: string) {
     if (!(await this.ui.confirm(`Delete the saved search “${name}”?`, { title: "Delete saved search", kind: "warning", okLabel: "Delete" }))) return;
     try {
       await this.writeSaved((l) => removeFrom(l, name));
+      this.store.set((s) => (s.appliedSaved !== null && fold(s.appliedSaved) === fold(name) ? { appliedSaved: null } : {})); // its chips stay as plain tags
     } catch (e) {
       this.setErr(errText(e));
     }

@@ -55,7 +55,7 @@ Fixed: Enter (in search) opens the highlighted note, or creates a note titled wi
 
 ## Tags
 
-Write `#tag` anywhere in a note (at the start of a line, after a space, or after `(`; letters, digits, `_`, `-`, `/`; at least one letter; not in fenced code blocks; `# Heading` is not a tag). The Filters button in the header (or ⌘⇧T) shows every tag with its note count; click chips to filter the list to notes having all selected tags, combined with the search text. A "Filtered by" line stays visible while tags are selected. In the preview, click a `#tag` to filter by it. Locked notes are not listed in the tag panel.
+Write `#tag` anywhere in a note (at the start of a line, after a space, or after `(`; letters, digits, `_`, `-`, `/`; at least one letter; not in fenced code blocks; `# Heading` is not a tag). The Filters button in the header (or ⌘⇧T) shows every tag with its note count; click chips to filter the list to notes having all selected tags, combined with the search text. Active filters show as chips inside the search box: Backspace at the start of the box removes the last one, the × at its right clears them, and when there is no room the rest fold into a "+N" chip (or, while you type, a single "N filters" chip) that opens the Filters panel.
 
 ## Saved searches
 

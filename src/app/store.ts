@@ -86,6 +86,7 @@ export interface AppState {
   merge: { source: string; sourceTitle: string; query: string; target: { path: string; title: string; count: number } | null; err: string; pending?: boolean } | null; // the Merge into… dialog; target set = confirm step; pending = merge in flight
   capture: { target: string; err: string } | null; // the search field is in quick-capture mode
   savedSearches: SavedSearch[];
+  appliedSaved: string | null; // the saved search applied last: one chip while its tags and No links hold (typing narrows it)
   saveSearch: { name: string; err: string; confirmReplace: boolean; renaming?: string } | null; // the Save search dialog; renaming = the saved search being renamed; confirmReplace = asking "Replace?" for name
   exporting: { counts: ExportCounts | null; format: "md" | "pdf"; tasksOnly: boolean; err: string; pending: boolean } | null; // the Export dialog; counts null = preview loading; pending = save in flight
   printHtml: string | null; // the rendered export in the print-only container while the print dialog is up
@@ -144,6 +145,7 @@ export const initialState = (isMac: boolean): AppState => ({
   merge: null,
   capture: null,
   savedSearches: [],
+  appliedSaved: null,
   saveSearch: null,
   exporting: null,
   printHtml: null,

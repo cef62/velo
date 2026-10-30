@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { activeFilterCount, cleanName, defaultName, removeFrom, renameIn, sameFilters, upsert } from "./saved";
+import { activeFilterCount, appliedSearch, cleanName, defaultName, removeFrom, renameIn, sameFilters, upsert } from "./saved";
 
 const s = (name: string, query = "") => ({ name, query, tags: [], no_links: false });
 
@@ -33,11 +33,13 @@ test("renameIn keeps position and drops a replaced name; removeFrom folds", () =
   expect(removeFrom([s("a"), s("Velo")], "velo")).toEqual([s("a")]);
 });
 
-test("activeFilterCount: tags + No links, or 1 for an applied saved search, 0 for text alone", () => {
+test("activeFilterCount: tags + No links, or 1 for the applied saved search even while typing narrows it", () => {
   const saved = [{ name: "w", query: "", tags: ["work", "idea"], no_links: false }, { name: "t", query: "todo", tags: [], no_links: false }];
-  expect(activeFilterCount(saved, { query: "x", tags: [], noLinks: false })).toBe(0);
-  expect(activeFilterCount(saved, { query: "todo", tags: [], noLinks: false })).toBe(1); // a text-only saved search still counts
-  expect(activeFilterCount(saved, { query: "", tags: ["work"], noLinks: true })).toBe(2);
-  expect(activeFilterCount(saved, { query: "", tags: ["idea", "work"], noLinks: false })).toBe(1);
-  expect(activeFilterCount(saved, { query: "more", tags: ["idea", "work"], noLinks: false })).toBe(2);
+  expect(activeFilterCount(saved, null, { query: "x", tags: [], noLinks: false })).toBe(0);
+  expect(activeFilterCount(saved, "t", { query: "todo", tags: [], noLinks: false })).toBe(1); // a text-only saved search still counts
+  expect(activeFilterCount(saved, null, { query: "", tags: ["work"], noLinks: true })).toBe(2);
+  expect(activeFilterCount(saved, "w", { query: "", tags: ["idea", "work"], noLinks: false })).toBe(1);
+  expect(activeFilterCount(saved, "w", { query: "more", tags: ["idea", "work"], noLinks: false })).toBe(1); // typed text narrows the applied search
+  expect(activeFilterCount(saved, "w", { query: "", tags: ["idea"], noLinks: false })).toBe(1); // a tag change ends it: plain tags again
+  expect(appliedSearch(saved, "gone", { query: "", tags: [], noLinks: false })).toBeNull();
 });

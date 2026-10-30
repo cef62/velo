@@ -4,7 +4,7 @@ import { tagChip } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { Button, Kbd } from "@/components/ui";
-import { sameFilters } from "../saved";
+import { activeFilterCount, appliedSearch } from "../saved";
 import { fold } from "../search";
 import { formatBinding, NONE } from "../shortcuts";
 import { useStore } from "./useStore";
@@ -50,7 +50,9 @@ export function FiltersPanel({ controller, store }: { controller: Controller; st
   const close = formatBinding(keys.toggle_tags, isMac);
   const stop = (i: number) => (i === Math.min(cur, k + tags.length) ? 0 : -1);
   const filtered = !capture && (query.trim() !== "" || selectedTags.length > 0 || noLinks); // capture text is not a search
-  const active = selectedTags.length + (noLinks ? 1 : 0);
+  const appliedName = useStore(store, (s) => s.appliedSaved);
+  const applied = appliedSearch(saved, appliedName, { query, tags: selectedTags, noLinks });
+  const active = activeFilterCount(saved, appliedName, { query, tags: selectedTags, noLinks });
   return (
     <section
       id="filters-panel"
@@ -98,7 +100,7 @@ export function FiltersPanel({ controller, store }: { controller: Controller; st
           <span className={rowLabel} aria-hidden>Saved</span>
           <div className={chips} role="group" aria-label="Saved searches">
             {saved.map((x, i) => {
-              const on = sameFilters(x, { query, tags: selectedTags, noLinks });
+              const on = x === applied;
               return (
                 <button
                   key={i} // index keys: a rename or delete keeps the focused node, so focus stays on that place
