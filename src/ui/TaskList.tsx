@@ -1,6 +1,6 @@
 import { type KeyboardEvent, memo, useMemo, useRef, useState } from "react";
 import { css } from "styled-system/css";
-import { searchMatch } from "styled-system/recipes";
+import { searchMatch, sectionHeader } from "styled-system/recipes";
 import type { TaskItem } from "../api";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
@@ -10,17 +10,8 @@ import { highlightRanges, markHtml } from "../highlight";
 import { HighlightedText } from "./HighlightedText";
 import { useStore } from "./useStore";
 
-// Same box as the note list's scroller, so the divider sizes it the same way.
-const pane = css({
-  h: "var(--list-h, 30%)",
-  flex: "none",
-  display: "flex",
-  flexDirection: "column",
-  minH: "0",
-  "[data-layout=horizontal] &": { h: "auto" },
-});
+const pane = css({ flex: "1", display: "flex", flexDirection: "column", minH: "0" }); // fills the left pane under its bar
 const scroller = css({ flex: "1", minH: "0", overflowY: "auto", p: "1" });
-const header = css({ px: "2.5", pt: "2", pb: "1", fontSize: "uiXs", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.04em", color: "velo.fgMuted" });
 const row = css({
   display: "flex",
   alignItems: "center",
@@ -45,7 +36,8 @@ const text = css({
   "& code": { fontFamily: "mono", fontSize: "0.9em", bg: "velo.subtle", px: "1", borderRadius: "l1" },
 });
 const note = css({ color: "velo.fgMuted", truncate: true, flex: "1 1 0", minW: "0", fontSize: "var(--velo-snippet-fs)" });
-const footer = css({ display: "flex", alignItems: "center", gap: "2", px: "2.5", py: "1", borderTop: "1px solid", borderColor: "velo.divider", fontSize: "uiSm", color: "velo.fgMuted", flex: "none" });
+// "Ticked · Undo": one status line under the list (v2 §3 #16), only while there is something to undo
+const status = css({ display: "flex", alignItems: "center", gap: "1", h: "8", px: "2.5", borderTop: "1px solid", borderColor: "velo.muted", fontSize: "uiSm", color: "velo.fgMuted", flex: "none" });
 const empty = css({ p: "4", textAlign: "center", color: "velo.fgMuted", fontSize: "uiSm" });
 
 const GROUPS = [
@@ -110,7 +102,6 @@ const TaskRow = memo(function TaskRow({ t, overdue, query, controller, stop, onS
 export function TaskList({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const view = useStore(store, (s) => s.taskView);
   const query = useStore(store, (s) => s.query);
-  const showDone = useStore(store, (s) => s.showDone);
   const undo = useStore(store, (s) => s.tickUndo);
 
   const groups = view ? GROUPS.filter(([k]) => view[k].length) : [];
@@ -132,28 +123,19 @@ export function TaskList({ controller, store }: { controller: Controller; store:
         {view && groups.length === 0 && <div className={empty}>{query ? `No tasks match “${query}”` : "No open tasks"}</div>}
         {groups.map(([k, label]) => (
           <div key={k} role="group" aria-label={label}>
-            <div className={header}>{label}</div>
+            <div className={sectionHeader()}>{label}</div>
             {view![k].map((t) => <TaskRow key={keyOf(t)} t={t} overdue={k === "overdue"} query={query} controller={controller} stop={keyOf(t) === stopKey} onStop={setCur} />)}
           </div>
         ))}
       </div>
-      <div className={footer}>
-        <Checkbox.Root size="sm" colorPalette="green" checked={showDone} onCheckedChange={() => void controller.toggleShowDone()}>
-          <Checkbox.Control>
-            <Checkbox.Indicator />
-          </Checkbox.Control>
-          <Checkbox.Label>Show done</Checkbox.Label>
-          <Checkbox.HiddenInput />
-        </Checkbox.Root>
-        {undo && (
-          <span role="status" className={css({ ml: "auto", display: "inline-flex", alignItems: "center", gap: "1" })}>
-            {undo.unticked ? "Unticked" : "Ticked"} ·
-            <Button variant="plain" size="xs" onClick={() => void controller.undoTick()}>
-              Undo
-            </Button>
-          </span>
-        )}
-      </div>
+      {undo && (
+        <span role="status" className={status}>
+          {undo.unticked ? "Unticked" : "Ticked"} ·
+          <Button variant="plain" size="xs" onClick={() => void controller.undoTick()}>
+            Undo
+          </Button>
+        </span>
+      )}
     </div>
   );
 }

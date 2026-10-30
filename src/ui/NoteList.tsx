@@ -13,12 +13,7 @@ import { useStore } from "./useStore";
 const LOAD_AHEAD = 50; // start paging this many rows before the loaded end
 const PAD = 4; // space around the rows inside the scroll content (css p: "1")
 
-const scroller = css({
-  h: "var(--list-h, 30%)",
-  flex: "none",
-  overflowY: "auto",
-  "[data-layout=horizontal] &": { h: "auto", minH: "0" },
-});
+const scroller = css({ flex: "1", minH: "0", overflowY: "auto" }); // fills the left pane under its bar
 const loader = css({ position: "absolute", left: "0", right: "0", display: "flex", alignItems: "center", gap: "2", px: "2.5", color: "velo.fgMuted", fontSize: "var(--velo-snippet-fs)" });
 const empty = css({ h: "full", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "1.5", textAlign: "center", color: "velo.fgMuted", fontSize: "uiSm", p: "4", "& strong": { color: "velo.fg", fontWeight: "600" }, "& span": { display: "inline-flex", alignItems: "center", gap: "1.5" } });
 

@@ -29,7 +29,7 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | ⌘⇧E | Ctrl+Shift+E | Lock / unlock current note |
 | ⌥⌘E | Ctrl+Alt+E | Lock all notes |
 | ⌘⌫ | Ctrl+Backspace | Move the current note to the Trash, after confirming (from the list or an empty search box; in the editor and in a non-empty search box ⌘⌫ keeps its editing meaning) |
-| ⌘⇧S | Ctrl+Shift+S | Toggle sort (last modified / title) |
+| ⌘⇧S | Ctrl+Shift+S | Toggle sort (last modified / title; also the Sort menu in the Notes bar) |
 | ⌘J / ⌘K | Ctrl+J / Ctrl+K | Back / forward through visited notes (also from the editor; ↑/↓ in search move in the list) |
 | ⌘, | Ctrl+, | Settings |
 | ⌘⇧T | Ctrl+Shift+T | Show / hide the tag panel |
@@ -62,11 +62,11 @@ Keep a search you use often. With a search text, tags or the No links chip activ
 
 ## Timeline
 
-Press ⌘⇧L (Ctrl+Shift+L) or the Timeline button of the left pane to list notes newest first, grouped by day (Today, Yesterday, the weekday, then the date). Choose Created or Updated (remembered) and 7 days, 30 days or All (not remembered). Locked notes are listed by title only. Click a row, or press Enter on it, to open the note; the timeline stays. The list is one Tab stop; move with ↑/↓.
+Press ⌘⇧L (Ctrl+Shift+L) or the Timeline tab of the left pane to list notes newest first, grouped by day (Today, Yesterday, the weekday, then the date). Choose Created or Updated (remembered) and 7 days, 30 days or All (not remembered). Locked notes are listed by title only. Click a row, or press Enter on it, to open the note; the timeline stays. The list is one Tab stop; move with ↑/↓.
 
 ## Export
 
-"Export…" in the timeline header (or the Export action, which has no default shortcut) exports exactly what the timeline shows. Choose Markdown (a save dialog) or PDF (the system print dialog: choose Save as PDF), and Full notes or Tasks only. The file starts with a task summary, the open tasks and the tasks done within the range with their `@done` date, then one section per note. Locked notes are never exported, even while unlocked, and are counted as left out. An export holds at most 1,000 notes (the newest).
+The Export button in the Timeline bar (or the Export action, which has no default shortcut) exports exactly what the timeline shows. Choose Markdown (a save dialog) or PDF (the system print dialog: choose Save as PDF), and Full notes or Tasks only. The file starts with a task summary, the open tasks and the tasks done within the range with their `@done` date, then one section per note. Locked notes are never exported, even while unlocked, and are counted as left out. An export holds at most 1,000 notes (the newest).
 
 ## Connections
 
@@ -92,7 +92,7 @@ Any markdown task line is a task: `- [ ] buy milk` (also `*`, `+`, numbered list
 
 - Add a due date with `📅 2026-10-30`. Typing `due:` and a space in the editor turns into `📅 ` as a typing aid; you type the date. velo never writes a due date itself.
 - Ticking a task through velo (the checkbox in the editor, in the preview or in the Tasks view) appends `@done(YYYY-MM-DD)` (local date); unticking removes it. An Obsidian-style `✅ YYYY-MM-DD` is still read as the done date. Typing `x` by hand adds no date.
-- The Tasks view (⌘⇧X, or Tasks under Left pane in the header's ⋯ menu) lists open tasks from every note, grouped Overdue, Today, Upcoming and No date. Search and the tag filter apply to it. "Show done" adds tasks ticked in the last 7 days. Ticking or unticking a task of a note that is not open shows a "Ticked · Undo" (or "Unticked · Undo") toast for 5 seconds. A tick in the open note goes through the editor: undo it there with ⌘Z. Click a task to jump to its line; Enter in the search field opens the first task listed.
+- The Tasks view (⌘⇧X, or the Tasks tab of the left pane) lists open tasks from every note, grouped Overdue, Today, Upcoming and No date. Search and the tag filter apply to it. "Show done" in the Tasks bar adds tasks ticked in the last 7 days. Ticking or unticking a task of a note that is not open shows a "Ticked · Undo" (or "Unticked · Undo") toast for 5 seconds. A tick in the open note goes through the editor: undo it there with ⌘Z. Click a task to jump to its line; Enter in the search field opens the first task listed.
 - The Dock icon shows the count of overdue and due-today tasks on macOS; other platforms show the count inside the app.
 - Quick capture (⌥⇧⌘N, system-wide) shows velo with the search field in capture mode (`→ Inbox`); type the task, press Enter, and velo appends `- [ ] text` to your Inbox note, or to today's daily note. Choose in Settings, General. The Inbox note is called `Inbox` unless you rename it there.
 - The daily note (⌘⇧D) opens or creates a note titled with today's date, `YYYY-MM-DD`.

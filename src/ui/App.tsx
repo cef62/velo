@@ -7,6 +7,7 @@ import { Header } from "./Header";
 import { EditorHost } from "./EditorHost";
 import { PreviewHost } from "./PreviewHost";
 import { NoteList } from "./NoteList";
+import { PaneBar } from "./PaneBar";
 import { TaskList } from "./TaskList";
 import { ConnectionsView } from "./ConnectionsView";
 import { TimelineView } from "./TimelineView";
@@ -43,6 +44,8 @@ const app = css({
   },
 });
 const pane = css({ flex: "1", minH: "0", minW: "0", display: "flex" });
+// The left pane: one bar over one list, the same box in every mode; the divider sizes it through --list-h / --list-w.
+const leftPane = css({ h: "var(--list-h, 30%)", flex: "none", display: "flex", flexDirection: "column", minH: "0", minW: "0", "[data-layout=horizontal] &": { h: "auto" } });
 const note = css({ flex: "1", minH: "0", minW: "0", display: "flex", flexDirection: "column", position: "relative" });
 // Header, tag panel and filter line stack as one block; in the horizontal grid it spans both columns.
 const top = css({ flex: "none", minW: "0", "[data-layout=horizontal] &": { gridColumn: "1 / -1" } });
@@ -66,14 +69,13 @@ export function App({ controller, store }: { controller: Controller; store: Stor
         <TagPanel controller={controller} store={store} />
         <FilterLine controller={controller} store={store} />
       </div>
-      {paneMode === "tasks" ? (
-        <TaskList controller={controller} store={store} />
-      ) : paneMode === "connections" ? (
+      {paneMode === "connections" ? (
         <ConnectionsView controller={controller} store={store} />
-      ) : paneMode === "timeline" ? (
-        <TimelineView controller={controller} store={store} />
       ) : (
-        <NoteList controller={controller} store={store} />
+        <div className={leftPane}>
+          <PaneBar controller={controller} store={store} />
+          {paneMode === "tasks" ? <TaskList controller={controller} store={store} /> : paneMode === "timeline" ? <TimelineView controller={controller} store={store} /> : <NoteList controller={controller} store={store} />}
+        </div>
       )}
       <Divider store={store} app={root} />
       <div className={pane}>

@@ -1592,10 +1592,14 @@ export class Controller {
     }
   }
 
-  async toggleSort() {
+  toggleSort() {
+    return this.setSort(this.store.get().sort === "title" ? "modified" : "title");
+  }
+
+  /** The list order (the Notes bar's Sort menu), saved in the settings. */
+  async setSort(next: AppState["sort"]) {
     try {
       await this.updateSettings(async (cur) => {
-        const next = cur.sort === "title" ? "modified" : "title";
         await this.api.setSettings({ ...cur, sort: next });
         this.store.set({ sort: next });
       });

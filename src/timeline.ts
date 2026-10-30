@@ -26,3 +26,7 @@ export function groupByDay(rows: TimelineRow[], now: Date, locale?: string): Day
 
 /** Start of the range: exactly the last N×24 h; null = all time. */
 export const sinceMs = (range: "7" | "30" | "all", now: Date): number | null => (range === "all" ? null : now.getTime() - Number(range) * DAY);
+
+/** The active filters as one line: “query” · #tag · No links · last 30 days. Shown under "No notes match" and in the Export dialog. */
+export const filtersLine = (f: { query: string; tags: string[]; noLinks: boolean; range: "7" | "30" | "all" }): string =>
+  [f.query && `“${f.query}”`, ...f.tags.map((t) => `#${t}`), f.noLinks && "No links", f.range !== "all" && `last ${f.range} days`].filter(Boolean).join(" · ");
