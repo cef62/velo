@@ -9,6 +9,7 @@ import { PreviewHost } from "./PreviewHost";
 import { NoteList } from "./NoteList";
 import { TaskList } from "./TaskList";
 import { ConnectionsView } from "./ConnectionsView";
+import { TimelineView } from "./TimelineView";
 import { TitleBar } from "./TitleBar";
 import { ConflictBanner } from "./ConflictBanner";
 import { UpdateBanner } from "./UpdateBanner";
@@ -68,6 +69,8 @@ export function App({ controller, store }: { controller: Controller; store: Stor
         <TaskList controller={controller} store={store} />
       ) : paneMode === "connections" ? (
         <ConnectionsView controller={controller} store={store} />
+      ) : paneMode === "timeline" ? (
+        <TimelineView controller={controller} store={store} />
       ) : (
         <NoteList controller={controller} store={store} />
       )}

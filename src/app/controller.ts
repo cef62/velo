@@ -17,6 +17,7 @@ import { formatBinding, matches, resolve, type Action, type GLOBAL_ACTIONS } fro
 import { isMenuKey, linkFor, menuModel, type MenuAction } from "../contextmenu";
 import { isLockedPath } from "../passphrase";
 import { localToday } from "../tasks";
+import { sinceMs } from "../timeline";
 import { prepare, rank, type Ranked } from "../fuzzy";
 import { extractTitle } from "../writing";
 import { cleanName, defaultName, removeFrom, renameIn, sameFilters, upsert, type Filters } from "../saved";
@@ -194,6 +195,7 @@ export class Controller {
       infoOpen: s.info_panel === true,
       connectionsSort: connectionsSortOf(s.connections_sort),
       savedSearches: s.saved_searches ?? [],
+      timeline: { ...this.store.get().timeline, by: s.timeline_sort === "created" ? "created" : "updated" },
     });
     this.syncStyle();
     if (!s.notes_dir) this.store.set({ phase: "setup" });
@@ -210,6 +212,7 @@ export class Controller {
   }
 
   async refreshTitles() {
+    this.refreshTimeline(); // titles refresh on every add, rename, delete and lock change
     void this.loadLinkTargets();
     try {
       this.titles = new Set((await this.api.listTitles()).map(fold));
@@ -379,9 +382,10 @@ export class Controller {
   protected listStale = false; // the query/tags changed in Tasks mode: the Notes list reloads when it is shown again
   /** Query or tag filter changed. In Tasks mode only the tasks follow it: the editor must not jump to a hidden list's first hit. */
   protected filterChanged(keepOpen: boolean | "highlight") {
-    if (this.store.get().paneMode === "tasks") {
+    const mode = this.store.get().paneMode;
+    if (mode === "tasks" || mode === "timeline") {
       this.listStale = true;
-      void this.loadTasks(true);
+      void (mode === "tasks" ? this.loadTasks(true) : this.loadTimeline());
     } else void this.runSearch(true, keepOpen);
   }
 
@@ -515,7 +519,8 @@ export class Controller {
     this.store.set({ capture: null, ...(keep ? {} : { query: this.captureQuery }) });
     // the kept text lists like a search, but never opens a hit: focus went to the open note (or a note just opened)
     // Tasks always reload: a load during capture mode (watcher, backend write) filtered by the capture text
-    if (this.store.get().paneMode === "tasks") this.filterChanged(false);
+    const mode = this.store.get().paneMode;
+    if (mode === "tasks" || mode === "timeline") this.filterChanged(false);
     else if (keep) void this.runSearch(true, "highlight");
     else if (captured !== undefined) void this.runSearch(false); // the target's row moved; the list is otherwise unchanged
     void this.api.captureDone(hide).catch((e) => console.error("capture done failed", e)); // ends the backend's session even when velo stays shown
@@ -761,6 +766,13 @@ export class Controller {
       const v = this.store.get().taskView;
       const first = v && [...v.overdue, ...v.today, ...v.upcoming, ...v.no_date, ...v.done][0];
       if (first) await this.openTask(first);
+      return;
+    }
+    if (this.store.get().paneMode === "timeline") {
+      // the list is stale here: Enter opens the first note shown, never creates one
+      await settled(() => this.timelineLoading);
+      const first = this.store.get().timeline.rows?.[0];
+      if (first) await this.show(first.path);
       return;
     }
     await settled(() => this.searching);
@@ -1138,17 +1150,57 @@ export class Controller {
     this.tagTimer = setTimeout(() => {
       void this.refreshTags(true);
       void this.loadTasks();
+      this.refreshTimeline();
     }, 300);
   }
 
-  setPaneMode(m: "notes" | "tasks" | "connections") {
+  setPaneMode(m: AppState["paneMode"]) {
     if (m === "connections") return void this.showConnections();
     this.store.set({ paneMode: m });
     if (m === "tasks") void this.loadTasks();
+    else if (m === "timeline") void this.loadTimeline();
     else if (this.listStale) {
       this.listStale = false;
       void this.runSearch(true, "highlight"); // switching modes never changes the open note
     }
+  }
+
+  protected readonly newTimelineReq = latest();
+  protected timelineLoading: Promise<void> = Promise.resolve(); // latest timeline load, awaited by Enter in Timeline mode
+  /** The timeline: notes filtered like the list, newest first by the chosen date, within the range. */
+  loadTimeline(): Promise<void> {
+    return (this.timelineLoading = this.doLoadTimeline());
+  }
+
+  protected async doLoadTimeline() {
+    const { query, selectedTags, noLinks, timeline } = this.store.get();
+    const fresh = this.newTimelineReq();
+    try {
+      const rows = await this.api.timeline(query, selectedTags, noLinks, timeline.by, sinceMs(timeline.range, new Date()));
+      if (fresh()) this.store.set((s) => ({ timeline: { ...s.timeline, rows, err: "" } }));
+    } catch (e) {
+      if (fresh()) this.store.set((s) => ({ timeline: { ...s.timeline, rows: null, err: errText(e) } }));
+    }
+  }
+
+  /** Notes changed: the shown timeline follows. */
+  protected refreshTimeline() {
+    if (this.store.get().paneMode === "timeline") void this.loadTimeline();
+  }
+
+  async setTimelineBy(by: "created" | "updated") {
+    this.store.set((s) => ({ timeline: { ...s.timeline, by } }));
+    void this.loadTimeline();
+    try {
+      await this.updateSettings((cur) => this.api.setSettings({ ...cur, timeline_sort: by }));
+    } catch (e) {
+      this.setErr(errText(e));
+    }
+  }
+
+  setTimelineRange(range: "7" | "30" | "all") {
+    this.store.set((s) => ({ timeline: { ...s.timeline, range } }));
+    return this.loadTimeline();
   }
 
   protected readonly newConnectionsReq = latest();
@@ -1651,7 +1703,7 @@ export class Controller {
     merge_note: () => void this.startMerge(),
     toggle_tasks: () => this.setPaneMode(this.store.get().paneMode === "tasks" ? "notes" : "tasks"),
     toggle_connections: () => this.setPaneMode(this.store.get().paneMode === "connections" ? "notes" : "connections"),
-    toggle_timeline: () => {}, // wired by the timeline task
+    toggle_timeline: () => this.setPaneMode(this.store.get().paneMode === "timeline" ? "notes" : "timeline"),
     export: () => {}, // wired by the export task
     save_search: () => this.startSaveSearch(),
   };

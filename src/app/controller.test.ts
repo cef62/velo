@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import type { Page, TaskItem, TaskView } from "../api";
+import type { Page, TaskItem, TaskView, TimelineRow } from "../api";
 import { Controller, INVALID_TITLE, type KeyEventLike } from "./controller";
 import { emptyConnections, FakeEditor, FakePreview, deferred, fakeApi, fakeUi, hit, noMeta, settle } from "./fakes";
 import { createStore, initialState } from "./store";
@@ -2374,4 +2374,81 @@ test("saved search menu renames and deletes", async () => {
   expect(calls.some((x) => x[0] === "confirm")).toBe(true);
   expect(saved()).toEqual([]);
   expect(store.get().savedSearches).toEqual([]);
+});
+
+const trow = (title: string): TimelineRow => ({ path: P(title), title, date: 0, snippet: "", locked: false });
+
+test("the timeline loads with the filters, the saved sort and no range", async () => {
+  const { c, api, store } = setup();
+  api.getSettings.mockResolvedValue({ ...(await api.getSettings()), timeline_sort: "created" });
+  await c.start();
+  c.setQuery("a");
+  c.setTags(["t"]);
+  c.setNoLinks(true);
+  api.timeline.mockResolvedValue([trow("A")]);
+  c.setPaneMode("timeline");
+  await settle();
+  expect(api.timeline).toHaveBeenLastCalledWith("a", ["t"], true, "created", null);
+  expect(store.get()).toMatchObject({ paneMode: "timeline", timeline: { rows: [trow("A")], by: "created", range: "all", err: "" } });
+  c.setTimelineRange("7");
+  await settle();
+  expect(api.timeline.mock.lastCall?.[4]).toBeTypeOf("number");
+});
+
+test("a filter change in timeline mode reloads the timeline, not the list", async () => {
+  const { c, api, store } = setup();
+  c.setPaneMode("timeline");
+  await settle();
+  api.search.mockClear();
+  c.setQuery("b");
+  await settle();
+  expect(api.timeline).toHaveBeenLastCalledWith("b", [], false, "updated", null);
+  expect(api.search).not.toHaveBeenCalled();
+  api.timeline.mockResolvedValue([trow("B")]);
+  c.setQuery("bb");
+  await c.enter(); // the stale list is never used: the first timeline row opens
+  expect(store.get().openPath).toBe(P("B"));
+});
+
+test("an older timeline reply landing last is dropped", async () => {
+  const { c, api, store } = setup();
+  const d1 = deferred<TimelineRow[]>();
+  const d2 = deferred<TimelineRow[]>();
+  api.timeline.mockImplementationOnce(() => d1.promise).mockImplementationOnce(() => d2.promise);
+  c.setPaneMode("timeline");
+  c.setQuery("b");
+  d2.resolve([trow("B")]);
+  await settle();
+  d1.resolve([trow("A")]);
+  await settle();
+  expect(store.get().timeline.rows).toEqual([trow("B")]);
+});
+
+test("the timeline sort is saved and reloads", async () => {
+  const { c, api, store } = await savedSetup();
+  c.setPaneMode("timeline");
+  await c.setTimelineBy("created");
+  await settle();
+  expect(api.setSettings).toHaveBeenCalledWith(expect.objectContaining({ timeline_sort: "created" }));
+  expect(store.get().timeline.by).toBe("created");
+  expect(api.timeline).toHaveBeenLastCalledWith("", [], false, "created", null);
+});
+
+test("a note saved, renamed or deleted reloads the timeline", async () => {
+  const { c, api } = setup();
+  await c.runSearch(true);
+  await settle();
+  c.setPaneMode("timeline");
+  await settle();
+  api.timeline.mockClear();
+  c.editorOpts().onSaved();
+  await new Promise((r) => setTimeout(r, 350));
+  expect(api.timeline).toHaveBeenCalledTimes(1);
+  api.renameNote.mockResolvedValueOnce({ path: P("Z"), rewritten: 0 });
+  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta });
+  c.startRename();
+  await c.commitRename("Z");
+  expect(api.timeline).toHaveBeenCalledTimes(2);
+  await c.deleteNote();
+  expect(api.timeline).toHaveBeenCalledTimes(3);
 });
