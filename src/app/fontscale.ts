@@ -15,7 +15,6 @@ export type ListLayout = "vertical" | "horizontal";
 
 export const FONT_MIN = 10
 export const FONT_MAX = 32
-export const FONT_DEFAULT = 14
 
 export function fontScale(size: number) {
   const s = Math.min(FONT_MAX, Math.max(FONT_MIN, Math.round(size)))

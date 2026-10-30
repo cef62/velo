@@ -56,10 +56,6 @@ pub const ACTIONS: [&str; 22] = [
 pub enum GlobalAction { ToggleWindow, Capture }
 
 impl Settings {
-    pub fn toggle_window_binding(&self) -> String {
-        self.shortcuts.get("toggle_window").cloned().unwrap_or_else(|| DEFAULT_TOGGLE.into())
-    }
-
     /// Every global shortcut with its binding ("none" = unset). Same rule as the UI's `resolve()`: an action left
     /// on its default yields to any saved binding of another action on that key (a default added by an upgrade).
     pub fn global_bindings(&self) -> Vec<(GlobalAction, String)> {
@@ -171,6 +167,9 @@ pub fn save(path: &Path, s: &Settings) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    impl Settings {
+        fn toggle_window_binding(&self) -> String { self.shortcuts.get("toggle_window").cloned().unwrap_or_else(|| DEFAULT_TOGGLE.into()) }
+    }
     #[test] fn settings_defaults_and_roundtrip() {
         let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");
         let s = load(&p); assert_eq!(s.toggle_window_binding(), "Mod+Shift+Space"); assert_eq!(s.layout, "vertical");

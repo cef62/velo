@@ -168,15 +168,13 @@ mod tests {
         fake_app(&data, std::process::id(), true);
         assert_eq!(call("merge_notes", serde_json::json!({"source": "a", "target": "b", "summary": "s"})), Ok(serde_json::json!({"fake": "merge_notes"})));
     }
-    #[test] fn busy_when_pid_alive_but_unreachable() {
+    #[test] fn direct_when_pid_alive_but_port_refused_stale_file() {
+        // a stale agent.json whose pid was reused: nothing listens, so there is no app to wait for
         let (_t, p, data, notes) = setup(true); fake_app(&data, std::process::id(), false); // listener dropped: port closed
         std::fs::write(notes.join("a.md"), "x").unwrap();
-        let call = gate(p, data.clone());
         let args = serde_json::json!({"title": "a", "text": "y", "summary": "s"});
-        let t = std::time::Instant::now();
-        assert_eq!(call("append_to_note", args), Err("velo is busy, retry".to_string()));
-        assert!(t.elapsed() >= std::time::Duration::from_secs(2));
-        assert_eq!(std::fs::read_to_string(notes.join("a.md")).unwrap(), "x");
+        assert!(gate(p, data)("append_to_note", args).is_ok());
+        assert_ne!(std::fs::read_to_string(notes.join("a.md")).unwrap(), "x");
     }
     #[test] fn busy_on_token_mismatch() {
         let (_t, p, data, _n) = setup(true); fake_app(&data, std::process::id(), true);
@@ -251,7 +249,10 @@ mod tests {
     /// again before going direct.
     #[test] fn off_while_retrying_is_refused_not_direct() {
         let (_t, p, data, notes) = setup(true); std::fs::write(notes.join("a.md"), "x").unwrap();
-        fake_app(&data, std::process::id(), false); // pid alive, port closed: forward retries
+        let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap(); // pid alive, listener never answers: forward retries
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join("agent.json"), serde_json::json!({"port": l.local_addr().unwrap().port(), "token": "t", "pid": std::process::id()}).to_string()).unwrap();
+        std::thread::spawn(move || for c in l.incoming() { drop(c) });
         let (p2, d2) = (p.clone(), data.clone());
         let t = std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(300));

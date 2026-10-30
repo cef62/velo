@@ -1,9 +1,10 @@
 import type { Settings } from "./api";
+import { FONT_MAX, FONT_MIN } from "./app/fontscale";
 import { NONE, eventToBinding, isAltGraph, overrides, validateBinding, type Action } from "./shortcuts";
 
 export function clampFont(raw: string, fallback: number): number {
   const n = Math.round(Number(raw));
-  return raw.trim() === "" || !Number.isFinite(n) ? fallback : Math.min(32, Math.max(10, n));
+  return raw.trim() === "" || !Number.isFinite(n) ? fallback : Math.min(FONT_MAX, Math.max(FONT_MIN, n));
 }
 
 export interface SettingsForm { layout: string; fontSize: string; sort: string; theme: string; headerLabels: boolean; writeFrontMatter: boolean; autoUpdateCheck: boolean; agentAccess: boolean; captureTarget: string; inboxTitle: string; connectionsSort: string; shortcuts: Record<Action, string> }
