@@ -22,6 +22,11 @@ export function SearchField({ controller, store }: { controller: Controller; sto
   const isMac = useStore(store, (s) => s.isMac);
   const capture = useStore(store, (s) => s.capture);
   const tasksMode = useStore(store, (s) => s.paneMode === "tasks");
+  // Timeline mode: ↑/↓ here move the timeline selection; the active row is announced through aria-activedescendant
+  const timelineOpt = useStore(store, (s) => {
+    const { rows, sel } = s.paneMode === "timeline" ? s.timeline : { rows: null, sel: null };
+    return rows?.length ? Math.max(0, rows.findIndex((r) => r.path === sel)) + 1 : 0;
+  });
   const hintsEl = useRef<HTMLSpanElement>(null);
   const [hintW, setHintW] = useState(0); // typed text must never run under the hints
   useLayoutEffect(() => {
@@ -44,6 +49,7 @@ export function SearchField({ controller, store }: { controller: Controller; sto
         aria-label={capture ? `Add a task to ${capture.target}` : "Search or create"}
         placeholder={capture ? `→ ${capture.target}` : "Search or create…"}
         value={query}
+        {...(timelineOpt && !capture ? { role: "combobox", "aria-expanded": true, "aria-controls": "timeline-list", "aria-activedescendant": `timeline-opt-${timelineOpt}` } : {})}
         style={hint.length ? { paddingRight: hintW + 14 } : undefined}
         spellCheck={false}
         autoComplete="off"

@@ -2692,3 +2692,50 @@ test("the timeline shows no error while the vault indexes", async () => {
   await settle();
   expect(store.get().timeline).toMatchObject({ rows: null, err: "" });
 });
+
+test("↑/↓ from the search field move the timeline selection; Enter opens it", async () => {
+  const { c, api, store } = setup();
+  api.timeline.mockResolvedValue([trow("A"), trow("B"), trow("C")]);
+  c.setPaneMode("timeline");
+  await settle();
+  const down = { ...key("ArrowDown"), key: "ArrowDown", inSearch: true };
+  const up = { ...key("ArrowUp"), key: "ArrowUp", inSearch: true };
+  expect(store.get().timeline.sel).toBeNull(); // none: Enter and the arrows start from the first row
+  expect(c.onKeyDown(down)).toBe(true);
+  expect(store.get().timeline.sel).toBe(P("B"));
+  c.onKeyDown(down);
+  c.onKeyDown(down); // stops at the last row
+  expect(store.get().timeline.sel).toBe(P("C"));
+  c.onKeyDown(up);
+  expect(store.get().timeline.sel).toBe(P("B"));
+  expect(store.get().openPath).toBeNull(); // moving never opens: a locked row would ask for the passphrase
+  await c.enter();
+  expect(store.get().openPath).toBe(P("B"));
+  // arrows outside the search field (segment groups, rows) keep their own meaning
+  expect(c.onKeyDown({ ...key("ArrowDown"), key: "ArrowDown" })).toBe(false);
+  expect(c.onKeyDown({ ...down, inEditor: true, inSearch: false })).toBe(false);
+});
+
+test("Enter in timeline mode falls back to the first row when the selection is gone", async () => {
+  const { c, api, store } = setup();
+  api.timeline.mockResolvedValue([trow("A"), trow("B")]);
+  c.setPaneMode("timeline");
+  await settle();
+  c.setTimelineSel(P("B"));
+  api.timeline.mockResolvedValue([trow("C"), trow("A")]);
+  c.setQuery("x");
+  await settle();
+  await c.enter();
+  expect(store.get().openPath).toBe(P("C"));
+});
+
+test("re-entering the timeline clears its selection", async () => {
+  const { c, api, store } = setup();
+  api.timeline.mockResolvedValue([trow("A"), trow("B")]);
+  c.setPaneMode("timeline");
+  await settle();
+  c.setTimelineSel(P("B"));
+  c.setPaneMode("notes");
+  c.setPaneMode("timeline");
+  expect(store.get().timeline.sel).toBeNull();
+});

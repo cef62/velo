@@ -77,7 +77,7 @@ export interface AppState {
   paneMode: "notes" | "tasks" | "connections" | "timeline"; // what the left pane lists
   connections: { centre: string; data: Connections | null; err: string } | null; // the Connections view; centre stays put while notes open from it
   connectionsSort: "ring" | "created" | "updated";
-  timeline: { rows: TimelineRow[] | null; by: "created" | "updated"; range: "7" | "30" | "all"; err: string }; // rows filtered like the list; range is not saved
+  timeline: { rows: TimelineRow[] | null; by: "created" | "updated"; range: "7" | "30" | "all"; err: string; sel: string | null }; // rows filtered like the list; range is not saved; sel = selected row path (none or gone = the first row)
   taskView: TaskView | null; // filtered by query/selectedTags like the notes list
   dueCount: number; // overdue + today, unfiltered: the Tasks switch count and the Dock badge
   showDone: boolean;
@@ -133,7 +133,7 @@ export const initialState = (isMac: boolean): AppState => ({
   connections: null,
   connectionsSort: "ring",
   noLinks: false,
-  timeline: { rows: null, by: "updated", range: "all", err: "" },
+  timeline: { rows: null, by: "updated", range: "all", err: "", sel: null },
   taskView: null,
   dueCount: 0,
   showDone: false,

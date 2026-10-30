@@ -39,6 +39,7 @@ export function TimelineView({ controller, store }: { controller: Controller; st
   const query = useStore(store, (s) => s.query);
   const tags = useStore(store, (s) => s.selectedTags);
   const noLinks = useStore(store, (s) => s.noLinks);
+  const listActive = useStore(store, (s) => s.listActive); // focus in the search field: ↑/↓ there move the selection
   // shortcut: day headers take a full row's height so the window math stays uniform; use per-item offsets if that looks too airy
   const rowH = rowHeight(fontSize, "horizontal");
   // shortcut: the day is read on render, so Today/Yesterday move past midnight only at the next render (scroll, reload, focus); add a midnight timer if that matters
@@ -50,9 +51,10 @@ export function TimelineView({ controller, store }: { controller: Controller; st
   const time = useMemo(() => new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }), []);
   const el = useRef<HTMLDivElement>(null);
   const [[a, b], setWin] = useState<[number, number]>([0, 0]);
-  const [cur, setCur] = useState(""); // path of the tab stop; the first row when it is gone
-  const focusCur = useRef(false); // ↑/↓ moved the stop: focus it once it is mounted
-  const stop = items.findIndex((it) => it.row?.path === cur) >= 0 ? cur : (items[1]?.row?.path ?? "");
+  const focusCur = useRef(false); // ↑/↓ on a row moved the stop: focus it once it is mounted
+  // the selection (from the search field or the rows) is the roving tab stop; the first row when none or gone
+  const stop = items.findIndex((it) => it.row?.path === tl.sel) >= 0 ? tl.sel! : (items[1]?.row?.path ?? "");
+  const setCur = (path: string) => controller.setTimelineSel(path);
   const stopIdx = items.findIndex((it) => it.row?.path === stop);
 
   const measure = () => {
@@ -68,12 +70,12 @@ export function TimelineView({ controller, store }: { controller: Controller; st
   }, [rowH, items.length]);
   useLayoutEffect(() => {
     const e = el.current;
-    if (e && focusCur.current && stopIdx >= 0) {
-      focusCur.current = false;
+    if (e && stopIdx >= 0) {
       const y = PAD + stopIdx * rowH;
       if (y - rowH - PAD < e.scrollTop) e.scrollTop = y - rowH - PAD; // keep its day header in view too
       else if (y + rowH + PAD > e.scrollTop + e.clientHeight) e.scrollTop = y + rowH + PAD - e.clientHeight;
-      e.querySelector<HTMLElement>(`[data-row="${stopIdx}"]`)?.focus({ preventScroll: true });
+      if (focusCur.current) e.querySelector<HTMLElement>(`[data-row="${stopIdx}"]`)?.focus({ preventScroll: true });
+      focusCur.current = false;
     }
     measure();
   }, [stopIdx, items.length, rowH]);
@@ -143,17 +145,18 @@ export function TimelineView({ controller, store }: { controller: Controller; st
           </div>
         ) : (
           <div style={{ padding: PAD }}>
-            <div role="listbox" aria-label="Timeline" onKeyDown={move} style={{ position: "relative", height: items.length * rowH }}>
+            <div role="listbox" id="timeline-list" aria-label="Timeline" onKeyDown={move} style={{ position: "relative", height: items.length * rowH }}>
               {idx.map((i) => {
                 const it = items[i];
                 const pos = { position: "absolute", left: 0, right: 0, top: i * rowH, height: rowH } as const;
                 if (!it.row) return <div key={`d${i}`} className={day} style={pos} aria-hidden>{it.label}</div>;
                 const r = it.row;
-                const c = listRow({ layout: "twoLine", state: r.path === openPath ? "selectedIdle" : "idle" });
+                const c = listRow({ layout: "twoLine", state: listActive && i === stopIdx ? "selected" : r.path === openPath ? "selectedIdle" : "idle" });
                 return (
                   <div
                     key={r.path}
                     role="option"
+                    id={`timeline-opt-${it.n}`} // the search field's aria-activedescendant
                     aria-selected={r.path === openPath}
                     aria-setsize={tl.rows?.length}
                     aria-posinset={it.n}

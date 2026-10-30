@@ -43,6 +43,7 @@ export type KeyEventLike = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctr
   getModifierState?: (k: string) => boolean; // pass it through so AltGr never fires a Mod+Alt binding off-mac
   inEditor: boolean;
   inSearchWithText: boolean;
+  inSearch?: boolean; // focus in the search field
   inDialog: boolean; // a dialog or the settings recorder owns the keys
   inRename: boolean;
 };
@@ -771,9 +772,9 @@ export class Controller {
     if (this.store.get().paneMode === "timeline") {
       // the list is stale here: Enter opens the first note shown, never creates one
       await settled(() => this.timelineLoading);
-      const first = this.store.get().timeline.rows?.[0];
+      const row = this.timelineRow();
       // the passphrase dialog keeps focus: only a note that really loaded takes it
-      if (first && (await this.show(first.path)) && this.editor.currentPath() === first.path) this.settleAfterOpen(false, "enter");
+      if (row && (await this.show(row.path)) && this.editor.currentPath() === row.path) this.settleAfterOpen(false, "enter");
       return;
     }
     await settled(() => this.searching);
@@ -1159,7 +1160,7 @@ export class Controller {
     if (m === "connections") return void this.showConnections();
     const into = m === "timeline" && this.store.get().paneMode !== "timeline";
     // re-entering: show loading, not rows of the filters the timeline last loaded with
-    this.store.set((s) => (into ? { paneMode: m, timeline: { ...s.timeline, rows: null } } : { paneMode: m }));
+    this.store.set((s) => (into ? { paneMode: m, timeline: { ...s.timeline, rows: null, sel: null } } : { paneMode: m }));
     if (m === "tasks") void this.loadTasks();
     else if (m === "timeline") void this.loadTimeline();
     else if (this.listStale) {
@@ -1185,6 +1186,24 @@ export class Controller {
       // while indexing: no error, the index-done refreshTitles reloads it
       if (fresh() && e !== "indexing") this.store.set((s) => ({ timeline: { ...s.timeline, rows: null, err: errText(e) } }));
     }
+  }
+
+  /** The selected timeline row; the first row when none is selected or it left the timeline. */
+  timelineRow() {
+    const { rows, sel } = this.store.get().timeline;
+    return rows?.find((r) => r.path === sel) ?? rows?.[0];
+  }
+
+  setTimelineSel(path: string) {
+    this.store.set((s) => ({ timeline: { ...s.timeline, sel: path } }));
+  }
+
+  /** ↑/↓ from the search field in Timeline mode: move the selection over the rows (day headers are not rows); never opens. */
+  stepTimeline(d: 1 | -1) {
+    const rows = this.store.get().timeline.rows ?? [];
+    const cur = this.timelineRow();
+    const i = moveSelection(cur ? rows.indexOf(cur) : -1, d, rows.length);
+    if (i >= 0) this.setTimelineSel(rows[i].path);
   }
 
   /** Notes changed: the shown timeline follows. */
@@ -1814,6 +1833,11 @@ export class Controller {
     const arrow = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
     if (notes && arrow && !e.inEditor) {
       void this.step(arrow);
+      return true;
+    }
+    // only from the search field: the timeline's segment groups and rows keep their own arrow keys
+    if (paneMode === "timeline" && arrow && e.inSearch) {
+      this.stepTimeline(arrow);
       return true;
     }
     for (const [action, run] of Object.entries(this.actions)) {
