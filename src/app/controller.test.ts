@@ -691,6 +691,18 @@ test("the badge ignores the search filter", async () => {
   expect(store.get().dueCount).toBe(4);
 });
 
+test("typing a search in Tasks does one scan; the badge is recomputed only on note changes", async () => {
+  const { c, api } = setup();
+  c.setPaneMode("tasks");
+  await settle();
+  api.tasks.mockClear();
+  c.setQuery("x");
+  await settle();
+  expect(api.tasks).toHaveBeenCalledTimes(1);
+  await c.onNotesChanged([]);
+  expect(api.tasks).toHaveBeenCalledTimes(3); // view + unfiltered badge scan
+});
+
 test("search and tags are shared between modes", async () => {
   const { c, api } = setup();
   c.setPaneMode("tasks");
@@ -1938,14 +1950,38 @@ test("link it is an isolated undo step and skips a different note with the same 
   expect(editor.isolated).toEqual([true]);
 });
 
-test("link targets load on refreshTitles and editor focus", async () => {
+test("link targets load on refreshTitles, not on every editor focus", async () => {
   const { c, api } = setup();
   await c.start();
   await settle();
   expect(api.listLinkTargets).toHaveBeenCalledTimes(1);
-  c.editorOpts().onFocus();
+  expect(c.editorOpts()).not.toHaveProperty("onFocus");
+});
+
+test("every path that changes titles refreshes link targets", async () => {
+  const { c, api } = setup({ A: "a", B: "b" });
+  await c.runSearch(true);
   await settle();
-  expect(api.listLinkTargets).toHaveBeenCalledTimes(2);
+  const refreshed = async (what: () => Promise<unknown>) => {
+    api.listLinkTargets.mockClear();
+    await what();
+    await settle();
+    expect(api.listLinkTargets).toHaveBeenCalled();
+  };
+  await refreshed(() => c.createLinked("New"));
+  await refreshed(() => c.onNotesChanged([]));
+  await refreshed(async () => {
+    await c.select(0);
+    api.lockNote.mockResolvedValueOnce(P("A") + ".age");
+    await c.toggleLock();
+  });
+  await refreshed(async () => {
+    await c.select(1);
+    c.startRename();
+    api.renameNote.mockResolvedValueOnce({ path: P("Z"), rewritten: 0 });
+    api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "b", hash: "h", encrypted: false, meta: noMeta });
+    await c.commitRename("Z");
+  });
 });
 
 test("createLinked creates an empty note and keeps the open note", async () => {

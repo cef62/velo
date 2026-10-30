@@ -66,7 +66,6 @@ export type EditorOpts = {
   rich?: RichOpts;
   /** `[[` autocomplete over these link targets. */
   complete?: CompleteSource;
-  onFocus?: () => void;
 };
 
 // Marks the stamped-dates change of a save: not a user edit (no dirty, no new save).
@@ -96,7 +95,6 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       opts.complete ? writingCompletions(opts.complete) : [],
       // an open popup takes Escape itself: close it, keep focus in the editor
       keymap.of([{ key: "Escape", run: (v) => completionStatus(v.state) === null && (opts.onEscape?.(), true) }]),
-      EditorView.domEventHandlers({ focus: () => opts.onFocus?.() }),
       EditorView.updateListener.of((u) => {
         if (!u.docChanged) return;
         opts.onChange?.(); // also fires on load so the preview follows note switches
