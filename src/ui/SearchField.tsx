@@ -34,7 +34,7 @@ export function SearchField({ controller, store }: { controller: Controller; sto
   const tasksMode = useStore(store, (s) => s.paneMode === "tasks");
   const chipsRef = useRef<Chip[]>([]); // useStore needs a stable reference: keep the last array while its chips are the same
   const chips = useStore(store, (s) => {
-    const next = chipsFor(s.savedSearches, { query: s.query, tags: s.selectedTags, noLinks: s.noLinks });
+    const next = chipsFor(s.savedSearches, s.appliedSaved, { query: s.query, tags: s.selectedTags, noLinks: s.noLinks });
     return sameChips(chipsRef.current, next) ? chipsRef.current : (chipsRef.current = next);
   });
   // Timeline mode: ↑/↓ here move the timeline selection, announced through aria-activedescendant
@@ -57,12 +57,14 @@ export function SearchField({ controller, store }: { controller: Controller; sto
     });
     for (const e of [wrapEl.current, hintsEl.current, measureEl.current, chipsEl.current]) if (e) ro.observe(e);
     return () => ro.disconnect();
-  });
-  const layout = chipLayout(fieldW, widths, query !== "");
+  }, [chips.length, capture]); // the measuring row (re)mounts with the chips
+  // the room for chips and text: the field minus the icon inset and the right-hand ×; widths lag one render behind a chip change
+  const layout = widths.length === chips.length ? chipLayout(fieldW - 36 - 28, widths, query !== "") : { shown: chips.length, folded: 0, collapse: false };
   const hintRoom = showSearchHint(useWindowWidth()); // the ⌘L hint goes first on narrow windows
   // Tasks mode: Enter opens a task, so the Create hints don't apply; with chips the ⌘L hint gives way to the ×
   const hint = capture || tasksMode || (query === "" && (!hintRoom || chips.length > 0)) ? [] : searchHint({ query, sel, exactTitleMatch, keys, isMac });
   const Icon = capture ? SquareCheck : Search;
+  const focusInput = () => wrapEl.current?.querySelector("input")?.focus(); // a removed chip took the focus with it
   const openFilters = () => {
     controller.showTags(true);
     requestAnimationFrame(() => document.querySelector<HTMLElement>("#filters-panel [data-tags] button")?.focus());
@@ -71,7 +73,7 @@ export function SearchField({ controller, store }: { controller: Controller; sto
     <span key={`${c.kind}:${c.label}`} className={searchChip({ kind: c.kind === "saved" ? "saved" : "tag" })} data-chip={i}>
       {c.kind === "saved" && <Bookmark aria-hidden style={{ marginRight: 3 }} />}
       {c.label}
-      <button type="button" aria-label={`Remove ${c.kind === "saved" ? "saved search " : ""}${c.label}`} onClick={() => controller.removeFilterChip(c)}>
+      <button type="button" aria-label={`Remove ${c.kind === "saved" ? "saved search " : ""}${c.label}`} onClick={() => (controller.removeFilterChip(c), focusInput())}>
         <X aria-hidden />
       </button>
     </span>
@@ -89,7 +91,7 @@ export function SearchField({ controller, store }: { controller: Controller; sto
           <span ref={chipsEl} className={chipRow}>
             {shown.map(chip)}
             {more && (
-              <button type="button" className={searchChip({ kind: "more" })} aria-label={`${all}. Open Filters`} onClick={openFilters}>
+              <button type="button" className={searchChip({ kind: "more" })} aria-label={`${layout.collapse ? chips.length : layout.folded} ${layout.collapse ? "filters" : "more filters"}: ${layout.collapse ? all : chips.slice(layout.shown).map((c) => c.label).join(", ")}. Open Filters`} onClick={openFilters}>
                 {more}
               </button>
             )}
@@ -142,7 +144,7 @@ export function SearchField({ controller, store }: { controller: Controller; sto
           </Kbd>
         ))}
         {hasChips && !hint.length && (
-          <button type="button" className={clear} aria-label="Clear filters" onClick={() => controller.clearFilterChips()}>
+          <button type="button" className={clear} aria-label="Clear filters" onClick={() => (controller.clearFilterChips(), focusInput())}>
             <X aria-hidden />
           </button>
         )}

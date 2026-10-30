@@ -310,7 +310,9 @@ test("removeFilterChip drops the last chip, a saved chip as one; clearFilterChip
   c.removeFilterChip({ kind: "tag", label: "#work", tag: "work" });
   expect(store.get().selectedTags).toEqual(["idea"]);
   c.applySaved("w");
-  expect(store.get()).toMatchObject({ query: "todo", selectedTags: ["work"] });
+  expect(store.get()).toMatchObject({ query: "todo", selectedTags: ["work"], appliedSaved: "w" });
+  c.setQuery("todo list"); // typing narrows the applied search: still one chip
+  expect(store.get().appliedSaved).toBe("w");
   c.removeFilterChip(); // the saved chip clears as one, text included
   expect(store.get()).toMatchObject({ query: "", selectedTags: [], noLinks: false });
   c.applySaved("w");
@@ -319,6 +321,9 @@ test("removeFilterChip drops the last chip, a saved chip as one; clearFilterChip
   c.setTags(["x"]);
   c.clearFilterChips();
   expect(store.get().selectedTags).toEqual([]);
+  c.applySaved("w");
+  c.setTags(["work", "idea"]); // a tag change ends the applied search
+  expect(store.get().appliedSaved).toBeNull();
 });
 
 test("a slow auto-show doesn't replace the note Enter just opened", async () => {
