@@ -16,7 +16,7 @@ export function FilterLine({ controller, store }: { controller: Controller; stor
       <Button variant="plain" size="2xs" h="22px" fontSize="uiSm" onClick={() => controller.clearFilters()}>
         Clear
       </Button>
-      <Button variant="plain" size="2xs" h="22px" fontSize="uiSm" onClick={() => controller.startSaveSearch()}>
+      <Button variant="plain" size="2xs" h="22px" fontSize="uiSm" disabled={s.capture !== null} onClick={() => controller.startSaveSearch()}>
         Save search…
       </Button>
       <span style={{ marginLeft: "auto" }}>{s.total} notes</span>

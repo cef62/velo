@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { css } from "styled-system/css";
 import { tagChip } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
@@ -25,7 +25,19 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
   const query = useStore(store, (s) => s.query);
   const saved = useStore(store, (s) => s.savedSearches);
   const group = useRef<HTMLDivElement>(null);
+  const capture = useStore(store, (s) => s.capture !== null);
   const [cur, setCur] = useState(0); // roving tab stop: Tab enters the group once, arrows move inside
+  const k = saved.length; // one roving sequence: saved chips, No links, tag chips
+  const menuAt = useRef<number | null>(null); // the saved chip whose menu opened last
+  // Deleting the focused last chip drops focus to <body>: move it to the chip now at that place, the one before, or No links.
+  useEffect(() => {
+    const i = menuAt.current;
+    menuAt.current = null;
+    if (i === null || document.activeElement !== document.body || !group.current) return;
+    const to = k === 0 ? 0 : Math.min(i, k - 1);
+    setCur(to);
+    group.current.querySelectorAll<HTMLButtonElement>("button")[to]?.focus();
+  }, [k]);
   if (!tagPanelOpen) return null;
   const move = (to: number) => {
     const btns = group.current!.querySelectorAll<HTMLButtonElement>("button");
@@ -34,9 +46,8 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
     btns[i]?.focus();
   };
   const close = formatBinding(keys.toggle_tags, isMac);
-  const k = saved.length; // one roving sequence: saved chips, No links, tag chips
   const stop = (i: number) => (i === Math.min(cur, k + tags.length) ? 0 : -1);
-  const filtered = query.trim() !== "" || selectedTags.length > 0 || noLinks;
+  const filtered = !capture && (query.trim() !== "" || selectedTags.length > 0 || noLinks); // capture text is not a search
   return (
     <section
       id="tag-panel"
@@ -85,7 +96,7 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
               const on = sameFilters(x, { query, tags: selectedTags, noLinks });
               return (
                 <button
-                  key={x.name}
+                  key={i} // index keys: a rename or delete keeps the focused node, so focus stays on that place
                   type="button"
                   data-saved
                   className={tagChip({ selected: on }).root}
@@ -95,11 +106,13 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
                   onClick={() => controller.applySaved(x.name)}
                   onContextMenu={(e) => {
                     e.preventDefault();
+                    menuAt.current = i;
                     void controller.savedMenu(x.name, false);
                   }}
                   onKeyDown={(e) => {
                     if (!isMenuKey(e.nativeEvent)) return;
                     e.preventDefault();
+                    menuAt.current = i;
                     void controller.savedMenu(x.name, true);
                   }}
                 >

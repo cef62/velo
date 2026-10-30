@@ -1109,6 +1109,7 @@ export class Controller {
 
   /** A chip's native menu. `atChip`: anchor at the focused chip (keyboard) instead of the cursor. */
   async savedMenu(name: string, atChip: boolean) {
+    // ids reuse MenuAction values: a new id would break openContextMenu's exhaustive record; they only name the native items
     const items: MenuSpec[] = [
       { id: "rename", text: "Rename…", action: () => this.store.set({ saveSearch: { name, err: "", confirmReplace: false, renaming: name } }) },
       { id: "delete_note", text: "Delete", action: () => void this.deleteSaved(name) },
