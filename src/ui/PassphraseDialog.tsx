@@ -20,12 +20,12 @@ export function PassphraseDialog() {
   const [req, setReq] = useState<Req | null>(null);
   const [n, setN] = useState(0); // a new request remounts the inline field: fresh text, error and focus
   const done = useRef<((ok: boolean) => void) | null>(null);
+  const finish = (ok: boolean) => {
+    done.current?.(ok);
+    done.current = null;
+    setReq(null);
+  };
   useEffect(() => {
-    const finish = (ok: boolean) => {
-      done.current?.(ok);
-      done.current = null;
-      setReq(null);
-    };
     registerPassphrase(
       (r) =>
         new Promise<boolean>((resolve) => {
@@ -37,11 +37,6 @@ export function PassphraseDialog() {
       () => finish(false),
     );
   }, []);
-  const finish = (ok: boolean) => {
-    done.current?.(ok);
-    done.current = null;
-    setReq(null);
-  };
   if (req?.mode === "unlock" && req.inline) return <LockScreen key={n} req={req} finish={finish} />;
   return (
     <Dialog.Root open={req !== null} onOpenChange={(d) => !d.open && finish(false)} role="dialog" closeOnInteractOutside={false}>
