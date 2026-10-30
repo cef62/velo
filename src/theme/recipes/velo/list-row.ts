@@ -18,6 +18,7 @@ export const listRow = defineSlotRecipe({
       minWidth: '0',
       boxSizing: 'border-box',
       cursor: 'default',
+      userSelect: 'none', // a text selection over the selected row would hide its white title (light: 1.4:1)
       // keyboard cursor when the list itself has focus (roving tabindex)
       _focusVisible: { outline: '2px solid', outlineColor: 'velo.accent', outlineOffset: '-2px' },
     },

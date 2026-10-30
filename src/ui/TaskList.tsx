@@ -23,6 +23,7 @@ const row = css({
   fontSize: "var(--velo-list-fs)",
   lineHeight: "1.2",
   cursor: "default",
+  userSelect: "none",
   minW: "0",
   _hover: { bg: "velo.subtle" },
   _focusVisible: { outline: "2px solid", outlineColor: "velo.accent", outlineOffset: "-2px" },
