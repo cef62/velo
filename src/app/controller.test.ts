@@ -2530,7 +2530,7 @@ test("the export action opens the export dialog", async () => {
   expect(store.get().exporting?.counts).toEqual(counts(1));
 });
 
-test("PDF export renders the export into the print container, prints once, then closes", async () => {
+test("PDF export renders the export into the print container, prints once, closes, and keeps the container until the next export or afterprint", async () => {
   const { c, api, ui, store } = setup();
   api.exportPreview.mockResolvedValue(counts(1));
   api.exportText.mockResolvedValueOnce("# Hi\n\nSee [[B]] #proj");
@@ -2549,8 +2549,14 @@ test("PDF export renders the export into the print container, prints once, then 
   expect(atPrint).not.toContain('href="#"');
   expect(api.printPage).toHaveBeenCalledTimes(1);
   expect(api.exportMarkdown).not.toHaveBeenCalled();
-  expect(store.get().printHtml).toBeNull();
+  // macOS print() returns while the sheet is still laying out: the container must outlive it
+  expect(store.get().printHtml).toBe(atPrint);
   expect(store.get().exporting).toBeNull();
+  await c.startExport();
+  expect(store.get().printHtml).toBeNull();
+  store.set({ printHtml: "<p>x</p>" });
+  c.printDone();
+  expect(store.get().printHtml).toBeNull();
 });
 
 test("PDF export: a print failure keeps the dialog open with the error and clears the print container", async () => {

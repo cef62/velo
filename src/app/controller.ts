@@ -1217,8 +1217,13 @@ export class Controller {
   /** Export…: always what the timeline shows, so other panes switch to it first. */
   startExport(): Promise<void> {
     if (this.store.get().paneMode !== "timeline") this.setPaneMode("timeline");
-    this.store.set({ exporting: { counts: null, format: "md", tasksOnly: false, err: "", pending: false } });
+    this.store.set({ exporting: { counts: null, format: "md", tasksOnly: false, err: "", pending: false }, printHtml: null });
     return this.loadExportPreview();
+  }
+
+  /** The window's afterprint: the print container is no longer needed. */
+  printDone() {
+    this.store.set({ printHtml: null });
   }
 
   protected readonly newExportReq = latest();
@@ -1259,7 +1264,8 @@ export class Controller {
         this.store.set({ printHtml: html });
         await this.ui.nextFrame();
         await this.api.printPage();
-        this.store.set({ printHtml: null, exporting: null });
+        // macOS print() returns as soon as the sheet opens, before WebKit lays the page out; the container stays until printDone or the next export
+        this.store.set({ exporting: null });
       } catch (e) {
         this.store.set({ printHtml: null });
         update({ pending: false, err: errText(e) });

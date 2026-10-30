@@ -97,7 +97,7 @@ export function App({ controller, store }: { controller: Controller; store: Stor
       <SaveSearchDialog controller={controller} store={store} />
       <ExportDialog controller={controller} store={store} />
       <PassphraseDialog />
-      <PrintHost store={store} />
+      <PrintHost controller={controller} store={store} />
     </div>
   );
 }
