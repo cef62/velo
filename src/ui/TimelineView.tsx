@@ -41,10 +41,12 @@ export function TimelineView({ controller, store }: { controller: Controller; st
   const noLinks = useStore(store, (s) => s.noLinks);
   // shortcut: day headers take a full row's height so the window math stays uniform; use per-item offsets if that looks too airy
   const rowH = rowHeight(fontSize, "horizontal");
+  // shortcut: the day is read on render, so Today/Yesterday move past midnight only at the next render (scroll, reload, focus); add a midnight timer if that matters
+  const today = new Date().toDateString();
   const items = useMemo(() => {
     let n = 0;
     return groupByDay(tl.rows ?? [], new Date()).flatMap((g): Item[] => [{ label: g.label }, ...g.rows.map((row) => ({ label: g.label, row, n: ++n }))]);
-  }, [tl.rows]);
+  }, [tl.rows, today]);
   const time = useMemo(() => new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }), []);
   const el = useRef<HTMLDivElement>(null);
   const [[a, b], setWin] = useState<[number, number]>([0, 0]);

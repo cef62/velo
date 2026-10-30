@@ -2396,7 +2396,7 @@ test("the timeline loads with the filters, the saved sort and no range", async (
 });
 
 test("a filter change in timeline mode reloads the timeline, not the list", async () => {
-  const { c, api, store } = setup();
+  const { c, api, store, editor } = setup();
   c.setPaneMode("timeline");
   await settle();
   api.search.mockClear();
@@ -2406,8 +2406,10 @@ test("a filter change in timeline mode reloads the timeline, not the list", asyn
   expect(api.search).not.toHaveBeenCalled();
   api.timeline.mockResolvedValue([trow("B")]);
   c.setQuery("bb");
+  const focused = editor.focused;
   await c.enter(); // the stale list is never used: the first timeline row opens
   expect(store.get().openPath).toBe(P("B"));
+  expect(editor.focused).toBe(focused + 1); // like Tasks: focus moves to the opened note
 });
 
 test("an older timeline reply landing last is dropped", async () => {

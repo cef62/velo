@@ -772,7 +772,8 @@ export class Controller {
       // the list is stale here: Enter opens the first note shown, never creates one
       await settled(() => this.timelineLoading);
       const first = this.store.get().timeline.rows?.[0];
-      if (first) await this.show(first.path);
+      // the passphrase dialog keeps focus: only a note that really loaded takes it
+      if (first && (await this.show(first.path)) && this.editor.currentPath() === first.path) this.editor.focus();
       return;
     }
     await settled(() => this.searching);
