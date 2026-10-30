@@ -31,8 +31,8 @@ const writingTheme = EditorView.theme({
   ".cm-scroller": { fontFamily: '"Inter Variable", Inter, system-ui, -apple-system, "Segoe UI", sans-serif', lineHeight: "1.7" },
   ".cm-content": { maxWidth: "46em", margin: "0 auto", padding: "28px 40px 40px", caretColor: v("accent") },
   ".cm-cursor, .cm-dropCursor": { borderLeftColor: v("accent") },
-  ".cm-selectionBackground, &.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground": { background: v("selection-idle") },
-  ".cm-selectionMatch": { background: v("accent-halo") },
+  ".cm-selectionBackground, &.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground": { background: v("accent-subtle-hover") },
+  ".cm-selectionMatch": { background: v("accent-halo"), boxShadow: `inset 0 -1px 0 ${v("accent-line")}` }, // grays alone are too close to the selection
   ".cm-panels": { background: v("chrome"), color: v("fg"), borderColor: v("divider") },
   // Autocomplete popup; `&.cm-editor` outranks the base theme's &light/&dark row colors.
   "&.cm-editor .cm-tooltip.cm-tooltip-autocomplete": { background: v("panel"), color: v("fg"), border: `1px solid ${v("border")}`, borderRadius: "6px", overflow: "hidden" },

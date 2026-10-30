@@ -6,8 +6,8 @@ export const globalCss = {
     '*': {
       '--global-color-border': 'colors.border',
       '--global-color-placeholder': 'colors.fg.subtle',
-      '--global-color-selection': 'colors.colorPalette.subtle.bg',
-      '--global-color-focus-ring': 'colors.colorPalette.solid.bg',
+      '--global-color-selection': 'colors.velo.accentSubtleHover', // gray.a3 on canvas is ~1.1:1: too faint
+      '--global-color-focus-ring': 'colors.velo.accent', // one ring colour for Park and velo controls
     },
     html: {
       colorPalette: 'gray',
