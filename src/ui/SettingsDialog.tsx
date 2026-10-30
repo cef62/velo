@@ -248,7 +248,8 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
             <p className={help}>{recMsg || "Click a key-cap, then press the new combination. Esc cancels, ⌫ clears."}</p>
             <Button variant="plain" size="xs" className={css({ ml: "auto" })} onClick={() => set({ shortcuts: { ...DEFAULTS } })}><RotateCcw /> Reset all</Button>
           </div>
-          <div className={css({ border: "1px solid", borderColor: "velo.divider", borderRadius: "8px", overflow: "hidden" })}>
+          {/* flex: none: as a shrinkable flex item with overflow:hidden it would squeeze to the tab's maxH and clip the rows, leaving the tab nothing to scroll */}
+          <div className={css({ flex: "none", border: "1px solid", borderColor: "velo.divider", borderRadius: "8px", overflow: "hidden" })}>
             <table className={css({ w: "100%", borderCollapse: "collapse", fontSize: "ui" })}>
               <thead>
                 <tr><th className={th}>Action</th><th className={th} style={{ width: 150 }}>Shortcut</th><th className={th} style={{ width: 76 }}><span className={css({ srOnly: true })}>Reset</span></th></tr>

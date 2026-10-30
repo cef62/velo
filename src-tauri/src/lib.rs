@@ -2,6 +2,7 @@ pub mod agent;
 pub mod commands;
 pub mod connections;
 pub mod crypto;
+pub mod export;
 pub mod frontmatter;
 pub mod index;
 pub mod log;
@@ -137,6 +138,11 @@ pub fn run() {
             commands::set_settings,
             commands::index_status,
             commands::search,
+            commands::timeline,
+            commands::export_preview,
+            commands::export_text,
+            commands::export_markdown,
+            commands::print_page,
             commands::list_tags,
             commands::list_titles,
             commands::list_link_targets,

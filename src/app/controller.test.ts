@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import type { Page, TaskItem, TaskView } from "../api";
+import type { Page, TaskItem, TaskView, TimelineRow } from "../api";
 import { Controller, INVALID_TITLE, type KeyEventLike } from "./controller";
 import { emptyConnections, FakeEditor, FakePreview, deferred, fakeApi, fakeUi, hit, noMeta, settle } from "./fakes";
 import { createStore, initialState } from "./store";
@@ -444,6 +444,28 @@ test("onKeyDown: none binding never fires; Backspace combo skipped in editor; ar
   expect(c.onKeyDown(key("KeyS", { meta: true, shift: true }))).toBe(true); // toggle_sort
   await settle();
   expect(api.setSettings).toHaveBeenCalledWith(expect.objectContaining({ sort: "title" }));
+});
+
+test("the context-menu key follows the saved context_menu binding; the ContextMenu key always works", async () => {
+  const { c, store, calls } = setup();
+  await c.runSearch(true);
+  await settle();
+  const menus = () => calls.filter((x) => x[0] === "popupMenu").length;
+  const f10 = { ...key("F10", { shift: true }), key: "F10" };
+  expect(c.onKeyDown(f10)).toBe(true); // default Shift+F10
+  await settle();
+  expect(menus()).toBe(1);
+  store.set({ keys: { ...store.get().keys, context_menu: "Mod+KeyM" } });
+  expect(c.onKeyDown(f10)).toBe(false);
+  expect(c.onKeyDown(key("KeyM", { meta: true }))).toBe(true);
+  await settle();
+  expect(menus()).toBe(2);
+  expect(c.onKeyDown(key("KeyM", { meta: true }, { inEditor: true }))).toBe(false); // never a command in the editor
+  store.set({ keys: { ...store.get().keys, context_menu: "none" } });
+  expect(c.onKeyDown(f10)).toBe(false);
+  expect(c.onKeyDown({ ...key("ContextMenu"), key: "ContextMenu" })).toBe(true);
+  await settle();
+  expect(menus()).toBe(3);
 });
 
 test("saveSettings maps not-found to Folder not found", async () => {
@@ -2281,4 +2303,459 @@ test("merge refuses encrypted", async () => {
   await c.startMerge();
   expect(store.get().merge).toBeNull();
   expect(store.get().err).toBe("Open a note to merge");
+});
+
+async function savedSetup() {
+  const t = setup();
+  let saved = await t.api.getSettings();
+  t.api.getSettings.mockImplementation(async () => ({ ...saved }));
+  t.api.setSettings.mockImplementation(async (s) => void (saved = s));
+  return { ...t, saved: () => saved.saved_searches };
+}
+
+test("save search does nothing without filters", () => {
+  const { c, store } = setup();
+  c.startSaveSearch();
+  expect(store.get().saveSearch).toBeNull();
+});
+
+test("a saved search applies query, tags and No links", async () => {
+  const { c, api, store, saved } = await savedSetup();
+  c.setQuery("velo");
+  c.setTags(["proj"]);
+  c.setNoLinks(true);
+  c.startSaveSearch();
+  expect(store.get().saveSearch).toEqual({ name: "velo", err: "", confirmReplace: false });
+  await c.commitSaveSearch("w");
+  expect(store.get().saveSearch).toBeNull();
+  expect(api.setSettings).toHaveBeenCalledWith(expect.objectContaining({ saved_searches: [{ name: "w", query: "velo", tags: ["proj"], no_links: true }] }));
+  expect(saved()).toHaveLength(1);
+  c.clearFilters();
+  c.setQuery("");
+  c.applySaved("w");
+  await settle();
+  expect(store.get()).toMatchObject({ query: "velo", selectedTags: ["proj"], noLinks: true });
+  expect(api.search).toHaveBeenLastCalledWith("velo", "modified", 0, ["proj"], true);
+});
+
+test("saving over an existing name asks first", async () => {
+  const { c, api, store, saved } = await savedSetup();
+  c.setQuery("a");
+  c.startSaveSearch();
+  await c.commitSaveSearch("Velo");
+  c.setQuery("b");
+  c.startSaveSearch();
+  api.setSettings.mockClear();
+  await c.commitSaveSearch("velo");
+  expect(store.get().saveSearch).toMatchObject({ name: "velo", confirmReplace: true });
+  expect(api.setSettings).not.toHaveBeenCalled();
+  await c.commitSaveSearch("velo");
+  expect(store.get().saveSearch).toBeNull();
+  expect(saved()).toEqual([{ name: "velo", query: "b", tags: [], no_links: false }]);
+});
+
+test("a blank or long name is refused", async () => {
+  const { c, api, store } = setup();
+  c.setQuery("a");
+  c.startSaveSearch();
+  await c.commitSaveSearch("   ");
+  expect(store.get().saveSearch?.err).toBe("Name required");
+  await c.commitSaveSearch("x".repeat(61));
+  expect(store.get().saveSearch?.err).toBe("Name too long (60 characters at most)");
+  expect(api.setSettings).not.toHaveBeenCalled();
+});
+
+test("applying the current saved search clears the filters", async () => {
+  const { c, store } = await savedSetup();
+  c.setQuery("velo");
+  c.setTags(["proj"]);
+  c.startSaveSearch();
+  await c.commitSaveSearch("w");
+  c.applySaved("w");
+  expect(store.get()).toMatchObject({ query: "", selectedTags: [], noLinks: false });
+});
+
+test("saved search menu renames and deletes", async () => {
+  const { c, store, menus, answers, calls, saved } = await savedSetup();
+  c.setQuery("a");
+  c.startSaveSearch();
+  await c.commitSaveSearch("w");
+  await c.savedMenu("w", true);
+  expect(calls.some((x) => x[0] === "focusAnchor")).toBe(true); // keyboard: anchored at the chip
+  const items = menus[menus.length - 1].items as { text: string; action: () => void }[];
+  expect(items.map((m) => m.text)).toEqual(["Rename…", "Delete"]);
+  items[0].action();
+  expect(store.get().saveSearch).toEqual({ name: "w", err: "", confirmReplace: false, renaming: "w" });
+  await c.commitSaveSearch("x");
+  expect(saved()).toEqual([{ name: "x", query: "a", tags: [], no_links: false }]);
+  answers.confirm = false;
+  await c.deleteSaved("x");
+  expect(saved()).toHaveLength(1);
+  answers.confirm = true;
+  await c.deleteSaved("x");
+  expect(calls.some((x) => x[0] === "confirm")).toBe(true);
+  expect(saved()).toEqual([]);
+  expect(store.get().savedSearches).toEqual([]);
+});
+
+const trow = (title: string): TimelineRow => ({ path: P(title), title, date: 0, snippet: "", locked: false });
+
+test("the timeline loads with the filters, the saved sort and no range", async () => {
+  const { c, api, store } = setup();
+  api.getSettings.mockResolvedValue({ ...(await api.getSettings()), timeline_sort: "created" });
+  await c.start();
+  c.setQuery("a");
+  c.setTags(["t"]);
+  c.setNoLinks(true);
+  api.timeline.mockResolvedValue([trow("A")]);
+  c.setPaneMode("timeline");
+  await settle();
+  expect(api.timeline).toHaveBeenLastCalledWith("a", ["t"], true, "created", null);
+  expect(store.get()).toMatchObject({ paneMode: "timeline", timeline: { rows: [trow("A")], by: "created", range: "all", err: "" } });
+  c.setTimelineRange("7");
+  await settle();
+  expect(api.timeline.mock.lastCall?.[4]).toBeTypeOf("number");
+});
+
+test("a filter change in timeline mode reloads the timeline, not the list", async () => {
+  const { c, api, store, editor } = setup();
+  c.setPaneMode("timeline");
+  await settle();
+  api.search.mockClear();
+  c.setQuery("b");
+  await settle();
+  expect(api.timeline).toHaveBeenLastCalledWith("b", [], false, "updated", null);
+  expect(api.search).not.toHaveBeenCalled();
+  api.timeline.mockResolvedValue([trow("B")]);
+  c.setQuery("bb");
+  const focused = editor.focused;
+  await c.enter(); // the stale list is never used: the first timeline row opens
+  expect(store.get().openPath).toBe(P("B"));
+  expect(editor.focused).toBe(focused + 1); // like Tasks: focus moves to the opened note
+});
+
+test("an older timeline reply landing last is dropped", async () => {
+  const { c, api, store } = setup();
+  const d1 = deferred<TimelineRow[]>();
+  const d2 = deferred<TimelineRow[]>();
+  api.timeline.mockImplementationOnce(() => d1.promise).mockImplementationOnce(() => d2.promise);
+  c.setPaneMode("timeline");
+  c.setQuery("b");
+  d2.resolve([trow("B")]);
+  await settle();
+  d1.resolve([trow("A")]);
+  await settle();
+  expect(store.get().timeline.rows).toEqual([trow("B")]);
+});
+
+test("the timeline sort is saved and reloads", async () => {
+  const { c, api, store } = await savedSetup();
+  c.setPaneMode("timeline");
+  await c.setTimelineBy("created");
+  await settle();
+  expect(api.setSettings).toHaveBeenCalledWith(expect.objectContaining({ timeline_sort: "created" }));
+  expect(store.get().timeline.by).toBe("created");
+  expect(api.timeline).toHaveBeenLastCalledWith("", [], false, "created", null);
+});
+
+test("a note saved, renamed or deleted reloads the timeline", async () => {
+  const { c, api } = setup();
+  await c.runSearch(true);
+  await settle();
+  c.setPaneMode("timeline");
+  await settle();
+  api.timeline.mockClear();
+  c.editorOpts().onSaved();
+  await new Promise((r) => setTimeout(r, 350));
+  expect(api.timeline).toHaveBeenCalledTimes(1);
+  api.renameNote.mockResolvedValueOnce({ path: P("Z"), rewritten: 0 });
+  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta });
+  c.startRename();
+  await c.commitRename("Z");
+  expect(api.timeline).toHaveBeenCalledTimes(2);
+  await c.deleteNote();
+  expect(api.timeline).toHaveBeenCalledTimes(3);
+});
+
+const counts = (notes: number) => ({ notes, open: 0, done: 0, locked: 0, over_limit: 0, no_tasks: 0, unreadable: 0 });
+
+test("export from the notes pane switches to the timeline and previews its date and range", async () => {
+  const { c, api, store } = setup();
+  api.exportPreview.mockResolvedValue(counts(3));
+  c.setQuery("a");
+  await c.setTimelineRange("7");
+  store.set({ paneMode: "notes" });
+  await c.startExport();
+  expect(store.get().paneMode).toBe("timeline");
+  expect(api.exportPreview).toHaveBeenCalledTimes(1);
+  expect(api.exportPreview.mock.lastCall?.[0]).toMatchObject({ query: "a", tags: [], no_links: false, by: "updated", tasks_only: false, title: "a" });
+  expect(api.exportPreview.mock.lastCall?.[0].since_ms).toBeTypeOf("number");
+  expect(store.get().exporting).toEqual({ counts: counts(3), format: "md", tasksOnly: false, err: "", pending: false });
+});
+
+test("Markdown export asks where to save, then writes there; a cancelled save writes nothing", async () => {
+  const { c, api, ui, store } = setup();
+  api.exportPreview.mockResolvedValue(counts(2));
+  store.set({ selectedTags: ["proj"] });
+  c.setQuery("velo");
+  await c.startExport();
+  const save = vi.spyOn(ui, "saveFile").mockResolvedValueOnce(null);
+  await c.commitExport(true);
+  expect(save).toHaveBeenCalledWith(`#proj velo ${localToday()}.md`);
+  expect(api.exportMarkdown).not.toHaveBeenCalled();
+  expect(store.get().exporting).toMatchObject({ pending: false });
+  save.mockResolvedValueOnce("/out/x.md");
+  await c.commitExport(true);
+  expect(api.exportMarkdown).toHaveBeenCalledWith("/out/x.md", expect.objectContaining({ query: "velo", tags: ["proj"], tasks_only: false, title: "#proj velo" }));
+  expect(store.get().exporting).toBeNull();
+});
+
+test("nothing to export: Export does nothing", async () => {
+  const { c, api, calls, store } = setup();
+  api.exportPreview.mockResolvedValue({ ...counts(0), locked: 2 });
+  await c.startExport();
+  await c.commitExport(true);
+  expect(calls.some(([n]) => n === "saveFile")).toBe(false);
+  expect(api.exportMarkdown).not.toHaveBeenCalled();
+  expect(store.get().exporting).not.toBeNull();
+});
+
+test("the export title is the saved search's name when the filters equal it, else All notes", async () => {
+  const { c, api, store } = setup();
+  api.exportPreview.mockResolvedValue(counts(1));
+  await c.startExport();
+  expect(api.exportPreview.mock.lastCall?.[0].title).toBe("All notes");
+  store.set({ savedSearches: [{ name: "Weekly", query: "velo", tags: ["proj"], no_links: false }], selectedTags: ["proj"], exporting: null });
+  c.setQuery("velo ");
+  await c.startExport();
+  expect(api.exportPreview.mock.lastCall?.[0].title).toBe("Weekly");
+});
+
+test("toggling Tasks only fetches the preview again", async () => {
+  const { c, api, store } = setup();
+  api.exportPreview.mockResolvedValue(counts(1));
+  await c.startExport();
+  await c.setExportOptions({ format: "pdf" });
+  expect(api.exportPreview).toHaveBeenCalledTimes(1);
+  await c.setExportOptions({ tasksOnly: true });
+  expect(api.exportPreview).toHaveBeenCalledTimes(2);
+  expect(api.exportPreview.mock.lastCall?.[0].tasks_only).toBe(true);
+  expect(store.get().exporting).toMatchObject({ tasksOnly: true, format: "pdf", counts: counts(1) });
+});
+
+test("the export action opens the export dialog", async () => {
+  const { c, api, store } = setup();
+  api.exportPreview.mockResolvedValue(counts(1));
+  store.set({ keys: { ...store.get().keys, export: "Mod+KeyE" } });
+  expect(c.onKeyDown(key("KeyE", { meta: true }))).toBe(true);
+  await settle();
+  expect(store.get().exporting?.counts).toEqual(counts(1));
+});
+
+test("PDF export renders the export into the print container, prints once, closes, and keeps the container until the next export", async () => {
+  const { c, api, ui, store } = setup();
+  api.exportPreview.mockResolvedValue(counts(1));
+  api.exportText.mockResolvedValueOnce("# Hi\n\nSee [[B]] #proj");
+  await c.startExport();
+  await c.setExportOptions({ format: "pdf" });
+  let atFrame: string | null = null;
+  let atPrint: string | null = null;
+  vi.spyOn(ui, "nextFrame").mockImplementationOnce(async () => void (atFrame = store.get().printHtml));
+  api.printPage.mockImplementationOnce(async () => void (atPrint = store.get().printHtml));
+  await c.commitExport(true);
+  expect(api.exportText).toHaveBeenCalledWith(expect.objectContaining({ tasks_only: false, title: "All notes" }));
+  expect(atFrame).toBe(atPrint);
+  expect(atPrint).toContain("<h1>Hi</h1>");
+  expect(atPrint).toContain('<span class="wikilink" data-title="B">B</span>');
+  expect(atPrint).toContain('<span class="tag" data-tag="proj">#proj</span>');
+  expect(atPrint).not.toContain('href="#"');
+  expect(api.printPage).toHaveBeenCalledTimes(1);
+  expect(api.exportMarkdown).not.toHaveBeenCalled();
+  // macOS print() returns while the sheet is still laying out: the container must outlive it
+  expect(store.get().printHtml).toBe(atPrint);
+  expect(store.get().exporting).toBeNull();
+  await c.startExport();
+  expect(store.get().printHtml).toBeNull();
+});
+
+test("PDF export cancelled while the text loads prints nothing", async () => {
+  const { c, api, calls, store } = setup();
+  api.exportPreview.mockResolvedValue(counts(1));
+  const d = deferred<string>();
+  api.exportText.mockImplementationOnce(() => d.promise);
+  await c.startExport();
+  await c.setExportOptions({ format: "pdf" });
+  const go = c.commitExport(true);
+  await c.commitExport(false);
+  d.resolve("# Hi");
+  await go;
+  expect(store.get().printHtml).toBeNull();
+  expect(calls.some(([n]) => n === "nextFrame")).toBe(false);
+  expect(api.printPage).not.toHaveBeenCalled();
+});
+
+test("PDF export: a print failure keeps the dialog open with the error and clears the print container", async () => {
+  const { c, api, store } = setup();
+  api.exportPreview.mockResolvedValue(counts(1));
+  api.exportText.mockResolvedValueOnce("x");
+  api.printPage.mockRejectedValueOnce("no printer");
+  await c.startExport();
+  await c.setExportOptions({ format: "pdf" });
+  await c.commitExport(true);
+  expect(store.get().printHtml).toBeNull();
+  expect(store.get().exporting).toMatchObject({ err: "no printer", pending: false, format: "pdf" });
+});
+
+for (const layout of ["vertical", "horizontal"] as const) {
+  test(`Enter in timeline mode with preview on (${layout} layout) opens the note in the editor with focus, like Tasks`, async () => {
+    const { c, api, store, editor } = setup();
+    const preview = new FakePreview();
+    c.attachPreview(preview);
+    preview.on = true;
+    store.set({ layout });
+    api.timeline.mockResolvedValue([trow("B")]);
+    c.setPaneMode("timeline");
+    const focused = editor.focused;
+    await c.enter();
+    expect(store.get().openPath).toBe(P("B"));
+    expect(preview.on).toBe(false); // the editor is display:none under preview in both layouts
+    expect(editor.focused).toBe(focused + 1);
+  });
+}
+
+test("Enter in notes mode with preview on in the horizontal layout leaves preview too", async () => {
+  const { c, store, editor } = setup({ ab: "x" });
+  const preview = new FakePreview();
+  c.attachPreview(preview);
+  preview.on = true;
+  store.set({ layout: "horizontal" });
+  c.setQuery("ab");
+  const focused = editor.focused;
+  await c.enter();
+  expect(store.get().openPath).toBe(P("ab"));
+  expect(preview.on).toBe(false);
+  expect(editor.focused).toBe(focused + 1);
+});
+
+test("PDF export cancelled, reopened and exported again prints only the second export", async () => {
+  const { c, api, store } = setup();
+  api.exportPreview.mockResolvedValue(counts(1));
+  const d1 = deferred<string>();
+  const d2 = deferred<string>();
+  api.exportText.mockImplementationOnce(() => d1.promise).mockImplementationOnce(() => d2.promise);
+  await c.startExport();
+  await c.setExportOptions({ format: "pdf" });
+  const first = c.commitExport(true);
+  await c.commitExport(false);
+  await c.startExport();
+  await c.setExportOptions({ format: "pdf" });
+  const second = c.commitExport(true);
+  d1.resolve("# One");
+  await first;
+  expect(api.printPage).not.toHaveBeenCalled();
+  d2.resolve("# Two");
+  await second;
+  expect(api.printPage).toHaveBeenCalledTimes(1);
+  expect(store.get().printHtml).toContain("Two");
+});
+
+test("export does nothing while capturing: the field holds capture text, not a filter", async () => {
+  const { c, api, store } = setup({ Inbox: "", B: "b" });
+  await c.startCapture();
+  c.setQuery("buy milk");
+  await c.startExport();
+  expect(store.get().exporting).toBeNull();
+  expect(api.exportPreview).not.toHaveBeenCalled();
+});
+
+test("re-entering the timeline shows loading, not the previous filters' rows", async () => {
+  const { c, api, store } = setup();
+  api.timeline.mockResolvedValue([trow("A")]);
+  c.setPaneMode("timeline");
+  await settle();
+  c.setPaneMode("notes");
+  c.setQuery("b");
+  await settle();
+  const d = deferred<TimelineRow[]>();
+  api.timeline.mockImplementationOnce(() => d.promise);
+  c.setPaneMode("timeline");
+  expect(store.get().timeline.rows).toBeNull();
+  d.resolve([trow("B")]);
+  await settle();
+  expect(store.get().timeline.rows).toEqual([trow("B")]);
+});
+
+test("the timeline shows no error while the vault indexes", async () => {
+  const { c, api, store } = setup();
+  api.timeline.mockRejectedValueOnce("indexing");
+  c.setPaneMode("timeline");
+  await settle();
+  expect(store.get().timeline).toMatchObject({ rows: null, err: "" });
+});
+
+test("↑/↓ from the search field move the timeline selection; Enter opens it", async () => {
+  const { c, api, store } = setup();
+  api.timeline.mockResolvedValue([trow("A"), trow("B"), trow("C")]);
+  c.setPaneMode("timeline");
+  await settle();
+  const down = { ...key("ArrowDown"), key: "ArrowDown", inSearch: true };
+  const up = { ...key("ArrowUp"), key: "ArrowUp", inSearch: true };
+  expect(store.get().timeline.sel).toBeNull(); // none: Enter and the arrows start from the first row
+  expect(c.onKeyDown(down)).toBe(true);
+  expect(store.get().timeline.sel).toBe(P("B"));
+  c.onKeyDown(down);
+  c.onKeyDown(down); // stops at the last row
+  expect(store.get().timeline.sel).toBe(P("C"));
+  c.onKeyDown(up);
+  expect(store.get().timeline.sel).toBe(P("B"));
+  expect(store.get().openPath).toBeNull(); // moving never opens: a locked row would ask for the passphrase
+  await c.enter();
+  expect(store.get().openPath).toBe(P("B"));
+  // arrows outside the search field (segment groups, rows) keep their own meaning
+  expect(c.onKeyDown({ ...key("ArrowDown"), key: "ArrowDown" })).toBe(false);
+  expect(c.onKeyDown({ ...down, inEditor: true, inSearch: false })).toBe(false);
+});
+
+test("Enter in timeline mode falls back to the first row when the selection is gone", async () => {
+  const { c, api, store } = setup();
+  api.timeline.mockResolvedValue([trow("A"), trow("B")]);
+  c.setPaneMode("timeline");
+  await settle();
+  c.setTimelineSel(P("B"));
+  api.timeline.mockResolvedValue([trow("C"), trow("A")]);
+  c.setQuery("x");
+  await settle();
+  await c.enter();
+  expect(store.get().openPath).toBe(P("C"));
+});
+
+test("re-entering the timeline clears its selection", async () => {
+  const { c, api, store } = setup();
+  api.timeline.mockResolvedValue([trow("A"), trow("B")]);
+  c.setPaneMode("timeline");
+  await settle();
+  c.setTimelineSel(P("B"));
+  c.setPaneMode("notes");
+  c.setPaneMode("timeline");
+  expect(store.get().timeline.sel).toBeNull();
+});
+
+test("a filter, date or range change in timeline mode clears the selection: Enter opens the new first row", async () => {
+  const { c, api, store } = setup();
+  api.timeline.mockResolvedValue([trow("A"), trow("B"), trow("C")]);
+  c.setPaneMode("timeline");
+  await settle();
+  c.setTimelineSel(P("C"));
+  api.timeline.mockResolvedValue([trow("A"), trow("C")]); // C still matches, A is first
+  c.setQuery("foo");
+  await settle();
+  expect(store.get().timeline.sel).toBeNull();
+  await c.enter();
+  expect(store.get().openPath).toBe(P("A"));
+  for (const change of [() => c.setTags(["t"]), () => c.setNoLinks(true), () => c.setTimelineRange("7"), () => c.setTimelineBy("created")]) {
+    c.setTimelineSel(P("C"));
+    void change();
+    expect(store.get().timeline.sel).toBeNull();
+  }
+  await settle();
 });

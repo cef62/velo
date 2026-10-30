@@ -39,18 +39,34 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | ⌘⇧X | Ctrl+Shift+X | Switch between Notes and Tasks |
 | ⌘⇧C | Ctrl+Shift+C | Show / hide the Connections view |
 | ⌘⇧D | Ctrl+Shift+D | Open today's daily note |
+| ⌘⇧L | Ctrl+Shift+L | Show / hide the timeline |
 | ⌘⇧Space | Ctrl+Shift+Space | Show / hide velo (system-wide) |
 | ⌘⇧N | Ctrl+Shift+N | Move the selection to a new note |
 | — | — | Merge the open note into another (set in Settings) |
+| — | — | Export… the timeline (set in Settings) |
+| — | — | Save search… (set in Settings) |
 | ⌥⇧⌘N | Ctrl+Alt+Shift+N | Quick capture (system-wide) |
+| ⇧F10 / Menu key | Shift+F10 / Menu key | Open the context menu of the highlighted row or chip (Shift+F10 can be changed in Settings; the Menu key always works) |
 
-Right-click a note in the list (or press the Menu key / Shift+F10 on the highlighted row) for a menu: open, rename, lock/unlock, copy `[[link]]`, show in Finder/Explorer, move to Trash. It opens the note first, so no menu appears if the switch is refused.
+Right-click a note in the list (or press the Menu key / Shift+F10 on the highlighted row; Shift+F10 can be changed in Settings → Keyboard shortcuts as "Open context menu") for a menu: open, rename, lock/unlock, copy `[[link]]`, show in Finder/Explorer, move to Trash. It opens the note first, so no menu appears if the switch is refused.
 
 Fixed: Enter (in search) opens the highlighted note, or creates a note titled with the query when nothing matches; Shift+Enter creates a note titled exactly as typed (or opens that exact title if it exists); Alt+Enter (⌥↩) does the same and starts the new note with an empty `- [ ]` task; ↑ / ↓ move the selection; Esc (in editor) returns to search.
 
 ## Tags
 
 Write `#tag` anywhere in a note (at the start of a line, after a space, or after `(`; letters, digits, `_`, `-`, `/`; at least one letter; not in fenced code blocks; `# Heading` is not a tag). The `#` button next to search (or ⌘⇧T) shows every tag with its note count; click chips to filter the list to notes having all selected tags, combined with the search text. A "Filtered by" line stays visible while tags are selected. In the preview, click a `#tag` to filter by it. Locked notes are not listed in the tag panel.
+
+## Saved searches
+
+Keep a search you use often. With a search text, tags or the No links chip active, choose "Save search…" in the filter banner or in the tag panel (⌘⇧T) and give it a name of 1 to 60 characters; a name already in use asks to replace the old one. Saved searches sit as a row of chips above the tags in the tag panel. Click one to apply its search text, tags and No links, replacing the current filters; click the active one to clear them. Right-click a chip, or press Shift+F10 / the Menu key on it, for Rename… and Delete (which asks first). They are stored per machine in the settings. The list, Tasks, the timeline and export all follow the filters.
+
+## Timeline
+
+Press ⌘⇧L (Ctrl+Shift+L) or the Timeline button of the left pane to list notes newest first, grouped by day (Today, Yesterday, the weekday, then the date). Choose Created or Updated (remembered) and 7 days, 30 days or All (not remembered). Locked notes are listed by title only. Click a row, or press Enter on it, to open the note; the timeline stays. The list is one Tab stop; move with ↑/↓.
+
+## Export
+
+"Export…" in the timeline header (or the Export action, which has no default shortcut) exports exactly what the timeline shows. Choose Markdown (a save dialog) or PDF (the system print dialog: choose Save as PDF), and Full notes or Tasks only. The file starts with a task summary, the open tasks and the tasks done within the range with their `@done` date, then one section per note. Locked notes are never exported, even while unlocked, and are counted as left out. An export holds at most 1,000 notes (the newest).
 
 ## Connections
 

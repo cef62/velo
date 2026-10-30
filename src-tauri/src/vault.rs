@@ -5,14 +5,23 @@ use crate::index::{Index, LinkTarget, Meta, Page, Sort, TagCount, TaskRow, all_t
 use crate::tasks::{TaskView, group_tasks, local_today, parse_tasks, toggle_line};
 
 const PAGE: usize = 200;
+// "All rows" for search_page_where: it binds limit into SQL text, so stay far from i64 overflow.
+const ALL: usize = 1_000_000;
 use crate::revisions::{RevisionInfo, Revisions, fnv64};
 use crate::names::{NoteFile, note_path, title_ok, parse_note_file};
 use crate::store::{SaveResult, Store, hash, meta_of};
 use crate::text::{fold, link_mention_text, rewrite_links};
 use anyhow::{Context, anyhow};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+
+#[derive(Serialize, Debug)]
+pub struct TimelineRow { pub path: String, pub title: String, pub date: i64, pub snippet: String, pub locked: bool }
+
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum TimelineBy { Created, Updated }
 
 /// `text` with the task on `line` (0-based) flipped, if that line still reads `expected`; and the flipped line.
 pub fn toggled_text(text: &str, line: usize, expected: &str) -> anyhow::Result<(String, String)> {
@@ -292,6 +301,20 @@ impl Vault {
 
     pub fn search_where(&self, query: &str, sort: Sort, offset: usize, tags: &[String], no_links: bool) -> anyhow::Result<Page> {
         self.index.search_page_where(query, sort, offset, PAGE, tags, &self.unlocked, no_links)
+    }
+
+    /// Every note matching the search filters, newest first by `by`, dated by its indexed created/modified; `since_ms` drops older ones.
+    /// Snippets are blanked for locked notes: an unlocked-in-memory one would otherwise carry its body.
+    pub fn timeline(&self, query: &str, tags: &[String], no_links: bool, by: TimelineBy, since_ms: Option<i64>) -> anyhow::Result<Vec<TimelineRow>> {
+        let dates = self.index.dates()?;
+        let mut rows: Vec<TimelineRow> = self.index.search_page_where(query, Sort::Modified, 0, ALL, tags, &self.unlocked, no_links)?.hits.into_iter().filter_map(|h| {
+            let &(c, m) = dates.get(&h.path)?;
+            let date = match by { TimelineBy::Created => c, TimelineBy::Updated => m };
+            let snippet = if h.encrypted { String::new() } else { h.snippet };
+            Some(TimelineRow { path: h.path, title: h.title, date, snippet, locked: h.encrypted })
+        }).filter(|r| since_ms.is_none_or(|s| r.date >= s)).collect();
+        rows.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.path.cmp(&b.path)));
+        Ok(rows)
     }
 
     /// Open and recent tasks; unlocked notes' tasks come from memory, so they never reach SQLite.
@@ -867,6 +890,30 @@ mod tests {
         (tempfile::tempdir().unwrap().keep(), tempfile::tempdir().unwrap().keep().join("i.sqlite"))
     }
 
+    #[test] fn timeline_orders_and_filters() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let note = |n: &str, c: &str, m: &str, body: &str| std::fs::write(dir.join(format!("{n}.md")), format!("---\ncreated: {c}\nmodified: {m}\n---\n{body}\n")).unwrap();
+        note("a", "2020-01-01T00:00:00+00:00", "2022-01-01T00:00:00+00:00", "zebra #x");
+        note("b", "2021-01-01T00:00:00+00:00", "2021-06-01T00:00:00+00:00", "zebra");
+        note("c", "2019-01-01T00:00:00+00:00", "2023-01-01T00:00:00+00:00", "other");
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let ms = |s: &str| chrono::DateTime::parse_from_rfc3339(s).unwrap().timestamp_millis();
+        let t = |v: &Vault, by, since| v.timeline("zebra", &[], false, by, since).unwrap();
+        let r = t(&v, TimelineBy::Updated, None);
+        assert_eq!(r.iter().map(|r| (r.title.as_str(), r.date)).collect::<Vec<_>>(), [("a", ms("2022-01-01T00:00:00+00:00")), ("b", ms("2021-06-01T00:00:00+00:00"))]);
+        assert!(!r[0].locked && r[0].snippet.contains("zebra"));
+        assert_eq!(t(&v, TimelineBy::Created, None).iter().map(|r| r.title.as_str()).collect::<Vec<_>>(), ["b", "a"]);
+        assert_eq!(t(&v, TimelineBy::Updated, Some(ms("2022-01-01T00:00:00+00:00"))).len(), 1);
+        assert_eq!(v.timeline("zebra", &["x".into()], false, TimelineBy::Updated, None).unwrap().len(), 1);
+        assert_eq!(v.timeline("", &[], true, TimelineBy::Updated, None).unwrap().len(), 3);
+        // locked: one matches by title, one only by its in-memory body; neither may leak text
+        let d = v.open_or_create("zebra lock", None, false).unwrap(); v.lock_note(&d.path, &id).unwrap();
+        let d = v.open_or_create("hidden", None, false).unwrap(); let p = v.lock_note(&d.path, &id).unwrap();
+        v.save_note(&p, "zebra secret", &stat_hash(&p), Some(&id), false).unwrap();
+        let locked: Vec<_> = t(&v, TimelineBy::Updated, None).into_iter().filter(|r| r.locked).collect();
+        assert_eq!(locked.len(), 2);
+        assert!(locked.iter().all(|r| r.snippet.is_empty()));
+    }
     #[test] fn open_reconciles_and_rebuilds() {
         let (dir, db) = setup();
         std::fs::write(dir.join("a.md"), "zebra").unwrap();

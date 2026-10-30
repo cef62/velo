@@ -1,10 +1,10 @@
 import type * as ApiModule from "../api";
-import type { AgentReply, AgentWrite, GraphNode, Hit, LinkTarget, MergeResult, Mention, NoteDoc, Settings, TagCount, TaskItem } from "../api";
+import type { AgentReply, AgentWrite, ExportRequest, GraphNode, Hit, LinkTarget, MergeResult, Mention, NoteDoc, SavedSearch, Settings, TagCount, TaskItem } from "../api";
 // Types only: editor.ts loads editortheme.ts, which touches `window` at import time (tests run in node).
 import type { Editor, EditorOpts } from "../editor";
 import type { Preview } from "../preview";
 import type { RichOpts } from "../richmd";
-import { afterOpen, shouldAutoEdit } from "../preview";
+import { afterOpen, renderMarkdown, shouldAutoEdit } from "../preview";
 import { Results } from "../list";
 import { shouldClose } from "../close";
 import { latest } from "../latest";
@@ -14,11 +14,14 @@ import { enterAction, fold, moveSelection } from "../search";
 import { extractTags, pruneSelection, toggleTag } from "../tags";
 import { frontMatterRange, stripFrontMatter, wordCount } from "../frontmatter";
 import { formatBinding, matches, resolve, type Action, type GLOBAL_ACTIONS } from "../shortcuts";
-import { isMenuKey, linkFor, menuModel, type MenuAction } from "../contextmenu";
+import { isMenuKey as menuKeyFor, linkFor, menuModel, type MenuAction } from "../contextmenu";
 import { isLockedPath } from "../passphrase";
 import { localToday } from "../tasks";
+import { sinceMs } from "../timeline";
+import { exportFileName } from "../export";
 import { prepare, rank, type Ranked } from "../fuzzy";
 import { extractTitle } from "../writing";
+import { cleanName, defaultName, removeFrom, renameIn, sameFilters, upsert, type Filters } from "../saved";
 import type { MenuSpec, UiPort } from "./ports";
 import { noInfo, type AppState, type Store } from "./store";
 
@@ -40,6 +43,7 @@ export type KeyEventLike = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctr
   getModifierState?: (k: string) => boolean; // pass it through so AltGr never fires a Mod+Alt binding off-mac
   inEditor: boolean;
   inSearchWithText: boolean;
+  inSearch?: boolean; // focus in the search field
   inDialog: boolean; // a dialog or the settings recorder owns the keys
   inRename: boolean;
 };
@@ -192,6 +196,8 @@ export class Controller {
       showFrontMatter: s.show_front_matter === true,
       infoOpen: s.info_panel === true,
       connectionsSort: connectionsSortOf(s.connections_sort),
+      savedSearches: s.saved_searches ?? [],
+      timeline: { ...this.store.get().timeline, by: s.timeline_sort === "created" ? "created" : "updated" },
     });
     this.syncStyle();
     if (!s.notes_dir) this.store.set({ phase: "setup" });
@@ -208,6 +214,7 @@ export class Controller {
   }
 
   async refreshTitles() {
+    this.refreshTimeline(); // titles refresh on every add, rename, delete and lock change
     void this.loadLinkTargets();
     try {
       this.titles = new Set((await this.api.listTitles()).map(fold));
@@ -377,9 +384,11 @@ export class Controller {
   protected listStale = false; // the query/tags changed in Tasks mode: the Notes list reloads when it is shown again
   /** Query or tag filter changed. In Tasks mode only the tasks follow it: the editor must not jump to a hidden list's first hit. */
   protected filterChanged(keepOpen: boolean | "highlight") {
-    if (this.store.get().paneMode === "tasks") {
+    const mode = this.store.get().paneMode;
+    if (mode === "tasks" || mode === "timeline") {
       this.listStale = true;
-      void this.loadTasks(true);
+      if (mode === "timeline") this.store.set((s) => ({ timeline: { ...s.timeline, sel: null } })); // new rows: start from the top, as the list does
+      void (mode === "tasks" ? this.loadTasks(true) : this.loadTimeline());
     } else void this.runSearch(true, keepOpen);
   }
 
@@ -513,7 +522,8 @@ export class Controller {
     this.store.set({ capture: null, ...(keep ? {} : { query: this.captureQuery }) });
     // the kept text lists like a search, but never opens a hit: focus went to the open note (or a note just opened)
     // Tasks always reload: a load during capture mode (watcher, backend write) filtered by the capture text
-    if (this.store.get().paneMode === "tasks") this.filterChanged(false);
+    const mode = this.store.get().paneMode;
+    if (mode === "tasks" || mode === "timeline") this.filterChanged(false);
     else if (keep) void this.runSearch(true, "highlight");
     else if (captured !== undefined) void this.runSearch(false); // the target's row moved; the list is otherwise unchanged
     void this.api.captureDone(hide).catch((e) => console.error("capture done failed", e)); // ends the backend's session even when velo stays shown
@@ -744,7 +754,6 @@ export class Controller {
     const r = afterOpen({
       created,
       body: this.editor.getText(),
-      layout: this.store.get().layout,
       previewOn: this.preview.isOn(),
       source,
     });
@@ -759,6 +768,14 @@ export class Controller {
       const v = this.store.get().taskView;
       const first = v && [...v.overdue, ...v.today, ...v.upcoming, ...v.no_date, ...v.done][0];
       if (first) await this.openTask(first);
+      return;
+    }
+    if (this.store.get().paneMode === "timeline") {
+      // the list is stale here: Enter opens the first note shown, never creates one
+      await settled(() => this.timelineLoading);
+      const row = this.timelineRow();
+      // the passphrase dialog keeps focus: only a note that really loaded takes it
+      if (row && (await this.show(row.path)) && this.editor.currentPath() === row.path) this.settleAfterOpen(false, "enter");
       return;
     }
     await settled(() => this.searching);
@@ -1054,6 +1071,80 @@ export class Controller {
     this.setTags(toggleTag(this.store.get().selectedTags, tag));
   }
 
+  protected filters(): Filters {
+    const s = this.store.get();
+    return { query: s.query, tags: s.selectedTags, noLinks: s.noLinks };
+  }
+
+  /** Save search…: ask for a name for the current filters. Nothing to save without a filter or search text. */
+  startSaveSearch() {
+    const f = this.filters();
+    if (this.store.get().capture || (!f.query.trim() && f.tags.length === 0 && !f.noLinks)) return;
+    this.store.set({ saveSearch: { name: defaultName(f), err: "", confirmReplace: false } });
+  }
+
+  /** The Save (or Rename) dialog finished: a name on Enter, null on Cancel. A name in use is replaced only on the second, confirmed commit. */
+  async commitSaveSearch(input: string | null) {
+    const cur = this.store.get().saveSearch;
+    if (!cur || input === null) return this.store.set({ saveSearch: null });
+    const name = cleanName(input);
+    if (!name) return this.store.set({ saveSearch: { ...cur, name: input, err: input.trim() ? "Name too long (60 characters at most)" : "Name required", confirmReplace: false } });
+    const taken = this.store.get().savedSearches.some((x) => fold(x.name) === fold(name) && fold(name) !== fold(cur.renaming ?? ""));
+    if (taken && !(cur.confirmReplace && fold(cur.name) === fold(name))) return this.store.set({ saveSearch: { ...cur, name, err: "", confirmReplace: true } });
+    try {
+      if (cur.renaming !== undefined) await this.renameSaved(cur.renaming, name);
+      else {
+        const f = this.filters();
+        await this.writeSaved((l) => upsert(l, { name, query: f.query.trim(), tags: [...f.tags], no_links: f.noLinks }));
+      }
+      this.store.set({ saveSearch: null });
+    } catch (e) {
+      this.store.set({ saveSearch: { ...cur, name, err: errText(e), confirmReplace: false } });
+    }
+  }
+
+  protected writeSaved(f: (list: SavedSearch[]) => SavedSearch[]): Promise<void> {
+    return this.updateSettings(async (cur) => {
+      const next = f(cur.saved_searches ?? []);
+      await this.api.setSettings({ ...cur, saved_searches: next });
+      this.store.set({ savedSearches: next });
+    });
+  }
+
+  /** A saved search's chip: replaces the search text, tags and No links; on the search already applied, clears them. */
+  applySaved(name: string) {
+    const s = this.store.get();
+    const saved = s.savedSearches.find((x) => fold(x.name) === fold(name));
+    if (!saved || s.capture) return; // the search field holds capture text, not a search
+    const on = sameFilters(saved, this.filters());
+    this.keptCapture = false;
+    this.store.set(on ? { query: "", selectedTags: [], noLinks: false } : { query: saved.query, selectedTags: [...saved.tags], noLinks: saved.no_links });
+    this.filterChanged(false);
+  }
+
+  /** A chip's native menu. `atChip`: anchor at the focused chip (keyboard) instead of the cursor. */
+  async savedMenu(name: string, atChip: boolean) {
+    // ids reuse MenuAction values: a new id would break openContextMenu's exhaustive record; they only name the native items
+    const items: MenuSpec[] = [
+      { id: "rename", text: "Rename…", action: () => this.store.set({ saveSearch: { name, err: "", confirmReplace: false, renaming: name } }) },
+      { id: "delete_note", text: "Delete", action: () => void this.deleteSaved(name) },
+    ];
+    await this.ui.popupMenu(items, atChip ? this.ui.focusAnchor() : null).catch((e) => this.setErr(errText(e)));
+  }
+
+  renameSaved(from: string, to: string): Promise<void> {
+    return this.writeSaved((l) => renameIn(l, from, to));
+  }
+
+  async deleteSaved(name: string) {
+    if (!(await this.ui.confirm(`Delete the saved search “${name}”?`, { title: "Delete saved search", kind: "warning", okLabel: "Delete" }))) return;
+    try {
+      await this.writeSaved((l) => removeFrom(l, name));
+    } catch (e) {
+      this.setErr(errText(e));
+    }
+  }
+
   protected readonly newTagsReq = latest();
   protected tagTimer: ReturnType<typeof setTimeout> | undefined;
   /** After an in-app save (self-writes are skipped by the watcher): coalesce typing bursts into one refresh. */
@@ -1062,16 +1153,158 @@ export class Controller {
     this.tagTimer = setTimeout(() => {
       void this.refreshTags(true);
       void this.loadTasks();
+      this.refreshTimeline();
     }, 300);
   }
 
-  setPaneMode(m: "notes" | "tasks" | "connections") {
+  setPaneMode(m: AppState["paneMode"]) {
     if (m === "connections") return void this.showConnections();
-    this.store.set({ paneMode: m });
+    const into = m === "timeline" && this.store.get().paneMode !== "timeline";
+    // re-entering: show loading, not rows of the filters the timeline last loaded with
+    this.store.set((s) => (into ? { paneMode: m, timeline: { ...s.timeline, rows: null, sel: null } } : { paneMode: m }));
     if (m === "tasks") void this.loadTasks();
+    else if (m === "timeline") void this.loadTimeline();
     else if (this.listStale) {
       this.listStale = false;
       void this.runSearch(true, "highlight"); // switching modes never changes the open note
+    }
+  }
+
+  protected readonly newTimelineReq = latest();
+  protected timelineLoading: Promise<void> = Promise.resolve(); // latest timeline load, awaited by Enter in Timeline mode
+  /** The timeline: notes filtered like the list, newest first by the chosen date, within the range. */
+  loadTimeline(): Promise<void> {
+    return (this.timelineLoading = this.doLoadTimeline());
+  }
+
+  protected async doLoadTimeline() {
+    const { query, selectedTags, noLinks, timeline } = this.store.get();
+    const fresh = this.newTimelineReq();
+    try {
+      const rows = await this.api.timeline(query, selectedTags, noLinks, timeline.by, sinceMs(timeline.range, new Date()));
+      if (fresh()) this.store.set((s) => ({ timeline: { ...s.timeline, rows, err: "" } }));
+    } catch (e) {
+      // while indexing: no error, the index-done refreshTitles reloads it
+      if (fresh() && e !== "indexing") this.store.set((s) => ({ timeline: { ...s.timeline, rows: null, err: errText(e) } }));
+    }
+  }
+
+  /** The selected timeline row; the first row when none is selected or it left the timeline. */
+  timelineRow() {
+    const { rows, sel } = this.store.get().timeline;
+    return rows?.find((r) => r.path === sel) ?? rows?.[0];
+  }
+
+  setTimelineSel(path: string) {
+    this.store.set((s) => ({ timeline: { ...s.timeline, sel: path } }));
+  }
+
+
+  /** ↑/↓ from the search field in Timeline mode: move the selection over the rows (day headers are not rows); never opens. */
+  stepTimeline(d: 1 | -1) {
+    const rows = this.store.get().timeline.rows ?? [];
+    const cur = this.timelineRow();
+    const i = moveSelection(cur ? rows.indexOf(cur) : -1, d, rows.length);
+    if (i >= 0) this.setTimelineSel(rows[i].path);
+  }
+
+  /** Notes changed: the shown timeline follows. */
+  protected refreshTimeline() {
+    if (this.store.get().paneMode === "timeline") void this.loadTimeline();
+  }
+
+  async setTimelineBy(by: "created" | "updated") {
+    this.store.set((s) => ({ timeline: { ...s.timeline, by, sel: null } }));
+    void this.loadTimeline();
+    try {
+      await this.updateSettings((cur) => this.api.setSettings({ ...cur, timeline_sort: by }));
+    } catch (e) {
+      this.setErr(errText(e));
+    }
+  }
+
+  setTimelineRange(range: "7" | "30" | "all") {
+    this.store.set((s) => ({ timeline: { ...s.timeline, range, sel: null } }));
+    return this.loadTimeline();
+  }
+
+  /** What the timeline shows, as an export request; titled by the matching saved search, else the filters. */
+  protected exportRequest(tasksOnly: boolean): ExportRequest {
+    const s = this.store.get();
+    const f = this.filters();
+    const named = s.savedSearches.find((x) => sameFilters(x, f))?.name;
+    const title = named ?? ([...f.tags.map((t) => `#${t}`), f.query.trim()].filter(Boolean).join(" ") || "All notes");
+    return { query: s.query, tags: s.selectedTags, no_links: s.noLinks, by: s.timeline.by, since_ms: sinceMs(s.timeline.range, new Date()), tasks_only: tasksOnly, title };
+  }
+
+  /** Export…: always what the timeline shows, so other panes switch to it first. */
+  startExport(): Promise<void> {
+    if (this.store.get().capture) return Promise.resolve(); // the search field holds capture text, not a filter
+    if (this.store.get().paneMode !== "timeline") this.setPaneMode("timeline");
+    this.store.set({ exporting: { counts: null, format: "md", tasksOnly: false, err: "", pending: false }, printHtml: null });
+    return this.loadExportPreview();
+  }
+
+  protected readonly newExportReq = latest();
+  // The backend reads up to 1,000 files: called on open and on a Tasks only change, never per render.
+  protected async loadExportPreview() {
+    const cur = this.store.get().exporting;
+    if (!cur) return;
+    const fresh = this.newExportReq();
+    const done = (p: Partial<NonNullable<AppState["exporting"]>>) => fresh() && this.store.set((s) => ({ exporting: s.exporting && { ...s.exporting, ...p } }));
+    try {
+      done({ counts: await this.api.exportPreview(this.exportRequest(cur.tasksOnly)), err: "" });
+    } catch (e) {
+      done({ err: errText(e) });
+    }
+  }
+
+  setExportOptions(p: { format?: "md" | "pdf"; tasksOnly?: boolean }): Promise<void> {
+    const cur = this.store.get().exporting;
+    if (!cur) return Promise.resolve();
+    const refetch = p.tasksOnly !== undefined && p.tasksOnly !== cur.tasksOnly;
+    this.store.set({ exporting: { ...cur, ...p, counts: refetch ? null : cur.counts } });
+    return refetch ? this.loadExportPreview() : Promise.resolve();
+  }
+
+  /** Export (go) or Cancel. Markdown: the save dialog picks the file; cancelling it keeps the dialog open. PDF: the native print dialog. */
+  protected readonly newExportCommit = latest();
+  async commitExport(go: boolean) {
+    const cur = this.store.get().exporting;
+    if (!cur) return;
+    if (!go) {
+      this.newExportCommit(); // drops an Export's reply still in flight
+      return this.store.set({ exporting: null });
+    }
+    if (cur.pending || !cur.counts?.notes) return; // nothing to export writes no empty file
+    const fresh = this.newExportCommit(); // a reply landing after Cancel or a newer Export is dropped
+    const req = this.exportRequest(cur.tasksOnly);
+    const update = (p: Partial<NonNullable<AppState["exporting"]>>) => this.store.set((s) => ({ exporting: s.exporting && { ...s.exporting, ...p } }));
+    update({ pending: true, err: "" });
+    if (cur.format === "pdf") {
+      try {
+        // wikilinks and tags print as plain text: nothing on paper to click
+        const html = renderMarkdown(await this.api.exportText(req), () => true).replace(/<a href="#" (class="(?:wikilink|tag)"[^>]*)>(.*?)<\/a>/g, "<span $1>$2</span>");
+        if (!fresh()) return; // cancelled (or reopened and exported again) while the text loaded
+        this.store.set({ printHtml: html });
+        await this.ui.nextFrame();
+        await this.api.printPage();
+        // macOS print() returns as soon as the sheet opens, before WebKit lays the page out; the container stays until the next export (afterprint may fire after the preview pass)
+        this.store.set({ exporting: null });
+      } catch (e) {
+        if (!fresh()) return;
+        this.store.set({ printHtml: null });
+        update({ pending: false, err: errText(e) });
+      }
+      return;
+    }
+    try {
+      const path = await this.ui.saveFile(exportFileName(req.title, localToday()));
+      if (path === null) return update({ pending: false });
+      await this.api.exportMarkdown(path, req);
+      this.store.set({ exporting: null });
+    } catch (e) {
+      update({ pending: false, err: errText(e) });
     }
   }
 
@@ -1398,7 +1631,7 @@ export class Controller {
       return err === "not-found" ? "Folder not found" : String(err);
     }
     this.applyLook(next);
-    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, headerLabels: next.header_labels, writeFrontMatter: next.write_front_matter, showFrontMatter: next.show_front_matter, infoOpen: next.info_panel, connectionsSort: connectionsSortOf(next.connections_sort), settings: null });
+    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, headerLabels: next.header_labels, writeFrontMatter: next.write_front_matter, showFrontMatter: next.show_front_matter, infoOpen: next.info_panel, connectionsSort: connectionsSortOf(next.connections_sort), savedSearches: next.saved_searches ?? [], settings: null });
     this.preview?.refresh(); // watermark shows the binding
     this.syncStyle();
     if (next.notes_dir !== cur.notes_dir) {
@@ -1554,7 +1787,14 @@ export class Controller {
     void this.editor.flush();
   }
 
-  protected readonly actions: Record<Exclude<Action, (typeof GLOBAL_ACTIONS)[number]>, () => void> = {
+  /** The context-menu key (ContextMenu, or the remappable `context_menu` binding) for this keydown. */
+  isMenuKey(e: Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">): boolean {
+    const { keys, isMac } = this.store.get();
+    return menuKeyFor(e, keys.context_menu, isMac);
+  }
+
+  // context_menu is not a global command: each focused list or chip opens its own menu through isMenuKey
+  protected readonly actions: Record<Exclude<Action, (typeof GLOBAL_ACTIONS)[number] | "context_menu">, () => void> = {
     toggle_info: () => void this.toggleInfo(),
     toggle_front_matter: () => void this.toggleFrontMatter(),
     focus_search: () => this.focusSearch(),
@@ -1575,6 +1815,9 @@ export class Controller {
     merge_note: () => void this.startMerge(),
     toggle_tasks: () => this.setPaneMode(this.store.get().paneMode === "tasks" ? "notes" : "tasks"),
     toggle_connections: () => this.setPaneMode(this.store.get().paneMode === "connections" ? "notes" : "connections"),
+    toggle_timeline: () => this.setPaneMode(this.store.get().paneMode === "timeline" ? "notes" : "timeline"),
+    export: () => void this.startExport(),
+    save_search: () => this.startSaveSearch(),
   };
 
   /**
@@ -1585,13 +1828,18 @@ export class Controller {
     if (e.inDialog || e.inRename) return false; // dialogs and the rename field own their keys
     const { sel, keys, paneMode } = this.store.get();
     const notes = paneMode === "notes"; // the note list's keys do nothing while the pane lists tasks
-    if (notes && isMenuKey(e) && !e.inEditor && sel >= 0) {
+    if (notes && this.isMenuKey(e) && !e.inEditor && sel >= 0) {
       void this.openContextMenu(sel, true);
       return true;
     }
     const arrow = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
     if (notes && arrow && !e.inEditor) {
       void this.step(arrow);
+      return true;
+    }
+    // only from the search field: the timeline's segment groups and rows keep their own arrow keys
+    if (paneMode === "timeline" && arrow && e.inSearch) {
+      this.stepTimeline(arrow);
       return true;
     }
     for (const [action, run] of Object.entries(this.actions)) {

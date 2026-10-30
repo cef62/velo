@@ -1,4 +1,4 @@
-import type { Connections, NoteMeta, RevisionInfo, Settings, TagCount, TaskView } from "../api";
+import type { Connections, ExportCounts, NoteMeta, RevisionInfo, SavedSearch, Settings, TagCount, TaskView, TimelineRow } from "../api";
 import { resolve, type Action } from "../shortcuts";
 
 /** Minimal observable state: React reads it through useSyncExternalStore, the controller writes it. */
@@ -74,9 +74,10 @@ export interface AppState {
   exactTitleMatch: boolean; // drives the ⇧↩ Create hint
   settings: Settings | null; // non-null = the Settings dialog is open on these saved settings
   update: { version: string; status: "available" | "current" | "installing" | "failed"; message?: string } | null; // the update banner; message: install progress or the failure
-  paneMode: "notes" | "tasks" | "connections"; // what the left pane lists
+  paneMode: "notes" | "tasks" | "connections" | "timeline"; // what the left pane lists
   connections: { centre: string; data: Connections | null; err: string } | null; // the Connections view; centre stays put while notes open from it
   connectionsSort: "ring" | "created" | "updated";
+  timeline: { rows: TimelineRow[] | null; by: "created" | "updated"; range: "7" | "30" | "all"; err: string; sel: string | null }; // rows filtered like the list; range is not saved; sel = selected row path (none or gone = the first row)
   taskView: TaskView | null; // filtered by query/selectedTags like the notes list
   dueCount: number; // overdue + today, unfiltered: the Tasks switch count and the Dock badge
   showDone: boolean;
@@ -84,6 +85,10 @@ export interface AppState {
   extract: { title: string; err: string } | null; // the Move to new note dialog
   merge: { source: string; sourceTitle: string; query: string; target: { path: string; title: string; count: number } | null; err: string; pending?: boolean } | null; // the Merge into… dialog; target set = confirm step; pending = merge in flight
   capture: { target: string; err: string } | null; // the search field is in quick-capture mode
+  savedSearches: SavedSearch[];
+  saveSearch: { name: string; err: string; confirmReplace: boolean; renaming?: string } | null; // the Save search dialog; renaming = the saved search being renamed; confirmReplace = asking "Replace?" for name
+  exporting: { counts: ExportCounts | null; format: "md" | "pdf"; tasksOnly: boolean; err: string; pending: boolean } | null; // the Export dialog; counts null = preview loading; pending = save in flight
+  printHtml: string | null; // the rendered export in the print-only container while the print dialog is up
 }
 
 export const initialState = (isMac: boolean): AppState => ({
@@ -128,6 +133,7 @@ export const initialState = (isMac: boolean): AppState => ({
   connections: null,
   connectionsSort: "ring",
   noLinks: false,
+  timeline: { rows: null, by: "updated", range: "all", err: "", sel: null },
   taskView: null,
   dueCount: 0,
   showDone: false,
@@ -135,4 +141,8 @@ export const initialState = (isMac: boolean): AppState => ({
   extract: null,
   merge: null,
   capture: null,
+  savedSearches: [],
+  saveSearch: null,
+  exporting: null,
+  printHtml: null,
 });

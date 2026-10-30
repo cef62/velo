@@ -536,6 +536,12 @@ impl Index {
         Ok(self.db.query_row(CREATED_FROM_FILE, [path], |r| r.get(0)).optional()?)
     }
 
+    /// path -> (created, modified) of every indexed note.
+    pub fn dates(&self) -> anyhow::Result<HashMap<String, (i64, i64)>> {
+        let mut st = self.db.prepare("SELECT path, created, modified FROM notes")?;
+        Ok(st.query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?.collect::<Result<_, _>>()?)
+    }
+
     pub fn title_modified(&self, path: &str) -> anyhow::Result<Option<(String, i64)>> {
         Ok(self.db.query_row("SELECT title, modified FROM notes WHERE path=?", [path], |r| Ok((r.get(0)?, r.get(1)?))).optional()?)
     }

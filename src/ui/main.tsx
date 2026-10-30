@@ -31,6 +31,8 @@ window.addEventListener(
     const t = e.target as HTMLElement;
     // the focused divider keeps ↑/↓ (and ←/→): they resize instead of stepping the list
     if (t.closest?.("[data-divider]") && e.key.startsWith("Arrow") && !(e.metaKey || e.ctrlKey || e.altKey)) return;
+    // a focused saved-search chip opens its own menu, not the selected note's
+    if (t.closest?.("[data-saved]") && controller.isMenuKey(e)) return;
     const handled = controller.onKeyDown({
       key: e.key,
       code: e.code,
@@ -41,6 +43,7 @@ window.addEventListener(
       getModifierState: (k) => e.getModifierState(k),
       inEditor: !!t.closest?.("[data-editor-host]"),
       inSearchWithText: isSearchInput(t) && (t as HTMLInputElement).value !== "",
+      inSearch: isSearchInput(t),
       inDialog: !!t.closest?.("[role=menu]") || !!document.querySelector("dialog[open], [role=dialog][data-state=open], [role=alertdialog][data-state=open]"),
       inRename: !!t.closest?.("[data-rename]"),
     });

@@ -9,13 +9,24 @@ export type TaskItem = { path: string; title: string; line: number; text: string
 export type TaskView = { overdue: TaskItem[]; today: TaskItem[]; upcoming: TaskItem[]; no_date: TaskItem[]; done: TaskItem[]; due_count: number };
 export type RenameResult = { path: string; rewritten: number };
 export type MergeResult = { path: string; rewritten: number; trash_error: string | null };
-export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; header_labels: boolean; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean; capture_target: "inbox" | "daily"; inbox_title: string; agent_access: boolean; connections_sort: "ring" | "created" | "updated" };
+export type SavedSearch = { name: string; query: string; tags: string[]; no_links: boolean };
+export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; header_labels: boolean; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean; capture_target: "inbox" | "daily"; inbox_title: string; agent_access: boolean; connections_sort: "ring" | "created" | "updated"; saved_searches: SavedSearch[]; timeline_sort: "updated" | "created" };
 
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<void>("set_settings", { settings });
 export type Page = { hits: Hit[]; has_more: boolean; total: number };
 export type TagCount = { tag: string; count: number };
 export const search = (query: string, sort: "modified" | "title", offset: number, tags: string[], noLinks: boolean) => invoke<Page>("search", { query, sort, offset, tags, noLinks });
+export type TimelineRow = { path: string; title: string; date: number; snippet: string; locked: boolean };
+export const timeline = (query: string, tags: string[], noLinks: boolean, by: "created" | "updated", sinceMs: number | null) => invoke<TimelineRow[]>("timeline", { query, tags, noLinks, by, sinceMs });
+export type ExportRequest = { query: string; tags: string[]; no_links: boolean; by: "created" | "updated"; since_ms: number | null; tasks_only: boolean; title: string };
+export type ExportCounts = { notes: number; open: number; done: number; locked: number; over_limit: number; no_tasks: number; unreadable: number };
+export const exportPreview = (request: ExportRequest) => invoke<ExportCounts>("export_preview", { request });
+export const exportText = (request: ExportRequest) => invoke<string>("export_text", { request });
+/** Opens the native print dialog for this window (Save as PDF lives there). */
+export const printPage = () => invoke<void>("print_page");
+/** Writes the export to exactly `path`. */
+export const exportMarkdown = (path: string, request: ExportRequest) => invoke<ExportCounts>("export_markdown", { path, request });
 export const listTags = () => invoke<TagCount[]>("list_tags");
 export const listTitles = () => invoke<string[]>("list_titles");
 /** `name == title` rows are titles, the others aliases. */

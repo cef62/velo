@@ -9,6 +9,7 @@ import { PreviewHost } from "./PreviewHost";
 import { NoteList } from "./NoteList";
 import { TaskList } from "./TaskList";
 import { ConnectionsView } from "./ConnectionsView";
+import { TimelineView } from "./TimelineView";
 import { TitleBar } from "./TitleBar";
 import { ConflictBanner } from "./ConflictBanner";
 import { UpdateBanner } from "./UpdateBanner";
@@ -22,7 +23,10 @@ import { SettingsDialog } from "./SettingsDialog";
 import { InfoPanel } from "./InfoPanel";
 import { ExtractDialog } from "./ExtractDialog";
 import { MergeDialog } from "./MergeDialog";
+import { SaveSearchDialog } from "./SaveSearchDialog";
+import { ExportDialog } from "./ExportDialog";
 import { PassphraseDialog } from "./PassphraseDialog";
+import { PrintHost } from "./PrintHost";
 
 // Layout per design README: vertical = header / list / divider / note; horizontal = header over [list | divider | note].
 // platform.applyLook writes data-layout on <html>; the divider sizes come from --list-h / --list-w .
@@ -67,6 +71,8 @@ export function App({ controller, store }: { controller: Controller; store: Stor
         <TaskList controller={controller} store={store} />
       ) : paneMode === "connections" ? (
         <ConnectionsView controller={controller} store={store} />
+      ) : paneMode === "timeline" ? (
+        <TimelineView controller={controller} store={store} />
       ) : (
         <NoteList controller={controller} store={store} />
       )}
@@ -88,7 +94,10 @@ export function App({ controller, store }: { controller: Controller; store: Stor
       <SettingsDialog controller={controller} store={store} />
       <ExtractDialog controller={controller} store={store} />
       <MergeDialog controller={controller} store={store} />
+      <SaveSearchDialog controller={controller} store={store} />
+      <ExportDialog controller={controller} store={store} />
       <PassphraseDialog />
+      <PrintHost store={store} />
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import type { Action } from "./shortcuts";
+import { matches, type Action } from "./shortcuts";
 
 export type MenuAction = "open" | "rename" | "toggle_lock" | "copy_link" | "reveal" | "delete_note" | "link_it" | "merge_note";
 export type MenuEntry = { id: MenuAction; text: string; accelerator?: string } | "separator";
@@ -46,6 +46,6 @@ export function menuModel(o: {
 
 export const linkFor = (title: string): string => `[[${title}]]`;
 
-/** ContextMenu key, or Shift+F10 with no other modifier. */
-export const isMenuKey = (e: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">): boolean =>
-  e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey);
+/** The ContextMenu key always; else the remappable `context_menu` binding (default Shift+F10; "none" = that key only). */
+export const isMenuKey = (e: Parameters<typeof matches>[0] & { key: string }, binding: string, isMac: boolean): boolean =>
+  e.key === "ContextMenu" || matches(e, binding, isMac);
