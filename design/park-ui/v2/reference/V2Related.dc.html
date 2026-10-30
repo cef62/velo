@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>v2 Related panel</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+<link rel="stylesheet" href="/_blob/329926fd862e3266351f7732d64d519e">
+<link rel="stylesheet" href="/_blob/8b1593304e554f9b2505124be1ddcde5">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+.crop{height:600px;border-radius:10px;overflow:hidden;border:1px solid var(--g6);display:flex}
+.crop .side{border-left:0;width:300px}
+.sech{display:flex;align-items:center;gap:6px;width:100%;border:0;background:transparent;cursor:pointer;padding:10px 10px 4px;font:600 11px/1 Inter,system-ui,sans-serif;text-transform:uppercase;letter-spacing:.05em;color:var(--g11);border-radius:6px}
+.sech .n{font-weight:500;letter-spacing:0}
+.sech svg{width:12px;height:12px}
+.tagh{display:flex;align-items:center;gap:6px;height:30px;padding:0 10px;font-size:12px;font-weight:500;color:var(--a11);border-radius:6px}
+.tagh .n{color:var(--g11);font-weight:400;margin-left:auto;font-variant-numeric:tabular-nums}
+.tagh svg{color:var(--g11)}
+.back{display:flex;align-items:center;gap:6px;height:30px;padding:0 10px;font-size:12px;color:var(--g11);border-bottom:1px solid var(--g4);margin:0 -6px 2px;padding-left:16px}
+.empty2{display:flex;flex-direction:column;gap:8px;padding:28px 18px;color:var(--g11);font-size:13px;line-height:1.5}
+.empty2 strong{color:var(--g12);font-weight:600}
+.keys{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px 28px}
+.keys div{display:flex;align-items:center;gap:8px;font-size:12px;color:#1c2024}
+.keys .kbd{min-width:28px}
+</style>
+</helmet>
+<div class="board" style="width: 1600px; height: 1640px; padding: 50px 60px; display: flex; flex-direction: column; gap: 22px">
+  <div style="display: flex; flex-direction: column; gap: 6px">
+    <h2 class="h-sec">Related — a list beside the note, not a graph in the list’s place <span class="yours">my call</span></h2>
+    <p class="anno" style="font-size: 13px; max-width: 1400px">Side panel tab (⌘⇧C, or ⌘I then →). Follows the open note. Order answers your two questions first: <b>Linked from</b> (with the sentence that links), then <b>Links to</b>, <b>Mentions</b> to link, and <b>Shared tags</b> to wander. Enter opens and keeps you in the panel, so you can walk the notes; ⌘J brings you back.</p>
+  </div>
+
+  <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <p class="lbl">{{t.label}}</p>
+      <div style="display: flex; gap: 40px">
+
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <div class="{{t.cls}} crop"><aside class="side" aria-label="Side panel">
+            <div class="stabs" role="tablist" aria-label="Side panel"><button class="stab" role="tab" aria-selected="true" aria-label="Related, 9">Related <span class="cnt gray">9</span></button><button class="stab" role="tab" aria-selected="false" tabindex="-1">Info</button></div>
+            <div class="sbody" role="tree" aria-label="Related to Velo roadmap">
+              <button class="sech" role="treeitem" aria-expanded="true"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>Linked from <span class="n">4</span></button>
+              <div class="rrow" role="treeitem"><div class="l1"><span class="tt">Design sync — Oct 24</span><span class="dt">2d</span></div><span class="sn">…revisit the <b>velo roadmap</b> order after the list work</span></div>
+              <div class="rrow" role="treeitem"><div class="l1"><span class="tt">2026-10-28</span><span class="dt">2d</span></div><span class="sn">Move two <b>velo roadmap</b> items to Q1</span></div>
+              <div class="rrow" role="treeitem"><div class="l1"><span class="tt">Q4 planning</span><span class="dt">1w</span></div><span class="sn">Ties into the <b>velo roadmap</b> and the MCP work</span></div>
+              <button class="sech" role="treeitem" aria-expanded="true"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>Links to <span class="n">3</span></button>
+              <div class="rrow" role="treeitem"><div class="l1"><span class="tt">Search ranking</span><span class="dt">3w</span></div><span class="sn">Title prefix &gt; title word &gt; body; recency…</span></div>
+              <div class="rrow miss" role="treeitem"><div class="l1"><span class="tt">Passphrase UX</span></div><span class="sn">No note yet · ⇧↩ create</span></div>
+              <button class="sech" role="treeitem" aria-expanded="true"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>Mentions <span class="n">1</span></button>
+              <div class="rrow" role="treeitem"><div class="l1"><span class="tt">Weekly review</span><span class="dt">3d</span></div><span class="sn">mentions “Velo roadmap” 2× · ⇧↩ link</span></div>
+              <button class="sech" role="treeitem" aria-expanded="true"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>Shared tags</button>
+              <div class="tagh" role="treeitem" aria-expanded="true"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>#idea<span class="n">12</span></div>
+              <div class="rrow" role="treeitem" style="padding-left: 30px"><div class="l1"><span class="tt">Tag search ideas</span><span class="dt">4d</span></div></div>
+              <div class="tagh" role="treeitem" aria-expanded="false"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>#work<span class="n">148</span></div>
+            </div>
+          </aside></div>
+          <p class="anno" style="width: 300px"><b>Default.</b> Sections collapse; tags with many notes start collapsed and show the 3 most recent when opened, then “All 148 in the list”.</p>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <div class="{{t.cls}} crop"><aside class="side" aria-label="Side panel">
+            <div class="stabs" role="tablist" aria-label="Side panel"><button class="stab" role="tab" aria-selected="true" aria-label="Related, 5">Related <span class="cnt gray">5</span></button><button class="stab" role="tab" aria-selected="false" tabindex="-1">Info</button></div>
+            <div class="sbody" role="tree" aria-label="Related to Design sync — Oct 24">
+              <div class="back"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>Velo roadmap<span class="kbd" style="margin-left: auto">⌘J</span></div>
+              <button class="sech" role="treeitem" aria-expanded="true"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>Linked from <span class="n">1</span></button>
+              <div class="rrow" role="treeitem"><div class="l1"><span class="tt">Weekly review</span><span class="dt">3d</span></div><span class="sn">See <b>design sync</b> notes for the header plan</span></div>
+              <button class="sech" role="treeitem" aria-expanded="true"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>Links to <span class="n">3</span></button>
+              <div class="rrow cur fv" role="treeitem" aria-selected="true" aria-expanded="true"><div class="l1"><span class="tt">Velo roadmap</span><span class="dt">now</span></div><span class="peek">Ship the 1.0 refresh before the winter break. Speed first, then polish. See Search ranking and the Tauri docs. This week: declutter the header, saved searches…</span><span class="sn" style="margin-top: 4px">Created 2 Oct · Updated now</span><span class="sn">↩ open · Space close</span></div>
+              <div class="rrow" role="treeitem"><div class="l1"><span class="tt">Panda CSS notes</span><span class="dt">2w</span></div><span class="sn">Recipes vs. slot recipes</span></div>
+              <div class="rrow" role="treeitem"><div class="l1"><span class="tt">Tauri window state bug</span><span class="dt">2d</span></div><span class="sn">Window restores off-screen after…</span></div>
+              <button class="sech" role="treeitem" aria-expanded="true"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>Mentions <span class="n">1</span></button>
+              <div class="rrow h" role="treeitem"><div class="l1"><span class="tt">Header ideas</span><span class="dt">5d</span></div><span class="sn">mentions “design sync” 1×</span><div class="acts"><button class="btn subtle sm"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>Link it</button></div></div>
+            </div>
+          </aside></div>
+          <p class="anno" style="width: 300px"><b>Wandering.</b> Opened “Design sync” from the panel: it re-centres, the trail shows where you came from. Space peeks without leaving. Hovering a mention shows <b>Link it</b>; ⇧↩ does it from the keyboard.</p>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <div class="{{t.cls}} crop"><aside class="side" aria-label="Side panel">
+            <div class="stabs" role="tablist" aria-label="Side panel"><button class="stab" role="tab" aria-selected="true">Related</button><button class="stab" role="tab" aria-selected="false" tabindex="-1">Info</button></div>
+            <div class="sbody">
+              <div class="empty2"><strong>Nothing connects to “Groceries” yet</strong><span>Notes that link here, notes it links to, and notes that mention its title will show up in this panel.</span><span>Type <span class="kbd">[[</span> in the note to link one.</span></div>
+            </div>
+          </aside></div>
+          <p class="anno" style="width: 300px"><b>Empty.</b> Says what would appear and how to make it appear. No note open: “Open a note to see what’s related.”</p>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <div class="{{t.cls}} crop"><aside class="side" aria-label="Side panel">
+            <div class="stabs" role="tablist" aria-label="Side panel"><button class="stab" role="tab" aria-selected="false" tabindex="-1" aria-label="Related, 9">Related <span class="cnt gray">9</span></button><button class="stab" role="tab" aria-selected="true">Info</button></div>
+            <div class="sbody" style="display: flex; flex-direction: column; gap: 2px">
+              <div class="sec">Dates</div>
+              <div class="kv"><span>Created</span><span>2 Oct 2026</span></div>
+              <div class="kv"><span>Updated</span><span>now</span></div>
+              <div class="sec">Note</div>
+              <div class="kv"><span>Words</span><span>412</span></div>
+              <div class="kv"><span>Aliases</span><span>roadmap, 1.0 plan</span></div>
+              <div class="sec">Revisions</div>
+              <div class="rrow cur" style="min-height: 34px"><div class="l1"><span class="tt">12 min ago</span><span class="dt">14:20</span></div></div>
+              <div class="rrow" style="min-height: 34px"><div class="l1"><span class="tt">Yesterday</span><span class="dt">18:02</span></div><span class="sn">agent · “add Q1 items”</span></div>
+              <div class="rrow" style="min-height: 34px"><div class="l1"><span class="tt">3 days ago</span><span class="dt">09:41</span></div></div>
+              <pre style="margin: 6px 10px 0; padding: 8px; max-height: 100px; overflow: hidden; border-radius: 6px; border: 1px solid var(--g6); background: var(--bg); font: 400 11px/1.5 'JetBrains Mono', monospace; color: var(--g12); white-space: pre-wrap"># Velo roadmap
+Ship the 1.0 refresh before the winter break…</pre>
+              <div style="padding: 8px 10px"><button class="btn outline sm">Restore this version</button></div>
+            </div>
+          </aside></div>
+          <p class="anno" style="width: 300px"><b>Info tab.</b> Tags moved out (the tag bar has them), “Linked from” became the Related tab, the front-matter switch went to the note ⋯ menu.</p>
+        </div>
+
+      </div>
+    </div>
+  </sc-for>
+
+  <div class="vl sheet" style="padding: 16px 20px; display: flex; flex-direction: column; gap: 10px">
+    <p class="lbl" style="font-size: 13px">Keyboard — one Tab stop for the tabs, one for the list</p>
+    <div class="keys">
+      <div><span class="kbd">↑</span><span class="kbd">↓</span>move (section headers included)</div>
+      <div><span class="kbd">←</span><span class="kbd">→</span>collapse / expand a section or tag</div>
+      <div><span class="kbd">↩</span>open, stay in the panel <span class="yours">my call</span></div>
+      <div><span class="kbd">⌘↩</span>open and jump to the editor</div>
+      <div><span class="kbd">Space</span>peek: preview + dates in place</div>
+      <div><span class="kbd">⇧↩</span>Link it (mention) · Create (missing)</div>
+      <div><span class="kbd">⌘J</span><span class="kbd">⌘K</span>back / forward along the trail</div>
+      <div><span class="kbd">Esc</span>back to the editor</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1600,"height":1640}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { themes: [{ label: 'Light', cls: 'vl' }, { label: 'Dark', cls: 'vd' }] };
+  }
+}
+</script>
+</body>
+</html>

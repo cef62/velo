@@ -156,7 +156,7 @@ const richTheme = EditorView.theme({
   ".cm-rich-missing, .cm-rich-missing *": { color: "var(--colors-velo-danger)", borderBottomStyle: "dashed", borderBottomColor: "var(--colors-velo-danger)" }, // * beats the inner link highlight
   ".cm-rich-tag": { color: "var(--colors-velo-accent-text)", background: "var(--colors-velo-accent-subtle)", borderRadius: "4px", padding: "0.1em 0.45em", fontSize: "0.8em", fontWeight: "500" },
   ".cm-rich-bullet": { color: "var(--colors-velo-fg-muted)" },
-  ".cm-rich-check": { width: "1em", height: "1em", margin: "0 0.4em 0 0", verticalAlign: "-0.15em", accentColor: "var(--colors-velo-accent)", cursor: "pointer" },
+  ".cm-rich-check": { width: "1em", height: "1em", margin: "0 0.4em 0 0", verticalAlign: "-0.15em", accentColor: "var(--colors-velo-positive)", cursor: "pointer" },
   ".cm-rich-quote": { borderLeft: "3px solid var(--colors-velo-accent-halo)", paddingLeft: "1em", color: "var(--colors-velo-fg-muted)" },
   ".cm-rich-code": { background: "var(--colors-velo-subtle)", padding: "0 1em", fontFamily: '"JetBrains Mono Variable", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace', fontSize: "0.84em" },
   ".cm-rich-hr": { backgroundImage: "linear-gradient(var(--colors-velo-border), var(--colors-velo-border))", backgroundSize: "100% 1px", backgroundRepeat: "no-repeat", backgroundPosition: "center" },

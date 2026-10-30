@@ -57,7 +57,7 @@ function Body({ state, controller }: { state: NonNullable<AppState["saveSearch"]
       </div>
       <div className={css({ display: "flex", justifyContent: "flex-end", gap: "2", px: "5", py: "3.5", borderTop: "1px solid", borderColor: "velo.divider" })}>
         <Button type="button" variant="outline" onClick={() => void controller.commitSaveSearch(null)}>Cancel</Button>
-        <Button type="submit">{replacing ? "Replace" : state.renaming !== undefined ? "Rename" : "Save"}</Button>
+        <Button type="submit" colorPalette="green">{replacing ? "Replace" : state.renaming !== undefined ? "Rename" : "Save"}</Button>
       </div>
     </form>
   );

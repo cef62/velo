@@ -18,6 +18,7 @@ const bar = css({
   h: "header",
   pr: "3",
   bg: "velo.chrome",
+  boxShadow: "inset 0 1px 0 {colors.velo.highlight}", // clear surface: top highlight (v2 §12)
   borderBottom: "1px solid",
   borderColor: "velo.divider",
   flex: "none",

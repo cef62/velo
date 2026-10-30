@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>v2 clear grayscale foundations</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+<link rel="stylesheet" href="/_blob/329926fd862e3266351f7732d64d519e">
+<link rel="stylesheet" href="/_blob/8b1593304e554f9b2505124be1ddcde5">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#202020}a:hover{color:#000}
+.sw{width:58px;height:58px;border-radius:6px;display:flex;flex-direction:column;justify-content:space-between;padding:6px;box-sizing:border-box;font:500 10px/1.1 Inter,sans-serif;border:1px solid rgba(128,128,128,.18)}
+.sw b{font-size:12px}
+.mean{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--g11)}
+.mean i{width:26px;height:26px;border-radius:6px;display:block;flex:none;border:1px solid var(--hair)}
+.sample{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.box{border:1px solid var(--hair);border-radius:8px;overflow:hidden;background:var(--bg)}
+</style>
+</helmet>
+<div class="board" style="width: 1800px; height: 1400px; padding: 52px 60px; display: flex; flex-direction: column; gap: 26px">
+  <div style="display: flex; flex-direction: column; gap: 8px">
+    <h1 style="margin: 0; font: 700 34px/1.1 Inter, system-ui, sans-serif; letter-spacing: -0.02em">Clear — graphite and grays</h1>
+    <p class="cap" style="font-size: 14px; max-width: 1400px">Park UI <b>grayColor: neutral</b> (Radix gray, no blue cast). The indigo accent becomes <b>graphite</b>: selection, focus, pressed and links are shades of gray. Color only carries meaning — <b>red</b> for errors, overdue and missing links; <b>green</b> for the positive: the primary action, done, an update ready, Link it. Surfaces read as clear glass: hairline edges and a top highlight instead of tinted fills.</p>
+  </div>
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 80px">
+    <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+      <div class="{{t.cls}} sheet" style="padding: 26px; display: flex; flex-direction: column; gap: 20px; border-color: var(--hair)">
+        <h2 class="h-sec">{{t.label}}</h2>
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <div style="font-size: 12px; font-weight: 600; color: var(--g11)">Gray — gray.1 → gray.12</div>
+          <div style="display: flex; gap: 4px">
+            <sc-for list="{{t.gray}}" as="s" hint-placeholder-count="12">
+              <div class="sw" style="background: {{s.hex}}; color: {{s.fg}}"><b>{{s.n}}</b><span>{{s.hex}}</span></div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 24px">
+          <sc-for list="{{t.roles}}" as="r" hint-placeholder-count="8">
+            <div class="mean"><i style="background: {{r.hex}}"></i><span><b style="color: var(--g12)">{{r.n}}</b> · {{r.u}} <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px">{{r.hex}}</span></span></div>
+          </sc-for>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px">
+          <div style="font-size: 12px; font-weight: 600; color: var(--g11)">In use</div>
+          <div class="sample">
+            <button class="btn solid">Save</button>
+            <button class="btn outline">Cancel</button>
+            <button class="btn subtle sm">Link it</button>
+            <div class="seg sm" role="radiogroup" aria-label="View sample"><button role="radio" aria-checked="true">Rich</button><button role="radio" aria-checked="false" tabindex="-1">Plain</button><button role="radio" aria-checked="false" tabindex="-1">Preview</button></div>
+            <div class="seg sm" role="radiogroup" aria-label="View sample, preview on"><button role="radio" aria-checked="false" tabindex="-1">Rich</button><button role="radio" aria-checked="false" tabindex="-1">Plain</button><button role="radio" aria-checked="true" class="pv">Preview</button></div>
+            <button class="ib" aria-pressed="true" aria-label="Side panel, pressed"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg></button>
+            <button class="ib fv" aria-label="Focused"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></svg></button>
+          </div>
+          <div class="sample">
+            <button class="chip" aria-pressed="false">#recipes <span class="n">31</span></button>
+            <button class="chip" aria-pressed="true">#work <span class="n">148</span></button>
+            <span class="schip">#idea<button aria-label="Remove #idea"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true" style="width: 12px; height: 12px"><path d="M18 6 6 18M6 6l12 12"/></svg></button></span>
+            <span class="cnt">3</span>
+            <span class="due late">Oct 28</span>
+            <button class="uppill"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>velo 0.11 is ready</button>
+            <span class="ferr"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>Wrong passphrase</span>
+          </div>
+          <div class="box">
+            <div class="list" style="flex: none" data-active="true">
+              <div class="row sel"><span class="tt">Velo roadmap</span><span class="sn">Selected, list active — graphite</span><span class="dt">now</span></div>
+              <div class="row sel2"><span class="tt">Velo roadmap</span><span class="sn">Selected, focus in the editor</span><span class="dt">now</span></div>
+              <div class="row h"><span class="tt">Reading list</span><span class="sn">Hover</span><span class="dt">3h</span></div>
+              <div class="trow"><span class="cbx on" aria-hidden="true"><svg class="i s" viewBox="0 0 24 24" style="width: 10px; height: 10px; stroke-width: 3"><path d="M20 6 9 17l-5-5"/></svg></span><span class="tx" style="color: var(--g11); text-decoration: line-through">Saved searches</span><span class="nt">Velo roadmap</span></div>
+            </div>
+          </div>
+          <div class="box" style="padding: 12px 18px">
+            <div class="md" style="font-size: 15px; line-height: 1.7">See <a class="wl" href="#">Search ranking</a> and the <a href="#">Tauri docs</a>; <a class="wl miss" href="#">Passphrase UX</a> has no note yet. <span class="tg">#work</span> <mark class="q">roadmap</mark></div>
+          </div>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+  <div class="vl sheet" style="padding: 16px 22px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; font-size: 12px; line-height: 1.55; border-color: rgba(0,0,0,.09)">
+    <p style="margin: 0"><b>Links without color.</b> Links and [[wikilinks]] are body-colored with a gray underline (gray.8). Missing targets keep red with a dashed underline, so the only color in the text is a problem to fix.</p>
+    <p style="margin: 0"><b>Selection.</b> List active: gray.11 light / #5a5a5a dark with white text (5.9 / 6.9:1). Focus elsewhere: gray.4 / gray.5. Focus ring: graphite 2 px (11.2 / 12.7:1).</p>
+    <p style="margin: 0"><b>Glass, optional</b> <span class="yours">my call</span> On macOS the header and side panel can sit on native vibrancy (Tauri window effects: sidebar / headerView material); these grays are the opaque fallback and the Windows / Linux look.</p>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1800,"height":1400}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const mk = (hexes, fgs) => hexes.map((hex, i) => ({ n: String(i + 1), hex, fg: fgs[i] }));
+    const d = '#202020', w = '#ffffff', dd = '#111111', dl = '#eeeeee';
+    return {
+      themes: [
+        { label: 'Light', cls: 'vl',
+          gray: mk(['#fcfcfc','#f9f9f9','#f0f0f0','#e8e8e8','#e0e0e0','#d9d9d9','#cecece','#bbbbbb','#8d8d8d','#838383','#646464','#202020'], [d,d,d,d,d,d,d,d,w,w,w,w]),
+          roles: [
+            { n: 'canvas', u: 'editor, list', hex: '#ffffff' },
+            { n: 'chrome', u: 'header, panels', hex: '#f7f7f7' },
+            { n: 'selection', u: 'list active', hex: '#646464' },
+            { n: 'pressed', u: 'toggles, tabs', hex: '#dcdcdc' },
+            { n: 'graphite', u: 'focus, chip on, Preview', hex: '#3b3b3b' },
+            { n: 'positive', u: 'primary, done, update', hex: '#218358' },
+            { n: 'danger', u: 'errors, overdue, missing', hex: '#ce2c31' },
+            { n: 'mark', u: 'markdown syntax', hex: '#646464' }
+          ] },
+        { label: 'Dark', cls: 'vd',
+          gray: mk(['#111111','#191919','#222222','#2a2a2a','#313131','#3a3a3a','#484848','#606060','#6e6e6e','#7b7b7b','#b4b4b4','#eeeeee'], [dl,dl,dl,dl,dl,dl,dl,dl,w,w,dd,dd]),
+          roles: [
+            { n: 'canvas', u: 'editor, list', hex: '#111111' },
+            { n: 'chrome', u: 'header, panels', hex: '#1c1c1c' },
+            { n: 'selection', u: 'list active', hex: '#5a5a5a' },
+            { n: 'pressed', u: 'toggles, tabs', hex: '#3a3a3a' },
+            { n: 'graphite', u: 'focus, chip on, Preview', hex: '#d4d4d4' },
+            { n: 'positive', u: 'primary, done, update', hex: '#3dd68c' },
+            { n: 'danger', u: 'errors, overdue, missing', hex: '#ff9592' },
+            { n: 'mark', u: 'markdown syntax', hex: '#959595' }
+          ] }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

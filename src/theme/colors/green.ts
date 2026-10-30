@@ -27,10 +27,11 @@ export const green = defineSemanticTokens.colors({
   a12: { value: { _light: '#002616e6', _dark: '#bbffd7f0' } },
   solid: {
     bg: {
-      DEFAULT: { value: { _light: '{colors.green.9}', _dark: '{colors.green.9}' } },
-      hover: { value: { _light: '{colors.green.10}', _dark: '{colors.green.10}' } },
+      // v2 clear: the solid button is velo.positive (4.7:1 / 8.2:1); green.9 + white is only ~3.2:1
+      DEFAULT: { value: { _light: '{colors.velo.positive}', _dark: '{colors.velo.positive}' } },
+      hover: { value: { _light: '{colors.velo.positiveHover}', _dark: '{colors.velo.positiveHover}' } },
     },
-    fg: { DEFAULT: { value: { _light: 'white', _dark: 'white' } } },
+    fg: { DEFAULT: { value: { _light: '{colors.velo.positiveFg}', _dark: '{colors.velo.positiveFg}' } } },
   },
   subtle: {
     bg: {

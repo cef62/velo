@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>v2 what moved where</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+<link rel="stylesheet" href="/_blob/329926fd862e3266351f7732d64d519e">
+<link rel="stylesheet" href="/_blob/8b1593304e554f9b2505124be1ddcde5">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+.cut{position:relative;width:1000px;overflow:hidden;border-radius:10px;border:1px solid #d9d9e0}
+.cut .hdr{width:1160px}
+.clip{position:absolute;top:0;right:0;bottom:0;width:4px;background:#e5484d}
+.mt td,.mt th{font-size:12px}
+.mt td{height:30px}
+.mt td:nth-child(2),.mt td:nth-child(3){color:#60646c}
+.mt td.k{font-family:"JetBrains Mono",monospace;font-size:11px;color:#60646c;white-space:nowrap}
+</style>
+</helmet>
+<div class="board" style="width: 2000px; height: 1400px; padding: 56px 60px; display: flex; flex-direction: column; gap: 28px">
+  <div style="display: flex; flex-direction: column; gap: 8px">
+    <h1 style="margin: 0; font: 700 34px/1.1 Inter, system-ui, sans-serif; letter-spacing: -0.02em">v2 — every control in the place it acts on</h1>
+    <p class="cap" style="font-size: 14px; max-width: 1300px">The header keeps only what is global: search, filters, the command palette, settings. List controls live on the list, note controls on the note, relations next to the note. Nothing is removed without your say: the right column lists what I recommend dropping. <span class="yours">my call</span> marks decisions for you to check.</p>
+  </div>
+
+  <div class="vl" style="display: flex; flex-direction: column; gap: 12px">
+    <p class="lbl">Today at 1000 px (default window): the right end is cut off</p>
+    <div class="cut">
+      <header class="hdr" style="padding-left: 96px">
+        <div class="tl" aria-hidden="true" style="position: absolute; left: 14px"><i></i><i></i><i></i></div>
+        <div class="seg" role="radiogroup" aria-label="Left pane (today)"><button role="radio" aria-checked="true">Notes</button><button role="radio" aria-checked="false">Tasks <span class="cnt">3</span></button><button role="radio" aria-checked="false">Connections</button><button role="radio" aria-checked="false">Timeline</button></div>
+        <label class="inp" style="flex: none; width: 200px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input aria-label="Search (today)" placeholder="Search or create…"></label>
+        <button class="ib" aria-label="Tags (today)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></svg></button>
+        <div class="seg" role="radiogroup" aria-label="Sort (today)"><button role="radio" aria-checked="true">Recent</button><button role="radio" aria-checked="false">A→Z</button></div>
+        <div class="seg" role="radiogroup" aria-label="Edit style (today)"><button role="radio" aria-checked="true">Rich</button><button role="radio" aria-checked="false">Plain</button></div>
+        <button class="ib" aria-label="Preview (today)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button>
+        <span class="sep"></span>
+        <button class="ib" aria-label="Lock (today)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
+        <button class="ib" aria-label="Lock all (today)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="8" height="5" x="14" y="17" rx="1"/><path d="M10 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v2.5"/><path d="M20 17v-2a2 2 0 1 0-4 0v2"/></svg></button>
+        <button class="ib" aria-label="Trash (today)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>
+        <button class="ib" aria-label="Settings (today)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+      </header>
+      <span class="clip" aria-hidden="true"></span>
+    </div>
+    <p class="anno">Fourteen controls in one row. The pane switch alone is ~350 px with labels; the v1 breakpoints (900 / 720) were set before it existed, so at 1000 px the header stays in “full” mode and Trash and Settings fall off the end.</p>
+
+    <p class="lbl" style="margin-top: 10px">v2 at 1000 px: four controls, fits down to 600 px</p>
+    <div style="width: 1000px; border-radius: 10px; border: 1px solid #d9d9e0; overflow: hidden">
+      <header class="hdr hdr2" style="padding-left: 96px; position: relative">
+        <div class="tl" aria-hidden="true" style="position: absolute; left: 14px"><i></i><i></i><i></i></div>
+        <label class="inp srch2"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input aria-label="Search or create" placeholder="Search or create…"><span class="kbd">⌘L</span></label>
+        <span class="grow"></span>
+        <button class="ib" aria-label="Filters (⌘⇧T)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></svg></button>
+        <button class="ib" aria-label="Command palette (⌘P)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></svg></button>
+        <button class="ib" aria-label="Settings (⌘,)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+      </header>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: minmax(0, 1fr) 520px; gap: 40px; flex: 1; min-height: 0">
+    <div class="vl sheet" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; overflow: hidden">
+      <h2 class="h-sec" style="font-size: 18px">Placement map</h2>
+      <table class="tbl mt">
+        <thead><tr><th style="width: 22%">Control</th><th style="width: 22%">Today</th><th>v2</th><th style="width: 110px">Shortcut</th></tr></thead>
+        <tbody>
+          <sc-for list="{{moves}}" as="m" hint-placeholder-count="20">
+            <tr><td style="font-weight: 500">{{m.c}}</td><td>{{m.a}}</td><td>{{m.b}}<sc-if value="{{m.y}}" hint-placeholder-val="{{false}}"><span class="yours">my call</span></sc-if></td><td class="k">{{m.k}}</td></tr>
+          </sc-for>
+        </tbody>
+      </table>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 20px">
+      <div class="vl sheet" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 10px">
+        <h2 class="h-sec" style="font-size: 18px">Recommend removing — you decide</h2>
+        <sc-for list="{{drops}}" as="d" hint-placeholder-count="7">
+          <div style="display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-bottom: 1px solid #e8e8ec"><span style="font-size: 13px; font-weight: 600">{{d.t}}</span><span class="anno">{{d.w}}</span></div>
+        </sc-for>
+      </div>
+      <div class="vl sheet" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 8px">
+        <h2 class="h-sec" style="font-size: 18px">New</h2>
+        <p class="anno"><b>Command palette, ⌘P</b> <span class="yours">my call</span> — every action by name with its shortcut. It replaces the overflow menu and is where rare actions live.</p>
+        <p class="anno"><b>Related tab</b> <span class="yours">my call</span> — a keyboard list of the open note’s links, backlinks, mentions and tag neighbours, in the side panel beside the note.</p>
+        <p class="anno"><b>Inline unlock</b> <span class="yours">my call</span> — opening a locked note shows the passphrase field in the editor area, not a modal.</p>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2000,"height":1400}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const m = (c, a, b, k, y) => ({ c, a, b, k, y: !!y });
+    return {
+      moves: [
+        m('Search / quick capture', 'Header', 'Header — the only wide control; active filters show as chips inside it', '⌘L'),
+        m('Notes · Tasks · Timeline', 'Header segmented', 'Tabs in the left pane’s bar; Tasks keeps its due count', '⌘⇧X · ⌘⇧L', 1),
+        m('Connections', 'Header, replaces the list', 'Side panel › Related tab, beside the note', '⌘⇧C', 1),
+        m('Sort Recent / A→Z', 'Header + overflow + Settings', 'Notes pane bar, one menu button', '⌘⇧S'),
+        m('Rich / Plain', 'Header + overflow', 'Title bar view switch', '⌘⇧R'),
+        m('Preview', 'Header toggle → pill', 'Third segment of the view switch', '⌘⇧P', 1),
+        m('Tags panel', 'Header #', 'Header # “Filters”, badge = active filters', '⌘⇧T'),
+        m('Lock / Unlock note', 'Header', 'Title bar; the icon shows the state', '⌘⇧E'),
+        m('Lock all', 'Header', 'Command palette', '⌥⌘E', 1),
+        m('Move to Trash', 'Header', 'Title bar ⋯ note menu', '⌘⌫'),
+        m('Rename · Move to new note · Merge', 'Double-click · shortcut', 'Title bar ⋯ note menu (+ double-click)', '⌘R · ⌘⇧N'),
+        m('Settings', 'Header', 'Header gear', '⌘,'),
+        m('More actions ⋯', 'Header, < 720 px', 'Gone — the palette is the overflow', '⌘P', 1),
+        m('Info', 'Title bar → panel', 'Title bar panel toggle; panel tabs Related · Info', '⌘I'),
+        m('“Filtered by …” banner', 'Under the header', 'Chips in the search field; Backspace removes', '—', 1),
+        m('Save search…', 'Tag panel + banner', 'Filters panel + palette', '—'),
+        m('Preview strip', 'Above the editor', 'Gone — the Preview segment is the indicator', '—', 1),
+        m('Show front matter', 'Info panel checkbox', 'Note ⋯ menu + palette', '—', 1),
+        m('Update banner', 'Note area', 'Header pill → popover with Install', '—', 1),
+        m('Export…', 'Timeline toolbar', 'Timeline pane bar + palette; scope shown in the dialog', '—'),
+        m('Show done', 'Tasks footer', 'Tasks pane bar toggle', '—'),
+        m('Unlock a locked note', 'Passphrase dialog', 'Field in the editor area', '⌘⇧E', 1)
+      ],
+      drops: [
+        { t: '“Show labels on header buttons” setting', w: 'Three icon buttons left, each with a tooltip; labels no longer solve anything.' },
+        { t: 'Overflow menu (More actions)', w: 'The palette does the same job for every action, at every width.' },
+        { t: 'Connections graph and its Ring / Created / Updated layouts', w: 'Related covers what you use it for. If you want a map later, open it full-window from the palette.' },
+        { t: 'Preview strip', w: 'The view switch already says Preview, and the caret is gone.' },
+        { t: 'Sort in Settings', w: 'Duplicates the pane bar menu, which already remembers the choice.' },
+        { t: 'Tags section in the Info panel', w: 'The tag bar under the title shows the same pills.' },
+        { t: '“Filtered by” banner', w: 'Replaced by chips in the search field.' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

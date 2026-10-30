@@ -30,7 +30,7 @@ export const editorGlobalCss = {
       h: '1em',
       m: '0 0.55em 0 0',
       verticalAlign: '-0.1em',
-      accentColor: 'var(--colors-velo-accent)',
+      accentColor: 'var(--colors-velo-positive)',
       cursor: 'pointer',
     },
     [`${task}:has(> input.task:checked), ${task}:has(> p > input.task:checked)`]: {
@@ -78,7 +78,7 @@ export const editorGlobalCss = {
     // GFM alerts: --alert is the accent for the bar and title
     '& .markdown-alert': { borderLeftColor: 'var(--alert)', color: 'velo.fg' },
     '& .markdown-alert-title': { color: 'var(--alert)', fontWeight: '650', m: '0.3em 0 0.25em' },
-    '& .markdown-alert-note': { '--alert': 'colors.velo.accentText' },
+    '& .markdown-alert-note': { '--alert': 'colors.velo.fgMuted' },
     '& .markdown-alert-tip': { '--alert': 'colors.green.11' },
     '& .markdown-alert-important': { '--alert': { base: '#6550b9', _dark: '#baa7ff' } },
     '& .markdown-alert-warning': { '--alert': 'colors.amber.11' },

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>v2 command palette</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+<link rel="stylesheet" href="/_blob/329926fd862e3266351f7732d64d519e">
+<link rel="stylesheet" href="/_blob/8b1593304e554f9b2505124be1ddcde5">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+.bar{height:10px;border-radius:5px;background:var(--g4)}
+.ovl2{position:absolute;inset:0;background:var(--overlay);display:flex;justify-content:center;align-items:flex-start;padding-top:28px}
+.pal .sec{padding:8px 10px 4px}
+.pi .kbd:empty,mark.q:empty,.pi .ctx:empty{display:none}
+.pi .ctx{margin-left:8px}
+</style>
+</helmet>
+<div class="board" style="width: 1400px; height: 1100px; padding: 40px 60px; display: flex; flex-direction: column; gap: 16px">
+  <div style="display: flex; flex-direction: column; gap: 6px">
+    <h2 class="h-sec">Command palette — ⌘P <span class="yours">my call</span></h2>
+    <p class="anno" style="font-size: 13px; max-width: 1200px">Every action by name, with its current binding (read from Settings, so remaps show). Actions only — notes stay in the search field. Empty query: recently used, then the note’s actions. Disabled actions stay listed and say why on the right.</p>
+  </div>
+
+  <sc-for list="{{states}}" as="s" hint-placeholder-count="2">
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <p class="lbl">{{s.label}}</p>
+      <div style="display: flex; gap: 80px">
+        <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+          <div class="{{t.cls}} scene" style="width: 600px; height: 440px">
+            <div class="hdr"><div class="tl" aria-hidden="true"><i></i><i></i><i></i></div><div class="bar" style="width: 300px; height: 32px; border-radius: 6px"></div></div>
+            <div style="padding: 16px; display: flex; flex-direction: column; gap: 14px"><div class="bar" style="width: 70%"></div><div class="bar" style="width: 52%"></div><div class="bar" style="width: 64%"></div></div>
+            <div class="ovl2">
+              <div class="pal" role="dialog" aria-modal="true" aria-label="Command palette" style="width: 540px">
+                <div class="pin"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></svg><input role="combobox" aria-expanded="true" aria-controls="pl" aria-label="Command" placeholder="Type a command…" value="{{s.q}}"></div>
+                <div class="plist" role="listbox" id="pl" aria-label="Commands">
+                  <sc-for list="{{s.items}}" as="i" hint-placeholder-count="8">
+                    <sc-if value="{{i.head}}" hint-placeholder-val="{{false}}"><div class="sec" role="presentation">{{i.head}}</div></sc-if>
+                    <sc-if value="{{i.name}}" hint-placeholder-val="{{true}}"><div class="pi {{i.cls}}" role="option" aria-selected="{{i.on}}"><span>{{i.a}}<mark class="q">{{i.m}}</mark>{{i.b}}</span><span class="ctx">{{i.ctx}}</span><span class="kbd" style="margin-left: auto">{{i.k}}</span></div></sc-if>
+                  </sc-for>
+                </div>
+                <div class="pfoot"><span><span class="kbd">↑</span><span class="kbd">↓</span> move</span><span><span class="kbd">↩</span> run</span><span><span class="kbd">Esc</span> close</span><span style="margin-left: auto">{{s.foot}}</span></div>
+              </div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1400,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const h = (head) => ({ head, name: false });
+    const it = (a, m, b, k, ctx, cls) => ({ head: false, name: true, a, m, b, k: k || '', ctx: ctx || '', cls: cls || '', on: cls === 'on' ? 'true' : 'false' });
+    return {
+      themes: [{ label: 'Light', cls: 'vl' }, { label: 'Dark', cls: 'vd' }],
+      states: [
+        { label: 'Empty query — recent, then this note', q: '', foot: '34 commands', items: [
+          h('Recent'),
+          it('Lock all notes', '', '', '⌥⌘E', '', 'on'),
+          it('Export…', '', '', '', 'Timeline'),
+          it('Vertical / horizontal layout', '', '', '⌘⇧J'),
+          h('Velo roadmap'),
+          it('Rename note', '', '', '⌘R'),
+          it('Move selection to new note', '', '', '⌘⇧N', 'select text first', 'dis'),
+          it('Merge into…', '', '', ''),
+          it('Show front matter', '', '', '')
+        ] },
+        { label: 'Typing “lock”', q: 'lock', foot: 'Looking for a note? Esc, then ⌘L', items: [
+          it('', 'Lock', ' note', '⌘⇧E', 'Velo roadmap', 'on'),
+          it('', 'Lock', ' all notes', '⌥⌘E'),
+          it('Settings: change the ', 'Lock', ' shortcut', '')
+        ] }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

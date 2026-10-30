@@ -1,8 +1,7 @@
-import { slate } from "./src/theme/colors/slate";
-import { indigo } from "./src/theme/colors/indigo";
+import { neutral } from "./src/theme/colors/neutral";
 import { green } from "./src/theme/colors/green";
 import { red } from "./src/theme/colors/red";
-import { velo } from "./src/theme/tokens/velo";
+import { velo, veloPopoverClear } from "./src/theme/tokens/velo";
 import { amber } from "./src/theme/colors/amber";
 import { animationStyles } from "./src/theme/animation-styles";
 import { zIndex } from "./src/theme/tokens/z-index";
@@ -105,8 +104,7 @@ export default defineConfig({
           },
 
           amber: amber,
-          gray: slate,
-          indigo: indigo,
+          gray: neutral,
           velo: velo,
           red: red,
           green: green
@@ -115,12 +113,7 @@ export default defineConfig({
 
         shadows: {
           ...shadows,
-          veloPopover: {
-            value: {
-              _light: '0 1px 2px rgba(16,24,64,.06), 0 12px 32px rgba(16,24,64,.14)',
-              _dark: '0 0 0 1px #2e3135, 0 16px 40px rgba(0,0,0,.55)',
-            },
-          },
+          veloPopover: veloPopoverClear,
         },
 
         radii: {

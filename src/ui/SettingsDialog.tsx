@@ -112,7 +112,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
       <SegmentGroup.Items items={items.map(([v, l]) => ({ value: v, label: l }))} />
     </SegmentGroup.Root>
   );
-  const kbdOn = { background: "transparent", color: "inherit", borderColor: "whiteAlpha.600", boxShadow: "none" } as const;
+  const kbdOn = { background: "transparent", color: "inherit", boxShadow: "none" } as const;
 
   return (
     <div onKeyDown={(e) => (isMac ? e.metaKey : e.ctrlKey) && e.key === "Enter" && (e.preventDefault(), void save())}>
@@ -292,7 +292,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
           msg && <span className={ferr} role="alert" style={{ marginRight: "auto" }}><CircleAlert aria-hidden />{msg}</span>
         )}
         <Button variant="outline" onClick={() => controller.closeSettings()}>Cancel</Button>
-        <Button disabled={nConflicts > 0 || saving} onClick={() => void save()}>Save <Kbd {...kbdOn}>{isMac ? "⌘↩" : "Ctrl+↩"}</Kbd></Button>
+        <Button colorPalette="green" disabled={nConflicts > 0 || saving} onClick={() => void save()}>Save <Kbd {...kbdOn}>{isMac ? "⌘↩" : "Ctrl+↩"}</Kbd></Button>
       </div>
     </div>
   );

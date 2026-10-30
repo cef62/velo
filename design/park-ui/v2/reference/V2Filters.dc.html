@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>v2 filters and saved searches</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+<link rel="stylesheet" href="/_blob/329926fd862e3266351f7732d64d519e">
+<link rel="stylesheet" href="/_blob/8b1593304e554f9b2505124be1ddcde5">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+.glab{font:600 11px/1 Inter,system-ui,sans-serif;text-transform:uppercase;letter-spacing:.05em;color:var(--g11);width:52px;flex:none;padding-top:8px}
+.grp{display:flex;gap:10px;align-items:flex-start}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+</style>
+</helmet>
+<div class="board" style="width: 2200px; height: 900px; padding: 50px 60px; display: flex; flex-direction: column; gap: 16px">
+  <div style="display: flex; flex-direction: column; gap: 6px">
+    <h2 class="h-sec">Filters panel (⌘⇧T) — saved searches and tags in one place</h2>
+    <p class="anno" style="font-size: 13px; max-width: 1500px">Saved searches first (dashed until applied), then “No links” and the tags. Applying a saved search replaces the filters and the query, and shows as one chip in the search field. Save search… and Clear live here and in the palette; the banner is gone. Chip group = one Tab stop, ←/→ move across both rows, Space toggles, Esc closes and returns to search.</p>
+  </div>
+  <div style="display: flex; gap: 80px">
+    <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+      <div style="display: flex; flex-direction: column; gap: 12px">
+        <p class="lbl">{{t.label}} · 1000 px · two tags active</p>
+        <div class="{{t.cls}} win" style="width: 1000px; height: 640px">
+          <header class="hdr hdr2" style="padding-left: 96px; position: relative; border-bottom: 0">
+            <div class="tl" aria-hidden="true" style="position: absolute; left: 14px"><i></i><i></i><i></i></div>
+            <label class="inp srch2"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><span class="schip">#work<button aria-label="Remove #work"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true" style="width: 12px; height: 12px"><path d="M18 6 6 18M6 6l12 12"/></svg></button></span><span class="schip">#idea<button aria-label="Remove #idea"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true" style="width: 12px; height: 12px"><path d="M18 6 6 18M6 6l12 12"/></svg></button></span><input aria-label="Search or create, filtered by work and idea" placeholder="Search 214 notes…"><button class="ib xs" aria-label="Clear filters"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></label>
+            <span class="grow"></span>
+            <button class="ib" aria-pressed="true" aria-expanded="true" aria-controls="fp" aria-label="Filters (⌘⇧T), 2 active"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></svg><span class="dot" aria-hidden="true">2</span></button>
+            <button class="ib" aria-label="Command palette (⌘P)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></svg></button>
+            <button class="ib" aria-label="Settings (⌘,)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+          </header>
+          <section class="fpanel" id="fp" aria-label="Filters">
+            <div class="row1">
+              <span style="font-weight: 600; color: var(--g12)">Filters</span>
+              <span style="color: var(--g11)">2 active · 214 notes</span>
+              <button class="btn ghost sm" style="margin-left: auto"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>Save search…</button>
+              <button class="btn ghost sm">Clear</button>
+              <span class="hint"><span class="kbd">⌘⇧T</span> close</span>
+            </div>
+            <div class="grp" role="group" aria-label="Saved searches"><span class="glab" aria-hidden="true">Saved</span><div class="chips">
+              <button class="chip saved" aria-pressed="false">Weekly review</button>
+              <button class="chip saved" aria-pressed="false">Inbox triage</button>
+              <button class="chip saved fv" aria-pressed="false">velo · open work</button>
+            </div></div>
+            <div class="grp" role="group" aria-label="Filter by tag"><span class="glab" aria-hidden="true">Tags</span><div class="chips">
+              <button class="chip" aria-pressed="false">No links</button>
+              <sc-for list="{{tags}}" as="c" hint-placeholder-count="16">
+                <button class="chip" aria-pressed="{{c.on}}">#{{c.n}} <span class="n">{{c.c}}</span></button>
+              </sc-for>
+            </div></div>
+          </section>
+          <div class="lpane" style="flex: 1">
+            <div class="pbar">
+              <div class="ptabs" role="tablist" aria-label="Left pane">
+                <button class="ptab" role="tab" aria-selected="true"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M16 13H8M16 17H8"/></svg>Notes</button>
+                <button class="ptab" role="tab" aria-selected="false" tabindex="-1" aria-label="Tasks, 3 due"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 17 2 2 4-4M3 7l2 2 4-4M13 6h8M13 12h8M13 18h8"/></svg>Tasks<span class="cnt">3</span></button>
+                <button class="ptab" role="tab" aria-selected="false" tabindex="-1"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>Timeline</button>
+              </div>
+              <span class="sp"></span><span class="meta">214 notes</span>
+              <button class="mbtn" aria-label="Sort: Recent (⌘⇧S)"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>Recent<svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+            </div>
+            <div class="list" role="listbox" aria-label="Notes">
+              <div class="row sel2" role="option" aria-selected="true"><span class="tt">Velo roadmap</span><span class="sn">Ship the 1.0 refresh before the winter break</span><span class="dt">now</span></div>
+              <div class="row" role="option" aria-selected="false"><span class="tt">Tag search ideas</span><span class="sn">Prefix match on #, recent tags first</span><span class="dt">4d</span></div>
+              <div class="row" role="option" aria-selected="false"><span class="tt">Design sync — Oct 24</span><span class="sn">Header collapse rules, divider affordance</span><span class="dt">2d</span></div>
+              <div class="row" role="option" aria-selected="false"><span class="tt">Q4 planning</span><span class="sn">Ties into the velo roadmap and the MCP work</span><span class="dt">1w</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2200,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const sel = ['work', 'idea'];
+    const raw = [['work',148],['idea',62],['recipes',31],['reading',27],['velo',24],['meeting',22],['journal',18],['design',16],['tauri',14],['italian',12],['books',11],['travel',9],['home',9],['gift',7],['music',5],['someday',4]];
+    return {
+      themes: [{ label: 'Light', cls: 'vl' }, { label: 'Dark', cls: 'vd' }],
+      tags: raw.map(([n, c]) => ({ n, c, on: sel.includes(n) ? 'true' : 'false' }))
+    };
+  }
+}
+</script>
+</body>
+</html>

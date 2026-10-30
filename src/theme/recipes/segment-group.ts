@@ -12,7 +12,7 @@ export const segmentGroup = defineSlotRecipe({
       },
       borderRadius: 'l3',
       boxShadow: 'inset 0 0 0px 1px var(--shadow-color)',
-      boxShadowColor: 'border',
+      boxShadowColor: 'velo.hairline',
       display: 'inline-flex',
       alignItems: 'center',
       justifyContent: 'center',

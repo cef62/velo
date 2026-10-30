@@ -97,7 +97,7 @@ function Body({ req, finish }: { req: Req; finish: (ok: boolean) => void }) {
       </div>
       <div className={css({ display: "flex", justifyContent: "flex-end", gap: "2", px: "5", py: "3.5", borderTop: "1px solid", borderColor: "velo.divider" })}>
         <Button type="button" variant="outline" onClick={() => finish(false)}>Cancel</Button>
-        <Button type="submit" disabled={busy}>{create ? "Create & lock" : "Unlock"}</Button>
+        <Button type="submit" colorPalette="green" disabled={busy}>{create ? "Create & lock" : "Unlock"}</Button>
       </div>
     </form>
   );

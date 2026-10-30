@@ -28,7 +28,7 @@ export function UpdateBanner({ controller, store }: { controller: Controller; st
       {(status === "installing" || status === "failed") && <span>{message}</span>}
       {status === "current" && <span>velo is up to date ({version}).</span>}
       {status === "available" && (
-        <Button size="xs" marginLeft="auto" onClick={() => void controller.installUpdate()}>
+        <Button size="xs" colorPalette="green" marginLeft="auto" onClick={() => void controller.installUpdate()}>
           Install and restart
         </Button>
       )}

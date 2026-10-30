@@ -1,51 +1,75 @@
 import { defineSemanticTokens } from '@pandacss/dev'
 
-// velo's semantic colors from the design handoff (explicit hexes, WCAG-checked in design/park-ui/README.md)
+// velo semantic colors, "clear" (v2, design/park-ui/v2/README.md §12).
+// Grays from Radix gray (neutral). The accent is graphite; color only carries meaning:
+// red = errors / overdue / missing links, green = positive (primary action, done, update, Link it).
+// Contrast (light / dark) checked with the WCAG formula; see design/park-ui/v2/README.md §12.
 const c = (light: string, dark: string) => ({ value: { _light: light, _dark: dark } })
 
 export const velo = defineSemanticTokens.colors({
-            // surfaces
-            canvas: c('#ffffff', '#111113'), // editor + list   (white / slate.1)
-            chrome: c('#f9f9fb', '#18191b'), // header, tag panel, first-run (slate.2)
-            panel: c('#ffffff', '#18191b'), // dialogs, menus
-            subtle: c('#f0f0f3', '#212225'), // row hover, segment track, code bg (slate.3)
-            muted: c('#e8e8ec', '#272a2d'), // ghost hover (slate.4)
-            segmentOn: c('#ffffff', '#363a3f'),
+  // surfaces
+  canvas: c('#ffffff', '#111111'), // editor + list (white / gray.1)
+  chrome: c('#f7f7f7', '#1c1c1c'), // header, pane bars, side panel, filters, first-run
+  panel: c('#ffffff', '#1c1c1c'), // dialogs, menus, palette
+  subtle: c('#f0f0f0', '#222222'), // row hover, segment track, code bg (gray.3)
+  muted: c('#e8e8e8', '#2a2a2a'), // ghost hover, lines inside a region (gray.4)
+  segmentOn: c('#ffffff', '#3a3a3a'),
 
-            // borders
-            divider: c('#e0e1e6', '#2e3135'), // slate.5
-            border: c('#d9d9e0', '#363a3f'), // slate.6
-            inputBorder: c('#cdced6', '#43484e'), // slate.7
-            grip: c('#cdced6', '#43484e'), // divider grip at rest
+  // edges: hairlines + a top highlight make surfaces read as clear glass
+  hairline: c('rgba(0,0,0,.09)', 'rgba(255,255,255,.08)'), // NEW — window, segments, chips, pressed
+  highlight: c('rgba(255,255,255,.85)', 'rgba(255,255,255,.07)'), // NEW — inset top highlight on chrome / pressed
+  divider: c('#e0e0e0', '#313131'), // gray.5 — between regions
+  border: c('#d9d9d9', '#3a3a3a'), // gray.6
+  inputBorder: c('#cecece', '#484848'), // gray.7
+  grip: c('#cecece', '#484848'),
 
-            // text
-            fg: c('#1c2024', '#edeef0'), // 16.4:1 / 16.3:1
-            fgMuted: c('#60646c', '#b0b4ba'), // snippets, dates — 5.9:1 / 9.1:1
-            mark: c('#60646c', '#8e929b'), // markdown syntax marks — 5.9:1 / 6.1:1
+  // text
+  fg: c('#202020', '#eeeeee'), // 16.3:1 / 16.3:1
+  fgMuted: c('#646464', '#b4b4b4'), // snippets, dates — 5.9:1 / 9.1:1
+  mark: c('#646464', '#959595'), // markdown syntax marks — 5.9:1 / 6.3:1
 
-            // accent
-            accent: c('#3e63dd', '#3e63dd'), // indigo.9 — solid buttons, chips on, caret, focus ring
-            accentHover: c('#3358d4', '#5472e4'), // indigo.10
-            accentText: c('#3a5bc7', '#9eb1ff'), // indigo.11 — links, wikilinks, #tags
-            accentSubtle: c('#edf2fe', '#182449'), // indigo.3 — tag-in-text bg, preview strip
-            accentSubtleHover: c('#e1e9ff', '#1d2e62'), // indigo.4 — pressed icon buttons
-            accentLine: c('#abbdf9', '#3a4f97'), // indigo.7 — link underline
-            accentBorder: c('#8da4ef', '#435db1'), // indigo.8 — input focus, divider hover
-            accentHalo: c('#d2deff', '#253974'), // indigo.5 — recording key-cap, search match
+  // graphite accent (was indigo)
+  accent: c('#3b3b3b', '#d4d4d4'), // focus ring, caret, chip on, Preview segment — 11.2:1 / 12.7:1 vs canvas
+  accentHover: c('#2a2a2a', '#eeeeee'),
+  accentFg: c('#ffffff', '#111111'), // NEW — text on accent (was hard-coded white)
+  accentText: c('#202020', '#eeeeee'), // links read by underline, not color
+  accentSubtle: c('#f0f0f0', '#222222'), // inline #tag bg, search chip
+  accentSubtleHover: c('#dcdcdc', '#3a3a3a'), // pressed toggles, selected pane tab
+  accentLine: c('#bbbbbb', '#606060'), // link / wikilink underline
+  accentBorder: c('#8d8d8d', '#7b7b7b'), // input focus, divider hover — 3.3:1 / 4.5:1 (non-text)
+  accentHalo: c('#e0e0e0', '#313131'), // recording key-cap, search match bg (match is also bold)
 
-            // list selection
-            selection: c('#3358d4', '#304384'), // list/search active — white text 6.0:1 / 9.3:1
-            selectionFg: c('#ffffff', '#ffffff'),
-            selectionMuted: c('#e1e9ff', '#d6e1ff'), // snippet/date on selection — 5.0:1 / 7.1:1
-            selectionIdle: c('#e1e9ff', '#1d2e62'), // selected, focus in editor
+  // list selection (graphite, like macOS Graphite accent)
+  selection: c('#646464', '#5a5a5a'), // white text 5.9:1 / 6.9:1
+  selectionFg: c('#ffffff', '#ffffff'),
+  selectionMuted: c('#e8e8e8', '#d9d9d9'), // snippet/date on selection — 4.8:1 / 4.9:1
+  selectionIdle: c('#e8e8e8', '#313131'), // selected, focus elsewhere — muted text 4.8:1 / 6.3:1
 
-            // status
-            danger: c('#ce2c31', '#ff9592'), // red.11 — errors, missing wikilinks
-            dangerBorder: c('#e5484d', '#e5484d'), // red.9
-            dangerSubtle: c('#feebec', '#3b1219'), // red.3
-            warningBg: c('#fff7c2', '#302008'), // amber.3 — conflict banner
-            warningBorder: c('#f3d673', '#5c3d05'), // amber.6
-            warningFg: c('#4f3422', '#ffe7b3'), // amber.12 — 10.5:1 / 13:1
+  // positive (NEW): primary action, done, update ready, Link it
+  positive: c('#218358', '#3dd68c'), // solid bg
+  positiveHover: c('#1d754f', '#4fe39b'),
+  positiveFg: c('#ffffff', '#0b2a1c'), // text on positive — 4.7:1 / 8.2:1
+  positiveText: c('#18794e', '#3dd68c'), // on canvas 5.4:1 / 10.1:1, on positiveSubtle 4.9:1 / 7.9:1
+  positiveSubtle: c('#e9f6e9', '#132d21'),
+  positiveBorder: c('#b2ddb5', '#20573e'),
 
-            overlay: c('rgba(28,32,36,.36)', 'rgba(0,0,0,.6)'),
+  // danger (unchanged)
+  danger: c('#ce2c31', '#ff9592'), // red.11 — errors, overdue, missing wikilinks
+  dangerBorder: c('#e5484d', '#e5484d'), // red.9
+  dangerSubtle: c('#feebec', '#3b1219'), // red.3
+
+  // warning → neutral: the conflict banner is gray now (only errors are red)
+  warningBg: c('#f0f0f0', '#222222'),
+  warningBorder: c('#d9d9d9', '#3a3a3a'),
+  warningFg: c('#202020', '#eeeeee'),
+
+  overlay: c('rgba(20,20,20,.32)', 'rgba(0,0,0,.6)'),
 })
+
+// panda.config.ts › semanticTokens.shadows.veloPopover, neutral instead of blue-tinted:
+export const veloPopoverClear = {
+  value: {
+    _light: '0 0 0 1px rgba(0,0,0,.06), 0 12px 32px rgba(0,0,0,.14)',
+    _dark: '0 0 0 1px rgba(255,255,255,.07), 0 16px 40px rgba(0,0,0,.6)',
+  },
+}

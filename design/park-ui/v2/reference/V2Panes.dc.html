@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>v2 left pane modes</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="/_blob/e8d259399a803cb8ce6e46bc693b6b47">
+<link rel="stylesheet" href="/_blob/329926fd862e3266351f7732d64d519e">
+<link rel="stylesheet" href="/_blob/8b1593304e554f9b2505124be1ddcde5">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#3a5bc7}a:hover{color:#1f2d5c}
+.crop{width:340px;height:620px;border-radius:10px;overflow:hidden;border:1px solid var(--g6);display:flex;flex-direction:column}
+.crop .lpane{flex:1}
+.day{padding:12px 10px 4px}
+</style>
+</helmet>
+<div class="board" style="width: 1260px; height: 1500px; padding: 50px 60px; display: flex; flex-direction: column; gap: 22px">
+  <div style="display: flex; flex-direction: column; gap: 6px">
+    <h2 class="h-sec">One model for every left-pane mode</h2>
+    <p class="anno" style="font-size: 13px; max-width: 1100px">36 px bar (mode tabs left, that mode’s controls right) over one list. Same row height, same section header, same selection, same keys: Tab reaches the tabs, then the list; ↑/↓ move, ↩ opens, Space acts (tick a task). The search field filters whichever mode is showing.</p>
+  </div>
+  <sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <p class="lbl">{{t.label}}</p>
+      <div style="display: flex; gap: 60px">
+
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <div class="{{t.cls}} crop"><div class="lpane">
+            <div class="pbar">
+              <div class="ptabs" role="tablist" aria-label="Left pane">
+                <button class="ptab" role="tab" aria-selected="true"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M16 13H8M16 17H8"/></svg>Notes</button>
+                <button class="ptab" role="tab" aria-selected="false" tabindex="-1" aria-label="Tasks, 3 due"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 17 2 2 4-4M3 7l2 2 4-4M13 6h8M13 12h8M13 18h8"/></svg><span class="cnt">3</span></button>
+                <button class="ptab" role="tab" aria-selected="false" tabindex="-1" aria-label="Timeline"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg></button>
+              </div>
+              <span class="sp"></span><span class="meta">1,204</span>
+              <button class="mbtn" aria-label="Sort: Recent (⌘⇧S)" aria-haspopup="menu"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>Recent<svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+            </div>
+            <div class="list" role="listbox" aria-label="Notes" data-active="true">
+              <div class="row row2 sel" role="option" aria-selected="true"><div class="l1"><span class="tt">Velo roadmap</span><span class="dt">now</span></div><span class="sn">Ship the 1.0 refresh before the winter break…</span></div>
+              <div class="row row2" role="option" aria-selected="false"><div class="l1"><span class="tt">Reading list</span><span class="dt">3h</span></div><span class="sn">Piranesi, The Overstory, Hyperion</span></div>
+              <div class="row row2" role="option" aria-selected="false"><div class="l1"><span class="tt">2026-10-30</span><span class="dt">4h</span></div><span class="sn">Daily note — standup, accountant Tuesday</span></div>
+              <div class="row row2 h" role="option" aria-selected="false"><div class="l1"><span class="tt">Ragù alla bolognese</span><span class="dt">5h</span></div><span class="sn">Soffritto low and slow, 20 min</span></div>
+              <div class="row row2" role="option" aria-selected="false"><div class="l1"><span class="tt">Design sync — Oct 24</span><span class="dt">2d</span></div><span class="sn">Header collapse rules</span></div>
+              <div class="row row2" role="option" aria-selected="false"><div class="l1"><span class="lk"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span><span class="tt">Journal 2026</span><span class="dt">5d</span></div><span class="sn">Locked</span></div>
+              <div class="row row2" role="option" aria-selected="false"><div class="l1"><span class="tt">Weekly review</span><span class="dt">3d</span></div><span class="sn">Open loops, waiting for, next week</span></div>
+              <div class="row row2" role="option" aria-selected="false"><div class="l1"><span class="tt">Panda CSS notes</span><span class="dt">2w</span></div><span class="sn">Recipes vs. slot recipes</span></div>
+            </div>
+          </div></div>
+          <p class="anno" style="width: 340px"><b>Notes.</b> Sort is a menu button (Recent / Title A→Z, ⌘⇧S) next to the count.</p>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <div class="{{t.cls}} crop"><div class="lpane">
+            <div class="pbar">
+              <div class="ptabs" role="tablist" aria-label="Left pane">
+                <button class="ptab" role="tab" aria-selected="false" tabindex="-1" aria-label="Notes"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M16 13H8M16 17H8"/></svg></button>
+                <button class="ptab" role="tab" aria-selected="true" aria-label="Tasks, 3 due"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 17 2 2 4-4M3 7l2 2 4-4M13 6h8M13 12h8M13 18h8"/></svg>Tasks<span class="cnt">3</span></button>
+                <button class="ptab" role="tab" aria-selected="false" tabindex="-1" aria-label="Timeline"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg></button>
+              </div>
+              <span class="sp"></span>
+              <button class="mbtn" aria-pressed="false">Show done</button>
+            </div>
+            <div class="list" role="list" aria-label="Tasks" style="gap: 0">
+              <div class="sec" aria-hidden="true">Overdue <span class="n">2</span></div>
+              <div class="trow sel" role="listitem" tabindex="0"><span class="cbx" aria-hidden="true"></span><span class="tx">Renew broadband contract</span><span class="nt">Broadband contract</span><span class="due late">Oct 28</span></div>
+              <div class="trow" role="listitem" tabindex="-1"><span class="cbx" aria-hidden="true"></span><span class="tx">Conflict banner copy</span><span class="nt">Velo roadmap</span><span class="due late">Oct 29</span></div>
+              <div class="sec" aria-hidden="true">Today <span class="n">1</span></div>
+              <div class="trow" role="listitem" tabindex="-1"><span class="cbx" aria-hidden="true"></span><span class="tx">Call the accountant</span><span class="nt">2026-10-30</span><span class="due">Today</span></div>
+              <div class="sec" aria-hidden="true">Upcoming <span class="n">3</span></div>
+              <div class="trow" role="listitem" tabindex="-1"><span class="cbx" aria-hidden="true"></span><span class="tx">Book rifugio Lagazuoi</span><span class="nt">Dolomiti</span><span class="due">Nov 4</span></div>
+              <div class="trow h" role="listitem" tabindex="-1"><span class="cbx" aria-hidden="true"></span><span class="tx">Review saved searches</span><span class="nt">Velo roadmap</span><span class="due">Nov 6</span></div>
+              <div class="trow" role="listitem" tabindex="-1"><span class="cbx" aria-hidden="true"></span><span class="tx">Q1 plan draft</span><span class="nt">Q4 planning</span><span class="due">Nov 14</span></div>
+              <div class="sec" aria-hidden="true">No date <span class="n">2</span></div>
+              <div class="trow" role="listitem" tabindex="-1"><span class="cbx" aria-hidden="true"></span><span class="tx">Related panel</span><span class="nt">Velo roadmap</span></div>
+              <div class="trow" role="listitem" tabindex="-1"><span class="cbx" aria-hidden="true"></span><span class="tx">Scan the Brennero rolls</span><span class="nt">Railroad photos</span></div>
+            </div>
+            <div class="toast" role="status">Ticked “Saved searches” · <button class="btn link sm" style="height: 22px">Undo</button></div>
+          </div></div>
+          <p class="anno" style="width: 340px"><b>Tasks.</b> Same rows; Space ticks, ↩ opens at the task’s line. “Show done” is a toggle in the bar; Undo is a status line, not a footer of its own.</p>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <div class="{{t.cls}} crop"><div class="lpane">
+            <div class="pbar">
+              <div class="ptabs" role="tablist" aria-label="Left pane">
+                <button class="ptab" role="tab" aria-selected="false" tabindex="-1" aria-label="Notes"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M16 13H8M16 17H8"/></svg></button>
+                <button class="ptab" role="tab" aria-selected="false" tabindex="-1" aria-label="Tasks, 3 due"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 17 2 2 4-4M3 7l2 2 4-4M13 6h8M13 12h8M13 18h8"/></svg><span class="cnt">3</span></button>
+                <button class="ptab" role="tab" aria-selected="true"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>Timeline</button>
+              </div>
+              <span class="sp"></span>
+              <button class="mbtn" aria-label="Updated, last 30 days" aria-haspopup="menu">Updated · 30d<svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+              <button class="ib" aria-label="Export…" style="width: 28px; height: 28px"><svg class="i s" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg></button>
+            </div>
+            <div class="list" role="listbox" aria-label="Timeline" style="gap: 0">
+              <div class="sec day" aria-hidden="true">Today · Fri 30 Oct</div>
+              <div class="row sel2" role="option" aria-selected="true"><span class="tt">Velo roadmap</span><span class="sn">Ship the 1.0 refresh…</span><span class="dt">14:20</span></div>
+              <div class="row" role="option" aria-selected="false"><span class="tt">2026-10-30</span><span class="sn">Standup notes</span><span class="dt">09:12</span></div>
+              <div class="sec day" aria-hidden="true">Yesterday</div>
+              <div class="row" role="option" aria-selected="false"><span class="tt">Reading list</span><span class="sn">Piranesi, The Overstory</span><span class="dt">21:40</span></div>
+              <div class="row" role="option" aria-selected="false"><span class="tt">Ragù alla bolognese</span><span class="sn">Soffritto low and slow</span><span class="dt">19:05</span></div>
+              <div class="sec day" aria-hidden="true">Wed 28 Oct</div>
+              <div class="row" role="option" aria-selected="false"><span class="tt">Design sync — Oct 24</span><span class="sn">Header collapse rules</span><span class="dt">16:30</span></div>
+              <div class="row" role="option" aria-selected="false"><span class="tt">Tauri window state bug</span><span class="sn">Window restores off-screen</span><span class="dt">11:02</span></div>
+              <div class="sec day" aria-hidden="true">Tue 27 Oct</div>
+              <div class="row" role="option" aria-selected="false"><span class="tt">Weekly review</span><span class="sn">Open loops</span><span class="dt">18:15</span></div>
+              <div class="row" role="option" aria-selected="false"><span class="tt">Q4 planning</span><span class="sn">MCP work</span><span class="dt">10:44</span></div>
+            </div>
+          </div></div>
+          <p class="anno" style="width: 340px"><b>Timeline.</b> Two segment groups became one menu (By: Created / Updated · Range: 7 days / 30 days / All). Export exports exactly what the list shows.</p>
+        </div>
+
+      </div>
+    </div>
+  </sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1260,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { themes: [{ label: 'Light', cls: 'vl' }, { label: 'Dark', cls: 'vd' }] };
+  }
+}
+</script>
+</body>
+</html>

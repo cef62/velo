@@ -75,7 +75,7 @@ function Body({ state, controller }: { state: NonNullable<AppState["exporting"]>
       </div>
       <div className={css({ display: "flex", justifyContent: "flex-end", gap: "2", px: "5", py: "3.5", borderTop: "1px solid", borderColor: "velo.divider" })}>
         <Button type="button" variant="outline" onClick={() => void controller.commitExport(false)}>Cancel</Button>
-        <Button type="submit" disabled={!counts || empty || state.pending}>Export…</Button>
+        <Button type="submit" colorPalette="green" disabled={!counts || empty || state.pending}>Export…</Button>
       </div>
     </form>
   );
