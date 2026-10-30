@@ -5,6 +5,7 @@ import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { Button, Dialog, SegmentGroup, Spinner } from "@/components/ui";
 import { countsLine } from "../export";
+import { filtersLine } from "../timeline";
 import { useStore } from "./useStore";
 
 const err = css({ display: "flex", alignItems: "center", gap: "1.5", fontSize: "uiSm", lineHeight: "1.4", color: "red.11", m: "0", "& svg": { w: "14px", h: "14px", flex: "none" } });
@@ -14,6 +15,10 @@ const row = css({ display: "flex", alignItems: "center", justifyContent: "space-
 /** Export…: what the timeline shows, to one Markdown file or to PDF through the print dialog. */
 export function ExportDialog({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const exporting = useStore(store, (s) => s.exporting);
+  // the scope is what the Timeline shows (v2 §4): by, range and the active filters
+  const scope = useStore(store, (s) =>
+    [`From the Timeline · ${s.timeline.by === "created" ? "Created" : "Updated"} ${s.timeline.range === "all" ? "any time" : `in the last ${s.timeline.range} days`}`, filtersLine({ query: s.query, tags: s.selectedTags, noLinks: s.noLinks, range: "all" })].filter(Boolean).join(" · "),
+  );
   const last = useRef(exporting);
   if (exporting) last.current = exporting; // keeps the body mounted through the exit animation
   return (
@@ -21,7 +26,7 @@ export function ExportDialog({ controller, store }: { controller: Controller; st
       <Dialog.Backdrop />
       <Dialog.Positioner>
         <Dialog.Content className={css({ maxW: "460px", p: "0", gap: "0", overflow: "hidden" })}>
-          {last.current && <Body state={exporting ?? last.current} controller={controller} />}
+          {last.current && <Body state={exporting ?? last.current} scope={scope} controller={controller} />}
         </Dialog.Content>
       </Dialog.Positioner>
     </Dialog.Root>
@@ -42,7 +47,7 @@ function Segments<T extends string>({ label: name, value, items, on }: { label: 
   );
 }
 
-function Body({ state, controller }: { state: NonNullable<AppState["exporting"]>; controller: Controller }) {
+function Body({ state, scope, controller }: { state: NonNullable<AppState["exporting"]>; scope: string; controller: Controller }) {
   const { counts } = state;
   const empty = counts !== null && counts.notes === 0;
   return (
@@ -54,6 +59,7 @@ function Body({ state, controller }: { state: NonNullable<AppState["exporting"]>
     >
       <div className={css({ p: "20px 20px 4px" })}>
         <Dialog.Title className={css({ fontSize: "17px", fontWeight: "650", lineHeight: "1.3", letterSpacing: "-0.01em" })}>Export</Dialog.Title>
+        <Dialog.Description className={css({ mt: "1", fontSize: "uiSm", color: "velo.fgMuted" })}>{scope}</Dialog.Description>
       </div>
       <div className={css({ p: "14px 20px 18px", display: "flex", flexDirection: "column", gap: "3" })}>
         <div className={row}>

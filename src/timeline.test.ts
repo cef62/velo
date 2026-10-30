@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { TimelineRow } from "./api";
-import { groupByDay, sinceMs } from "./timeline";
+import { filtersLine, groupByDay, sinceMs } from "./timeline";
 
 const now = new Date(2026, 9, 30, 12, 0);
 const row = (title: string, d: Date): TimelineRow => ({ path: `/n/${title}.md`, title, date: d.getTime(), snippet: "", locked: false });
@@ -25,4 +25,9 @@ test("range start is exactly N×24 h back; all has none", () => {
   expect(sinceMs("7", now)).toBe(now.getTime() - 7 * 86_400_000);
   expect(sinceMs("30", now)).toBe(now.getTime() - 30 * 86_400_000);
   expect(sinceMs("all", now)).toBeNull();
+});
+
+test("filtersLine lists only the active parts", () => {
+  expect(filtersLine({ query: "  ", tags: [], noLinks: false, range: "all" })).toBe("");
+  expect(filtersLine({ query: "roadmap", tags: ["work"], noLinks: true, range: "30" })).toBe("“roadmap” · #work · No links · last 30 days");
 });

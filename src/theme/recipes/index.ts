@@ -19,6 +19,9 @@ import { paneDivider } from "./velo/pane-divider";
 import { inlineTag } from "./velo/inline-tag";
 import { keyCap } from "./velo/key-cap";
 import { listRow } from "./velo/list-row";
+import { menuButton } from "./velo/menu-button";
+import { paneBar } from "./velo/pane-bar";
+import { countBadge, sectionHeader } from "./velo/section-header";
 import { previewPill } from "./velo/preview-pill";
 import { searchMatch } from "./velo/search-match";
 import { tagChip } from "./velo/tag-chip";
@@ -30,6 +33,9 @@ export const recipes = {
   paneDivider,
   inlineTag,
   keyCap,
+  menuButton,
+  sectionHeader,
+  countBadge,
   previewPill,
   searchMatch,
   button,
@@ -46,6 +52,7 @@ export const slotRecipes = {
   popover,
   segmentGroup,
   listRow,
+  paneBar,
   select,
   tabs,
   tagChip,

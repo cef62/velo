@@ -243,6 +243,22 @@ test("quick settings toggles don't write back each other's stale copy", async ()
   expect(saved).toMatchObject({ info_panel: true, sort: "title" });
 });
 
+test("setSort saves the order and re-sorts; toggleSort flips it", async () => {
+  const { c, api, store } = setup();
+  let saved = await api.getSettings(); // the fake api must hand back what was saved: toggleSort reads it
+  api.getSettings.mockImplementation(async () => ({ ...saved }));
+  api.setSettings.mockImplementation(async (s) => void (saved = s));
+  await c.setSort("title");
+  expect(api.setSettings).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "title" }));
+  expect(store.get().sort).toBe("title");
+  await c.setSort("title"); // same value: still a save, never a toggle
+  expect(store.get().sort).toBe("title");
+  await c.toggleSort();
+  expect(store.get().sort).toBe("modified");
+  await Promise.all([c.toggleSort(), c.toggleSort()]); // two quick presses cancel out
+  expect(store.get().sort).toBe("modified");
+});
+
 test("a slow auto-show doesn't replace the note Enter just opened", async () => {
   const { c, api, store } = setup();
   const d = deferred<ReturnType<typeof api.openNote> extends Promise<infer T> ? T : never>();
