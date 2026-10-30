@@ -8,7 +8,7 @@ use super::client::NO_ANSWER;
 use crate::store::{SaveResult, hash};
 use crate::tasks::TaskView;
 use crate::text::fold;
-use crate::vault::{MergeResult, NoteDoc, Toggled, Vault};
+use crate::vault::{MergeResult, NoteDoc, Toggled, Vault, plain_twin_of_locked};
 use anyhow::anyhow;
 use std::ops::DerefMut;
 use std::path::{Path, PathBuf};
@@ -49,10 +49,10 @@ pub trait NoteOps {
     fn connections(&self, path: &str) -> anyhow::Result<Connections>;
 }
 
-/// An encrypted note, or the plain twin of one (`X.md` beside `X.md.age`: a lock synced in before the delete, or a
-/// lock that failed to remove the plaintext). Both stay hidden from the agent.
+/// An encrypted note, or the plain twin of one (`X.md` or `X.txt` beside `X.md.age`, see `plain_twin_of_locked`).
+/// Both stay hidden from the agent.
 pub fn locked(path: &str) -> bool {
-    path.ends_with(".md.age") || (path.ends_with(".md") && Path::new(&format!("{path}.age")).exists())
+    path.ends_with(".md.age") || plain_twin_of_locked(Path::new(path))
 }
 
 /// `r`, unless it failed after the file at `path` changed from `before` (its hash; `None` = missing): the write
@@ -199,11 +199,14 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
         // locked notes' bodies (and so their tags) never reach the index; a plain twin's do, so take them out
         let mut tags = self.vault.tags()?;
         for e in std::fs::read_dir(self.dir())?.flatten() {
-            let Some(twin) = e.path().to_str().and_then(|p| p.strip_suffix(".age")).filter(|p| p.ends_with(".md")).map(String::from) else { continue };
-            let mut seen = std::collections::HashSet::new();
-            for t in self.vault.index.tags_of(&twin)?.into_iter().map(|t| fold(&t)).filter(|t| seen.insert(t.clone())) {
-                if let Some(c) = tags.iter_mut().find(|c| fold(&c.tag) == t) {
-                    c.count -= 1;
+            let Some(title) = parse_note_file(&e.path()).filter(|n| n.encrypted).map(|n| n.title) else { continue };
+            // the twin is `X.md` or `X.txt` (locking `X.txt` writes `X.md.age`), as in `plain_twin_of_locked`
+            for twin in ["md", "txt"].map(|ext| e.path().with_file_name(format!("{title}.{ext}"))) {
+                let mut seen = std::collections::HashSet::new();
+                for t in self.vault.index.tags_of(&twin.to_string_lossy())?.into_iter().map(|t| fold(&t)).filter(|t| seen.insert(t.clone())) {
+                    if let Some(c) = tags.iter_mut().find(|c| fold(&c.tag) == t) {
+                        c.count -= 1;
+                    }
                 }
             }
         }
@@ -444,6 +447,22 @@ mod tests {
         assert!(o.rescan().is_ok());
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(o.rescan().is_err(), "an unreadable folder must not look like an up-to-date index");
+    }
+    /// Locking `Foo.txt` writes `Foo.md.age`: a plain `Foo.txt` left beside it is locked for the agent and the vault.
+    #[test] fn txt_twin_of_locked_note_is_hidden() {
+        let (mut o, dir) = ops();
+        std::fs::write(dir.join("Foo.txt"), "secret #leak").unwrap();
+        std::fs::write(dir.join("Foo.md.age"), "ciphertext").unwrap();
+        o.rescan().unwrap();
+        let txt = dir.join("Foo.txt").to_string_lossy().into_owned();
+        assert!(locked(&txt));
+        assert_eq!(o.find("Foo").unwrap(), None);
+        assert_eq!(o.read(&txt).err().unwrap().to_string(), "not found");
+        assert!(o.search("secret", &[], 0, false).unwrap().hits.is_empty());
+        assert!(o.tags().unwrap().iter().all(|t| t.tag != "leak"));
+        let h = hash(b"secret #leak");
+        assert_eq!(o.vault.save_note(&txt, "x", &h, None, false).err().unwrap().to_string(), "locked-sibling");
+        assert!(!o.vault.rewritable(Path::new(&txt)));
     }
     #[test] fn agent_snapshot_refuses_locked() {
         let (mut o, dir) = ops();

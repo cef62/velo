@@ -172,8 +172,13 @@ impl Revisions {
         for e in rd.flatten() {
             let p = e.path();
             if p.extension().is_some_and(|x| x == "md") {
-                std::fs::write(p.with_extension("md.age"), encrypt(&std::fs::read(&p)?)?)?; // the .json sidecar stays plain
+                std::fs::write(p.with_extension("md.age"), encrypt(&std::fs::read(&p)?)?)?;
                 std::fs::remove_file(&p)?;
+            } else if p.extension().is_some_and(|x| x == "json")
+                && std::fs::read(&p).ok().and_then(|b| serde_json::from_slice::<Sidecar>(&b).ok()).is_none_or(|s| !s.summary.is_empty())
+            {
+                // an agent summary is plaintext about the note: drop it, keep the agent mark
+                std::fs::write(&p, serde_json::to_vec(&Sidecar { summary: String::new(), agent: true })?)?;
             }
         }
         Ok(())
@@ -343,8 +348,9 @@ mod tests {
         assert_eq!(r.list("new")[0].summary.as_deref(), Some("why"));
         r.encrypt_all("new", |b| Ok(b.to_vec())).unwrap();
         let l = r.list("new");
-        assert_eq!((l.len(), l[0].id.as_str(), l[0].summary.as_deref()), (1, "10.md.age", Some("why")));
-        assert!(r.dir("new").join("10.json").exists());
+        // a locked note's summary is plaintext about it: gone, the agent mark stays
+        assert_eq!((l.len(), l[0].id.as_str(), l[0].summary.as_deref(), l[0].agent), (1, "10.md.age", Some(""), true));
+        assert!(!std::fs::read_to_string(r.dir("new").join("10.json")).unwrap().contains("why"));
         r.prune(now);
         assert!(!r.dir("new").exists(), "pair pruned, dir gone");
         r.snapshot_agent("p", b"a", false, 10, "z").unwrap();

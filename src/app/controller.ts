@@ -962,6 +962,8 @@ export class Controller {
       clearTimeout(this.undoTimer);
       this.store.set({ taskView: null, tickUndo: null });
       void this.loadTasks(); // a new request: older replies are stale
+      void this.loadConnections(); // the graph's links and tags may come from now-locked notes
+      void this.refreshTitles(); // link targets carry each note's locked flag
       if (path && isLockedPath(path)) {
         this.editor.unload(); // drop the decrypted text from the editor and stop autosave re-caching it
         this.closedDoc();
@@ -1387,6 +1389,9 @@ export class Controller {
   /** Settings dialog Save: null = saved (dialog closed), else the message to show in the dialog. */
   async saveSettings(next: Settings): Promise<string | null> {
     const cur = this.store.get().settings ?? (await this.api.getSettings());
+    // the open note belongs to the old folder: save it while that folder is still the vault (an agent write may have
+    // landed while the dialog was open)
+    if (next.notes_dir !== cur.notes_dir && !(await this.editor.flush())) return "Save the open note first";
     try {
       await this.updateSettings(() => this.api.setSettings(next)); // on hotkey registration failure this throws and the old hotkey stays
     } catch (err) {
@@ -1397,6 +1402,9 @@ export class Controller {
     this.preview?.refresh(); // watermark shows the binding
     this.syncStyle();
     if (next.notes_dir !== cur.notes_dir) {
+      // saved above; anything typed since could only fail to save into the new folder
+      if (!this.editor.unload()) this.editor.discard();
+      this.closedDoc();
       this.store.set({ phase: "ready" });
       await this.runSearch(true);
       void this.refreshTitles();
