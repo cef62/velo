@@ -13,7 +13,6 @@ export function chipsFor(saved: SavedSearch[], applied: string | null, f: Filter
 export const TEXT_MIN = 160; // px of typing room the chips must leave, else they collapse into one
 export const MORE_W = 40; // the "+N" chip's width
 
-
 /**
  * How many chips show given each chip's width (+ `gap` between them) and `fieldW`, the room between the
  * field's icon and its right-hand controls: at most half of it; the rest fold into a dashed "+N". While typing,

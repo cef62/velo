@@ -10,11 +10,11 @@ const tagSet = (tags: string[]) => [...new Set(tags.map(fold))].sort().join("\n"
 export const sameFilters = (s: SavedSearch, f: Filters): boolean =>
   s.query.trim() === f.query.trim() && tagSet(s.tags) === tagSet(f.tags) && s.no_links === f.noLinks;
 
-/** The saved search applied as one chip: the one applied last, while its tags and No links still hold (typing narrows it, so the text may differ). */
+/** The saved search applied as one chip: the one applied last, while its tags and No links hold and its text is still typed (typing narrows it: more text, never less). */
 export function appliedSearch(saved: SavedSearch[], applied: string | null, f: Filters): SavedSearch | null {
   if (applied === null) return null;
   const s = saved.find((x) => fold(x.name) === fold(applied));
-  return s && tagSet(s.tags) === tagSet(f.tags) && s.no_links === f.noLinks ? s : null;
+  return s && tagSet(s.tags) === tagSet(f.tags) && s.no_links === f.noLinks && fold(f.query).includes(fold(s.query.trim())) ? s : null;
 }
 
 /** Filters shown as active in the header: an applied saved search counts as one, else each tag and the No links chip. */

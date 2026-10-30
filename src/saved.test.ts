@@ -42,4 +42,7 @@ test("activeFilterCount: tags + No links, or 1 for the applied saved search even
   expect(activeFilterCount(saved, "w", { query: "more", tags: ["idea", "work"], noLinks: false })).toBe(1); // typed text narrows the applied search
   expect(activeFilterCount(saved, "w", { query: "", tags: ["idea"], noLinks: false })).toBe(1); // a tag change ends it: plain tags again
   expect(appliedSearch(saved, "gone", { query: "", tags: [], noLinks: false })).toBeNull();
+  expect(appliedSearch(saved, "t", { query: "todo list", tags: [], noLinks: false })?.name).toBe("t"); // narrowed: still applied
+  expect(appliedSearch(saved, "t", { query: "", tags: [], noLinks: false })).toBeNull(); // its text erased: not applied any more
+  expect(appliedSearch(saved, "t", { query: "tod", tags: [], noLinks: false })).toBeNull();
 });

@@ -1,6 +1,7 @@
 import { expect, test, vi } from "vitest";
 import type { Page, TaskItem, TaskView, TimelineRow } from "../api";
 import { Controller, INVALID_TITLE, type KeyEventLike } from "./controller";
+import { chipsFor } from "../searchChips";
 import { emptyConnections, FakeEditor, FakePreview, deferred, fakeApi, fakeUi, hit, noMeta, settle } from "./fakes";
 import { createStore, initialState } from "./store";
 import { localToday, toggleTaskLine } from "../tasks";
@@ -312,7 +313,10 @@ test("removeFilterChip drops the last chip, a saved chip as one; clearFilterChip
   c.applySaved("w");
   expect(store.get()).toMatchObject({ query: "todo", selectedTags: ["work"], appliedSaved: "w" });
   c.setQuery("todo list"); // typing narrows the applied search: still one chip
-  expect(store.get().appliedSaved).toBe("w");
+  expect(chipsFor(store.get().savedSearches, store.get().appliedSaved, { query: "todo list", tags: ["work"], noLinks: false })).toHaveLength(1);
+  c.setQuery(""); // its text erased: the chip is gone, the tag stays as a plain chip
+  expect(chipsFor(store.get().savedSearches, store.get().appliedSaved, { query: "", tags: ["work"], noLinks: false })).toEqual([{ kind: "tag", label: "#work", tag: "work" }]);
+  c.setQuery("todo");
   c.removeFilterChip(); // the saved chip clears as one, text included
   expect(store.get()).toMatchObject({ query: "", selectedTags: [], noLinks: false });
   c.applySaved("w");

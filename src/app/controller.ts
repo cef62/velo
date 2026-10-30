@@ -1262,7 +1262,7 @@ export class Controller {
   protected exportRequest(tasksOnly: boolean): ExportRequest {
     const s = this.store.get();
     const f = this.filters();
-    const named = s.savedSearches.find((x) => sameFilters(x, f))?.name;
+    const named = appliedSearch(s.savedSearches, s.appliedSaved, f)?.name ?? s.savedSearches.find((x) => sameFilters(x, f))?.name;
     const title = named ?? ([...f.tags.map((t) => `#${t}`), f.query.trim()].filter(Boolean).join(" ") || "All notes");
     return { query: s.query, tags: s.selectedTags, no_links: s.noLinks, by: s.timeline.by, since_ms: sinceMs(s.timeline.range, new Date()), tasks_only: tasksOnly, title };
   }

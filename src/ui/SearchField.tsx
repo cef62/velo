@@ -59,7 +59,7 @@ export function SearchField({ controller, store }: { controller: Controller; sto
     return () => ro.disconnect();
   }, [chips.length, capture]); // the measuring row (re)mounts with the chips
   // the room for chips and text: the field minus the icon inset and the right-hand ×; widths lag one render behind a chip change
-  const layout = widths.length === chips.length ? chipLayout(fieldW - 36 - 28, widths, query !== "") : { shown: chips.length, folded: 0, collapse: false };
+  const layout = widths.length === chips.length ? chipLayout(fieldW - 36 - Math.max(28, hintW + 14), widths, query !== "") : { shown: chips.length, folded: 0, collapse: false };
   const hintRoom = showSearchHint(useWindowWidth()); // the ⌘L hint goes first on narrow windows
   // Tasks mode: Enter opens a task, so the Create hints don't apply; with chips the ⌘L hint gives way to the ×
   const hint = capture || tasksMode || (query === "" && (!hintRoom || chips.length > 0)) ? [] : searchHint({ query, sel, exactTitleMatch, keys, isMac });
