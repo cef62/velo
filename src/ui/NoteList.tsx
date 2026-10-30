@@ -66,6 +66,9 @@ export function NoteList({ controller, store }: { controller: Controller; store:
       const top = PAD + sel * rowH;
       if (top - PAD < e.scrollTop) e.scrollTop = top - PAD;
       else if (top + rowH + PAD > e.scrollTop + e.clientHeight) e.scrollTop = top + rowH + PAD - e.clientHeight;
+      // focus follows the selection when it is on a row (not in the search field: typing must not lose focus); the selected row is always rendered
+      const f = document.activeElement;
+      if (f && f !== e && e.contains(f) && (f as HTMLElement).dataset.row !== String(sel)) e.querySelector<HTMLElement>(`[data-row="${sel}"]`)?.focus({ preventScroll: true });
     }
     measure();
   }, [sel, listReset, rowH]);

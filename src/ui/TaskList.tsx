@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { type KeyboardEvent, memo, useMemo, useRef, useState } from "react";
 import { css } from "styled-system/css";
 import { searchMatch } from "styled-system/recipes";
 import type { TaskItem } from "../api";
@@ -56,38 +56,47 @@ const GROUPS = [
   ["done", "Done"],
 ] as const;
 
-type RowProps = { t: TaskItem; overdue: boolean; query: string; controller: Controller };
+type RowProps = { t: TaskItem; overdue: boolean; query: string; controller: Controller; stop: boolean; onStop: (key: string) => void };
 
 const marks = (t: TaskItem, q: string) => JSON.stringify([highlightRanges(t.text, q), highlightRanges(t.title, q)]);
 // Every reload brings new objects and every keystroke a new query: compare what the row shows, so only rows that change re-render.
 // shortcut: marks are compared on the raw markdown, so a match only in rendered text (an entity like &copy;) can show late; compare rendered HTML if that matters.
 const sameRow = (a: RowProps, b: RowProps) =>
-  a.overdue === b.overdue && a.controller === b.controller &&
+  a.overdue === b.overdue && a.controller === b.controller && a.stop === b.stop && a.onStop === b.onStop &&
   (["path", "line", "line_text", "text", "title", "due", "done"] as const).every((k) => a.t[k] === b.t[k]) &&
   (a.query === b.query || marks(a.t, a.query) === marks(b.t, b.query));
 
-const TaskRow = memo(function TaskRow({ t, overdue, query, controller }: RowProps) {
+const TaskRow = memo(function TaskRow({ t, overdue, query, controller, stop, onStop }: RowProps) {
   // renderInline escapes HTML (markdown-it, html: false), as the preview does; markHtml re-escapes what it touches
   const html = useMemo(() => markHtml(renderInline(t.text), query, searchMatch()), [t.text, query]);
   return (
     <div
       role="listitem"
-      tabIndex={0}
+      tabIndex={stop ? 0 : -1} // roving: one tab stop for the whole list, ↑/↓ move
+      data-task=""
+      onFocus={() => onStop(`${t.path}:${t.line}`)}
       className={row}
       data-done={t.done || undefined}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest("a")) e.preventDefault(); // links, wikilinks and tags in a row don't navigate: the row opens the task
         void controller.openTask(t);
       }}
-      onKeyDown={(e) => e.key === "Enter" && void controller.openTask(t)}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Enter") void controller.openTask(t);
+        else if (e.key === " ") {
+          e.preventDefault();
+          void controller.tickTask(t);
+        }
+      }}
     >
       <Checkbox.Root size="sm" checked={t.done} onCheckedChange={() => void controller.tickTask(t)} onClick={(e) => e.stopPropagation()}>
         <Checkbox.Control>
           <Checkbox.Indicator />
         </Checkbox.Control>
-        <Checkbox.HiddenInput aria-label={t.text} />
+        <Checkbox.HiddenInput aria-label={t.text} tabIndex={-1} />
       </Checkbox.Root>
-      <span className={text} dangerouslySetInnerHTML={{ __html: html }} />
+      <span className={text} aria-hidden="true" dangerouslySetInnerHTML={{ __html: html }} />
       <span className={note}><HighlightedText text={t.title} query={query} /></span>
       {t.due && (
         <Badge size="sm" variant="subtle" colorPalette={overdue ? "red" : "gray"} flex="none">
@@ -105,14 +114,26 @@ export function TaskList({ controller, store }: { controller: Controller; store:
   const undo = useStore(store, (s) => s.tickUndo);
 
   const groups = view ? GROUPS.filter(([k]) => view[k].length) : [];
+  const list = useRef<HTMLDivElement>(null);
+  const [cur, setCur] = useState(""); // key of the tab stop; the first row when it is gone
+  const keyOf = (t: TaskItem) => `${t.path}:${t.line}`;
+  const stopKey = groups.some(([k]) => view![k].some((t) => keyOf(t) === cur)) ? cur : groups.length ? keyOf(view![groups[0][0]][0]) : "";
+  const move = (e: KeyboardEvent) => {
+    const d = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+    const rows = [...list.current!.querySelectorAll<HTMLElement>("[data-task]")];
+    const i = rows.indexOf(e.target as HTMLElement);
+    if (!d || i < 0) return;
+    e.preventDefault();
+    rows[Math.max(0, Math.min(rows.length - 1, i + d))].focus(); // focus sets the tab stop
+  };
   return (
     <div className={pane}>
-      <div className={scroller} role="list" aria-label="Tasks">
+      <div ref={list} className={scroller} role="list" aria-label="Tasks" onKeyDown={move}>
         {view && groups.length === 0 && <div className={empty}>{query ? `No tasks match “${query}”` : "No open tasks"}</div>}
         {groups.map(([k, label]) => (
           <div key={k} role="group" aria-label={label}>
             <div className={header}>{label}</div>
-            {view![k].map((t) => <TaskRow key={`${t.path}:${t.line}`} t={t} overdue={k === "overdue"} query={query} controller={controller} />)}
+            {view![k].map((t) => <TaskRow key={keyOf(t)} t={t} overdue={k === "overdue"} query={query} controller={controller} stop={keyOf(t) === stopKey} onStop={setCur} />)}
           </div>
         ))}
       </div>

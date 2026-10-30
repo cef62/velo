@@ -105,7 +105,6 @@ export class Controller {
         void this.loadInfo();
       },
       complete: { links: () => this.linkIndex, tags: () => this.tagIndex, onCreate: (t) => void this.createLinked(t) },
-      onFocus: () => void this.loadLinkTargets(),
     };
   }
 
@@ -380,7 +379,7 @@ export class Controller {
   protected filterChanged(keepOpen: boolean | "highlight") {
     if (this.store.get().paneMode === "tasks") {
       this.listStale = true;
-      void this.loadTasks();
+      void this.loadTasks(true);
     } else void this.runSearch(true, keepOpen);
   }
 
@@ -879,6 +878,7 @@ export class Controller {
       return;
     }
     void this.loadTasks(); // the path moved (and a locked note's tasks leave the index)
+    void this.refreshTitles(); // link targets carry the path and the locked flag
     try {
       const doc = await this.api.openNote(np);
       this.history.rename(path, np);
@@ -1151,26 +1151,31 @@ export class Controller {
 
   async toggleShowDone() {
     this.store.set((s) => ({ showDone: !s.showDone }));
-    await this.loadTasks();
+    await this.loadTasks(true);
   }
 
   protected readonly newTasksReq = latest();
   protected tasksDay = ""; // localToday() at the last load: groups and the due count depend on it
   /** Tasks for the view (filtered like the list) and the due count / Dock badge (unfiltered). */
-  loadTasks(): Promise<void> {
-    return (this.tasksLoading = this.doLoadTasks());
+  loadTasks(filterOnly = false): Promise<void> {
+    return (this.tasksLoading = this.doLoadTasks(filterOnly));
   }
 
   protected tasksLoading: Promise<void> = Promise.resolve(); // latest task load, awaited by Enter in Tasks mode
-  protected async doLoadTasks() {
+  protected badgeStale = false; // a full load did not land: the next one recomputes the badge even when only the filter changed
+  protected async doLoadTasks(filterOnly: boolean) {
     this.tasksDay = localToday();
     const { query, selectedTags, showDone } = this.store.get();
     const fresh = this.newTasksReq();
     try {
       const v = await this.api.tasks(query, selectedTags, showDone);
-      // the badge must not change while typing a search: count from an unfiltered view
-      const due = query.trim() || selectedTags.length ? (await this.api.tasks("", [], false)).due_count : v.due_count;
+      // the badge must not change while typing a search: count from an unfiltered view, and only when notes changed (not per keystroke)
+      const filtered = !!query.trim() || selectedTags.length > 0;
+      if (!filterOnly) this.badgeStale = true;
+      const due = !filtered ? v.due_count : filterOnly && !this.badgeStale ? null : (await this.api.tasks("", [], false)).due_count;
       if (!fresh()) return;
+      if (due === null) return void this.store.set({ taskView: v });
+      this.badgeStale = false;
       this.store.set({ taskView: v, dueCount: due });
       await this.api.setBadge(due);
     } catch (e) {
