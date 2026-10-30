@@ -387,6 +387,7 @@ export class Controller {
     const mode = this.store.get().paneMode;
     if (mode === "tasks" || mode === "timeline") {
       this.listStale = true;
+      if (mode === "timeline") this.store.set((s) => ({ timeline: { ...s.timeline, sel: null } })); // new rows: start from the top, as the list does
       void (mode === "tasks" ? this.loadTasks(true) : this.loadTimeline());
     } else void this.runSearch(true, keepOpen);
   }
@@ -1198,6 +1199,7 @@ export class Controller {
     this.store.set((s) => ({ timeline: { ...s.timeline, sel: path } }));
   }
 
+
   /** ↑/↓ from the search field in Timeline mode: move the selection over the rows (day headers are not rows); never opens. */
   stepTimeline(d: 1 | -1) {
     const rows = this.store.get().timeline.rows ?? [];
@@ -1212,7 +1214,7 @@ export class Controller {
   }
 
   async setTimelineBy(by: "created" | "updated") {
-    this.store.set((s) => ({ timeline: { ...s.timeline, by } }));
+    this.store.set((s) => ({ timeline: { ...s.timeline, by, sel: null } }));
     void this.loadTimeline();
     try {
       await this.updateSettings((cur) => this.api.setSettings({ ...cur, timeline_sort: by }));
@@ -1222,7 +1224,7 @@ export class Controller {
   }
 
   setTimelineRange(range: "7" | "30" | "all") {
-    this.store.set((s) => ({ timeline: { ...s.timeline, range } }));
+    this.store.set((s) => ({ timeline: { ...s.timeline, range, sel: null } }));
     return this.loadTimeline();
   }
 

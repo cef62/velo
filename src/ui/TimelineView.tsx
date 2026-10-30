@@ -55,6 +55,9 @@ export function TimelineView({ controller, store }: { controller: Controller; st
   // the selection (from the search field or the rows) is the roving tab stop; the first row when none or gone
   const stop = items.findIndex((it) => it.row?.path === tl.sel) >= 0 ? tl.sel! : (items[1]?.row?.path ?? "");
   const setCur = (path: string) => controller.setTimelineSel(path);
+  // one active row, styled and announced: the selection when set, else the open note
+  const active = items.some((it) => it.row?.path === tl.sel) ? tl.sel : openPath;
+  const scrolledSel = useRef(tl.sel);
   const stopIdx = items.findIndex((it) => it.row?.path === stop);
 
   const measure = () => {
@@ -70,7 +73,9 @@ export function TimelineView({ controller, store }: { controller: Controller; st
   }, [rowH, items.length]);
   useLayoutEffect(() => {
     const e = el.current;
-    if (e && stopIdx >= 0) {
+    // only a new selection scrolls: a reload must not snap back after the user scrolled away
+    if (e && stopIdx >= 0 && (scrolledSel.current !== tl.sel || focusCur.current)) {
+      scrolledSel.current = tl.sel;
       const y = PAD + stopIdx * rowH;
       if (y - rowH - PAD < e.scrollTop) e.scrollTop = y - rowH - PAD; // keep its day header in view too
       else if (y + rowH + PAD > e.scrollTop + e.clientHeight) e.scrollTop = y + rowH + PAD - e.clientHeight;
@@ -78,7 +83,7 @@ export function TimelineView({ controller, store }: { controller: Controller; st
       focusCur.current = false;
     }
     measure();
-  }, [stopIdx, items.length, rowH]);
+  }, [stopIdx, items.length, rowH, tl.sel]);
 
   const move = (e: KeyboardEvent) => {
     const d = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
@@ -151,13 +156,13 @@ export function TimelineView({ controller, store }: { controller: Controller; st
                 const pos = { position: "absolute", left: 0, right: 0, top: i * rowH, height: rowH } as const;
                 if (!it.row) return <div key={`d${i}`} className={day} style={pos} aria-hidden>{it.label}</div>;
                 const r = it.row;
-                const c = listRow({ layout: "twoLine", state: listActive && i === stopIdx ? "selected" : r.path === openPath ? "selectedIdle" : "idle" });
+                const c = listRow({ layout: "twoLine", state: r.path !== active ? "idle" : listActive ? "selected" : "selectedIdle" });
                 return (
                   <div
                     key={r.path}
                     role="option"
                     id={`timeline-opt-${it.n}`} // the search field's aria-activedescendant
-                    aria-selected={r.path === openPath}
+                    aria-selected={r.path === active}
                     aria-setsize={tl.rows?.length}
                     aria-posinset={it.n}
                     tabIndex={i === stopIdx ? 0 : -1} // roving: one tab stop for the whole list, ↑/↓ move

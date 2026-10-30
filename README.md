@@ -46,6 +46,7 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | — | — | Export… the timeline (set in Settings) |
 | — | — | Save search… (set in Settings) |
 | ⌥⇧⌘N | Ctrl+Alt+Shift+N | Quick capture (system-wide) |
+| ⇧F10 / Menu key | Shift+F10 / Menu key | Open the context menu of the highlighted row or chip (Shift+F10 can be changed in Settings; the Menu key always works) |
 
 Right-click a note in the list (or press the Menu key / Shift+F10 on the highlighted row; Shift+F10 can be changed in Settings → Keyboard shortcuts as "Open context menu") for a menu: open, rename, lock/unlock, copy `[[link]]`, show in Finder/Explorer, move to Trash. It opens the note first, so no menu appears if the switch is refused.
 

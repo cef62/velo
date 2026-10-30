@@ -2739,3 +2739,23 @@ test("re-entering the timeline clears its selection", async () => {
   c.setPaneMode("timeline");
   expect(store.get().timeline.sel).toBeNull();
 });
+
+test("a filter, date or range change in timeline mode clears the selection: Enter opens the new first row", async () => {
+  const { c, api, store } = setup();
+  api.timeline.mockResolvedValue([trow("A"), trow("B"), trow("C")]);
+  c.setPaneMode("timeline");
+  await settle();
+  c.setTimelineSel(P("C"));
+  api.timeline.mockResolvedValue([trow("A"), trow("C")]); // C still matches, A is first
+  c.setQuery("foo");
+  await settle();
+  expect(store.get().timeline.sel).toBeNull();
+  await c.enter();
+  expect(store.get().openPath).toBe(P("A"));
+  for (const change of [() => c.setTags(["t"]), () => c.setNoLinks(true), () => c.setTimelineRange("7"), () => c.setTimelineBy("created")]) {
+    c.setTimelineSel(P("C"));
+    void change();
+    expect(store.get().timeline.sel).toBeNull();
+  }
+  await settle();
+});
