@@ -1,7 +1,7 @@
 //! Task-line parsing and toggling. The line rule mirrors `TASK_ITEM` in src/preview.ts.
 use crate::frontmatter;
 use crate::index::TaskRow;
-use crate::text::fold;
+use crate::text::{fold, lines};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -44,15 +44,6 @@ fn iso(s: &str) -> Option<&str> {
     Some(d)
 }
 
-/// A code-fence line: its char, its length, and the text after it.
-fn fence(line: &str) -> Option<(char, usize, &str)> {
-    let t = line.trim_start();
-    let c = t.chars().next().filter(|c| matches!(c, '`' | '~'))?;
-    let rest = t.trim_start_matches(c);
-    let n = t.len() - rest.len();
-    (n >= 3).then_some((c, n, rest))
-}
-
 /// Removes every `<marker><date><close>` (with the space before it); returns the rest and the first date.
 fn strip(s: &str, marker: &str, close: &str) -> (String, Option<String>) {
     let (mut out, mut first, mut rest) = (String::new(), None, s);
@@ -80,23 +71,14 @@ fn strip_done(s: &str) -> (String, Option<String>) {
 
 pub fn parse_tasks(full_text: &str) -> Vec<TaskLine> {
     let start = frontmatter::parse(full_text).map_or(0, |f| f.end);
-    let mut line = full_text[..start].matches('\n').count();
-    let mut open: Option<(char, usize)> = None; // the fence we are inside
+    let first = full_text[..start].matches('\n').count();
     let mut out = vec![];
-    for raw in full_text[start..].split('\n') {
-        let l = raw.strip_suffix('\r').unwrap_or(raw);
-        match (open, fence(l)) {
-            // CommonMark: only the same char, at least as long, with nothing after it, closes a fence
-            (Some((c, n)), Some((c2, n2, rest))) if c == c2 && n2 >= n && rest.trim().is_empty() => open = None,
-            (Some(_), _) => {}
-            (None, Some((c, n, _))) => open = Some((c, n)),
-            (None, None) => if let Some((b, done)) = scan(l) {
-                let (rest, due) = strip(&l[b + 2..], "📅 ", "");
-                let (rest, done_on) = strip_done(&rest);
-                out.push(TaskLine { line, line_text: l.to_string(), text: rest.trim().to_string(), done, due, done_on });
-            }
+    for (line, (_, l, prose)) in (first..).zip(lines(&full_text[start..])) {
+        if let Some((b, done)) = scan(l).filter(|_| prose) {
+            let (rest, due) = strip(&l[b + 2..], "📅 ", "");
+            let (rest, done_on) = strip_done(&rest);
+            out.push(TaskLine { line, line_text: l.to_string(), text: rest.trim().to_string(), done, due, done_on });
         }
-        line += 1;
     }
     out
 }

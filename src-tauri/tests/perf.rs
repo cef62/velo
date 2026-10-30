@@ -18,22 +18,29 @@ fn search_p95_under_50ms() {
     let mut idx = Index::open(&tmp.path().join("index.db")).unwrap();
     let build = Instant::now();
     let mut n = 0;
+    let mut unlocked = HashMap::new();
     idx.begin().unwrap();
     for e in std::fs::read_dir(&dir).unwrap() {
         let p = e.unwrap().path();
         if p.extension().is_none_or(|x| x != "md") {
             continue;
         }
-        let nf = parse_note_file(&p).unwrap();
+        let mut nf = parse_note_file(&p).unwrap();
         let body = std::fs::read_to_string(&p).unwrap();
         let meta = Meta { mtime: n, size: body.len() as u64, birth: 0 };
-        idx.upsert(p.file_name().unwrap().to_str().unwrap(), &nf, &meta, Some(&body)).unwrap();
+        let key = p.file_name().unwrap().to_str().unwrap().to_string();
+        // 1 in 10 notes is locked and unlocked by the keychain: no body in SQLite, plaintext scanned in Rust per search
+        nf.encrypted = n % 10 == 0;
+        idx.upsert(&key, &nf, &meta, Some(&body)).unwrap();
+        if nf.encrypted {
+            unlocked.insert(key, body);
+        }
         n += 1;
     }
     idx.commit().unwrap();
     println!("cold build of {n} notes: {:.1} s", build.elapsed().as_secs_f64());
     assert!(n > 0, "no fixture notes in {dir}");
-    let none = HashMap::new();
+    println!("{} of them locked and unlocked", unlocked.len());
     for sort in [Sort::Modified, Sort::Title] {
         // (label, offset override: None = page 0; Some(f) = deep offset for the query)
         for (label, deep) in [("page 0", false), ("deep", true)] {
@@ -47,7 +54,7 @@ fn search_p95_under_50ms() {
                 };
                 for _ in 0..10 {
                     let t = Instant::now();
-                    idx.search_page(q, sort, off, 200, &[], &none).unwrap(); // offset 0 includes the total count
+                    idx.search_page(q, sort, off, 200, &[], &unlocked).unwrap(); // offset 0 includes the total count
                     times.push(t.elapsed().as_secs_f64() * 1000.0);
                 }
             }
@@ -63,7 +70,7 @@ fn search_p95_under_50ms() {
         let mut times = Vec::new();
         for _ in 0..30 {
             let t = Instant::now();
-            idx.search_page(q, sort, 0, 200, &tags, &none).unwrap();
+            idx.search_page(q, sort, 0, 200, &tags, &unlocked).unwrap();
             times.push(t.elapsed().as_secs_f64() * 1000.0);
         }
         times.sort_by(|a, b| a.partial_cmp(b).unwrap());

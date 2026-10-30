@@ -111,7 +111,7 @@ pub struct Vault {
 }
 
 fn s(p: &Path) -> String {
-    p.to_string_lossy().into_owned()
+    crate::names::nfc_name(p).to_string_lossy().into_owned() // one index key per note, however the volume spells it
 }
 
 fn now_ms() -> i64 {
@@ -182,7 +182,7 @@ impl Vault {
     /// `progress(done, total)` counts files needing (re)indexing; every 250 files and at the end, never when none.
     pub fn open_with_progress(dir: PathBuf, db_path: &Path, identity: Option<&str>, progress: &mut dyn FnMut(usize, usize)) -> anyhow::Result<Vault> {
         // revisions live next to the index db (the app data dir), keyed by vault dir
-        let root = db_path.parent().unwrap_or(Path::new(".")).join("revisions").join(fnv64(&s(&dir)));
+        let root = db_path.parent().unwrap_or(Path::new(".")).join("revisions").join(fnv64(&dir.to_string_lossy()));
         let mut v = Vault { store: Store::new(dir), index: Index::open(db_path)?, unlocked: HashMap::new(), revisions: Revisions::new(root) };
         v.revisions.maybe_prune(now_ms());
         v.store.clean_leftovers();
@@ -490,6 +490,7 @@ impl Vault {
     pub fn rename_note(&mut self, path: &str, new_title: &str, rewrite_links_too: bool) -> anyhow::Result<RenameResult> {
         let from = Path::new(path);
         let old = self.note(from)?;
+        if new_title.contains(']') { return Err(anyhow!("invalid-title")); } // see `title_ok`
         let to = self.store.rename(from, new_title)?; // keeps io::ErrorKind::AlreadyExists
         // The file has moved: from here on nothing may fail the rename, or the UI keeps the old path and its next
         // save recreates the old file. Index errors heal on the next change; an unreadable link source is skipped.

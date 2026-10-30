@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use unicode_normalization::UnicodeNormalization;
 
 pub struct NoteFile {
     pub title: String,
@@ -23,9 +24,19 @@ pub fn title_to_stem(title: &str) -> String {
     if s.is_empty() { "Untitled".into() } else { s }
 }
 
-/// A title whose file name is the title itself, so a `[[link]]` to it resolves.
+/// A title whose file name is the title itself, so a `[[link]]` to it resolves; a `]` would end the link early.
+/// Checked where titles come from the user only: an existing `X]y.md` keeps its path.
 pub fn title_ok(title: &str) -> bool {
-    !title.trim().is_empty() && title_to_stem(title) == title.trim()
+    !title.trim().is_empty() && title_to_stem(title) == title.trim() && !title.contains(']')
+}
+
+/// `p` with its file name in NFC on macOS, whose volumes treat NFC and NFD names as one file (HFS+ and SMB list them
+/// NFD); the folder part stays byte for byte. Elsewhere the two spellings are two files, so `p` is unchanged.
+pub fn nfc_name(p: &Path) -> PathBuf {
+    match p.file_name().and_then(|n| n.to_str()) {
+        Some(n) if cfg!(target_os = "macos") => p.with_file_name(n.nfc().collect::<String>()),
+        _ => p.to_path_buf(),
+    }
 }
 
 pub fn note_path(dir: &Path, title: &str, encrypted: bool) -> PathBuf {
@@ -63,6 +74,6 @@ mod tests {
     #[test] fn note_path_ext() { assert_eq!(note_path(Path::new("/n"), "a/b", true), PathBuf::from("/n/a-b.md.age")); }
     #[test] fn title_ok_rules() {
         assert!(title_ok("Plan") && title_ok(" Plan "));
-        for bad in ["a/b", ".x", "   ", "a:b"] { assert!(!title_ok(bad), "{bad}"); }
+        for bad in ["a/b", ".x", "   ", "a:b", "Plan]v2"] { assert!(!title_ok(bad), "{bad}"); }
     }
 }

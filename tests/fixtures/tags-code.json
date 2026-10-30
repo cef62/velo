@@ -1,0 +1,10 @@
+[
+  { "body": "para\n\n    #indented\n#ok", "tags": ["indented", "ok"] },
+  { "body": "- item\n\n    see [[Old]] #proj", "tags": ["proj"] },
+  { "body": "- a\n    - #nested", "tags": ["nested"] },
+  { "body": "````md\n```\n#inner\n```\n````\n#after", "tags": ["after"] },
+  { "body": "~~~\n```\n#mixed\n~~~\n#b", "tags": ["b"] },
+  { "body": "```\n``` not a close\n#still\n```\n#c", "tags": ["c"] },
+  { "body": "```js``` #inline\n#d", "tags": ["inline", "d"] },
+  { "body": "```\r\n#crlf\r\n```\r\n#e", "tags": ["e"] }
+]
