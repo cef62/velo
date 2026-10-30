@@ -112,7 +112,7 @@ function Confirm({ m, controller }: { m: Merge; controller: Controller }) {
       <div className={footer}>
         <Button type="button" variant="outline" disabled={m.pending} onClick={() => controller.cancelMerge()}>Cancel</Button>
         <Button type="button" variant="outline" disabled={m.pending} onClick={() => controller.backMerge()}>Back</Button>
-        <Button type="button" autoFocus disabled={m.pending} onClick={() => void controller.commitMerge()}>Merge</Button>
+        <Button type="button" colorPalette="green" autoFocus disabled={m.pending} onClick={() => void controller.commitMerge()}>Merge</Button>
       </div>
     </>
   );

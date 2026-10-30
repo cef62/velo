@@ -30,7 +30,7 @@ export function FirstRun({ controller, store }: { controller: Controller; store:
         </p>
       </div>
       <Button ref={btn} size="lg" onClick={() => void controller.chooseFolder()}>
-        <FolderOpen /> Choose folder… <Kbd bg="transparent" color="inherit" borderColor="color-mix(in srgb, currentColor 45%, transparent)" boxShadow="none">↩</Kbd>
+        <FolderOpen /> Choose folder… <Kbd bg="transparent" color="inherit" boxShadow="none">↩</Kbd>
       </Button>
       <p className={css({ fontSize: "uiSm", color: "velo.fgMuted" })}>You can change it later in Settings ({formatBinding(s.keys.settings, s.isMac)}).</p>
     </main>
