@@ -77,13 +77,13 @@ function Body({ controller, store }: { controller: Controller; store: Store<AppS
           onKeyDown={(e) => {
             if (e.key === "ArrowDown") move(1);
             else if (e.key === "ArrowUp") move(-1);
-            else if (e.key === "Enter" && flat[cur] && !e.nativeEvent.isComposing) run(flat[cur]);
+            else if (e.key === "Enter" && flat[cur] && !e.nativeEvent.isComposing && e.keyCode !== 229) run(flat[cur]); // 229: WebKit's IME commit
             else return;
             e.preventDefault();
           }}
         />
       </div>
-      {flat.length === 0 && <div className={empty} role="status">No command matches “{query}”</div>}
+      <div className={empty} role="status" hidden={flat.length > 0}>{flat.length === 0 ? `No command matches “${query}”` : ""}</div>
       <div ref={list} id="palette-list" role="listbox" aria-label="Commands" className={c.list}>
         {groups.map((g, gi) => (
           <div key={`${gi}:${g.title}`} role="group" aria-label={g.title || "Matches"}>

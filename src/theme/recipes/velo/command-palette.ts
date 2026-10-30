@@ -8,15 +8,11 @@ export const commandPalette = defineSlotRecipe({
   className: 'commandPalette',
   slots: ['content', 'inputRow', 'input', 'list', 'item', 'context', 'footer'],
   base: {
+    // size, placement, surface and shadow are set by CommandPalette.tsx as utilities: the Dialog recipe's content
+    // slot is emitted later in the same layer and would win over them here
     content: {
-      w: 'palette',
-      maxW: 'calc(100vw - 32px)',
-      mt: '10vh',
-      bg: 'velo.panel',
       borderWidth: '1px',
       borderColor: 'velo.border',
-      borderRadius: 'l3',
-      boxShadow: 'veloPopover',
       overflow: 'hidden',
       display: 'flex',
       flexDirection: 'column',
