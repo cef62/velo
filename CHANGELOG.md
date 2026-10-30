@@ -1,5 +1,14 @@
 # velo
 
+## 0.10.1
+
+### Patch Changes
+
+- 871a70c: Fix `velo --mcp` answering "busy" forever after a crash when the leftover agent file pointed at a reused process id: it now works directly on the notes again. "Copy setup command" now gives the AppImage's real path instead of its temporary mount path on Linux.
+- 481dffe: Keyboard use of the note list and the Tasks view is smoother: focus now follows the selection when you move through the notes with the arrow keys, and the Tasks list is a single tab stop with ↑/↓ to move, Space to tick and Enter to open. Searching in Tasks and focusing the editor also do much less background work.
+- b57f87a: Tags, tag removal, links and tasks now share one rule for what counts as code: fenced blocks, following CommonMark (a ```` ```` ```` fence is not closed by an inner ```` ``` ````). A `#tag` inside such a block no longer shows up in the tag panel, and an agent's tag removal now removes every tag the panel shows. Renaming or merging a note no longer rewrites `[[links]]` inside fenced code, and links there no longer count as backlinks. New titles and renames can no longer contain `]`, which broke every `[[link]]` to the note; existing files with `]` keep working. On macOS, a note whose file name the volume stores decomposed (HFS+, SMB shares) no longer appears twice in the list, and its saves are no longer reported as outside changes.
+- c4e9407: Made the notes folder safer: renaming or merging a note no longer garbles linked notes that aren't UTF-8; a locked `.txt` note's leftover plain copy stays hidden from AI agents; locking or unlocking no longer reports a failure after the note has already moved; files left in the notes folder by a crash are cleaned up when the vault opens (a stray plaintext temp file is deleted and a note hidden mid-rename comes back); agent summaries of a note are wiped when it is locked; Lock all now refreshes the Connections view; changing the notes folder closes the note from the old folder instead of leaving it editable with failing saves; and with front-matter dates off, a note's created date no longer jumps to the last save.
+
 ## 0.10.0
 
 ### Minor Changes
