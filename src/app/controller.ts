@@ -24,7 +24,7 @@ import { noInfo, type AppState, type Store } from "./store";
 
 export type Api = typeof ApiModule;
 
-export const INVALID_TITLE = 'A title can\'t contain / \\ : * ? " < > | or start with a dot';
+export const INVALID_TITLE = 'A title can\'t contain / \\ : * ? " < > | ] or start with a dot';
 
 const connectionsSortOf = (v: unknown): Settings["connections_sort"] => (v === "created" || v === "updated" ? v : "ring");
 
