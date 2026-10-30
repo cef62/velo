@@ -245,6 +245,9 @@ test("quick settings toggles don't write back each other's stale copy", async ()
 
 test("setSort saves the order and re-sorts; toggleSort flips it", async () => {
   const { c, api, store } = setup();
+  let saved = await api.getSettings(); // the fake api must hand back what was saved: toggleSort reads it
+  api.getSettings.mockImplementation(async () => ({ ...saved }));
+  api.setSettings.mockImplementation(async (s) => void (saved = s));
   await c.setSort("title");
   expect(api.setSettings).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "title" }));
   expect(store.get().sort).toBe("title");
