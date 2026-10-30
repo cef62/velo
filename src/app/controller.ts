@@ -1850,11 +1850,11 @@ export class Controller {
     this.store.set({ palette: false });
   }
 
-  /** An item chosen in the palette: the palette closes first (focus returns), then the action runs as its shortcut would. */
+  /** An item chosen in the palette: the palette closes and its focus trap lets go, then the action runs as its shortcut would. */
   runPaletteAction(a: Action) {
     if (!(a in this.actions)) return;
     this.store.set((s) => ({ palette: false, recentActions: pushRecent(s.recentActions, a) }));
-    this.actions[a as keyof typeof this.actions]();
+    void this.ui.nextFrame().then(() => this.actions[a as keyof typeof this.actions]());
   }
 
   // context_menu is not a global command: each focused list or chip opens its own menu through isMenuKey

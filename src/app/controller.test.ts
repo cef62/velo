@@ -330,6 +330,28 @@ test("removeFilterChip drops the last chip, a saved chip as one; clearFilterChip
   expect(store.get().appliedSaved).toBeNull();
 });
 
+test("the palette opens and closes; a chosen action runs after the next frame and goes to Recent", async () => {
+  const { c, store, ui, calls } = setup();
+  c.openPalette();
+  expect(store.get().palette).toBe(true);
+  c.onKeyDown({ ...KEY_P, inDialog: true });
+  expect(store.get().palette).toBe(true); // keys inside the dialog are its own
+  c.closePalette();
+  expect(store.get().palette).toBe(false);
+  c.onKeyDown(KEY_P);
+  expect(store.get().palette).toBe(true);
+  let frame!: () => void;
+  ui.nextFrame = () => new Promise<void>((r) => (frame = r));
+  c.runPaletteAction("focus_search");
+  expect(store.get()).toMatchObject({ palette: false, recentActions: ["focus_search"] });
+  expect(calls.some((x) => x[0] === "focusSearch")).toBe(false); // not yet: the focus trap is still up
+  frame();
+  await settle();
+  expect(calls.some((x) => x[0] === "focusSearch")).toBe(true);
+  c.runPaletteAction("toggle_window"); // an OS-level action is not runnable here
+  expect(store.get().recentActions).toEqual(["focus_search"]);
+});
+
 test("a slow auto-show doesn't replace the note Enter just opened", async () => {
   const { c, api, store } = setup();
   const d = deferred<ReturnType<typeof api.openNote> extends Promise<infer T> ? T : never>();
@@ -889,6 +911,7 @@ test("toggle_tasks switches the pane and notes-changed refreshes tasks", async (
 });
 
 const KEY_C = { key: "c", code: "KeyC", metaKey: true, ctrlKey: false, altKey: false, shiftKey: true, inEditor: false, inSearchWithText: false, inDialog: false, inRename: false };
+const KEY_P = { key: "p", code: "KeyP", metaKey: true, ctrlKey: false, altKey: false, shiftKey: false, inEditor: false, inSearchWithText: false, inDialog: false, inRename: false };
 
 test("toggle_connections opens the view centred on the open note", async () => {
   const { c, api, store, editor } = setup();

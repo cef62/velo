@@ -21,7 +21,7 @@ export function CommandPalette({ controller, store }: { controller: Controller; 
     <Dialog.Root open={open} onOpenChange={(d) => !d.open && controller.closePalette()}>
       <Dialog.Backdrop />
       <Dialog.Positioner className={css({ alignItems: "flex-start" })}>
-        <Dialog.Content className={`${c.content} ${css({ p: "0", gap: "0" })}`} aria-label="Command palette">
+        <Dialog.Content className={`${c.content} ${css({ p: "0", gap: "0", w: "palette", maxW: "calc(100vw - 32px)", mt: "10vh", mb: "auto", bg: "velo.panel", boxShadow: "veloPopover", borderRadius: "l3" })}`} aria-label="Command palette">
           {open && <Body controller={controller} store={store} />}
         </Dialog.Content>
       </Dialog.Positioner>
@@ -77,17 +77,17 @@ function Body({ controller, store }: { controller: Controller; store: Store<AppS
           onKeyDown={(e) => {
             if (e.key === "ArrowDown") move(1);
             else if (e.key === "ArrowUp") move(-1);
-            else if (e.key === "Enter" && flat[cur]) run(flat[cur]);
+            else if (e.key === "Enter" && flat[cur] && !e.nativeEvent.isComposing) run(flat[cur]);
             else return;
             e.preventDefault();
           }}
         />
       </div>
+      {flat.length === 0 && <div className={empty} role="status">No command matches “{query}”</div>}
       <div ref={list} id="palette-list" role="listbox" aria-label="Commands" className={c.list}>
-        {flat.length === 0 && <div className={empty}>No command matches “{query}”</div>}
-        {groups.map((g) => (
-          <div key={g.title || "hits"} role="group" aria-label={g.title || "Matches"}>
-            {g.title && <div className={sectionHeader()}>{g.title}</div>}
+        {groups.map((g, gi) => (
+          <div key={`${gi}:${g.title}`} role="group" aria-label={g.title || "Matches"}>
+            {g.title && <div className={sectionHeader()} aria-hidden="true">{g.title}</div>}
             {g.items.map((it) => {
               i++;
               const n = i;
