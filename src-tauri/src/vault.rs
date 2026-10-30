@@ -141,6 +141,19 @@ pub fn plain_twin_of_locked(path: &Path) -> bool {
     parse_note_file(path).is_some_and(|n| !n.encrypted && path.parent().is_some_and(|d| note_path(d, &n.title, true).exists()))
 }
 
+/// Lock/unlock's last step once `to` is written: remove `from`. Already gone (a sync or Finder deleted it) is success:
+/// `to` is now the only copy. Any other failure removes `to`, so the error is true and no twin is left (a plain twin
+/// would leak and keep syncing; a locked one would refuse every save of the plain note).
+fn finish_move(from: &Path, to: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(from) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound && from.exists() => {
+            std::fs::remove_file(to).ok();
+            Err(e)
+        }
+        _ => Ok(()),
+    }
+}
+
 fn parse(p: &Path) -> anyhow::Result<NoteFile> {
     parse_note_file(p).ok_or_else(|| anyhow!("not a note file: {}", p.display()))
 }
@@ -609,11 +622,7 @@ impl Vault {
         self.revisions.encrypt_all(&nf.title, |b| crypto::encrypt(identity, b))?;
         let plain = self.store.read(from)?;
         self.store.write_atomic(&to, &crypto::encrypt(identity, &plain)?)?;
-        if let Err(e) = std::fs::remove_file(from) {
-            // undo, so the UI's error is true: the note stays plain, with no locked twin that would refuse its saves
-            std::fs::remove_file(&to).ok();
-            return Err(e).context("removing plaintext note");
-        }
+        finish_move(from, &to).context("removing plaintext note")?;
         // The file has moved: from here on nothing may fail the lock (as in `rename_note`), or the UI keeps the old
         // path, whose saves are refused. Index errors heal on the next change.
         self.index.remove_erasing(path).ok();
@@ -638,11 +647,7 @@ impl Vault {
         }
         let plain = crypto::decrypt(identity, &self.store.read(from)?)?;
         self.store.write_atomic(&to, &plain)?;
-        if let Err(e) = std::fs::remove_file(from) {
-            // undo, so the UI's error is true: a plain twin beside the locked note would be refused anyway
-            std::fs::remove_file(&to).ok();
-            return Err(e).context("removing encrypted note");
-        }
+        finish_move(from, &to).context("removing encrypted note")?;
         // as in `lock_note`: the file has moved, so nothing may fail the unlock
         self.index.remove(path).ok();
         self.unlocked.remove(path);
@@ -1031,6 +1036,17 @@ mod tests {
         let q = v.unlock_note(&p, &id).unwrap();
         assert!(Path::new(&q).exists() && !Path::new(&p).exists());
         c.execute_batch("DROP TRIGGER boom").unwrap();
+    }
+    /// The old file already gone (deleted by a sync mid-lock): the new file is the only copy and stays.
+    #[test] fn finish_move_keeps_the_only_copy() {
+        let d = tempfile::tempdir().unwrap();
+        let (from, to) = (d.path().join("X.md"), d.path().join("X.md.age"));
+        std::fs::write(&to, "c").unwrap();
+        assert!(finish_move(&from, &to).is_ok());
+        assert!(to.exists());
+        std::fs::write(&from, "p").unwrap();
+        assert!(finish_move(&from, &to).is_ok());
+        assert!(!from.exists() && to.exists());
     }
     /// A lock whose plaintext can't be removed changes nothing: no locked twin is left to refuse the note's saves.
     #[cfg(target_os = "macos")]

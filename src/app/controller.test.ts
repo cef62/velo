@@ -479,6 +479,26 @@ test("changing the notes folder closes the note from the old folder", async () =
   expect(store.get().openPath).toBe(null);
 });
 
+test("changing the notes folder with unsaved edits saves them first, or refuses to switch", async () => {
+  const { c, api, store, editor } = setup();
+  await c.show(P("A"));
+  await c.openSettings();
+  const s = store.get().settings!;
+  editor.dirty = true; // an agent write landed while Settings was open
+  editor.flushResult = false;
+  expect(await c.saveSettings({ ...s, notes_dir: "/other" })).toBe("Save the open note first");
+  expect(api.setSettings).not.toHaveBeenCalled();
+  expect(editor.currentPath()).toBe(P("A"));
+  editor.flushResult = true; // saved; the fake stays dirty, so unload refuses and the saved text is discarded
+  const flushes = editor.flush.mock.calls.length;
+  let flushedBefore = 0;
+  api.setSettings.mockImplementationOnce(async () => void (flushedBefore = editor.flush.mock.calls.length - flushes));
+  expect(await c.saveSettings({ ...s, notes_dir: "/other" })).toBe(null);
+  expect(flushedBefore).toBe(1); // saved into the old folder, before the switch
+  expect(editor.currentPath()).toBe(null);
+  expect(store.get().openPath).toBe(null);
+});
+
 test("conflict clears on dismiss and when the open note changes; openConflict opens it", async () => {
   const { c, store, notes } = setup();
   await c.runSearch(true);
