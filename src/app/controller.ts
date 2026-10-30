@@ -14,7 +14,7 @@ import { enterAction, fold, moveSelection } from "../search";
 import { extractTags, pruneSelection, toggleTag } from "../tags";
 import { frontMatterRange, stripFrontMatter, wordCount } from "../frontmatter";
 import { formatBinding, matches, resolve, type Action, type GLOBAL_ACTIONS } from "../shortcuts";
-import { isMenuKey, linkFor, menuModel, type MenuAction } from "../contextmenu";
+import { isMenuKey as menuKeyFor, linkFor, menuModel, type MenuAction } from "../contextmenu";
 import { isLockedPath } from "../passphrase";
 import { localToday } from "../tasks";
 import { sinceMs } from "../timeline";
@@ -1767,7 +1767,14 @@ export class Controller {
     void this.editor.flush();
   }
 
-  protected readonly actions: Record<Exclude<Action, (typeof GLOBAL_ACTIONS)[number]>, () => void> = {
+  /** The context-menu key (ContextMenu, or the remappable `context_menu` binding) for this keydown. */
+  isMenuKey(e: Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">): boolean {
+    const { keys, isMac } = this.store.get();
+    return menuKeyFor(e, keys.context_menu, isMac);
+  }
+
+  // context_menu is not a global command: each focused list or chip opens its own menu through isMenuKey
+  protected readonly actions: Record<Exclude<Action, (typeof GLOBAL_ACTIONS)[number] | "context_menu">, () => void> = {
     toggle_info: () => void this.toggleInfo(),
     toggle_front_matter: () => void this.toggleFrontMatter(),
     focus_search: () => this.focusSearch(),
@@ -1801,7 +1808,7 @@ export class Controller {
     if (e.inDialog || e.inRename) return false; // dialogs and the rename field own their keys
     const { sel, keys, paneMode } = this.store.get();
     const notes = paneMode === "notes"; // the note list's keys do nothing while the pane lists tasks
-    if (notes && isMenuKey(e) && !e.inEditor && sel >= 0) {
+    if (notes && this.isMenuKey(e) && !e.inEditor && sel >= 0) {
       void this.openContextMenu(sel, true);
       return true;
     }

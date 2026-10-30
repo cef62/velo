@@ -4,7 +4,6 @@ import { css } from "styled-system/css";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { SegmentGroup, Spinner } from "@/components/ui";
-import { isMenuKey } from "../contextmenu";
 import { dateText as date, isTagNode, nodeKeyAction, nodeLabel, ringLayout, tabOrder, timeLayout, type Placed } from "../connections";
 import { useStore } from "./useStore";
 
@@ -135,7 +134,7 @@ export function ConnectionsView({ controller, store }: { controller: Controller;
   const mentionOf = (p: Placed) => (p.kind === "mention" ? data?.mentions.find((m) => m.node.path === p.node.path) ?? null : null);
   const menu = (p: Placed) => !isTagNode(p) && p.kind !== "centre" && void controller.openNodeMenu(p.node, mentionOf(p));
   const onKey = (e: KeyboardEvent, p: Placed) => {
-    if (isMenuKey(e.nativeEvent)) {
+    if (controller.isMenuKey(e.nativeEvent)) {
       e.preventDefault();
       return menu(p);
     }

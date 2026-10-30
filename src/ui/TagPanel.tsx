@@ -4,7 +4,6 @@ import { tagChip } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { Button, Kbd } from "@/components/ui";
-import { isMenuKey } from "../contextmenu";
 import { sameFilters } from "../saved";
 import { fold } from "../search";
 import { formatBinding, NONE } from "../shortcuts";
@@ -110,7 +109,7 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
                     void controller.savedMenu(x.name, false);
                   }}
                   onKeyDown={(e) => {
-                    if (!isMenuKey(e.nativeEvent)) return;
+                    if (!controller.isMenuKey(e.nativeEvent)) return;
                     e.preventDefault();
                     menuAt.current = i;
                     void controller.savedMenu(x.name, true);

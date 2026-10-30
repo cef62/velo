@@ -446,6 +446,28 @@ test("onKeyDown: none binding never fires; Backspace combo skipped in editor; ar
   expect(api.setSettings).toHaveBeenCalledWith(expect.objectContaining({ sort: "title" }));
 });
 
+test("the context-menu key follows the saved context_menu binding; the ContextMenu key always works", async () => {
+  const { c, store, calls } = setup();
+  await c.runSearch(true);
+  await settle();
+  const menus = () => calls.filter((x) => x[0] === "popupMenu").length;
+  const f10 = { ...key("F10", { shift: true }), key: "F10" };
+  expect(c.onKeyDown(f10)).toBe(true); // default Shift+F10
+  await settle();
+  expect(menus()).toBe(1);
+  store.set({ keys: { ...store.get().keys, context_menu: "Mod+KeyM" } });
+  expect(c.onKeyDown(f10)).toBe(false);
+  expect(c.onKeyDown(key("KeyM", { meta: true }))).toBe(true);
+  await settle();
+  expect(menus()).toBe(2);
+  expect(c.onKeyDown(key("KeyM", { meta: true }, { inEditor: true }))).toBe(false); // never a command in the editor
+  store.set({ keys: { ...store.get().keys, context_menu: "none" } });
+  expect(c.onKeyDown(f10)).toBe(false);
+  expect(c.onKeyDown({ ...key("ContextMenu"), key: "ContextMenu" })).toBe(true);
+  await settle();
+  expect(menus()).toBe(3);
+});
+
 test("saveSettings maps not-found to Folder not found", async () => {
   const { c, api } = setup();
   const s = await api.getSettings();

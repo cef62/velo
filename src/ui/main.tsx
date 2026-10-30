@@ -8,7 +8,6 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as api from "../api";
 import { Controller } from "../app/controller";
 import { createStore, initialState } from "../app/store";
-import { isMenuKey } from "../contextmenu";
 import { isSearchInput, platform } from "./platform";
 import { App } from "./App";
 
@@ -33,7 +32,7 @@ window.addEventListener(
     // the focused divider keeps ↑/↓ (and ←/→): they resize instead of stepping the list
     if (t.closest?.("[data-divider]") && e.key.startsWith("Arrow") && !(e.metaKey || e.ctrlKey || e.altKey)) return;
     // a focused saved-search chip opens its own menu, not the selected note's
-    if (t.closest?.("[data-saved]") && isMenuKey(e)) return;
+    if (t.closest?.("[data-saved]") && controller.isMenuKey(e)) return;
     const handled = controller.onKeyDown({
       key: e.key,
       code: e.code,
