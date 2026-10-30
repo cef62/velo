@@ -1221,11 +1221,6 @@ export class Controller {
     return this.loadExportPreview();
   }
 
-  /** The window's afterprint: the print container is no longer needed. */
-  printDone() {
-    this.store.set({ printHtml: null });
-  }
-
   protected readonly newExportReq = latest();
   // The backend reads up to 1,000 files: called on open and on a Tasks only change, never per render.
   protected async loadExportPreview() {
@@ -1261,10 +1256,11 @@ export class Controller {
       try {
         // wikilinks and tags print as plain text: nothing on paper to click
         const html = renderMarkdown(await this.api.exportText(req), () => true).replace(/<a href="#" (class="(?:wikilink|tag)"[^>]*)>(.*?)<\/a>/g, "<span $1>$2</span>");
+        if (!this.store.get().exporting?.pending) return; // cancelled (or reopened) while the text loaded
         this.store.set({ printHtml: html });
         await this.ui.nextFrame();
         await this.api.printPage();
-        // macOS print() returns as soon as the sheet opens, before WebKit lays the page out; the container stays until printDone or the next export
+        // macOS print() returns as soon as the sheet opens, before WebKit lays the page out; the container stays until the next export (afterprint may fire after the preview pass)
         this.store.set({ exporting: null });
       } catch (e) {
         this.store.set({ printHtml: null });

@@ -2530,7 +2530,7 @@ test("the export action opens the export dialog", async () => {
   expect(store.get().exporting?.counts).toEqual(counts(1));
 });
 
-test("PDF export renders the export into the print container, prints once, closes, and keeps the container until the next export or afterprint", async () => {
+test("PDF export renders the export into the print container, prints once, closes, and keeps the container until the next export", async () => {
   const { c, api, ui, store } = setup();
   api.exportPreview.mockResolvedValue(counts(1));
   api.exportText.mockResolvedValueOnce("# Hi\n\nSee [[B]] #proj");
@@ -2554,9 +2554,22 @@ test("PDF export renders the export into the print container, prints once, close
   expect(store.get().exporting).toBeNull();
   await c.startExport();
   expect(store.get().printHtml).toBeNull();
-  store.set({ printHtml: "<p>x</p>" });
-  c.printDone();
+});
+
+test("PDF export cancelled while the text loads prints nothing", async () => {
+  const { c, api, calls, store } = setup();
+  api.exportPreview.mockResolvedValue(counts(1));
+  const d = deferred<string>();
+  api.exportText.mockImplementationOnce(() => d.promise);
+  await c.startExport();
+  await c.setExportOptions({ format: "pdf" });
+  const go = c.commitExport(true);
+  await c.commitExport(false);
+  d.resolve("# Hi");
+  await go;
   expect(store.get().printHtml).toBeNull();
+  expect(calls.some(([n]) => n === "nextFrame")).toBe(false);
+  expect(api.printPage).not.toHaveBeenCalled();
 });
 
 test("PDF export: a print failure keeps the dialog open with the error and clears the print container", async () => {
