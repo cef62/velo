@@ -53,22 +53,29 @@ fn fence(line: &str) -> Option<(char, usize, &str)> {
     (n >= 3).then_some((c, n, rest))
 }
 
-/// Removes every `<marker><date>` (with the space before it); returns the rest and the first date.
-fn strip(s: &str, marker: &str) -> (String, Option<String>) {
+/// Removes every `<marker><date><close>` (with the space before it); returns the rest and the first date.
+fn strip(s: &str, marker: &str, close: &str) -> (String, Option<String>) {
     let (mut out, mut first, mut rest) = (String::new(), None, s);
     while let Some(i) = rest.find(marker) {
         let after = &rest[i + marker.len()..];
-        match iso(after) {
+        match iso(after).filter(|_| after[10..].starts_with(close)) {
             Some(d) => {
                 out.push_str(rest[..i].trim_end());
                 first.get_or_insert(d.to_string());
-                rest = &after[10..];
+                rest = &after[10 + close.len()..];
             }
             None => { out.push_str(&rest[..i + marker.len()]); rest = after; }
         }
     }
     out.push_str(rest);
     (out, first)
+}
+
+/// The done date: velo writes `@done(YYYY-MM-DD)`; Obsidian's `✅ YYYY-MM-DD` is still read, and replaced on a toggle.
+fn strip_done(s: &str) -> (String, Option<String>) {
+    let (rest, done) = strip(s, "@done(", ")");
+    let (rest, legacy) = strip(&rest, "✅ ", "");
+    (rest, done.or(legacy))
 }
 
 pub fn parse_tasks(full_text: &str) -> Vec<TaskLine> {
@@ -84,8 +91,8 @@ pub fn parse_tasks(full_text: &str) -> Vec<TaskLine> {
             (Some(_), _) => {}
             (None, Some((c, n, _))) => open = Some((c, n)),
             (None, None) => if let Some((b, done)) = scan(l) {
-                let (rest, due) = strip(&l[b + 2..], "📅 ");
-                let (rest, done_on) = strip(&rest, "✅ ");
+                let (rest, due) = strip(&l[b + 2..], "📅 ", "");
+                let (rest, done_on) = strip_done(&rest);
                 out.push(TaskLine { line, line_text: l.to_string(), text: rest.trim().to_string(), done, due, done_on });
             }
         }
@@ -97,9 +104,9 @@ pub fn parse_tasks(full_text: &str) -> Vec<TaskLine> {
 pub fn toggle_line(line: &str, today: &str) -> Option<String> {
     let (body, cr) = match line.strip_suffix('\r') { Some(b) => (b, "\r"), None => (line, "") };
     let (b, done) = scan(body)?;
-    let (rest, _) = strip(&body[b + 2..], "✅ ");
+    let (rest, _) = strip_done(&body[b + 2..]);
     let mark = if done { ' ' } else { 'x' };
-    let stamp = if done { String::new() } else { format!(" ✅ {today}") };
+    let stamp = if done { String::new() } else { format!(" @done({today})") };
     Some(format!("{}{mark}]{rest}{stamp}{cr}", &body[..b]))
 }
 
@@ -234,7 +241,16 @@ mod tests {
     fn toggle_twice_is_one_done_date() {
         let mut l = "- [ ] a 📅 2026-10-30".to_string();
         for _ in 0..3 { l = toggle_line(&l, "2026-10-27").unwrap(); }
-        assert_eq!(l.matches('✅').count(), 1);
-        assert!(l.contains("✅ 2026-10-27") && l.contains("📅 2026-10-30"));
+        assert_eq!(l.matches("@done(").count(), 1);
+        assert!(l.contains("@done(2026-10-27)") && l.contains("📅 2026-10-30"));
+    }
+
+    #[test]
+    fn done_date_reads_both_marks() {
+        let t = parse_tasks("- [x] a @done(2026-10-20)
+- [x] b ✅ 2026-10-21
+");
+        assert_eq!((t[0].done_on.as_deref(), t[0].text.as_str()), (Some("2026-10-20"), "a"));
+        assert_eq!((t[1].done_on.as_deref(), t[1].text.as_str()), (Some("2026-10-21"), "b"));
     }
 }

@@ -1147,7 +1147,7 @@ mod tests {
     #[test] fn toggle_task_flips_and_dates() {
         let mut v = open_empty(); let p = note_with(&mut v, "t", "- [ ] a\n");
         v.toggle_task(&p, 0, "- [ ] a", None, false).unwrap();
-        assert_eq!(std::fs::read_to_string(&p).unwrap(), format!("- [x] a ✅ {}\n", local_today()));
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), format!("- [x] a @done({})\n", local_today()));
     }
     #[test] fn toggle_task_reports_line_after_stamping() {
         let mut v = open_empty(); let p = note_with(&mut v, "t", "x\n- [ ] a\n");
@@ -1156,7 +1156,7 @@ mod tests {
         assert!(saved.starts_with("---\n"), "stamped front matter: {saved}");
         assert!(t.line > 1);
         assert_eq!(saved.split('\n').nth(t.line).unwrap(), t.line_text);
-        assert_eq!(t.line_text, format!("- [x] a ✅ {}", local_today()));
+        assert_eq!(t.line_text, format!("- [x] a @done({})", local_today()));
         let back = v.toggle_task(&p, t.line, &t.line_text, None, true).unwrap();
         assert_eq!(back, Toggled { line: t.line, line_text: "- [ ] a".into() });
         assert!(std::fs::read_to_string(&p).unwrap().ends_with("x\n- [ ] a\n"));
@@ -1170,7 +1170,7 @@ mod tests {
     #[test] fn toggle_task_keeps_crlf() {
         let mut v = open_empty(); let p = note_with(&mut v, "t", "x\r\n- [ ] a\r\n");
         v.toggle_task(&p, 1, "- [ ] a", None, false).unwrap();
-        assert_eq!(std::fs::read_to_string(&p).unwrap(), format!("x\r\n- [x] a ✅ {}\r\n", local_today()));
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), format!("x\r\n- [x] a @done({})\r\n", local_today()));
     }
     #[test] fn toggle_task_in_code_fence_refused() {
         let mut v = open_empty(); let p = note_with(&mut v, "t", "```\n- [ ] a\n```\n");
@@ -1231,7 +1231,7 @@ mod tests {
         let raw = std::fs::read(&p).unwrap();
         assert!(!String::from_utf8_lossy(&raw).contains("secret"));
         let plain = String::from_utf8(crypto::decrypt(&id, &raw).unwrap()).unwrap();
-        assert_eq!(plain, format!("- [x] secret ✅ {}\n", local_today()));
+        assert_eq!(plain, format!("- [x] secret @done({})\n", local_today()));
     }
     #[test] fn locked_note_encrypts_stamped_text() {
         let (dir, db) = setup(); let id = crypto::new_identity();

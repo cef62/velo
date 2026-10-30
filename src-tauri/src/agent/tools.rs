@@ -77,7 +77,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "set_task_done",
-        description: concat!("Tick (`done` true) or untick a task in a note, with velo's ✅ date handling. Pass `line` and `line_text` from list_tasks or read_note; if the line changed since, it fails with task-moved. Returns status `changed` (with the new hash and line) or `unchanged` when the task is already in that state.", conventions!()),
+        description: concat!("Tick (`done` true) or untick a task in a note, with velo's done date handling (`@done(YYYY-MM-DD)`). Pass `line` and `line_text` from list_tasks or read_note; if the line changed since, it fails with task-moved. Returns status `changed` (with the new hash and line) or `unchanged` when the task is already in that state.", conventions!()),
         input_schema: r#"{"type":"object","properties":{"title":{"type":"string"},"line":{"type":"integer","minimum":0},"line_text":{"type":"string"},"done":{"type":"boolean"},"summary":{"type":"string"}},"required":["title","line","line_text","done","summary"]}"#,
     },
     ToolSpec {
@@ -811,7 +811,7 @@ mod tests {
         let r = call(&mut ops, "set_task_done", args(true, "- [ ] do it", "ticked")).unwrap();
         assert_eq!(r["status"], "changed");
         assert_eq!(r["hash"], hash_of(&dir, "a.md"));
-        assert!(read(&dir, "a.md").contains("- [x] do it ✅"), "{}", read(&dir, "a.md"));
+        assert!(read(&dir, "a.md").contains("- [x] do it @done("), "{}", read(&dir, "a.md"));
         assert_eq!(agent_revs(&ops, &p), ["ticked"]);
         let lt = r["line_text"].as_str().unwrap().to_string();
         line.set(r["line"].as_u64().unwrap());
