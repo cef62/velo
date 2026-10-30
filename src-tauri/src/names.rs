@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use unicode_normalization::UnicodeNormalization;
 
 pub struct NoteFile {
     pub title: String,
@@ -9,7 +10,7 @@ pub fn title_to_stem(title: &str) -> String {
     let mut s: String = title
         .trim()
         .chars()
-        .map(|c| if c.is_control() || "/\\:*?\"<>|]".contains(c) { '-' } else { c })
+        .map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { '-' } else { c })
         .collect();
     let mut end = s.len().min(200);
     while !s.is_char_boundary(end) {
@@ -23,9 +24,19 @@ pub fn title_to_stem(title: &str) -> String {
     if s.is_empty() { "Untitled".into() } else { s }
 }
 
-/// A title whose file name is the title itself, so a `[[link]]` to it resolves.
+/// A title whose file name is the title itself, so a `[[link]]` to it resolves; a `]` would end the link early.
+/// Checked where titles come from the user only: an existing `X]y.md` keeps its path.
 pub fn title_ok(title: &str) -> bool {
-    !title.trim().is_empty() && title_to_stem(title) == title.trim()
+    !title.trim().is_empty() && title_to_stem(title) == title.trim() && !title.contains(']')
+}
+
+/// `p` with its file name in NFC on macOS, whose volumes treat NFC and NFD names as one file (HFS+ and SMB list them
+/// NFD); the folder part stays byte for byte. Elsewhere the two spellings are two files, so `p` is unchanged.
+pub fn nfc_name(p: &Path) -> PathBuf {
+    match p.file_name().and_then(|n| n.to_str()) {
+        Some(n) if cfg!(target_os = "macos") => p.with_file_name(n.nfc().collect::<String>()),
+        _ => p.to_path_buf(),
+    }
 }
 
 pub fn note_path(dir: &Path, title: &str, encrypted: bool) -> PathBuf {
@@ -49,8 +60,6 @@ mod tests {
     use super::*;
 
     #[test] fn stem_replaces_illegal() { assert_eq!(title_to_stem("a/b:c*?\"<>|d"), "a-b-c------d"); }
-    // a `]` would end the `[[link]]` early, so no link could reach the note
-    #[test] fn stem_replaces_closing_bracket() { assert_eq!(title_to_stem("Plan]v2 [x]"), "Plan-v2 [x-"); }
     #[test] fn stem_trims_dots_spaces() { assert_eq!(title_to_stem("  notes. . "), "notes"); }
     #[test] fn stem_leading_dots_not_hidden() { assert_eq!(title_to_stem(".NET tips"), "-NET tips"); assert_eq!(title_to_stem("..x"), "--x"); assert_eq!(title_to_stem("a.b"), "a.b"); }
     #[test] fn stem_empty_is_untitled() { assert_eq!(title_to_stem(" / "), "-"); assert_eq!(title_to_stem("   "), "Untitled"); }

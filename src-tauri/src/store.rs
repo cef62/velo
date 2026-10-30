@@ -72,7 +72,7 @@ impl Store {
             return Err(e);
         }
         let h = hash(bytes);
-        self.self_writes.lock().unwrap().insert(path.to_path_buf(), h.clone());
+        self.self_writes.lock().unwrap().insert(crate::names::nfc_name(path), h.clone());
         Ok(h)
     }
 
@@ -135,7 +135,7 @@ impl Store {
     }
 
     pub fn take_self_write(&self, path: &Path, bytes: &[u8]) -> bool {
-        let mut m = self.self_writes.lock().unwrap();
+        let (mut m, path) = (self.self_writes.lock().unwrap(), &crate::names::nfc_name(path)); // the watcher may spell it NFD
         if m.get(path).is_some_and(|h| *h == hash(bytes)) {
             m.remove(path);
             true

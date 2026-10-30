@@ -1,5 +1,6 @@
 [
-  { "body": "para\n\n    #indented\n#ok", "tags": ["ok"] },
+  { "body": "para\n\n    #indented\n#ok", "tags": ["indented", "ok"] },
+  { "body": "- item\n\n    see [[Old]] #proj", "tags": ["proj"] },
   { "body": "- a\n    - #nested", "tags": ["nested"] },
   { "body": "````md\n```\n#inner\n```\n````\n#after", "tags": ["after"] },
   { "body": "~~~\n```\n#mixed\n~~~\n#b", "tags": ["b"] },

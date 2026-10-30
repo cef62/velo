@@ -1016,10 +1016,10 @@ mod fix_tests {
     }
 
     #[test] fn remove_tags_keeps_links_code_and_paragraphs() {
-        let (mut ops, dir) = vault(&[("A.md", "read [the #work notes](http://x) and [[Plan #work]]\n\n    code #work here\n"), ("B.md", "Some paragraph\n- #work\n- [ ] #work\n")]);
+        let (mut ops, dir) = vault(&[("A.md", "read [the #work notes](http://x) and [[Plan #work]]\n\n```\ncode #work here\n```\n"), ("B.md", "Some paragraph\n- #work\n- [ ] #work\n")]);
         let r = call(&mut ops, "remove_tags", json!({"titles": ["A", "B"], "tags": ["work"], "summary": "s"})).unwrap();
         assert_eq!(r["results"][0]["reason"], "tag only appears in code or a link");
-        assert_eq!(read(&dir, "A.md"), "read [the #work notes](http://x) and [[Plan #work]]\n\n    code #work here\n");
+        assert_eq!(read(&dir, "A.md"), "read [the #work notes](http://x) and [[Plan #work]]\n\n```\ncode #work here\n```\n");
         assert_eq!(r["results"][1]["status"], "changed");
         assert!(read(&dir, "B.md").ends_with("---\nSome paragraph\n"));
     }
