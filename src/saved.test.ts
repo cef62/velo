@@ -34,8 +34,9 @@ test("renameIn keeps position and drops a replaced name; removeFrom folds", () =
 });
 
 test("activeFilterCount: tags + No links, or 1 for an applied saved search, 0 for text alone", () => {
-  const saved = [{ name: "w", query: "", tags: ["work", "idea"], no_links: false }];
+  const saved = [{ name: "w", query: "", tags: ["work", "idea"], no_links: false }, { name: "t", query: "todo", tags: [], no_links: false }];
   expect(activeFilterCount(saved, { query: "x", tags: [], noLinks: false })).toBe(0);
+  expect(activeFilterCount(saved, { query: "todo", tags: [], noLinks: false })).toBe(1); // a text-only saved search still counts
   expect(activeFilterCount(saved, { query: "", tags: ["work"], noLinks: true })).toBe(2);
   expect(activeFilterCount(saved, { query: "", tags: ["idea", "work"], noLinks: false })).toBe(1);
   expect(activeFilterCount(saved, { query: "more", tags: ["idea", "work"], noLinks: false })).toBe(2);

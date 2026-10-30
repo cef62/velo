@@ -1,4 +1,4 @@
-import { ListFilter, Settings } from "lucide-react";
+import { Hash, Settings } from "lucide-react";
 import { type ReactElement, type ReactNode } from "react";
 import { css } from "styled-system/css";
 import type { Controller } from "../app/controller";
@@ -60,7 +60,7 @@ export function Header({ controller, store }: { controller: Controller; store: S
       <SearchField controller={controller} store={store} />
       <span className={grow} data-tauri-drag-region={isMac || undefined} />
       <UpdatePill controller={controller} store={store} />
-      {icon("Filters", "toggle_tags", <><ListFilter />{filters > 0 && <span className={dot} aria-hidden="true">{filters}</span>}</>, () => controller.showTags(!tagPanelOpen), {
+      {icon("Filters", "toggle_tags", <><Hash />{filters > 0 && <span className={dot} aria-hidden="true">{filters}</span>}</>, () => controller.showTags(!tagPanelOpen), {
         pressed: tagPanelOpen,
         controls: "tag-panel",
         label: filters > 0 ? `Filters, ${filters} active` : "Filters",

@@ -19,16 +19,16 @@ export function OverflowMenu({ controller, store }: { controller: Controller; st
   const kbd = (a: Action) => (keys[a] === NONE ? null : <Kbd marginLeft="auto">{formatBinding(keys[a], isMac)}</Kbd>);
   const noNote = openPath === null;
   return (
-    <Menu.Root positioning={{ placement: "bottom-end" }}>
+    <Menu.Root size="sm" positioning={{ placement: "bottom-end" }}>
       <Menu.Trigger asChild>
         <IconButton variant="plain" size="sm" aria-label="More actions" title="More actions" className={css({ "&[aria-expanded=true]": { bg: "velo.accentSubtleHover", color: "velo.accentText" } })}>
           <Ellipsis />
         </IconButton>
       </Menu.Trigger>
       <Menu.Positioner>
-        <Menu.Content minW="220px">
+        <Menu.Content minW="220px" maxH="var(--available-height)"> {/* 12 items: never clipped by the recipe's 384px cap */}
           <Menu.RadioItemGroup value={paneMode} onValueChange={(d) => d.value !== paneMode && controller.setPaneMode(d.value as typeof paneMode)}>
-            <div className={label}>Left pane</div>
+            <Menu.ItemGroupLabel className={label}>Left pane</Menu.ItemGroupLabel>
             <Menu.RadioItem value="notes">
               <span className={row}><Menu.ItemIndicator />
                 <Menu.ItemText>Notes</Menu.ItemText></span>
