@@ -19,6 +19,12 @@ export type TagCount = { tag: string; count: number };
 export const search = (query: string, sort: "modified" | "title", offset: number, tags: string[], noLinks: boolean) => invoke<Page>("search", { query, sort, offset, tags, noLinks });
 export type TimelineRow = { path: string; title: string; date: number; snippet: string; locked: boolean };
 export const timeline = (query: string, tags: string[], noLinks: boolean, by: "created" | "updated", sinceMs: number | null) => invoke<TimelineRow[]>("timeline", { query, tags, noLinks, by, sinceMs });
+export type ExportRequest = { query: string; tags: string[]; no_links: boolean; by: "created" | "updated"; since_ms: number | null; tasks_only: boolean; title: string };
+export type ExportCounts = { notes: number; open: number; done: number; locked: number; over_limit: number; no_tasks: number; unreadable: number };
+export const exportPreview = (request: ExportRequest) => invoke<ExportCounts>("export_preview", { request });
+export const exportText = (request: ExportRequest) => invoke<string>("export_text", { request });
+/** Writes the export to exactly `path`. */
+export const exportMarkdown = (path: string, request: ExportRequest) => invoke<ExportCounts>("export_markdown", { path, request });
 export const listTags = () => invoke<TagCount[]>("list_tags");
 export const listTitles = () => invoke<string[]>("list_titles");
 /** `name == title` rows are titles, the others aliases. */

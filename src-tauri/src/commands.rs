@@ -1,5 +1,6 @@
 use crate::agent::listener::{self, AgentState, set_access};
 use crate::crypto;
+use crate::export::{self, ExportCounts, ExportRequest};
 use crate::index::{Page, Sort, TagCount};
 use crate::revisions::RevisionInfo;
 use crate::settings::{self, GlobalAction, Settings};
@@ -332,6 +333,30 @@ pub fn index_status(st: State<'_, AppState>) -> Option<(usize, usize)> {
 #[tauri::command(async)]
 pub fn timeline(st: State<'_, AppState>, query: String, tags: Vec<String>, no_links: bool, by: TimelineBy, since_ms: Option<i64>) -> Res<Vec<TimelineRow>> {
     with_vault(&st, |v, _| v.timeline(&query, &tags, no_links, by, since_ms))
+}
+
+fn export_today() -> String {
+    chrono::Local::now().format("%F").to_string()
+}
+
+#[tauri::command(async)]
+pub fn export_preview(st: State<'_, AppState>, request: ExportRequest) -> Res<ExportCounts> {
+    with_vault(&st, |v, _| Ok(export::build(v, &request, &export_today())?.1))
+}
+
+#[tauri::command(async)]
+pub fn export_text(st: State<'_, AppState>, request: ExportRequest) -> Res<String> {
+    with_vault(&st, |v, _| Ok(export::build(v, &request, &export_today())?.0))
+}
+
+/// Writes exactly `path` (the file the user picked in the save dialog).
+#[tauri::command(async)]
+pub fn export_markdown(st: State<'_, AppState>, path: String, request: ExportRequest) -> Res<ExportCounts> {
+    with_vault(&st, |v, _| {
+        let (text, counts) = export::build(v, &request, &export_today())?;
+        export::write(Path::new(&path), &text)?;
+        Ok(counts)
+    })
 }
 
 #[tauri::command(async)]
