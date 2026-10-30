@@ -152,7 +152,7 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
           ) : (
             <Menu.Root positioning={{ placement: "bottom-end" }}>
               <Menu.Trigger asChild>
-                <button type="button" className={menuButton()} aria-label={`View: ${view}`}>
+                <button type="button" className={menuButton()} aria-label={`View: ${VIEWS.find((v) => v.value === view)!.text}`}>
                   {VIEWS.find((v) => v.value === view)!.glyph}
                   <span data-label>{VIEWS.find((v) => v.value === view)!.text}</span>
                   <ChevronDown data-chevron aria-hidden />
@@ -172,7 +172,7 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
           )}
           {!mode.lockInMenu && (
             <Tooltip content={`${s.encrypted ? "Encrypted — press to remove encryption" : "Lock note"}${binding("toggle_lock")}`} openDelay={500}>
-              <IconButton className={pressed} variant="plain" size="sm" aria-label={s.encrypted ? "Encrypted" : "Lock note"} aria-pressed={s.encrypted} onClick={() => void controller.toggleLock()}>
+              <IconButton className={pressed} variant="plain" size="sm" aria-label="Encrypt note" aria-pressed={s.encrypted} onClick={() => void controller.toggleLock()}>
                 {s.encrypted ? <Lock size={16} aria-hidden /> : <LockOpen size={16} aria-hidden />}
               </IconButton>
             </Tooltip>

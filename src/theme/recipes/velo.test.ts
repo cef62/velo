@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { banner, paneDivider, inlineTag, keyCap, listRow, lockScreen, searchMatch, tagChip, titleBar } from "../../../styled-system/recipes";
+import { banner, paneDivider, inlineTag, keyCap, listRow, lockScreen, searchChip, searchMatch, tagChip, titleBar } from "../../../styled-system/recipes";
 
 const nonEmpty = (s: string) => expect(s).toMatch(/\S/);
 
 describe("velo recipes", () => {
   it("simple recipes return classes", () => {
-    for (const r of [searchMatch(), inlineTag()]) nonEmpty(r);
+    for (const r of [searchMatch(), inlineTag(), banner({ tone: "conflict" })]) nonEmpty(r);
+    for (const kind of ["tag", "saved", "more"] as const) nonEmpty(searchChip({ kind }));
     for (const orientation of ["horizontal", "vertical"] as const) nonEmpty(paneDivider({ orientation }));
-    for (const tone of ["conflict", "filter"] as const) nonEmpty(banner({ tone }));
     for (const slot of ["root", "card", "icon", "title", "row"] as const) nonEmpty(lockScreen()[slot]);
   });
 
@@ -27,11 +27,12 @@ describe("velo recipes", () => {
   });
 
   it("tagChip and titleBar slots", () => {
-    for (const selected of [true, false]) {
-      const c = tagChip({ selected });
-      nonEmpty(c.root);
-      nonEmpty(c.count);
-    }
+    for (const selected of [true, false])
+      for (const kind of ["tag", "saved"] as const) {
+        const c = tagChip({ selected, kind });
+        nonEmpty(c.root);
+        nonEmpty(c.count);
+      }
     const t = titleBar();
     for (const slot of ["root", "title", "status", "actions"] as const) nonEmpty(t[slot]);
   });

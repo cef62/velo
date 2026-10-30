@@ -12,8 +12,11 @@ import { useStore } from "./useStore";
 const panel = css({ display: "flex", flexDirection: "column", gap: "2.5", pt: "3", px: "3.5", pb: "3.5", bg: "velo.chrome", boxShadow: "inset 0 1px 0 {colors.velo.highlight}", borderBottom: "1px solid", borderColor: "velo.divider", flex: "none", maxH: "40vh", overflowY: "auto" });
 const line = css({ display: "flex", alignItems: "center", gap: "2.5", fontSize: "uiSm" });
 const chips = css({ display: "flex", flexWrap: "wrap", gap: "1.5" });
+// two labelled rows (v2 §3 #10): Saved · Tags
+const rowLabel = css({ w: "12", flex: "none", fontSize: "uiXs", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.05em", color: "velo.fgMuted", pt: "1.5" });
+const labelled = css({ display: "flex", alignItems: "flex-start", gap: "2.5" });
 
-export function TagPanel({ controller, store }: { controller: Controller; store: Store<AppState> }) {
+export function FiltersPanel({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const tagPanelOpen = useStore(store, (s) => s.tagPanelOpen);
   const selectedTags = useStore(store, (s) => s.selectedTags);
   const total = useStore(store, (s) => s.total);
@@ -47,11 +50,12 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
   const close = formatBinding(keys.toggle_tags, isMac);
   const stop = (i: number) => (i === Math.min(cur, k + tags.length) ? 0 : -1);
   const filtered = !capture && (query.trim() !== "" || selectedTags.length > 0 || noLinks); // capture text is not a search
+  const active = selectedTags.length + (noLinks ? 1 : 0);
   return (
     <section
-      id="tag-panel"
+      id="filters-panel"
       className={panel}
-      aria-label="Tags"
+      aria-label="Filters"
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.preventDefault();
@@ -61,9 +65,9 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
       }}
     >
       <div className={line}>
-        <span className={css({ fontWeight: "600", color: "velo.fg" })}>Tags</span>
+        <span className={css({ fontWeight: "600", color: "velo.fg" })}>Filters</span>
         <span className={css({ color: "velo.fgMuted" })}>
-          {selectedTags.length > 0 && `${selectedTags.length} selected · `}
+          {active > 0 && `${active} active · `}
           {total} notes
         </span>
         <Button variant="plain" size="sm" marginLeft="auto" disabled={!filtered} onClick={() => controller.startSaveSearch()}>
@@ -90,6 +94,8 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
         }}
       >
         {k > 0 && (
+          <div className={labelled}>
+          <span className={rowLabel} aria-hidden>Saved</span>
           <div className={chips} role="group" aria-label="Saved searches">
             {saved.map((x, i) => {
               const on = sameFilters(x, { query, tags: selectedTags, noLinks });
@@ -98,7 +104,7 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
                   key={i} // index keys: a rename or delete keeps the focused node, so focus stays on that place
                   type="button"
                   data-saved
-                  className={tagChip({ selected: on }).root}
+                  className={tagChip({ selected: on, kind: "saved" }).root}
                   aria-pressed={on}
                   tabIndex={stop(i)}
                   onFocus={() => setCur(i)}
@@ -120,8 +126,11 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
               );
             })}
           </div>
+          </div>
         )}
-        <div className={chips} role="group" aria-label="Filter by tag">
+        <div className={labelled}>
+        <span className={rowLabel} aria-hidden>Tags</span>
+        <div className={chips} role="group" aria-label="Filter by tag" data-tags>
           <button type="button" className={tagChip({ selected: noLinks }).root} aria-pressed={noLinks} tabIndex={stop(k)} onFocus={() => setCur(k)} onClick={() => controller.setNoLinks(!noLinks)}>
             No links
           </button>
@@ -134,6 +143,7 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
               </button>
             );
           })}
+        </div>
         </div>
       </div>
     </section>

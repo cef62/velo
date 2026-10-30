@@ -1,6 +1,6 @@
 import { defineRecipe } from '@pandacss/dev'
 
-// Banners: conflict (neutral), filter line. Updates are a header pill (UpdatePill); preview shows in the title bar switch.
+// Banner: only the conflict one is left (v2 §6); filters are chips in the search field, updates a header pill.
 export const banner = defineRecipe({
   className: 'banner',
   base: { display: 'flex', alignItems: 'center', gap: '2.5', flex: 'none', fontSize: 'ui' },
@@ -14,17 +14,6 @@ export const banner = defineRecipe({
         borderColor: 'velo.warningBorder',
         color: 'velo.warningFg',
         '& a': { color: 'velo.warningFg', fontWeight: '600', textDecoration: 'underline', textUnderlineOffset: '2px' },
-      },
-      filter: {
-        h: '30px',
-        px: '3.5',
-        gap: '1.5',
-        bg: 'velo.accentSubtle',
-        borderBottomWidth: '1px',
-        borderColor: 'velo.accentHalo',
-        color: 'velo.fgMuted',
-        fontSize: 'uiSm',
-        '& b': { fontWeight: '500', color: 'velo.accentText' },
       },
     },
   },

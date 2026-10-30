@@ -22,6 +22,7 @@ import { exportFileName } from "../export";
 import { prepare, rank, type Ranked } from "../fuzzy";
 import { extractTitle } from "../writing";
 import { cleanName, defaultName, removeFrom, renameIn, sameFilters, upsert, type Filters } from "../saved";
+import { chipsFor, type Chip } from "../searchChips";
 import type { MenuSpec, UiPort } from "./ports";
 import { noInfo, type AppState, type Store } from "./store";
 
@@ -606,6 +607,7 @@ export class Controller {
       return false;
     }
     const current = this.newShow();
+    if (!retried) this.ui.cancelPassphrase(); // an inline unlock still up belongs to an older open
     try {
       const doc = await this.loading(() => this.api.openNote(path));
       if (!doc) return false;
@@ -618,8 +620,13 @@ export class Controller {
     } catch (e) {
       if (how === "nav" && e === "not-found") return "missing";
       if (e === "locked" && !retried && how !== "auto") { // never pop the dialog up while typing in search
-        const ok = await this.promptPassphrase({ trigger: "open", context: null });
-        if (ok) return this.show(path, how, true);
+        const ok = await this.promptPassphrase({ trigger: "open", context: null, inline: true });
+        if (!current()) return true; // a newer note was opened while the field was up: leave it alone
+        if (ok) {
+          const r = await this.show(path, how, true);
+          if (r === true && current()) this.editor.focus(); // the unlock field had focus; reading starts in the note
+          return r;
+        }
         if (ok === null) return how !== "nav"; // no key on this computer: keep the copy-identity error
       }
       this.setErr(e === "locked" ? "Note is locked" : errText(e));
@@ -633,7 +640,7 @@ export class Controller {
    * null = opening a locked note with no key anywhere: a new key couldn't decrypt it, so no dialog, just the copy-identity error.
    * context: the note title when locking, for the create dialog's subtitle.
    */
-  protected async promptPassphrase(req: { trigger: "open" | "lock"; context: string | null }): Promise<boolean | null> {
+  protected async promptPassphrase(req: { trigger: "open" | "lock"; context: string | null; inline?: boolean }): Promise<boolean | null> {
     try {
       if (req.trigger === "open" && !(await this.api.hasIdentity()) && !(await this.api.identityFileExists())) {
         this.setErr(NO_KEY_MSG);
@@ -643,6 +650,7 @@ export class Controller {
       return await this.ui.passphrase({
         mode: exists ? "unlock" : "create",
         context: req.context,
+        inline: req.inline,
         submit: async (pw) => {
           if ((await this.api.setupPassphrase(pw)) === "keychain-unavailable") {
             this.notice = "Keychain unavailable — you'll be asked for your passphrase each launch";
@@ -1061,7 +1069,25 @@ export class Controller {
     this.filterChanged(true);
   }
 
-  /** The filter line's Clear: tags and the No links chip. */
+  /** Backspace at the start of the search field, or a chip's ×: drop that filter (the applied saved search drops as one). */
+  removeFilterChip(chip?: Chip) {
+    const f = this.filters();
+    const chips = chipsFor(this.store.get().savedSearches, f);
+    const c = chip ?? chips[chips.length - 1];
+    if (!c) return;
+    if (c.kind === "saved") return this.applySaved(c.name); // already applied: clears it
+    if (c.kind === "nolinks") return this.setNoLinks(false);
+    this.setTags(f.tags.filter((t) => fold(t) !== fold(c.tag)));
+  }
+
+  /** The search field's ×: every chip (the applied saved search clears as one, search text included). */
+  clearFilterChips() {
+    const chips = chipsFor(this.store.get().savedSearches, this.filters());
+    if (chips[0]?.kind === "saved") return this.applySaved(chips[0].name);
+    this.clearFilters();
+  }
+
+  /** The Filters panel's Clear: tags and the No links chip. */
   clearFilters() {
     this.store.set({ selectedTags: [], noLinks: false });
     this.filterChanged(true);

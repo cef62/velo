@@ -15,7 +15,8 @@ export const isSearchInput = (t: EventTarget | null) => t !== null && t === sear
 // The passphrase dialog (Task 12) registers itself here; until then locked notes can't be opened.
 type PassphraseFn = UiPort["passphrase"];
 let passphrase: PassphraseFn = async () => false;
-export const registerPassphrase = (fn: PassphraseFn) => void (passphrase = fn);
+let cancelPassphrase = () => {};
+export const registerPassphrase = (fn: PassphraseFn, cancel: () => void) => void ((passphrase = fn), (cancelPassphrase = cancel));
 
 // data-theme is always written: "system" resolves through the OS preference and follows its changes.
 const dark = window.matchMedia("(prefers-color-scheme: dark)");
@@ -35,6 +36,7 @@ export const platform: UiPort = {
   },
   confirm: (message, o) => ask(message, { title: o.title, okLabel: o.okLabel, kind: o.kind }),
   passphrase: (req) => passphrase(req),
+  cancelPassphrase: () => cancelPassphrase(),
   async chooseDirectory() {
     const d = await open({ directory: true });
     return typeof d === "string" ? d : null;
