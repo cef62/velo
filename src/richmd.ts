@@ -182,7 +182,7 @@ export function richMarkdown(opts: RichOpts): Extension {
       if (t instanceof HTMLInputElement && t.classList.contains("cm-rich-check")) {
         e.preventDefault();
         if (!view.state.facet(EditorView.editable)) return true; // no note open, indexing, lock hand-off
-        const change = toggleTaskAt(view.state.doc, Number(t.dataset.pos), localToday()); // same ✅ stamp as Editor.toggleTask
+        const change = toggleTaskAt(view.state.doc, Number(t.dataset.pos), localToday()); // same @done stamp as Editor.toggleTask
         if (change) view.dispatch({ changes: change });
         return true;
       }

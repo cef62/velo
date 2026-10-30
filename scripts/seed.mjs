@@ -31,7 +31,7 @@ for (let i = 0; i < count; i++) {
     paras.push(Array.from({ length: n }, () => {
       const r = rand();
       const day = String(1 + Math.floor(rand() * 28)).padStart(2, '0');
-      return r < 0.3 ? `- [x] ${phrase(4)} ✅ 2026-10-${day}` : r < 0.7 ? `- [ ] ${phrase(4)} 📅 2026-10-${day}` : `- [ ] ${phrase(4)}`;
+      return r < 0.3 ? `- [x] ${phrase(4)} @done(2026-10-${day})` : r < 0.7 ? `- [ ] ${phrase(4)} 📅 2026-10-${day}` : `- [ ] ${phrase(4)}`;
     }).join('\n'));
   }
   // Front matter on about half the notes (dates, tags, an alias) to exercise the parser and alias lookups.
