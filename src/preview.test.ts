@@ -24,9 +24,9 @@ test("shouldAutoEdit", () => {
   expect(shouldAutoEdit({ created: false, body: "", previewOn: false })).toBe(false);
 });
 test("afterOpen", () => {
-  const base = { created: false, body: "hi", layout: "vertical" as const, previewOn: true };
-  expect(afterOpen({ ...base, source: "enter" })).toEqual({ leavePreview: true, focusEditor: true });
-  expect(afterOpen({ ...base, layout: "horizontal", source: "enter" })).toEqual({ leavePreview: false, focusEditor: true });
+  const base = { created: false, body: "hi", previewOn: true };
+  expect(afterOpen({ ...base, source: "enter" })).toEqual({ leavePreview: true, focusEditor: true }); // preview hides the editor in both layouts
+  expect(afterOpen({ ...base, previewOn: false, source: "enter" })).toEqual({ leavePreview: false, focusEditor: true });
   expect(afterOpen({ ...base, created: true, source: "wikilink" })).toEqual({ leavePreview: true, focusEditor: true });
   expect(afterOpen({ ...base, source: "wikilink" })).toEqual({ leavePreview: false, focusEditor: false });
   expect(afterOpen({ ...base, body: " ", source: "wikilink" })).toEqual({ leavePreview: true, focusEditor: true });

@@ -752,7 +752,6 @@ export class Controller {
     const r = afterOpen({
       created,
       body: this.editor.getText(),
-      layout: this.store.get().layout,
       previewOn: this.preview.isOn(),
       source,
     });

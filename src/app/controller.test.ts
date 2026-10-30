@@ -2606,18 +2606,34 @@ test("PDF export: a print failure keeps the dialog open with the error and clear
   expect(store.get().exporting).toMatchObject({ err: "no printer", pending: false, format: "pdf" });
 });
 
-test("Enter in timeline mode with preview on in the vertical layout leaves preview, so the editor really takes focus", async () => {
-  const { c, api, store, editor } = setup();
+for (const layout of ["vertical", "horizontal"] as const) {
+  test(`Enter in timeline mode with preview on (${layout} layout) opens the note in the editor with focus, like Tasks`, async () => {
+    const { c, api, store, editor } = setup();
+    const preview = new FakePreview();
+    c.attachPreview(preview);
+    preview.on = true;
+    store.set({ layout });
+    api.timeline.mockResolvedValue([trow("B")]);
+    c.setPaneMode("timeline");
+    const focused = editor.focused;
+    await c.enter();
+    expect(store.get().openPath).toBe(P("B"));
+    expect(preview.on).toBe(false); // the editor is display:none under preview in both layouts
+    expect(editor.focused).toBe(focused + 1);
+  });
+}
+
+test("Enter in notes mode with preview on in the horizontal layout leaves preview too", async () => {
+  const { c, store, editor } = setup({ ab: "x" });
   const preview = new FakePreview();
   c.attachPreview(preview);
   preview.on = true;
-  expect(store.get().layout).toBe("vertical");
-  api.timeline.mockResolvedValue([trow("B")]);
-  c.setPaneMode("timeline");
+  store.set({ layout: "horizontal" });
+  c.setQuery("ab");
   const focused = editor.focused;
   await c.enter();
-  expect(store.get().openPath).toBe(P("B"));
-  expect(preview.on).toBe(false); // the editor is display:none under preview in this layout
+  expect(store.get().openPath).toBe(P("ab"));
+  expect(preview.on).toBe(false);
   expect(editor.focused).toBe(focused + 1);
 });
 
