@@ -1575,6 +1575,9 @@ export class Controller {
     merge_note: () => void this.startMerge(),
     toggle_tasks: () => this.setPaneMode(this.store.get().paneMode === "tasks" ? "notes" : "tasks"),
     toggle_connections: () => this.setPaneMode(this.store.get().paneMode === "connections" ? "notes" : "connections"),
+    toggle_timeline: () => {}, // wired by the timeline task
+    export: () => {}, // wired by the export task
+    save_search: () => {}, // wired by the saved-searches task
   };
 
   /**

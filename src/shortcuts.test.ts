@@ -127,3 +127,10 @@ test("the backend knows the same action ids and capture default (#8)", () => {
   expect(settingsRs).toContain(`const DEFAULT_CAPTURE: &str = "${DEFAULTS.capture}";`);
   expect(settingsRs).toContain(`const DEFAULT_TOGGLE: &str = "${DEFAULTS.toggle_window}";`);
 });
+
+test("timeline, export and save_search actions", () => {
+  expect(DEFAULTS.toggle_timeline).toBe("Mod+Shift+KeyL");
+  expect(DEFAULTS.export).toBe(NONE);
+  expect(DEFAULTS.save_search).toBe(NONE);
+  expect([LABELS.toggle_timeline, LABELS.export, LABELS.save_search]).toEqual(["Toggle timeline", "Export…", "Save search…"]);
+});

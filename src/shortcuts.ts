@@ -2,7 +2,7 @@
 // Mod = ⌘ on macOS, Ctrl elsewhere. Ctrl = physical Control (macOS only).
 export type Action =
   | "focus_search" | "toggle_preview" | "rename" | "toggle_lock"
-  | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "delete_note" | "toggle_tags" | "toggle_rich" | "toggle_layout" | "toggle_window" | "toggle_info" | "toggle_front_matter" | "toggle_tasks" | "toggle_connections" | "capture" | "daily_note" | "extract_note" | "merge_note";
+  | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "delete_note" | "toggle_tags" | "toggle_rich" | "toggle_layout" | "toggle_window" | "toggle_info" | "toggle_front_matter" | "toggle_tasks" | "toggle_connections" | "capture" | "daily_note" | "extract_note" | "merge_note" | "toggle_timeline" | "export" | "save_search";
 
 /** Handled by the OS-level shortcut in the backend, never by the in-app key handler. */
 export const GLOBAL_ACTIONS = ["toggle_window", "capture"] as const;
@@ -33,6 +33,9 @@ export const DEFAULTS: Record<Action, string> = {
   daily_note: "Mod+Shift+KeyD",
   extract_note: "Mod+Shift+KeyN",
   merge_note: NONE,
+  toggle_timeline: "Mod+Shift+KeyL",
+  export: NONE,
+  save_search: NONE,
 };
 
 export const LABELS: Record<Action, string> = {
@@ -58,6 +61,9 @@ export const LABELS: Record<Action, string> = {
   daily_note: "Today's daily note",
   extract_note: "Move to new note",
   merge_note: "Merge into…",
+  toggle_timeline: "Toggle timeline",
+  export: "Export…",
+  save_search: "Save search…",
 };
 
 type Ev = Pick<KeyboardEvent, "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">;

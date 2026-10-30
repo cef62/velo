@@ -2,6 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(default)]
+pub struct SavedSearch { pub name: String, pub query: String, pub tags: Vec<String>, pub no_links: bool }
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
 pub struct Settings {
@@ -35,21 +39,25 @@ pub struct Settings {
     pub agent_access: bool,
     /// Connections view ring order: "ring" | "created" | "updated"; anything else reads as "ring"
     pub connections_sort: String,
+    /// named searches (query + tag filter + no-links); `load` keeps only valid, uniquely named entries
+    pub saved_searches: Vec<SavedSearch>,
+    /// Timeline order: "updated" | "created"; anything else reads as "updated"
+    pub timeline_sort: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), header_labels: false, shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into(), agent_access: false, connections_sort: "ring".into() }
+        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), header_labels: false, shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into(), agent_access: false, connections_sort: "ring".into(), saved_searches: vec![], timeline_sort: "updated".into() }
     }
 }
 
 const DEFAULT_TOGGLE: &str = "Mod+Shift+Space";
 const DEFAULT_CAPTURE: &str = "Mod+Alt+Shift+KeyN"; // canonical modifier order, as the UI's DEFAULTS
 /// Every action id in the UI's `DEFAULTS` (src/shortcuts.ts); a saved id outside it (e.g. the old `next_note`) is ignored there.
-pub const ACTIONS: [&str; 22] = [
+pub const ACTIONS: [&str; 25] = [
     "focus_search", "toggle_preview", "rename", "toggle_lock", "lock_all", "settings", "toggle_sort", "back", "forward", "delete_note",
     "toggle_tags", "toggle_rich", "toggle_layout", "toggle_window", "toggle_info", "toggle_front_matter", "toggle_tasks", "toggle_connections", "capture", "daily_note", "extract_note",
-    "merge_note",
+    "merge_note", "toggle_timeline", "export", "save_search",
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -142,9 +150,22 @@ pub fn same_shortcut(a: &str, b: &str) -> bool {
 }
 
 pub fn load(path: &Path) -> Settings {
-    let Some(v) = std::fs::read(path).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()) else { return Settings::default() };
+    let Some(mut v) = std::fs::read(path).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()) else { return Settings::default() };
     let legacy = v.get("hotkey").and_then(|h| h.as_str()).map(from_plugin_format); // v1 field
+    // taken out first so one malformed entry (or a non-array) cannot reset every other setting
+    let saved = v.as_object_mut().and_then(|o| o.remove("saved_searches"));
     let mut s: Settings = serde_json::from_value(v).unwrap_or_default();
+    let mut seen = std::collections::HashSet::new();
+    for e in saved.and_then(|a| if let serde_json::Value::Array(a) = a { Some(a) } else { None }).unwrap_or_default() {
+        let Ok(mut e) = serde_json::from_value::<SavedSearch>(e) else { continue };
+        e.name = e.name.trim().into();
+        if !e.name.is_empty() && e.name.chars().count() <= 60 && seen.insert(crate::text::fold(&e.name)) {
+            s.saved_searches.push(e);
+        }
+    }
+    if !["updated", "created"].contains(&s.timeline_sort.as_str()) {
+        s.timeline_sort = "updated".into();
+    }
     if !["ring", "created", "updated"].contains(&s.connections_sort.as_str()) {
         s.connections_sort = "ring".into();
     }
@@ -218,6 +239,20 @@ mod tests {
         assert_eq!(load(&p).connections_sort, "ring");
         std::fs::write(&p, r#"{"connections_sort":"created"}"#).unwrap();
         assert_eq!(load(&p).connections_sort, "created");
+    }
+    #[test] fn saved_searches_load_and_sanitise() {
+        let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");
+        let s = Settings::default(); assert!(s.saved_searches.is_empty()); assert_eq!(s.timeline_sort, "updated");
+        let long = "n".repeat(61);
+        let j = serde_json::json!({"font_size": 16, "timeline_sort": "weird", "saved_searches": [
+            {"name":" a ","query":"x","tags":["p"],"no_links":false}, {"name":"","query":"y"}, {"name":long}, 42, {"name":"A","query":"dup"}]});
+        std::fs::write(&p, j.to_string()).unwrap();
+        let s = load(&p);
+        assert_eq!(s.saved_searches, vec![SavedSearch { name: "a".into(), query: "x".into(), tags: vec!["p".into()], no_links: false }]);
+        assert_eq!((s.timeline_sort.as_str(), s.font_size), ("updated", 16));
+        save(&p, &s).unwrap(); assert_eq!(load(&p).saved_searches, s.saved_searches);
+        std::fs::write(&p, r#"{"font_size":16,"saved_searches":"bad"}"#).unwrap();
+        assert!(load(&p).saved_searches.is_empty()); assert_eq!(load(&p).font_size, 16);
     }
     #[test] fn defaults() { let s = Settings::default(); assert_eq!(s.sort, "modified"); assert_eq!(s.toggle_window_binding(), "Mod+Shift+Space"); }
     #[test] fn from_plugin_format_matches_ui_normalization() {
