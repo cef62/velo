@@ -11,7 +11,7 @@ const err = css({ display: "flex", alignItems: "center", gap: "1.5", fontSize: "
 const label = css({ fontSize: "uiSm", fontWeight: "550", color: "velo.fg" });
 const row = css({ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "3" });
 
-/** Export…: what the timeline shows, to one Markdown file (PDF arrives with the print task). */
+/** Export…: what the timeline shows, to one Markdown file or to PDF through the print dialog. */
 export function ExportDialog({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const exporting = useStore(store, (s) => s.exporting);
   const last = useRef(exporting);
@@ -28,12 +28,12 @@ export function ExportDialog({ controller, store }: { controller: Controller; st
   );
 }
 
-function Segments<T extends string>({ label: name, value, items, on }: { label: string; value: T; items: readonly (readonly [T, string, boolean?])[]; on: (v: T) => void }) {
+function Segments<T extends string>({ label: name, value, items, on }: { label: string; value: T; items: readonly (readonly [T, string])[]; on: (v: T) => void }) {
   return (
     <SegmentGroup.Root size="sm" value={value} onValueChange={(d) => d.value && d.value !== value && on(d.value as T)} aria-label={name}>
       <SegmentGroup.Indicator />
-      {items.map(([v, text, disabled]) => (
-        <SegmentGroup.Item key={v} value={v} disabled={disabled}>
+      {items.map(([v, text]) => (
+        <SegmentGroup.Item key={v} value={v}>
           <SegmentGroup.ItemText>{text}</SegmentGroup.ItemText>
           <SegmentGroup.ItemHiddenInput aria-label={text} />
         </SegmentGroup.Item>
@@ -58,7 +58,7 @@ function Body({ state, controller }: { state: NonNullable<AppState["exporting"]>
       <div className={css({ p: "14px 20px 18px", display: "flex", flexDirection: "column", gap: "3" })}>
         <div className={row}>
           <span className={label} aria-hidden>Format</span>
-          <Segments label="Format" value={state.format} items={[["md", "Markdown"], ["pdf", "PDF", true]] as const} on={(format) => void controller.setExportOptions({ format })} />
+          <Segments label="Format" value={state.format} items={[["md", "Markdown"], ["pdf", "PDF"]] as const} on={(format) => void controller.setExportOptions({ format })} />
         </div>
         <div className={row}>
           <span className={label} aria-hidden>Content</span>
@@ -75,7 +75,7 @@ function Body({ state, controller }: { state: NonNullable<AppState["exporting"]>
       </div>
       <div className={css({ display: "flex", justifyContent: "flex-end", gap: "2", px: "5", py: "3.5", borderTop: "1px solid", borderColor: "velo.divider" })}>
         <Button type="button" variant="outline" onClick={() => void controller.commitExport(false)}>Cancel</Button>
-        <Button type="submit" disabled={!counts || empty || state.pending || state.format !== "md"}>Export…</Button>
+        <Button type="submit" disabled={!counts || empty || state.pending}>Export…</Button>
       </div>
     </form>
   );

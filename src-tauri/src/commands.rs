@@ -349,6 +349,12 @@ pub fn export_text(st: State<'_, AppState>, request: ExportRequest) -> Res<Strin
     with_vault(&st, |v, _| Ok(export::build(v, &request, &export_today())?.0))
 }
 
+/// PDF export: the native print dialog for the calling webview (the frontend has filled its print-only container).
+#[tauri::command]
+pub fn print_page(webview: tauri::Webview) -> Res<()> {
+    webview.print().map_err(|e| e.to_string())
+}
+
 /// Writes exactly `path` (the file the user picked in the save dialog).
 #[tauri::command(async)]
 pub fn export_markdown(st: State<'_, AppState>, path: String, request: ExportRequest) -> Res<ExportCounts> {

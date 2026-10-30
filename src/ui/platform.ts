@@ -40,6 +40,7 @@ export const platform: UiPort = {
     return typeof d === "string" ? d : null;
   },
   saveFile: (defaultName) => save({ defaultPath: defaultName, filters: [{ name: "Markdown", extensions: ["md"] }] }),
+  nextFrame: () => new Promise((r) => requestAnimationFrame(() => r())),
   openUrl: (url) => openUrl(url),
   reveal: (path) => revealItemInDir(path),
   copyText: (t) => navigator.clipboard.writeText(t),

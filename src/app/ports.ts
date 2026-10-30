@@ -11,6 +11,7 @@ export interface UiPort {
   passphrase(req: { mode: "create" | "unlock"; context: string | null; submit: (pw: string) => Promise<void> }): Promise<boolean>;
   chooseDirectory(): Promise<string | null>;
   saveFile(defaultName: string): Promise<string | null>; // native save dialog: the chosen path, null = cancelled
+  nextFrame(): Promise<void>; // resolves after the next animation frame, once React has committed
   openUrl(url: string): Promise<void>;
   reveal(path: string): Promise<void>;
   copyText(t: string): Promise<void>;

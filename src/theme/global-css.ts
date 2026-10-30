@@ -1,4 +1,5 @@
 import { editorGlobalCss } from './editor-css'
+import { printGlobalCss } from './print-css'
 
 export const globalCss = {
   extend: {
@@ -18,5 +19,6 @@ export const globalCss = {
       fontSize: 'ui',
     },
     ...editorGlobalCss,
+    ...printGlobalCss,
   },
 }

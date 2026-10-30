@@ -4,7 +4,7 @@ import type { AgentReply, AgentWrite, ExportRequest, GraphNode, Hit, LinkTarget,
 import type { Editor, EditorOpts } from "../editor";
 import type { Preview } from "../preview";
 import type { RichOpts } from "../richmd";
-import { afterOpen, shouldAutoEdit } from "../preview";
+import { afterOpen, renderMarkdown, shouldAutoEdit } from "../preview";
 import { Results } from "../list";
 import { shouldClose } from "../close";
 import { latest } from "../latest";
@@ -1243,15 +1243,29 @@ export class Controller {
     return refetch ? this.loadExportPreview() : Promise.resolve();
   }
 
-  /** Export (go) or Cancel. Markdown: the save dialog picks the file; cancelling it keeps the dialog open. */
+  /** Export (go) or Cancel. Markdown: the save dialog picks the file; cancelling it keeps the dialog open. PDF: the native print dialog. */
   async commitExport(go: boolean) {
     const cur = this.store.get().exporting;
     if (!cur) return;
     if (!go) return this.store.set({ exporting: null });
-    if (cur.pending || !cur.counts?.notes || cur.format !== "md") return; // nothing to export writes no empty file; PDF: Task 7
+    if (cur.pending || !cur.counts?.notes) return; // nothing to export writes no empty file
     const req = this.exportRequest(cur.tasksOnly);
     const update = (p: Partial<NonNullable<AppState["exporting"]>>) => this.store.set((s) => ({ exporting: s.exporting && { ...s.exporting, ...p } }));
     update({ pending: true, err: "" });
+    if (cur.format === "pdf") {
+      try {
+        // wikilinks and tags print as plain text: nothing on paper to click
+        const html = renderMarkdown(await this.api.exportText(req), () => true).replace(/<a href="#" (class="(?:wikilink|tag)"[^>]*)>(.*?)<\/a>/g, "<span $1>$2</span>");
+        this.store.set({ printHtml: html });
+        await this.ui.nextFrame();
+        await this.api.printPage();
+        this.store.set({ printHtml: null, exporting: null });
+      } catch (e) {
+        this.store.set({ printHtml: null });
+        update({ pending: false, err: errText(e) });
+      }
+      return;
+    }
     try {
       const path = await this.ui.saveFile(exportFileName(req.title, localToday()));
       if (path === null) return update({ pending: false });

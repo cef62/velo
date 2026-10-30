@@ -2529,3 +2529,38 @@ test("the export action opens the export dialog", async () => {
   await settle();
   expect(store.get().exporting?.counts).toEqual(counts(1));
 });
+
+test("PDF export renders the export into the print container, prints once, then closes", async () => {
+  const { c, api, ui, store } = setup();
+  api.exportPreview.mockResolvedValue(counts(1));
+  api.exportText.mockResolvedValueOnce("# Hi\n\nSee [[B]] #proj");
+  await c.startExport();
+  await c.setExportOptions({ format: "pdf" });
+  let atFrame: string | null = null;
+  let atPrint: string | null = null;
+  vi.spyOn(ui, "nextFrame").mockImplementationOnce(async () => void (atFrame = store.get().printHtml));
+  api.printPage.mockImplementationOnce(async () => void (atPrint = store.get().printHtml));
+  await c.commitExport(true);
+  expect(api.exportText).toHaveBeenCalledWith(expect.objectContaining({ tasks_only: false, title: "All notes" }));
+  expect(atFrame).toBe(atPrint);
+  expect(atPrint).toContain("<h1>Hi</h1>");
+  expect(atPrint).toContain('<span class="wikilink" data-title="B">B</span>');
+  expect(atPrint).toContain('<span class="tag" data-tag="proj">#proj</span>');
+  expect(atPrint).not.toContain('href="#"');
+  expect(api.printPage).toHaveBeenCalledTimes(1);
+  expect(api.exportMarkdown).not.toHaveBeenCalled();
+  expect(store.get().printHtml).toBeNull();
+  expect(store.get().exporting).toBeNull();
+});
+
+test("PDF export: a print failure keeps the dialog open with the error and clears the print container", async () => {
+  const { c, api, store } = setup();
+  api.exportPreview.mockResolvedValue(counts(1));
+  api.exportText.mockResolvedValueOnce("x");
+  api.printPage.mockRejectedValueOnce("no printer");
+  await c.startExport();
+  await c.setExportOptions({ format: "pdf" });
+  await c.commitExport(true);
+  expect(store.get().printHtml).toBeNull();
+  expect(store.get().exporting).toMatchObject({ err: "no printer", pending: false, format: "pdf" });
+});

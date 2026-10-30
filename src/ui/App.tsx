@@ -26,6 +26,7 @@ import { MergeDialog } from "./MergeDialog";
 import { SaveSearchDialog } from "./SaveSearchDialog";
 import { ExportDialog } from "./ExportDialog";
 import { PassphraseDialog } from "./PassphraseDialog";
+import { PrintHost } from "./PrintHost";
 
 // Layout per design README: vertical = header / list / divider / note; horizontal = header over [list | divider | note].
 // platform.applyLook writes data-layout on <html>; the divider sizes come from --list-h / --list-w .
@@ -96,6 +97,7 @@ export function App({ controller, store }: { controller: Controller; store: Stor
       <SaveSearchDialog controller={controller} store={store} />
       <ExportDialog controller={controller} store={store} />
       <PassphraseDialog />
+      <PrintHost store={store} />
     </div>
   );
 }

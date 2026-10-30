@@ -142,6 +142,7 @@ pub fn run() {
             commands::export_preview,
             commands::export_text,
             commands::export_markdown,
+            commands::print_page,
             commands::list_tags,
             commands::list_titles,
             commands::list_link_targets,

@@ -23,6 +23,8 @@ export type ExportRequest = { query: string; tags: string[]; no_links: boolean; 
 export type ExportCounts = { notes: number; open: number; done: number; locked: number; over_limit: number; no_tasks: number; unreadable: number };
 export const exportPreview = (request: ExportRequest) => invoke<ExportCounts>("export_preview", { request });
 export const exportText = (request: ExportRequest) => invoke<string>("export_text", { request });
+/** Opens the native print dialog for this window (Save as PDF lives there). */
+export const printPage = () => invoke<void>("print_page");
 /** Writes the export to exactly `path`. */
 export const exportMarkdown = (path: string, request: ExportRequest) => invoke<ExportCounts>("export_markdown", { path, request });
 export const listTags = () => invoke<TagCount[]>("list_tags");
