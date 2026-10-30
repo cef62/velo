@@ -1,6 +1,6 @@
 import { defineRecipe } from '@pandacss/dev'
 
-// Banners: conflict (neutral), filter line, preview strip. Updates are a header pill (UpdatePill).
+// Banners: conflict (neutral), filter line. Updates are a header pill (UpdatePill); preview shows in the title bar switch.
 export const banner = defineRecipe({
   className: 'banner',
   base: { display: 'flex', alignItems: 'center', gap: '2.5', flex: 'none', fontSize: 'ui' },
@@ -25,17 +25,6 @@ export const banner = defineRecipe({
         color: 'velo.fgMuted',
         fontSize: 'uiSm',
         '& b': { fontWeight: '500', color: 'velo.accentText' },
-      },
-      preview: {
-        h: '30px',
-        px: '5',
-        gap: '2',
-        bg: 'velo.accentSubtle',
-        borderBottomWidth: '1px',
-        borderColor: 'velo.accentHalo',
-        color: 'velo.accentText',
-        fontSize: 'uiSm',
-        fontWeight: '500',
       },
     },
   },

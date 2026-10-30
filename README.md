@@ -12,7 +12,7 @@ Inspired by nvALT and Notational Velocity; not affiliated with or endorsed by th
 - Markdown preview with clickable wikilinks and external links.
 - Note counts next to every tag and in the filter line; the Filters button in the header shows how many filters are active; a Retry button when a save fails.
 - Theme: System (follows the OS), Light or Dark, in Settings.
-- Rich editing (default): markdown marks are hidden except on the line you are editing; ⌘/Ctrl-click opens links, wikilinks and tags; task checkboxes are clickable. Toggle Rich / Plain from the header's ⋯ menu or ⌘⇧R. The file text is never changed by the display.
+- Rich editing (default): markdown marks are hidden except on the line you are editing; ⌘/Ctrl-click opens links, wikilinks and tags; task checkboxes are clickable. Choose Rich, Plain or Preview in the title bar's view switch, or press ⌘⇧R / ⌘⇧P. The file text is never changed by the display.
 - Per-note encryption with [age](https://age-encryption.org); locked notes are never written to disk or to the index as plaintext.
 - Live reload of external edits; a concurrent edit produces a `(conflict ...)` copy instead of overwriting anything.
 - Global hotkey (default ⌘⇧Space / Ctrl+Shift+Space) to bring velo up; remappable in Settings. Any shortcut can be cleared with ⌫ in Settings, and conflicting shortcuts are shown instead of refused.
@@ -35,7 +35,7 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | ⌘⇧T | Ctrl+Shift+T | Show / hide the tag panel |
 | ⌘⇧R | Ctrl+Shift+R | Rich / plain editing |
 | ⌘⇧J | Ctrl+Shift+J | Vertical / horizontal layout |
-| ⌘I | Ctrl+I | Show / hide the note info panel |
+| ⌘I | Ctrl+I | Show / hide the side panel (note info) |
 | ⌘⇧X | Ctrl+Shift+X | Switch between Notes and Tasks |
 | ⌘⇧C | Ctrl+Shift+C | Show / hide the Connections view |
 | ⌘⇧D | Ctrl+Shift+D | Open today's daily note |
@@ -111,7 +111,7 @@ modified: 2026-10-27T10:02:41+01:00
 - New notes start with both dates. Saving a note without a block prepends one (`created` from the file's date, `modified` now); saving a note with a block updates `modified` and adds `created` if missing. Locked notes are stamped before encryption.
 - Everything else in the block (other keys, comments, order) is left byte for byte. velo never overwrites an existing `created:` line, and edits only the first `modified:` line. Other date formats (`2026-10-27`, `2026-10-27 09:14`, quoted) are read; an unreadable value falls back to the file date, shown with a "from file" hint.
 - Turn writing off in Settings, General ("Add created/modified dates to notes"). Existing blocks are still read.
-- The block is hidden in the editor and preview. Show it with the "Show front matter in the editor" checkbox in the info panel, or bind a key to "Show / hide front matter" in Settings (unbound by default).
+- The block is hidden in the editor and preview. Show it with "Show front matter" in the note's ⋯ menu (title bar) or the checkbox in the info panel, or bind a key to "Show / hide front matter" in Settings (unbound by default).
 - `tags:` and `aliases:` (flow list `[a, b]`, block list or single value) are read. velo writes them only when merging notes (the source's tags and aliases, plus its title as an alias, go to the target); otherwise only an agent's `add_tags` / `remove_tags` tools change the `tags:` list. Tags merge with `#tags`. Aliases work as titles for `[[wikilinks]]`, opening by name, and search.
 - The list's date and the Recent sort use the modified date from the note.
 
@@ -175,7 +175,7 @@ Rust backend in `src-tauri` (Tauri 2); UI in `src` with React 19, Park UI v1 (Ar
 
 velo generates one age X25519 identity. It is kept in the OS keychain (so locked notes open without a prompt on this machine) and a passphrase-wrapped copy is stored in `.velo/identity.age` (so you can unlock on another machine, or recover). Each locked note is age-encrypted to that identity as `Title.md.age`.
 
-Lock all (⌥⌘E) forgets the decrypted notes and the key until you enter your passphrase again; quitting and relaunching unlocks from the keychain as usual.
+Lock all (⌥⌘E) forgets the decrypted notes and the key until you enter your passphrase again (opening a locked note then shows the passphrase field in place of the note; Esc goes back to the list); quitting and relaunching unlocks from the keychain as usual.
 
 Decrypt outside velo with the [`age` CLI](https://github.com/FiloSottile/age):
 

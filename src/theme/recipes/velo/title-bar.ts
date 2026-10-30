@@ -10,7 +10,8 @@ export const titleBar = defineSlotRecipe({
       alignItems: 'center',
       gap: '3',
       h: 'titleBar',
-      px: '5',
+      pl: '5',
+      pr: '2.5', // icon buttons sit at the edge (v2 §7)
       borderBottomWidth: '1px',
       borderColor: 'velo.muted',
       bg: 'velo.canvas',

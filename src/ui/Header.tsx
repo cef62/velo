@@ -12,7 +12,7 @@ import { UpdatePill } from "./UpdatePill";
 import { useStore } from "./useStore";
 
 // v2 header (design/park-ui/v2/README.md §2): search, Filters, Settings, in one row at every width; it never folds.
-// The ⋯ menu holds the controls that move to the pane bar, the title bar and the command palette in later steps.
+// The ⋯ menu holds what nothing else shows yet (Connections, Lock all) until the command palette takes them.
 const bar = css({
   display: "flex",
   alignItems: "center",

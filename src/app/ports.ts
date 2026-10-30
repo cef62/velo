@@ -8,7 +8,9 @@ export type MenuSpec = (Exclude<MenuEntry, "separator"> & { action: () => void }
 export interface UiPort {
   focusSearch(): void; // focus + select text
   confirm(message: string, o: { title: string; okLabel?: string; kind?: "warning" | "info" }): Promise<boolean>;
-  passphrase(req: { mode: "create" | "unlock"; context: string | null; submit: (pw: string) => Promise<void> }): Promise<boolean>;
+  // inline: opening a locked note shows the field in the note area (v2); other unlock prompts (lock, tick a task) keep the dialog
+  passphrase(req: { mode: "create" | "unlock"; context: string | null; inline?: boolean; submit: (pw: string) => Promise<void> }): Promise<boolean>;
+  cancelPassphrase(): void; // a pending prompt is dropped (resolves false): a newer note was opened under it
   chooseDirectory(): Promise<string | null>;
   saveFile(defaultName: string): Promise<string | null>; // native save dialog: the chosen path, null = cancelled
   nextFrame(): Promise<void>; // resolves after the next animation frame, once React has committed

@@ -5,6 +5,7 @@ import type { UiPort } from "../app/ports";
 import { Button, Dialog, Field, Input } from "@/components/ui";
 import { errText } from "../errtext";
 import { WRONG_PASSPHRASE, passphraseDialogMode, passphraseError, passphraseSubtitle } from "../passphrase";
+import { LockScreen } from "./LockScreen";
 import { registerPassphrase } from "./platform";
 
 type Req = Parameters<UiPort["passphrase"]>[0];
@@ -13,25 +14,33 @@ const content = css({ maxW: "420px", p: "0", gap: "0", overflow: "hidden" });
 const tile = css({ w: "36px", h: "36px", borderRadius: "8px", bg: "velo.accentSubtle", color: "velo.accentText", display: "flex", alignItems: "center", justifyContent: "center", flex: "none", "& svg": { w: "18px", h: "18px" } });
 const err = css({ display: "flex", alignItems: "center", gap: "1.5", fontSize: "uiSm", lineHeight: "1.4", color: "red.11", m: "0", "& svg": { w: "14px", h: "14px", flex: "none" } });
 
-/** Implements UiPort.passphrase: mounted once; platform routes the controller's requests here. */
+/** Implements UiPort.passphrase: mounted once in the note area; platform routes the controller's requests here.
+ *  Create (first lock) is a dialog; unlock (a locked note opened without the key) is the inline LockScreen (v2 §3 #14). */
 export function PassphraseDialog() {
   const [req, setReq] = useState<Req | null>(null);
+  const [n, setN] = useState(0); // a new request remounts the inline field: fresh text, error and focus
   const done = useRef<((ok: boolean) => void) | null>(null);
+  const pending = useRef<Req | null>(null); // the canceller drops only an inline prompt; dialogs stay up
+  const finish = (ok: boolean) => {
+    done.current?.(ok);
+    done.current = null;
+    pending.current = null;
+    setReq(null);
+  };
   useEffect(() => {
     registerPassphrase(
       (r) =>
         new Promise<boolean>((resolve) => {
           done.current?.(false); // a newer request supersedes a pending one
           done.current = resolve;
+          pending.current = r;
+          setN((x) => x + 1);
           setReq(r);
         }),
+      () => pending.current?.inline && finish(false),
     );
   }, []);
-  const finish = (ok: boolean) => {
-    done.current?.(ok);
-    done.current = null;
-    setReq(null);
-  };
+  if (req?.mode === "unlock" && req.inline) return <LockScreen key={n} req={req} finish={finish} />;
   return (
     <Dialog.Root open={req !== null} onOpenChange={(d) => !d.open && finish(false)} role="dialog" closeOnInteractOutside={false}>
       <Dialog.Backdrop />

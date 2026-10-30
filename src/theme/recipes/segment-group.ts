@@ -68,6 +68,8 @@ export const segmentGroup = defineSlotRecipe({
           opacity: '0',
         },
       },
+      // velo view switch: Preview is the one segment that changes what you see, so it is solid when checked (v2 §3 #5)
+      '&[data-preview][data-state=checked]': { bg: 'velo.accent', color: 'velo.accentFg', borderRadius: 'l3' },
     },
 
     indicator: {
@@ -87,6 +89,7 @@ export const segmentGroup = defineSlotRecipe({
 
   variants: {
     size: {
+      '2xs': { item: { h: '7', minW: '7', textStyle: 'xs', px: '2', _icon: { boxSize: '3.5' } } }, // velo title bar: 28px switch
       xs: { item: { h: '8', minW: '8', textStyle: 'sm', px: '2.5', _icon: { boxSize: '4' } } },
       sm: { item: { h: '9', minW: '9', textStyle: 'sm', px: '3', _icon: { boxSize: '4' } } },
       md: { item: { h: '10', minW: '10', textStyle: 'sm', px: '3.5', _icon: { boxSize: '5' } } },

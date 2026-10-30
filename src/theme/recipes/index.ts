@@ -22,7 +22,7 @@ import { listRow } from "./velo/list-row";
 import { menuButton } from "./velo/menu-button";
 import { paneBar } from "./velo/pane-bar";
 import { countBadge, sectionHeader } from "./velo/section-header";
-import { previewPill } from "./velo/preview-pill";
+import { lockScreen } from "./velo/lock-screen";
 import { searchMatch } from "./velo/search-match";
 import { tagChip } from "./velo/tag-chip";
 import { titleBar } from "./velo/title-bar";
@@ -36,7 +36,6 @@ export const recipes = {
   menuButton,
   sectionHeader,
   countBadge,
-  previewPill,
   searchMatch,
   button,
   group,
@@ -52,6 +51,7 @@ export const slotRecipes = {
   popover,
   segmentGroup,
   listRow,
+  lockScreen,
   paneBar,
   select,
   tabs,

@@ -48,9 +48,8 @@ export const paneBar = defineSlotRecipe({
     labels: {
       all: {},
       active: { tab: { '&[aria-selected=false] [data-label]': { display: 'none' }, '&[aria-selected=false]': { px: '1.5' } } },
-      none: { tab: { '& [data-label]': { display: 'none' }, px: '1.5' } }, // < 240px: icons only, so the mode controls still fit
     },
   },
   defaultVariants: { labels: 'all' },
-  staticCss: [{ labels: ['all', 'active', 'none'] }],
+  staticCss: [{ labels: ['all', 'active'] }],
 })
