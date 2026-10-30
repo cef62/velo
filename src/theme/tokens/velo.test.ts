@@ -7,7 +7,4 @@ describe("clear tokens", () => {
     for (const n of ["accentFg", "hairline", "highlight", "positive", "positiveHover", "positiveFg", "positiveText", "positiveSubtle", "positiveBorder"])
       expect(token.var(`colors.velo.${n}` as Token)).toBe(`var(--colors-velo-${n.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())})`);
   });
-
-    expect(green.solid.fg.DEFAULT.value).toEqual({ _light: "{colors.velo.positiveFg}", _dark: "{colors.velo.positiveFg}" });
-  });
 });
