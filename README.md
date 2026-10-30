@@ -62,11 +62,11 @@ Keep a search you use often. With a search text, tags or the No links chip activ
 
 ## Timeline
 
-Press ⌘⇧L (Ctrl+Shift+L) or the Timeline tab of the left pane to list notes newest first, grouped by day (Today, Yesterday, the weekday, then the date). Choose Created or Updated (remembered) and 7 days, 30 days or All (not remembered). Locked notes are listed by title only. Click a row, or press Enter on it, to open the note; the timeline stays. The list is one Tab stop; move with ↑/↓.
+Press ⌘⇧L (Ctrl+Shift+L) or the Timeline tab of the left pane to list notes newest first, grouped by day (Today, Yesterday, the weekday, then the date). Choose Created or Updated (remembered) and 7 days, 30 days or All (not remembered) from the menu in the Timeline bar. Locked notes are listed by title only. Click a row, or press Enter on it, to open the note; the timeline stays. The list is one Tab stop; move with ↑/↓.
 
 ## Export
 
-The Export button in the Timeline bar (or the Export action, which has no default shortcut) exports exactly what the timeline shows. Choose Markdown (a save dialog) or PDF (the system print dialog: choose Save as PDF), and Full notes or Tasks only. The file starts with a task summary, the open tasks and the tasks done within the range with their `@done` date, then one section per note. Locked notes are never exported, even while unlocked, and are counted as left out. An export holds at most 1,000 notes (the newest).
+The Export button in the Timeline bar (or the Export action, which has no default shortcut) exports exactly what the timeline shows; the dialog states that scope (date, range and filters). Choose Markdown (a save dialog) or PDF (the system print dialog: choose Save as PDF), and Full notes or Tasks only. The file starts with a task summary, the open tasks and the tasks done within the range with their `@done` date, then one section per note. Locked notes are never exported, even while unlocked, and are counted as left out. An export holds at most 1,000 notes (the newest).
 
 ## Connections
 

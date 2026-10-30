@@ -29,4 +29,4 @@ export const sinceMs = (range: "7" | "30" | "all", now: Date): number | null => 
 
 /** The active filters as one line: “query” · #tag · No links · last 30 days. Shown under "No notes match" and in the Export dialog. */
 export const filtersLine = (f: { query: string; tags: string[]; noLinks: boolean; range: "7" | "30" | "all" }): string =>
-  [f.query && `“${f.query}”`, ...f.tags.map((t) => `#${t}`), f.noLinks && "No links", f.range !== "all" && `last ${f.range} days`].filter(Boolean).join(" · ");
+  [f.query.trim() && `“${f.query.trim()}”`, ...f.tags.map((t) => `#${t}`), f.noLinks && "No links", f.range !== "all" && `last ${f.range} days`].filter(Boolean).join(" · ");

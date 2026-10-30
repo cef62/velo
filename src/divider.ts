@@ -1,7 +1,7 @@
 // Draggable divider between the note list and the note: list height (vertical layout) or width (horizontal).
 // Remembered per layout in localStorage: a per-machine convenience, so losing it only resets the default size.
 
-export const MIN_LIST = 80; // px: list never collapses
+export const MIN_LIST = 116; // px: list never collapses (36px pane bar + a couple of rows)
 export const MIN_NOTE = 160; // px: note pane never collapses
 
 /** Size clamped so both the list and the note keep a usable minimum within `total` px. */

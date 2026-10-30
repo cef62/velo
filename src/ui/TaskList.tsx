@@ -132,7 +132,7 @@ export function TaskList({ controller, store }: { controller: Controller; store:
       {undo && (
         <span role="status" className={status}>
           {undo.unticked ? "Unticked" : "Ticked"} ·
-          <Button variant="plain" size="xs" onClick={() => void controller.undoTick()}>
+          <Button variant="plain" size="2xs" onClick={() => void controller.undoTick()}>
             Undo
           </Button>
         </span>

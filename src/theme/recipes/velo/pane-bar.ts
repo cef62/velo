@@ -20,6 +20,7 @@ export const paneBar = defineSlotRecipe({
       bg: 'velo.canvas',
       flex: 'none',
       minW: '0',
+      overflow: 'hidden', // a narrow column clips instead of spilling under the note
     },
     tabs: { display: 'flex', alignItems: 'center', gap: '0.5', flex: 'none' },
     tab: {

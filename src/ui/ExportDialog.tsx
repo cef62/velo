@@ -16,7 +16,9 @@ const row = css({ display: "flex", alignItems: "center", justifyContent: "space-
 export function ExportDialog({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const exporting = useStore(store, (s) => s.exporting);
   // the scope is what the Timeline shows (v2 §4): by, range and the active filters
-  const scope = useStore(store, (s) => [`From the Timeline · ${s.timeline.by === "created" ? "Created" : "Updated"}`, filtersLine({ query: s.query, tags: s.selectedTags, noLinks: s.noLinks, range: s.timeline.range })].filter(Boolean).join(" · "));
+  const scope = useStore(store, (s) =>
+    [`From the Timeline · ${s.timeline.by === "created" ? "Created" : "Updated"} ${s.timeline.range === "all" ? "any time" : `in the last ${s.timeline.range} days`}`, filtersLine({ query: s.query, tags: s.selectedTags, noLinks: s.noLinks, range: "all" })].filter(Boolean).join(" · "),
+  );
   const last = useRef(exporting);
   if (exporting) last.current = exporting; // keeps the body mounted through the exit animation
   return (
