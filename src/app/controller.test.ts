@@ -300,6 +300,27 @@ test("opening a locked note asks inline; a newer open under the field wins and c
   expect(store.get().err).toBe("");
 });
 
+test("removeFilterChip drops the last chip, a saved chip as one; clearFilterChips clears the applied saved search's text too", async () => {
+  const { c, store } = setup();
+  store.set({ savedSearches: [{ name: "w", query: "todo", tags: ["work"], no_links: false }] });
+  c.setTags(["work", "idea"]);
+  c.setNoLinks(true);
+  c.removeFilterChip(); // the last chip is No links
+  expect(store.get()).toMatchObject({ selectedTags: ["work", "idea"], noLinks: false });
+  c.removeFilterChip({ kind: "tag", label: "#work", tag: "work" });
+  expect(store.get().selectedTags).toEqual(["idea"]);
+  c.applySaved("w");
+  expect(store.get()).toMatchObject({ query: "todo", selectedTags: ["work"] });
+  c.removeFilterChip(); // the saved chip clears as one, text included
+  expect(store.get()).toMatchObject({ query: "", selectedTags: [], noLinks: false });
+  c.applySaved("w");
+  c.clearFilterChips();
+  expect(store.get()).toMatchObject({ query: "", selectedTags: [] });
+  c.setTags(["x"]);
+  c.clearFilterChips();
+  expect(store.get().selectedTags).toEqual([]);
+});
+
 test("a slow auto-show doesn't replace the note Enter just opened", async () => {
   const { c, api, store } = setup();
   const d = deferred<ReturnType<typeof api.openNote> extends Promise<infer T> ? T : never>();
