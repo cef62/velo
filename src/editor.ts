@@ -6,7 +6,7 @@ import { writingSetup } from "./editortheme";
 import { refreshRich, richMarkdown, type RichOpts } from "./richmd";
 import { dueInputRule, localToday, toggleTaskAt } from "./tasks";
 import { SaveController } from "./saver";
-import { frontMatterHide, ISOLATED, replaceAll, undoHistory } from "./fmhide";
+import { frontMatterHide, ISOLATED, replaceAll, stampSelection, undoHistory } from "./fmhide";
 import { stampChange } from "./frontmatter";
 import { openNote, saveNote, type NoteDoc, type NoteMeta } from "./api";
 
@@ -129,8 +129,8 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       const c = stampChange(view.state.doc.toString(), block, sentBlock);
       if (!c) return;
       const changes = view.state.changes(c);
-      // assoc 1: a caret at 0 (empty note) ends up after an inserted block, on the same body character
-      view.dispatch({ changes, selection: view.state.selection.map(changes, 1), annotations: [stamped.of(true), Transaction.addToHistory.of(false)] });
+      // a caret at 0 (empty note) ends up after an inserted block, on the same body character
+      view.dispatch({ changes, selection: stampSelection(view.state.selection, changes), annotations: [stamped.of(true), Transaction.addToHistory.of(false)] });
     },
   });
 

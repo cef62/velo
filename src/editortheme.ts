@@ -37,9 +37,9 @@ const writingTheme = EditorView.theme({
   // Autocomplete popup; `&.cm-editor` outranks the base theme's &light/&dark row colors.
   "&.cm-editor .cm-tooltip.cm-tooltip-autocomplete": { background: v("panel"), color: v("fg"), border: `1px solid ${v("border")}`, borderRadius: "6px", overflow: "hidden" },
   "&.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul": { fontFamily: "inherit", maxHeight: "20em" },
-  "&.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li": { padding: "3px 10px" },
+  "&.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li": { padding: "3px 10px", display: "flex" },
   "&.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]": { background: v("selection"), color: v("selection-fg") },
-  ".cm-completionDetail": { color: v("fg-muted"), fontStyle: "normal", marginLeft: "0.75em" },
+  ".cm-completionDetail": { color: v("fg-muted"), fontStyle: "normal", marginLeft: "auto", paddingLeft: "1.5em" }, // note count on the right
   "&.cm-editor .cm-tooltip-autocomplete li[aria-selected] .cm-completionDetail": { color: v("selection-muted") },
 });
 

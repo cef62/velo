@@ -5,7 +5,8 @@ import type { AppState, Store } from "../app/store";
 import { tagBarItems } from "../tags";
 import { useStore } from "./useStore";
 
-const row = css({ flex: "none", display: "flex", flexWrap: "wrap", gap: "1.5", px: "5", py: "1" });
+// a band of its own: subtle background and a rule under it, so it reads apart from the text
+const row = css({ flex: "none", display: "flex", flexWrap: "wrap", gap: "1.5", px: "5", py: "1.5", bg: "velo.subtle", borderBottomWidth: "1px", borderColor: "velo.border" });
 
 export function TagBar({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const openPath = useStore(store, (s) => s.openPath);
