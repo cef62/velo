@@ -630,7 +630,9 @@ fn setup_command(exe: &Path) -> String {
 
 #[tauri::command]
 pub fn agent_setup_command() -> Result<String, String> {
-    std::env::current_exe().map(|e| setup_command(&e)).map_err(|e| e.to_string())
+    // an AppImage runs from a temporary mount: its own path ($APPIMAGE) is the one that stays valid
+    let exe = std::env::var_os("APPIMAGE").filter(|p| !p.is_empty()).map(std::path::PathBuf::from);
+    exe.map_or_else(std::env::current_exe, Ok).map(|e| setup_command(&e)).map_err(|e| e.to_string())
 }
 
 /// A keychain write failure is not fatal: the identity stays in memory for this session.

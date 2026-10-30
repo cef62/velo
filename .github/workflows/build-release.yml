@@ -24,6 +24,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false # later steps use the env token (tauri-action, gh), never git auth
 
       - id: release
         env:
@@ -68,6 +69,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false # pnpm install and crate build scripts run here: no repo-write token on disk
 
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10 (6.1.0: pnpm steps silently no-op on Windows)
 

@@ -25,13 +25,15 @@ pub(crate) const NO_ANSWER: &str = "velo did not answer; the change may have bee
 enum Sent {
     /// Not dispatched (connect failed, unauthorized): safe to retry.
     No,
+    /// Connection refused: nothing listens on the port, so `agent.json` is stale (a reused pid).
+    Refused,
     /// Dispatched: never resend.
     Reply(Result<Value, String>),
 }
 
 /// `None` = no running app (no `agent.json`, or dead pid): work directly. `Some` = the app owns the vault. A file that
-/// exists but is unusable counts as a running app (busy), never direct. Connect failures and `unauthorized` retry for 2 s,
-/// then `BUSY`. Once a request is sent it is never resent and never goes direct: no usable reply gives `NO_ANSWER`.
+/// exists but is unusable counts as a running app (busy), never direct, except when the port refuses connections (a stale
+/// file with a reused pid). Other connect failures and `unauthorized` retry for 2 s, then `BUSY`. Once a request is sent it is never resent and never goes direct: no usable reply gives `NO_ANSWER`.
 pub fn forward(data_dir: &Path, name: &str, args: &Value) -> Option<Result<Value, String>> {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
@@ -48,8 +50,10 @@ pub fn forward(data_dir: &Path, name: &str, args: &Value) -> Option<Result<Value
         }
         // no port: the app runs but its listener did not start (`listener::mark_running`)
         let Some(port) = info["port"].as_u64().and_then(|p| u16::try_from(p).ok()) else { return Some(Err(BUSY.into())) };
-        if let Sent::Reply(r) = attempt(port, &info["token"], name, args) {
-            return Some(r);
+        match attempt(port, &info["token"], name, args) {
+            Sent::Reply(r) => return Some(r),
+            Sent::Refused => return None,
+            Sent::No => {}
         }
         if Instant::now() >= deadline {
             return Some(Err(BUSY.into()));
@@ -59,7 +63,12 @@ pub fn forward(data_dir: &Path, name: &str, args: &Value) -> Option<Result<Value
 }
 
 fn attempt(port: u16, token: &Value, name: &str, args: &Value) -> Sent {
-    let Ok(mut conn) = TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), Duration::from_millis(500)) else { return Sent::No };
+    // 3 s: Windows retries a refused loopback connect for about 2 s before reporting it; a live app accepts at once
+    let mut conn = match TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), Duration::from_secs(3)) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => return Sent::Refused,
+        Err(_) => return Sent::No,
+    };
     // above the app's 5 s editor wait + 60 s claimed wait, with margin
     if conn.set_read_timeout(Some(Duration::from_secs(90))).is_err() {
         return Sent::No;
@@ -84,5 +93,28 @@ fn attempt(port: u16, token: &Value, name: &str, args: &Value) -> Sent {
         Some("unauthorized") => Sent::Reply(Err(BUSY.into())),
         Some(e) => Sent::Reply(Err(e.into())),
         None => Sent::Reply(Err(NO_ANSWER.into())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn write_info(dir: &Path, port: u16) {
+        std::fs::write(dir.join("agent.json"), json!({"pid": std::process::id(), "port": port, "token": "t"}).to_string()).unwrap();
+    }
+    #[test]
+    fn stale_file_with_refused_port_falls_back_to_direct() {
+        let dir = tempfile::tempdir().unwrap();
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port(); // dropped: nothing listens
+        write_info(dir.path(), port);
+        assert!(forward(dir.path(), "list_tags", &json!({})).is_none());
+    }
+    #[test]
+    fn live_listener_that_rejects_us_stays_busy() {
+        let dir = tempfile::tempdir().unwrap();
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        write_info(dir.path(), l.local_addr().unwrap().port());
+        std::thread::spawn(move || for c in l.incoming() { drop(c) }); // accepts, never answers
+        assert_eq!(forward(dir.path(), "list_tags", &json!({})), Some(Err(BUSY.into())));
     }
 }

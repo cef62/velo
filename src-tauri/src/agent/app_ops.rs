@@ -21,7 +21,7 @@ use std::time::Duration;
 pub const EDITOR_TIMEOUT: Duration = Duration::from_secs(5);
 /// Once the webview has claimed a request (it is applying it), the wait for its answer goes on this long instead.
 pub const CLAIMED_TIMEOUT: Duration = Duration::from_secs(60);
-const BUSY: &str = "velo is busy, retry";
+use super::client::BUSY;
 
 /// A request's reply channel, whether the webview claimed it, and the note paths it is about.
 type Pending = (mpsc::Sender<Value>, bool, Vec<String>);
