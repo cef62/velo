@@ -1537,10 +1537,14 @@ export class Controller {
     }
   }
 
-  async toggleStyle() {
+  toggleStyle() {
+    return this.setStyle(this.store.get().editorStyle === "plain" ? "rich" : "plain");
+  }
+
+  /** Rich or Plain editing (the title bar's view switch), saved in the settings. */
+  async setStyle(next: AppState["editorStyle"]) {
     try {
       await this.updateSettings(async (cur) => {
-        const next = cur.editor_style === "plain" ? "rich" : "plain";
         await this.api.setSettings({ ...cur, editor_style: next });
         this.store.set({ editorStyle: next });
       });
@@ -1548,6 +1552,11 @@ export class Controller {
     } catch (e) {
       this.setErr(errText(e));
     }
+  }
+
+  /** The note ⋯ menu disables "Move selection to new note" without a selection. */
+  hasSelection(): boolean {
+    return this.editor.currentPath() !== null && this.editor.getSelection() !== null;
   }
 
   async toggleFrontMatter() {

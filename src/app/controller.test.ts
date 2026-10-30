@@ -254,6 +254,16 @@ test("setSort saves the order and re-sorts; toggleSort flips it", async () => {
   expect(store.get().sort).toBe("modified");
 });
 
+test("setStyle saves the editing style; toggleStyle flips it; hasSelection follows the editor", async () => {
+  const { c, api, store } = setup();
+  await c.setStyle("plain");
+  expect(api.setSettings).toHaveBeenLastCalledWith(expect.objectContaining({ editor_style: "plain" }));
+  expect(store.get().editorStyle).toBe("plain");
+  await c.toggleStyle();
+  expect(store.get().editorStyle).toBe("rich");
+  expect(c.hasSelection()).toBe(false); // no note open
+});
+
 test("a slow auto-show doesn't replace the note Enter just opened", async () => {
   const { c, api, store } = setup();
   const d = deferred<ReturnType<typeof api.openNote> extends Promise<infer T> ? T : never>();

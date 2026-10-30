@@ -13,7 +13,6 @@ import { ConnectionsView } from "./ConnectionsView";
 import { TimelineView } from "./TimelineView";
 import { TitleBar } from "./TitleBar";
 import { ConflictBanner } from "./ConflictBanner";
-import { PreviewStrip } from "./PreviewStrip";
 import { TagBar } from "./TagBar";
 import { Divider } from "./Divider";
 import { TagPanel } from "./TagPanel";
@@ -82,11 +81,11 @@ export function App({ controller, store }: { controller: Controller; store: Stor
       <section className={note}>
         <TitleBar controller={controller} store={store} />
         <ConflictBanner controller={controller} store={store} />
-        <PreviewStrip store={store} />
         <TagBar controller={controller} store={store} />
         <EditorHost controller={controller} />
         <PreviewHost controller={controller} />
-        {/* the editor stays mounted under the first-run screen */}
+        {/* the editor stays mounted under the first-run screen; the inline unlock covers the note area the same way */}
+        <PassphraseDialog />
         <FirstRun controller={controller} store={store} />
       </section>
       <InfoPanel controller={controller} store={store} />
@@ -96,7 +95,6 @@ export function App({ controller, store }: { controller: Controller; store: Stor
       <MergeDialog controller={controller} store={store} />
       <SaveSearchDialog controller={controller} store={store} />
       <ExportDialog controller={controller} store={store} />
-      <PassphraseDialog />
       <PrintHost store={store} />
     </div>
   );
