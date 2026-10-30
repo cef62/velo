@@ -23,6 +23,7 @@ export const printGlobalCss = {
       '& ol': { listStyle: 'decimal' },
       '& li': { my: '0.1em', breakInside: 'avoid' },
       '& li.task-list-item': { listStyle: 'none', ml: '-1.4em' },
+      '& ul:has(> li.task-list-item)': { breakInside: 'avoid' },
       '& input.task': { m: '0 0.5em 0 0', verticalAlign: '-0.1em', accentColor: ink },
       '& blockquote, & .markdown-alert': { m: '0 0 0.8em', pl: '1em', borderLeft: '3px solid', borderColor: rule, color: muted },
       '& pre': { fontFamily: 'mono', fontSize: '0.85em', bg: tint, p: '0.6em 0.9em', m: '0 0 0.8em', whiteSpace: 'pre-wrap', breakInside: 'avoid' },
@@ -37,7 +38,8 @@ export const printGlobalCss = {
     },
   },
   '@media print': {
-    'html, body': { background: '#fff' },
+    // an open dialog's scroll lock sets overflow:hidden on body inline: it would cut the PDF to one page
+    'html, body': { overflow: 'visible !important', height: 'auto !important', background: '#fff' },
     'body > *:not([data-print])': { display: 'none !important' },
   },
 }

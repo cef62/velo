@@ -87,7 +87,8 @@ fn build_from(rows: Vec<TimelineRow>, dates: &HashMap<String, (i64, i64)>, r: &E
     }
     let mut out = format!("# {}\n{} · exported {today}\n\n## Status\n{} open · {} done\n\n", r.title, range_line(r.since_ms, now_ms), c.open, c.done);
     let _ = write!(out, "### Open\n{open}### Done\n{done}\n{sections}");
-    let parts: Vec<String> = [(c.locked, "locked notes left out"), (c.over_limit, "over the 1,000 limit"), (c.no_tasks, "without tasks"), (c.unreadable, "unreadable")]
+    let locked = if c.locked == 1 { "locked note left out" } else { "locked notes left out" };
+    let parts: Vec<String> = [(c.locked, locked.to_string()), (c.over_limit, format!("over the {LIMIT} limit")), (c.no_tasks, "without tasks".into()), (c.unreadable, "unreadable".into())]
         .iter().filter(|(n, _)| *n > 0).map(|(n, s)| format!("{n} {s}")).collect();
     if !parts.is_empty() { let _ = writeln!(out, "---\n{}", parts.join(" · ")); }
     (out, c)
@@ -166,7 +167,7 @@ mod tests {
         let (t, c) = build(&v, &r, "2026-10-30").unwrap();
         assert!(!t.contains("SECRET-XYZ"), "{t}");
         assert_eq!((c.locked, c.notes, c.open), (1, 0, 0));
-        assert!(t.ends_with("---\n1 locked notes left out\n"));
+        assert!(t.ends_with("---\n1 locked note left out\n"), "{t}");
     }
 
     #[test] fn export_limit_counts_the_rest() {
@@ -180,6 +181,7 @@ mod tests {
         assert_eq!((c.notes, c.over_limit), (LIMIT, 1));
         assert_eq!(t.matches("\n## n").count(), LIMIT);
         assert!(!t.contains(&format!("## n{LIMIT}\n")));
+        assert!(t.ends_with(&format!("---\n1 over the {LIMIT} limit\n")), "{t}");
     }
 
     #[test] fn export_counts_unreadable_notes() {

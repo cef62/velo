@@ -57,7 +57,7 @@ Write `#tag` anywhere in a note (at the start of a line, after a space, or after
 
 ## Saved searches
 
-Keep a search you use often. With a search text, tags or the No links chip active, choose "Save search…" in the filter banner or in the tag panel (⌘⇧T) and give it a name of 1 to 60 characters; a name already in use asks to replace the old one. Saved searches sit as chips in the "Saved" row of the tag panel. Click one to apply its search text, tags and No links, replacing the current filters; click the active one to clear them. Right-click a chip, or press Shift+F10 / the Menu key on it, for Rename… and Delete (which asks first). They are stored per machine in the settings. The list, Tasks, the timeline and export all follow the filters.
+Keep a search you use often. With a search text, tags or the No links chip active, choose "Save search…" in the filter banner or in the tag panel (⌘⇧T) and give it a name of 1 to 60 characters; a name already in use asks to replace the old one. Saved searches sit as a row of chips above the tags in the tag panel. Click one to apply its search text, tags and No links, replacing the current filters; click the active one to clear them. Right-click a chip, or press Shift+F10 / the Menu key on it, for Rename… and Delete (which asks first). They are stored per machine in the settings. The list, Tasks, the timeline and export all follow the filters.
 
 ## Timeline
 

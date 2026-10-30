@@ -774,7 +774,7 @@ export class Controller {
       await settled(() => this.timelineLoading);
       const first = this.store.get().timeline.rows?.[0];
       // the passphrase dialog keeps focus: only a note that really loaded takes it
-      if (first && (await this.show(first.path)) && this.editor.currentPath() === first.path) this.editor.focus();
+      if (first && (await this.show(first.path)) && this.editor.currentPath() === first.path) this.settleAfterOpen(false, "enter");
       return;
     }
     await settled(() => this.searching);
@@ -1158,7 +1158,9 @@ export class Controller {
 
   setPaneMode(m: AppState["paneMode"]) {
     if (m === "connections") return void this.showConnections();
-    this.store.set({ paneMode: m });
+    const into = m === "timeline" && this.store.get().paneMode !== "timeline";
+    // re-entering: show loading, not rows of the filters the timeline last loaded with
+    this.store.set((s) => (into ? { paneMode: m, timeline: { ...s.timeline, rows: null } } : { paneMode: m }));
     if (m === "tasks") void this.loadTasks();
     else if (m === "timeline") void this.loadTimeline();
     else if (this.listStale) {
@@ -1181,7 +1183,8 @@ export class Controller {
       const rows = await this.api.timeline(query, selectedTags, noLinks, timeline.by, sinceMs(timeline.range, new Date()));
       if (fresh()) this.store.set((s) => ({ timeline: { ...s.timeline, rows, err: "" } }));
     } catch (e) {
-      if (fresh()) this.store.set((s) => ({ timeline: { ...s.timeline, rows: null, err: errText(e) } }));
+      // while indexing: no error, the index-done refreshTitles reloads it
+      if (fresh() && e !== "indexing") this.store.set((s) => ({ timeline: { ...s.timeline, rows: null, err: errText(e) } }));
     }
   }
 
@@ -1216,6 +1219,7 @@ export class Controller {
 
   /** Export…: always what the timeline shows, so other panes switch to it first. */
   startExport(): Promise<void> {
+    if (this.store.get().capture) return Promise.resolve(); // the search field holds capture text, not a filter
     if (this.store.get().paneMode !== "timeline") this.setPaneMode("timeline");
     this.store.set({ exporting: { counts: null, format: "md", tasksOnly: false, err: "", pending: false }, printHtml: null });
     return this.loadExportPreview();
@@ -1244,11 +1248,16 @@ export class Controller {
   }
 
   /** Export (go) or Cancel. Markdown: the save dialog picks the file; cancelling it keeps the dialog open. PDF: the native print dialog. */
+  protected readonly newExportCommit = latest();
   async commitExport(go: boolean) {
     const cur = this.store.get().exporting;
     if (!cur) return;
-    if (!go) return this.store.set({ exporting: null });
+    if (!go) {
+      this.newExportCommit(); // drops an Export's reply still in flight
+      return this.store.set({ exporting: null });
+    }
     if (cur.pending || !cur.counts?.notes) return; // nothing to export writes no empty file
+    const fresh = this.newExportCommit(); // a reply landing after Cancel or a newer Export is dropped
     const req = this.exportRequest(cur.tasksOnly);
     const update = (p: Partial<NonNullable<AppState["exporting"]>>) => this.store.set((s) => ({ exporting: s.exporting && { ...s.exporting, ...p } }));
     update({ pending: true, err: "" });
@@ -1256,13 +1265,14 @@ export class Controller {
       try {
         // wikilinks and tags print as plain text: nothing on paper to click
         const html = renderMarkdown(await this.api.exportText(req), () => true).replace(/<a href="#" (class="(?:wikilink|tag)"[^>]*)>(.*?)<\/a>/g, "<span $1>$2</span>");
-        if (!this.store.get().exporting?.pending) return; // cancelled (or reopened) while the text loaded
+        if (!fresh()) return; // cancelled (or reopened and exported again) while the text loaded
         this.store.set({ printHtml: html });
         await this.ui.nextFrame();
         await this.api.printPage();
         // macOS print() returns as soon as the sheet opens, before WebKit lays the page out; the container stays until the next export (afterprint may fire after the preview pass)
         this.store.set({ exporting: null });
       } catch (e) {
+        if (!fresh()) return;
         this.store.set({ printHtml: null });
         update({ pending: false, err: errText(e) });
       }

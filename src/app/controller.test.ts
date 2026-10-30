@@ -2583,3 +2583,74 @@ test("PDF export: a print failure keeps the dialog open with the error and clear
   expect(store.get().printHtml).toBeNull();
   expect(store.get().exporting).toMatchObject({ err: "no printer", pending: false, format: "pdf" });
 });
+
+test("Enter in timeline mode with preview on in the vertical layout leaves preview, so the editor really takes focus", async () => {
+  const { c, api, store, editor } = setup();
+  const preview = new FakePreview();
+  c.attachPreview(preview);
+  preview.on = true;
+  expect(store.get().layout).toBe("vertical");
+  api.timeline.mockResolvedValue([trow("B")]);
+  c.setPaneMode("timeline");
+  const focused = editor.focused;
+  await c.enter();
+  expect(store.get().openPath).toBe(P("B"));
+  expect(preview.on).toBe(false); // the editor is display:none under preview in this layout
+  expect(editor.focused).toBe(focused + 1);
+});
+
+test("PDF export cancelled, reopened and exported again prints only the second export", async () => {
+  const { c, api, store } = setup();
+  api.exportPreview.mockResolvedValue(counts(1));
+  const d1 = deferred<string>();
+  const d2 = deferred<string>();
+  api.exportText.mockImplementationOnce(() => d1.promise).mockImplementationOnce(() => d2.promise);
+  await c.startExport();
+  await c.setExportOptions({ format: "pdf" });
+  const first = c.commitExport(true);
+  await c.commitExport(false);
+  await c.startExport();
+  await c.setExportOptions({ format: "pdf" });
+  const second = c.commitExport(true);
+  d1.resolve("# One");
+  await first;
+  expect(api.printPage).not.toHaveBeenCalled();
+  d2.resolve("# Two");
+  await second;
+  expect(api.printPage).toHaveBeenCalledTimes(1);
+  expect(store.get().printHtml).toContain("Two");
+});
+
+test("export does nothing while capturing: the field holds capture text, not a filter", async () => {
+  const { c, api, store } = setup({ Inbox: "", B: "b" });
+  await c.startCapture();
+  c.setQuery("buy milk");
+  await c.startExport();
+  expect(store.get().exporting).toBeNull();
+  expect(api.exportPreview).not.toHaveBeenCalled();
+});
+
+test("re-entering the timeline shows loading, not the previous filters' rows", async () => {
+  const { c, api, store } = setup();
+  api.timeline.mockResolvedValue([trow("A")]);
+  c.setPaneMode("timeline");
+  await settle();
+  c.setPaneMode("notes");
+  c.setQuery("b");
+  await settle();
+  const d = deferred<TimelineRow[]>();
+  api.timeline.mockImplementationOnce(() => d.promise);
+  c.setPaneMode("timeline");
+  expect(store.get().timeline.rows).toBeNull();
+  d.resolve([trow("B")]);
+  await settle();
+  expect(store.get().timeline.rows).toEqual([trow("B")]);
+});
+
+test("the timeline shows no error while the vault indexes", async () => {
+  const { c, api, store } = setup();
+  api.timeline.mockRejectedValueOnce("indexing");
+  c.setPaneMode("timeline");
+  await settle();
+  expect(store.get().timeline).toMatchObject({ rows: null, err: "" });
+});
