@@ -9,7 +9,7 @@ pub fn title_to_stem(title: &str) -> String {
     let mut s: String = title
         .trim()
         .chars()
-        .map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { '-' } else { c })
+        .map(|c| if c.is_control() || "/\\:*?\"<>|]".contains(c) { '-' } else { c })
         .collect();
     let mut end = s.len().min(200);
     while !s.is_char_boundary(end) {
@@ -49,6 +49,8 @@ mod tests {
     use super::*;
 
     #[test] fn stem_replaces_illegal() { assert_eq!(title_to_stem("a/b:c*?\"<>|d"), "a-b-c------d"); }
+    // a `]` would end the `[[link]]` early, so no link could reach the note
+    #[test] fn stem_replaces_closing_bracket() { assert_eq!(title_to_stem("Plan]v2 [x]"), "Plan-v2 [x-"); }
     #[test] fn stem_trims_dots_spaces() { assert_eq!(title_to_stem("  notes. . "), "notes"); }
     #[test] fn stem_leading_dots_not_hidden() { assert_eq!(title_to_stem(".NET tips"), "-NET tips"); assert_eq!(title_to_stem("..x"), "--x"); assert_eq!(title_to_stem("a.b"), "a.b"); }
     #[test] fn stem_empty_is_untitled() { assert_eq!(title_to_stem(" / "), "-"); assert_eq!(title_to_stem("   "), "Untitled"); }
@@ -63,6 +65,6 @@ mod tests {
     #[test] fn note_path_ext() { assert_eq!(note_path(Path::new("/n"), "a/b", true), PathBuf::from("/n/a-b.md.age")); }
     #[test] fn title_ok_rules() {
         assert!(title_ok("Plan") && title_ok(" Plan "));
-        for bad in ["a/b", ".x", "   ", "a:b"] { assert!(!title_ok(bad), "{bad}"); }
+        for bad in ["a/b", ".x", "   ", "a:b", "Plan]v2"] { assert!(!title_ok(bad), "{bad}"); }
     }
 }

@@ -111,7 +111,9 @@ pub struct Vault {
 }
 
 fn s(p: &Path) -> String {
-    p.to_string_lossy().into_owned()
+    let s = p.to_string_lossy();
+    // macOS volumes treat NFC and NFD names as one file, and HFS+ and SMB list them NFD: one index key per note
+    if cfg!(target_os = "macos") { unicode_normalization::UnicodeNormalization::nfc(&*s).collect() } else { s.into_owned() }
 }
 
 fn now_ms() -> i64 {

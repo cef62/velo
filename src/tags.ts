@@ -18,18 +18,30 @@ export function readTag(src: string, i: number): string | null {
   return tag && /\p{Alphabetic}/u.test(tag) ? tag : null;
 }
 
-/** Display spellings of the distinct tags in a note body, fenced code ignored (same as Rust; tests only). */
+/** Rust text::fence: [char, length, rest] of a code-fence line (a backtick fence's info has no backtick), or null. */
+const fence = (line: string): [string, number, string] | null => {
+  const m = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
+  return m && !(m[1][0] === "`" && m[2].includes("`")) ? [m[1][0], m[1].length, m[2]] : null;
+};
+
+/** Display spellings of the distinct tags in a note body, fenced and indented code ignored (Rust text::lines rules). */
 export function extractTags(body: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
-  let fenced = false;
+  let open: [string, number] | null = null;
+  let afterBlank = true;
+  let icode = false;
   for (const line of body.split(/\r?\n/)) {
     const t = line.trimStart();
-    if (t.startsWith("```") || t.startsWith("~~~")) {
-      fenced = !fenced;
-      continue;
-    }
-    if (fenced) continue;
+    const f = fence(line);
+    const fenced = open !== null || f !== null;
+    // CommonMark: only the same char, at least as long, with nothing after it, closes a fence
+    if (open && f && f[0] === open[0] && f[1] >= open[1] && !f[2].trim()) open = null;
+    else if (!open && f) open = [f[0], f[1]];
+    // indented code: 4+ spaces (or a tab) after a blank line or more code; an indented list item is not code
+    icode = /^( {4}|\t)/.test(line) && t !== "" && (afterBlank || icode) && !/^([-*+]|\d+[.)])(\[[xX]\])?$/.test(t.split(" ")[0]);
+    afterBlank = t === "";
+    if (fenced || icode) continue;
     for (let i = 0; i < line.length; i++) {
       const tag = readTag(line, i);
       if (tag && !seen.has(fold(tag))) {

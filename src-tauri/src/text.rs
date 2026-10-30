@@ -8,18 +8,20 @@ pub fn fold(s: &str) -> String {
         .collect()
 }
 
-/// Byte ranges of the inner text of each `[[...]]` (no `]` or newline inside).
+/// Byte ranges of the inner text of each `[[...]]` (no `]` or newline inside) outside fenced and indented code.
 fn link_spans(body: &str) -> Vec<(usize, usize)> {
     let mut spans = Vec::new();
-    let mut i = 0;
-    while let Some(p) = body[i..].find("[[") {
-        let start = i + p + 2;
-        let len = body[start..].find([']', '\n']).unwrap_or(body.len() - start);
-        if body[start + len..].starts_with("]]") {
-            spans.push((start, start + len));
-            i = start + len + 2;
-        } else {
-            i = start - 1;
+    for (at, line, _) in lines(body).filter(|l| l.2) {
+        let mut i = 0;
+        while let Some(p) = line[i..].find("[[") {
+            let start = i + p + 2;
+            let len = line[start..].find(']').unwrap_or(line.len() - start);
+            if line[start + len..].starts_with("]]") {
+                spans.push((at + start, at + start + len));
+                i = start + len + 2;
+            } else {
+                i = start - 1;
+            }
         }
     }
     spans
@@ -40,20 +42,11 @@ fn tag_char(c: char) -> bool {
     c.is_alphanumeric() || matches!(c, '_' | '-' | '/')
 }
 
-/// `(folded, display)` for each `#tag` outside fenced code, first spelling kept, in order of appearance.
+/// `(folded, display)` for each `#tag` outside fenced and indented code, first spelling kept, in order of appearance.
 pub fn extract_tags(body: &str) -> Vec<(String, String)> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
-    let mut fenced = false;
-    for line in body.lines() {
-        let t = line.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") {
-            fenced = !fenced;
-            continue;
-        }
-        if fenced {
-            continue;
-        }
+    for (_, line, _) in lines(body).filter(|l| l.2) {
         let mut prev = None;
         for (i, c) in line.char_indices() {
             if c == '#' && prev.is_none_or(|p: char| p.is_whitespace() || p == '(') {
@@ -94,15 +87,32 @@ fn span_closes(rest: &str) -> bool {
     rest.split_inclusive('\n').enumerate().take_while(|(i, l)| *i == 0 || !l.trim().is_empty()).any(|(_, l)| l.contains('`'))
 }
 
+/// A code-fence line: its char, its length, and the text after it (a backtick fence's info has no backtick).
+pub(crate) fn fence(line: &str) -> Option<(char, usize, &str)> {
+    let t = line.trim_start();
+    let c = t.chars().next().filter(|c| matches!(c, '`' | '~'))?;
+    let rest = t.trim_start_matches(c);
+    let n = t.len() - rest.len();
+    (n >= 3 && !(c == '`' && rest.contains('`'))).then_some((c, n, rest))
+}
+
 /// One line of `body` for the prose scanner; `skip` marks fenced code, indented code and blank lines.
 struct Line<'a> { start: usize, raw: &'a str, line: &'a str, skip: bool }
+
+/// Each line of `body` as `(byte start, text without its line ending, prose)`; prose is false in fenced or indented
+/// code and on blank lines. The one code rule for tags, tag removal, links and tasks.
+pub(crate) fn lines(body: &str) -> impl Iterator<Item = (usize, &str, bool)> {
+    let mut sc = Scanner::new(body);
+    std::iter::from_fn(move || sc.next_line().map(|l| (l.start, l.line, !l.skip)))
+}
 
 /// The scanner rules shared by `remove_inline_tag` and `find_mentions`: fenced and indented code skip whole lines,
 /// `step` tracks inline code spans (which may run over the lines of one paragraph) and `[...]` / `[[...]]` depth.
 struct Scanner<'a> {
     body: &'a str,
     pos: usize,
-    fenced: bool,
+    /// the fence we are inside: its char and length
+    open: Option<(char, usize)>,
     after_blank: bool,
     icode: bool,
     code: bool,
@@ -114,21 +124,28 @@ struct Scanner<'a> {
 
 impl<'a> Scanner<'a> {
     fn new(body: &'a str) -> Self {
-        Scanner { body, pos: 0, fenced: false, after_blank: true, icode: false, code: false, depth: 0, after_close: false, target: false }
+        Scanner { body, pos: 0, open: None, after_blank: true, icode: false, code: false, depth: 0, after_close: false, target: false }
     }
 
     fn next_line(&mut self) -> Option<Line<'a>> {
         let raw = self.body[self.pos..].split_inclusive('\n').next()?;
         let start = self.pos;
         self.pos += raw.len();
-        let line = raw.trim_end_matches(['\n', '\r']);
+        let line = raw.strip_suffix('\n').unwrap_or(raw);
+        let line = line.strip_suffix('\r').unwrap_or(line);
         let t = line.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") { self.fenced = !self.fenced; }
+        let fenced = match (self.open, fence(line)) {
+            // CommonMark: only the same char, at least as long, with nothing after it, closes a fence
+            (Some((c, n)), Some((c2, n2, rest))) if c == c2 && n2 >= n && rest.trim().is_empty() => { self.open = None; true }
+            (Some(_), _) => true,
+            (None, Some((c, n, _))) => { self.open = Some((c, n)); true }
+            (None, None) => false,
+        };
         // indented code: 4+ spaces (or a tab) after a blank line or more code; an indented list item is not code
         let indented = (line.starts_with("    ") || line.starts_with('\t')) && !t.is_empty();
         self.icode = indented && (self.after_blank || self.icode) && !bare_marker(t.split(' ').next().unwrap_or(""));
         self.after_blank = t.is_empty();
-        let skip = self.fenced || self.icode || t.is_empty() || t.starts_with("```") || t.starts_with("~~~");
+        let skip = fenced || self.icode || t.is_empty();
         if skip { self.code = false; }
         (self.depth, self.after_close, self.target) = (0, false, false);
         Some(Line { start, raw, line, skip })
@@ -292,6 +309,26 @@ mod tests {
         let t: Vec<String> = extract_tags(b).into_iter().map(|(_, d)| d).collect();
         assert_eq!(t, vec!["Work", "idea", "nested/path", "Café"]);
         assert_eq!(extract_tags("#Café")[0].0, "cafe");
+    }
+    #[test] fn tags_skip_code_like_removal_and_ts() {
+        let cases: Vec<serde_json::Value> = serde_json::from_str(include_str!("../../tests/fixtures/tags-code.json")).unwrap();
+        for c in cases {
+            let body = c["body"].as_str().unwrap();
+            let want: Vec<&str> = c["tags"].as_array().unwrap().iter().map(|t| t.as_str().unwrap()).collect();
+            let got: Vec<(String, String)> = extract_tags(body);
+            assert_eq!(got.iter().map(|(_, d)| d.as_str()).collect::<Vec<_>>(), want, "{body:?}");
+            // removal sees exactly the tags the index sees
+            for (f, _) in &got {
+                let (out, n) = remove_inline_tag(body, f);
+                assert!(n > 0 && extract_tags(&out).iter().all(|(g, _)| g != f), "{body:?} {f}");
+            }
+        }
+        assert_eq!(remove_inline_tag("````\n```\n#work\n```\n````\n#work\n", "work").1, 1);
+    }
+    #[test] fn links_in_code_are_not_links() {
+        let b = "```\n[[Old]]\n```\n    x\n\n    [[Old]]\n[[Old]]";
+        assert_eq!(extract_links(b), vec!["Old"]);
+        assert_eq!(rewrite_links(b, "Old", "New"), ("```\n[[Old]]\n```\n    x\n\n    [[Old]]\n[[New]]".into(), 1));
     }
     #[test] fn rewrite_case_insensitive() {
         assert_eq!(rewrite_links("x [[Old]] y [[old]] z [[Older]]", "OLD", "New"), ("x [[New]] y [[New]] z [[Older]]".into(), 2));
