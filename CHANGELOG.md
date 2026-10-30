@@ -1,5 +1,16 @@
 # velo
 
+## 0.10.0
+
+### Minor Changes
+
+- 367b6f7: Ticking a task now writes `@done(YYYY-MM-DD)` instead of `✅ YYYY-MM-DD`. Existing `✅` dates are still read, and replaced the next time the task is toggled.
+- 95bf217: Added writing helpers: a tag bar under the note title, autocomplete for [[links]] and #tags, Move to new note (⌘⇧N) and Merge into…, plus a merge_notes tool for agents.
+
+### Patch Changes
+
+- 95bf217: Fix the note list resize snapping back to its smallest size after switching to Tasks or Connections, and show which tag pills are selected in the tag panel and info panel.
+
 ## 0.9.0
 
 ### Minor Changes
