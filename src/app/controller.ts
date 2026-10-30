@@ -962,6 +962,8 @@ export class Controller {
       clearTimeout(this.undoTimer);
       this.store.set({ taskView: null, tickUndo: null });
       void this.loadTasks(); // a new request: older replies are stale
+      void this.loadConnections(); // the graph's links and tags may come from now-locked notes
+      void this.refreshTitles(); // link targets carry each note's locked flag
       if (path && isLockedPath(path)) {
         this.editor.unload(); // drop the decrypted text from the editor and stop autosave re-caching it
         this.closedDoc();
@@ -1392,6 +1394,9 @@ export class Controller {
     this.preview?.refresh(); // watermark shows the binding
     this.syncStyle();
     if (next.notes_dir !== cur.notes_dir) {
+      // the open note is in the old folder, where every save would fail; openSettings flushed it (the dialog is modal)
+      this.editor.unload();
+      this.closedDoc();
       this.store.set({ phase: "ready" });
       await this.runSearch(true);
       void this.refreshTitles();

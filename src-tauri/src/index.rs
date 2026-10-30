@@ -102,6 +102,8 @@ CREATE TABLE IF NOT EXISTS tasks_stale(path TEXT NOT NULL);
 CREATE TRIGGER IF NOT EXISTS notes_written AFTER INSERT ON notes BEGIN INSERT INTO tasks_stale(path) VALUES(new.path); END;
 "#;
 
+const CREATED_FROM_FILE: &str = "SELECT created FROM notes WHERE path=?1 AND created_src='file'";
+
 const DELETES: [&str; 6] = [
     "DELETE FROM notes_fts WHERE rowid=(SELECT rowid FROM notes WHERE path=?1)",
     "DELETE FROM notes WHERE path=?1",
@@ -294,14 +296,22 @@ impl Index {
     pub fn upsert(&mut self, path: &str, nf: &NoteFile, meta: &Meta, body: Option<&str>) -> anyhow::Result<()> {
         // A savepoint is its own transaction outside `begin`, and nests inside one.
         let tx = self.db.savepoint()?;
-        for sql in DELETES {
+        // a write first: a read would take a lock that fails at once, not after busy_timeout, under another writer
+        tx.execute(DELETES[0], [path])?;
+        let old_created: Option<i64> = tx.query_row(CREATED_FROM_FILE, [path], |r| r.get(0)).optional()?;
+        for sql in &DELETES[1..] {
             tx.execute(sql, [path])?;
         }
         // Locked notes: plaintext (and so front matter) never reaches SQLite; file dates only.
         let body = if nf.encrypted { None } else { body };
         let fm = body.and_then(frontmatter::parse);
         let text = body.map(frontmatter::body);
-        let (created, created_src, modified, modified_src) = effective_dates(fm.as_ref(), meta);
+        let (mut created, created_src, modified, modified_src) = effective_dates(fm.as_ref(), meta);
+        if created_src == "file" {
+            // an atomic save resets the birth time: keep the earliest file date seen.
+            // shortcut: a rebuild or a rename forgets it, upgrade by writing front matter (the setting) if that matters
+            created = old_created.map_or(created, |o| o.min(created));
+        }
         tx.execute(
             "INSERT INTO notes(path,title,title_folded,mtime,size,encrypted,preview,created,created_src,modified,modified_src) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             params![path, nf.title, fold(&nf.title), meta.mtime, meta.size as i64, nf.encrypted, text.map(|b| preview(&nf.title, b)).unwrap_or_default(), created, created_src, modified, modified_src],
@@ -519,6 +529,11 @@ impl Index {
             Ok(TaskRow { path: r.get(0)?, title: r.get(1)?, modified: r.get(2)?, line: r.get::<_, i64>(3)? as usize, text: r.get(4)?, done: r.get(5)?, due: r.get(6)?, done_on: r.get(7)?, line_text: r.get(8)? })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// The indexed created time of a note dated by its file (no front-matter `created`).
+    pub fn created_from_file(&self, path: &str) -> anyhow::Result<Option<i64>> {
+        Ok(self.db.query_row(CREATED_FROM_FILE, [path], |r| r.get(0)).optional()?)
     }
 
     pub fn title_modified(&self, path: &str) -> anyhow::Result<Option<(String, i64)>> {
@@ -830,7 +845,9 @@ mod tests {
         // birth earlier than mtime wins; later birth is ignored
         let nf = NoteFile { title: "b".into(), encrypted: false };
         i.upsert("b.md", &nf, &Meta { mtime: 7000, size: 1, birth: 100 }, Some("x")).unwrap(); assert_eq!(row(&i, "b.md").0, 100);
-        i.upsert("b.md", &nf, &Meta { mtime: 7000, size: 1, birth: 9000 }, Some("x")).unwrap(); assert_eq!(row(&i, "b.md").0, 7000);
+        i.upsert("c.md", &nf, &Meta { mtime: 7000, size: 1, birth: 9000 }, Some("x")).unwrap(); assert_eq!(row(&i, "c.md").0, 7000);
+        // a later save (atomic: new birth time) keeps the earliest file date
+        i.upsert("b.md", &nf, &Meta { mtime: 8000, size: 1, birth: 8000 }, Some("y")).unwrap(); assert_eq!(row(&i, "b.md").0, 100);
     }
     #[test] fn frontmatter_not_searchable_and_not_in_snippet() {
         let i = idx(&[("a.md", FM, 1)]);

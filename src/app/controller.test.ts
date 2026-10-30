@@ -468,6 +468,17 @@ test("saveSettings applies look, keys and sort, and closes the dialog", async ()
   expect(calls).toContainEqual(["setWindowTheme", "dark"]);
 });
 
+test("changing the notes folder closes the note from the old folder", async () => {
+  const { c, api, store, editor } = setup();
+  await c.show(P("A"));
+  await c.openSettings();
+  const s = store.get().settings!;
+  api.search.mockResolvedValue({ hits: [], has_more: false, total: 0 }); // the new folder is empty
+  expect(await c.saveSettings({ ...s, notes_dir: "/other" })).toBe(null);
+  expect(editor.currentPath()).toBe(null);
+  expect(store.get().openPath).toBe(null);
+});
+
 test("conflict clears on dismiss and when the open note changes; openConflict opens it", async () => {
   const { c, store, notes } = setup();
   await c.runSearch(true);
@@ -1046,6 +1057,20 @@ test("Lock all reloads the tasks: decrypted rows, the due count and the badge go
   expect(store.get().taskView?.today).toEqual([]);
   expect(store.get().dueCount).toBe(0);
   expect(api.setBadge).toHaveBeenLastCalledWith(0);
+});
+
+test("Lock all reloads the Connections graph and the link targets", async () => {
+  const { c, api, store } = setup();
+  await c.show(P("A"));
+  c.onKeyDown(KEY_C);
+  await settle();
+  expect(store.get().paneMode).toBe("connections");
+  api.connections.mockClear();
+  api.listLinkTargets.mockClear();
+  await c.lockEverything();
+  await settle();
+  expect(api.connections).toHaveBeenCalledWith(P("A"));
+  expect(api.listLinkTargets).toHaveBeenCalled();
 });
 
 test("typing a filter in Tasks mode never opens a note; back in Notes the list follows without opening", async () => {

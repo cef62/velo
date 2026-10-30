@@ -56,6 +56,25 @@ impl Store {
         Ok(out)
     }
 
+    /// Files a crash left behind: `.X.md.tmp` from `write_atomic` (it can hold plaintext a later lock would leave in
+    /// the folder) is deleted; `.X.md.rename` from a case-only rename (the note is hidden under it) goes back to
+    /// `X.md` unless that exists. Only names of notes are touched.
+    pub fn clean_leftovers(&self) {
+        let Ok(rd) = std::fs::read_dir(&self.dir) else { return };
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let Some(rest) = name.strip_prefix('.') else { continue };
+            if rest.strip_suffix(".tmp").is_some_and(|n| parse_note_file(Path::new(n)).is_some()) {
+                std::fs::remove_file(e.path()).ok();
+            } else if let Some(note) = rest.strip_suffix(".rename").filter(|n| parse_note_file(Path::new(n)).is_some()) {
+                let to = self.dir.join(note);
+                if to.symlink_metadata().is_err() {
+                    std::fs::rename(e.path(), to).ok();
+                }
+            }
+        }
+    }
+
     pub fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         std::fs::read(path)
     }
@@ -218,6 +237,21 @@ mod tests {
         assert_ne!(paths[0], paths[1]);
         assert_eq!(fs::read(&paths[0]).unwrap(), b"mine1");
         assert_eq!(fs::read(&paths[1]).unwrap(), b"mine2");
+    }
+    #[test] fn clean_leftovers_removes_tmp_and_restores_rename() {
+        let d = tempfile::tempdir().unwrap();
+        let st = Store::new(d.path().to_path_buf());
+        fs::write(d.path().join(".Secret.md.tmp"), "plain").unwrap();
+        fs::write(d.path().join(".Foo.md.rename"), "foo").unwrap();
+        fs::write(d.path().join(".Bar.md.rename"), "old").unwrap();
+        fs::write(d.path().join("Bar.md"), "kept").unwrap();
+        fs::write(d.path().join(".other.tmp"), "not a note's").unwrap();
+        st.clean_leftovers();
+        assert!(!d.path().join(".Secret.md.tmp").exists());
+        assert_eq!(fs::read_to_string(d.path().join("Foo.md")).unwrap(), "foo");
+        assert_eq!(fs::read_to_string(d.path().join("Bar.md")).unwrap(), "kept");
+        assert!(d.path().join(".Bar.md.rename").exists(), "never replaces a note");
+        assert!(d.path().join(".other.tmp").exists());
     }
     #[test] fn rename_onto_existing_non_note_refused() {
         let d = tempfile::tempdir().unwrap();

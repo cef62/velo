@@ -134,6 +134,13 @@ fn note_meta(text: &str, m: &Meta) -> NoteMeta {
     NoteMeta { created, created_src: cs.into(), modified, modified_src: ms.into(), tags, aliases: fm.map(|f| f.aliases).unwrap_or_default() }
 }
 
+/// A plain note (`X.md` or `X.txt`) with the locked note `X.md.age` beside it: a lock synced in before the delete,
+/// or a lock that failed to remove the plaintext. It counts as locked: never saved, snapshotted as plaintext,
+/// rewritten or shown to the agent.
+pub fn plain_twin_of_locked(path: &Path) -> bool {
+    parse_note_file(path).is_some_and(|n| !n.encrypted && path.parent().is_some_and(|d| note_path(d, &n.title, true).exists()))
+}
+
 fn parse(p: &Path) -> anyhow::Result<NoteFile> {
     parse_note_file(p).ok_or_else(|| anyhow!("not a note file: {}", p.display()))
 }
@@ -165,6 +172,7 @@ impl Vault {
         let root = db_path.parent().unwrap_or(Path::new(".")).join("revisions").join(fnv64(&s(&dir)));
         let mut v = Vault { store: Store::new(dir), index: Index::open(db_path)?, unlocked: HashMap::new(), revisions: Revisions::new(root) };
         v.revisions.maybe_prune(now_ms());
+        v.store.clean_leftovers();
         let files = v.store.list()?;
         let (stale, gone, replaced) = v.diff(&files)?;
         let total = stale.len();
@@ -242,6 +250,15 @@ impl Vault {
             return Err(anyhow!("not a note in the notes folder"));
         }
         parse(p)
+    }
+
+    /// `note_meta`, with a file-dated created no later than the indexed one (see `Index::upsert`).
+    fn note_meta(&self, path: &str, text: &str, m: &Meta) -> NoteMeta {
+        let mut meta = note_meta(text, m);
+        if meta.created_src == "file" && let Ok(Some(c)) = self.index.created_from_file(path) {
+            meta.created = meta.created.min(c);
+        }
+        meta
     }
 
     fn try_unlock(&mut self, path: &Path, identity: &str) {
@@ -323,7 +340,7 @@ impl Vault {
         } else {
             lossy(&bytes)
         };
-        let meta = note_meta(&text, &stat(p)?);
+        let meta = self.note_meta(path, &text, &stat(p)?);
         Ok(NoteDoc { path: path.into(), title: nf.title, text, hash: hash(&bytes), encrypted: nf.encrypted, meta })
     }
 
@@ -397,7 +414,7 @@ impl Vault {
         let nf = self.note(p)?;
         let encrypted = nf.encrypted;
         // A stale editor bound to the pre-lock path must not resurrect the plaintext next to Title.md.age.
-        if !encrypted && note_path(&self.store.dir, &nf.title, true).exists() {
+        if plain_twin_of_locked(p) {
             return Err(anyhow!("locked-sibling"));
         }
         let orig = text;
@@ -431,7 +448,7 @@ impl Vault {
             self.unlocked.insert(s(&target), text.to_string());
         }
         if let SaveResult::Saved { front_matter, meta, .. } = &mut res {
-            *meta = note_meta(text, &stat(&target)?);
+            *meta = self.note_meta(&s(&target), text, &stat(&target)?);
             *front_matter = stamped.as_deref().filter(|t| *t != orig).and_then(|t| frontmatter::parse(t).map(|f| t[..f.end].to_string()));
         }
         Ok(res)
@@ -491,7 +508,9 @@ impl Vault {
                 continue;
             }
             let Ok(bytes) = self.store.read(sp) else { continue };
-            let (new_text, n) = rewrite_links(&lossy(&bytes), old_title, new_title);
+            // a non-UTF-8 note (legacy Latin-1 .txt) would be rewritten lossily, for good: skip it
+            let Ok(text) = String::from_utf8(bytes) else { continue };
+            let (new_text, n) = rewrite_links(&text, old_title, new_title);
             if n > 0 && self.store.write_atomic(sp, new_text.as_bytes()).is_ok() {
                 self.reindex(sp, Some(&new_text)).ok();
                 rewritten += n;
@@ -573,7 +592,7 @@ impl Vault {
     /// (save_note refuses it the same way); a source the index still lists after it was deleted, or one that can't be
     /// read, is skipped.
     pub fn rewritable(&self, src: &Path) -> bool {
-        parse_note_file(src).is_some_and(|n| !n.encrypted && !note_path(&self.store.dir, &n.title, true).exists()) && src.is_file() && std::fs::File::open(src).is_ok()
+        parse_note_file(src).is_some_and(|n| !n.encrypted) && !plain_twin_of_locked(src) && src.is_file() && std::fs::File::open(src).is_ok()
     }
 
     pub fn lock_note(&mut self, path: &str, identity: &str) -> anyhow::Result<String> {
@@ -590,9 +609,15 @@ impl Vault {
         self.revisions.encrypt_all(&nf.title, |b| crypto::encrypt(identity, b))?;
         let plain = self.store.read(from)?;
         self.store.write_atomic(&to, &crypto::encrypt(identity, &plain)?)?;
-        std::fs::remove_file(from).context("removing plaintext note")?;
-        self.index.remove_erasing(path)?;
-        self.reindex(&to, None)?;
+        if let Err(e) = std::fs::remove_file(from) {
+            // undo, so the UI's error is true: the note stays plain, with no locked twin that would refuse its saves
+            std::fs::remove_file(&to).ok();
+            return Err(e).context("removing plaintext note");
+        }
+        // The file has moved: from here on nothing may fail the lock (as in `rename_note`), or the UI keeps the old
+        // path, whose saves are refused. Index errors heal on the next change.
+        self.index.remove_erasing(path).ok();
+        self.reindex(&to, None).ok();
         // Older versions from a bulk (even this process's) are still in the FTS segments. Best effort from here: the
         // note is locked, and a failure (disk full) stays marked for the next lock or open.
         self.index.finish_bulk();
@@ -613,10 +638,15 @@ impl Vault {
         }
         let plain = crypto::decrypt(identity, &self.store.read(from)?)?;
         self.store.write_atomic(&to, &plain)?;
-        std::fs::remove_file(from).context("removing encrypted note")?;
-        self.index.remove(path)?;
+        if let Err(e) = std::fs::remove_file(from) {
+            // undo, so the UI's error is true: a plain twin beside the locked note would be refused anyway
+            std::fs::remove_file(&to).ok();
+            return Err(e).context("removing encrypted note");
+        }
+        // as in `lock_note`: the file has moved, so nothing may fail the unlock
+        self.index.remove(path).ok();
         self.unlocked.remove(path);
-        self.reindex(&to, Some(&lossy(&plain)))?;
+        self.reindex(&to, Some(&lossy(&plain))).ok();
         Ok(s(&to))
     }
 
@@ -651,7 +681,7 @@ impl Vault {
     pub fn snapshot_text(&mut self, path: &str, text: &str, identity: Option<&str>) -> anyhow::Result<()> {
         let nf = self.note(Path::new(path))?;
         // a stale pre-lock path still means a locked note: never write its text as plaintext
-        if !nf.encrypted && !note_path(&self.store.dir, &nf.title, true).exists() {
+        if !nf.encrypted && !plain_twin_of_locked(Path::new(path)) {
             self.revisions.snapshot_bytes(&nf.title, text.as_bytes(), false, now_ms(), false)?;
             return Ok(());
         }
@@ -670,7 +700,7 @@ impl Vault {
     /// Returns the snapshot id (`None`: an empty file has nothing to keep).
     pub fn agent_snapshot(&mut self, path: &str, summary: &str) -> anyhow::Result<Option<String>> {
         let nf = self.note(Path::new(path))?;
-        if nf.encrypted || note_path(&self.store.dir, &nf.title, true).exists() {
+        if nf.encrypted || plain_twin_of_locked(Path::new(path)) {
             return Err(anyhow!("locked"));
         }
         let bytes = std::fs::read(path)?;
@@ -690,7 +720,7 @@ impl Vault {
     /// First revision of a note the agent just created: its created text, with the summary.
     pub fn agent_snapshot_text(&mut self, path: &str, text: &str, summary: &str) -> anyhow::Result<()> {
         let nf = self.note(Path::new(path))?;
-        if nf.encrypted || note_path(&self.store.dir, &nf.title, true).exists() {
+        if nf.encrypted || plain_twin_of_locked(Path::new(path)) {
             return Err(anyhow!("locked"));
         }
         self.revisions.snapshot_agent(&nf.title, text.as_bytes(), false, now_ms(), summary)?;
@@ -745,7 +775,7 @@ impl Vault {
 
     fn locked_twin(&self, path: &str) -> bool {
         let twin = parse_note_file(Path::new(path)).filter(|nf| !nf.encrypted).map(|nf| note_path(&self.store.dir, &nf.title, true));
-        twin.is_some_and(|t| t.exists() || self.index.title_modified(&s(&t)).ok().flatten().is_some())
+        plain_twin_of_locked(Path::new(path)) || twin.is_some_and(|t| self.index.title_modified(&s(&t)).ok().flatten().is_some())
     }
 
     /// One chunk of a bulk re-index: if something ended the bulk (a lock, another process), start it again, else the
@@ -792,7 +822,7 @@ impl Vault {
                         continue;
                     }
                     self.unlocked.remove(&key);
-                    *lost_plain |= !nf.encrypted && note_path(&self.store.dir, &nf.title, true).exists();
+                    *lost_plain |= plain_twin_of_locked(p);
                 }
                 Err(_) => continue,
             }
@@ -977,6 +1007,59 @@ mod tests {
         let old = dir.join("Old.md").to_string_lossy().into_owned();
         let r = v.rename_note(&old, "New", true).unwrap();
         assert_eq!(r.rewritten, 1); assert_eq!(std::fs::read_to_string(dir.join("a.md")).unwrap(), "see [[New]]");
+    }
+    /// A legacy Latin-1 note is never rewritten (lossy, with no revision to undo it).
+    #[test] fn rename_skips_non_utf8_link_source() {
+        let (dir, db) = setup();
+        let latin1 = b"caf\xe9 [[Old]]".to_vec();
+        std::fs::write(dir.join("a.txt"), &latin1).unwrap(); std::fs::write(dir.join("b.md"), "[[Old]]").unwrap(); std::fs::write(dir.join("Old.md"), "").unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let r = v.rename_note(&dir.join("Old.md").to_string_lossy(), "New", true).unwrap();
+        assert_eq!(r.rewritten, 1);
+        assert_eq!(std::fs::read(dir.join("a.txt")).unwrap(), latin1);
+        assert_eq!(std::fs::read_to_string(dir.join("b.md")).unwrap(), "[[New]]");
+    }
+    /// Once the file has moved, an index error must not fail the lock or unlock (the UI would keep a dead path).
+    #[test] fn lock_and_unlock_succeed_when_the_index_fails_after_the_move() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let d = v.open_or_create("s", None, false).unwrap();
+        let c = rusqlite::Connection::open(&db).unwrap();
+        c.execute_batch("CREATE TRIGGER boom BEFORE DELETE ON notes BEGIN SELECT RAISE(FAIL, 'boom'); END;").unwrap();
+        let p = v.lock_note(&d.path, &id).unwrap();
+        assert!(Path::new(&p).exists() && !Path::new(&d.path).exists());
+        let q = v.unlock_note(&p, &id).unwrap();
+        assert!(Path::new(&q).exists() && !Path::new(&p).exists());
+        c.execute_batch("DROP TRIGGER boom").unwrap();
+    }
+    /// A lock whose plaintext can't be removed changes nothing: no locked twin is left to refuse the note's saves.
+    #[cfg(target_os = "macos")]
+    #[test] fn lock_rolls_back_when_the_plaintext_cannot_be_removed() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let d = v.open_or_create("s", None, false).unwrap();
+        let flags = |f: &str| assert!(std::process::Command::new("chflags").args([f, &d.path]).status().unwrap().success());
+        flags("uchg"); // immutable: can't be deleted
+        let r = v.lock_note(&d.path, &id);
+        flags("nouchg");
+        assert!(r.is_err());
+        assert!(Path::new(&d.path).exists() && !dir.join("s.md.age").exists());
+    }
+    /// With front matter off, an atomic save (new inode, new birth time) keeps the indexed created date.
+    #[test] fn file_dated_created_survives_saves() {
+        let (dir, db) = setup();
+        let p = dir.join("n.md");
+        std::fs::write(&p, "old").unwrap();
+        let jan = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_704_067_200); // 2024-01-01
+        std::fs::File::options().write(true).open(&p).unwrap().set_modified(jan).unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let ps = p.to_string_lossy().into_owned();
+        let before = v.open_note(&ps, None).unwrap().meta.created;
+        assert!(before <= 1_704_067_200_000);
+        let SaveResult::Saved { meta, .. } = v.save_note(&ps, "new", &stat_hash(&ps), None, false).unwrap() else { panic!() };
+        assert_eq!(meta.created, before);
+        assert_eq!(v.index.created_from_file(&ps).unwrap(), Some(before));
+        assert_eq!(v.open_note(&ps, None).unwrap().meta.created, before);
     }
     #[test] fn leading_dot_titles_stay_visible_and_indexed() {
         let mut v = open_empty();
