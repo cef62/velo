@@ -17,16 +17,18 @@ const key = (horizontal: boolean) => (horizontal ? "velo.list-w" : "velo.list-h"
 const cssVar = (horizontal: boolean) => (horizontal ? "--list-w" : "--list-h");
 
 /** `titlebar` also drags in the vertical layout: it is the band that reads as the divider there. `rowH`: keyboard step (the list row height). `signal` removes the listeners. */
-export function mountDivider(divider: HTMLElement, app: HTMLElement, list: HTMLElement, titlebar?: HTMLElement, rowH: () => number = () => 16, signal?: AbortSignal) {
+export function mountDivider(divider: HTMLElement, app: HTMLElement, titlebar?: HTMLElement, rowH: () => number = () => 16, signal?: AbortSignal) {
   const horizontal = () => !!app.closest("[data-layout=horizontal]");
-  const total = () => (horizontal() ? app.clientWidth : app.clientHeight - list.getBoundingClientRect().top + app.getBoundingClientRect().top);
+  // looked up each time: switching to Tasks or Connections swaps the element before the divider
+  const list = () => divider.previousElementSibling as HTMLElement;
+  const total = () => (horizontal() ? app.clientWidth : app.clientHeight - list().getBoundingClientRect().top + app.getBoundingClientRect().top);
   const set = (size: number, save: boolean) => {
     const h = horizontal(), v = clampSize(size, total());
     app.style.setProperty(cssVar(h), `${v}px`);
     divider.setAttribute("aria-valuenow", String(v));
     if (save) try { localStorage.setItem(key(h), String(v)); } catch { /* storage blocked: size just isn't remembered */ }
   };
-  const current = () => (horizontal() ? list.offsetWidth : list.offsetHeight);
+  const current = () => (horizontal() ? list().offsetWidth : list().offsetHeight);
 
   const drag = (handle: HTMLElement, e: PointerEvent) => {
     e.preventDefault();

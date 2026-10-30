@@ -73,6 +73,9 @@ pub fn all_tags(body: &str, fm: Option<&FrontMatter>) -> Vec<(String, String)> {
 /// close only on a matching fence, and a due/done date needs a boundary).
 const SCHEMA_VERSION: i64 = 6;
 
+#[derive(Serialize)]
+pub struct LinkTarget { pub name: String, pub title: String, pub path: String, pub modified: i64, pub locked: bool }
+
 pub struct Index {
     db: Connection,
 }
@@ -537,6 +540,15 @@ impl Index {
         Ok(st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?)
     }
 
+    /// Every title and indexed alias with its note; `name == title` marks a title row.
+    pub fn link_targets(&self) -> anyhow::Result<Vec<LinkTarget>> {
+        let mut st = self.db.prepare(
+            "SELECT title, title, path, modified, encrypted FROM notes UNION ALL SELECT a.alias_display, n.title, n.path, n.modified, n.encrypted FROM aliases a JOIN notes n ON n.path = a.path",
+        )?;
+        let rows = st.query_map([], |r| Ok(LinkTarget { name: r.get(0)?, title: r.get(1)?, path: r.get(2)?, modified: r.get(3)?, locked: r.get(4)? }))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Display spellings of one note's tags (front matter and inline).
     pub fn tags_of(&self, path: &str) -> anyhow::Result<Vec<String>> {
         let mut st = self.db.prepare("SELECT tag_display FROM tags WHERE path=?")?;
@@ -966,5 +978,14 @@ mod tests {
         b.upsert("b.md", &nf("b"), &meta, Some("beta")).unwrap(); // "database is locked" with busy_timeout 0
         t.join().unwrap();
         assert_eq!(b.known().unwrap().len(), 2);
+    }
+    #[test] fn link_targets_lists_titles_and_aliases() {
+        let mut i = idx(&[("Nick.md", "---\naliases: [Nicholas]\n---\n", 7)]);
+        i.upsert("L.md.age", &NoteFile { title: "L".into(), encrypted: true }, &Meta { mtime: 9, size: 1, birth: 0 }, None).unwrap();
+        let mut got: Vec<_> = i.link_targets().unwrap().into_iter().map(|t| (t.name, t.title, t.modified, t.locked)).collect();
+        got.sort();
+        let m = i.title_modified("Nick.md").unwrap().unwrap().1;
+        let l = i.title_modified("L.md.age").unwrap().unwrap().1;
+        assert_eq!(got, vec![("L".into(), "L".into(), l, true), ("Nicholas".into(), "Nick".into(), m, false), ("Nick".into(), "Nick".into(), m, false)]);
     }
 }

@@ -13,12 +13,15 @@ import { TitleBar } from "./TitleBar";
 import { ConflictBanner } from "./ConflictBanner";
 import { UpdateBanner } from "./UpdateBanner";
 import { PreviewStrip } from "./PreviewStrip";
+import { TagBar } from "./TagBar";
 import { Divider } from "./Divider";
 import { TagPanel } from "./TagPanel";
 import { FilterLine } from "./FilterLine";
 import { FirstRun } from "./FirstRun";
 import { SettingsDialog } from "./SettingsDialog";
 import { InfoPanel } from "./InfoPanel";
+import { ExtractDialog } from "./ExtractDialog";
+import { MergeDialog } from "./MergeDialog";
 import { PassphraseDialog } from "./PassphraseDialog";
 
 // Layout per design README: vertical = header / list / divider / note; horizontal = header over [list | divider | note].
@@ -74,6 +77,7 @@ export function App({ controller, store }: { controller: Controller; store: Stor
         <UpdateBanner controller={controller} store={store} />
         <ConflictBanner controller={controller} store={store} />
         <PreviewStrip store={store} />
+        <TagBar controller={controller} store={store} />
         <EditorHost controller={controller} />
         <PreviewHost controller={controller} />
         {/* the editor stays mounted under the first-run screen */}
@@ -82,6 +86,8 @@ export function App({ controller, store }: { controller: Controller; store: Stor
       <InfoPanel controller={controller} store={store} />
       </div>
       <SettingsDialog controller={controller} store={store} />
+      <ExtractDialog controller={controller} store={store} />
+      <MergeDialog controller={controller} store={store} />
       <PassphraseDialog />
     </div>
   );

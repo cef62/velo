@@ -1,10 +1,12 @@
 import { Annotation, Compartment, Transaction } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
+import { completionStatus } from "@codemirror/autocomplete";
+import { writingCompletions, type CompleteSource } from "./complete";
 import { writingSetup } from "./editortheme";
 import { refreshRich, richMarkdown, type RichOpts } from "./richmd";
 import { dueInputRule, localToday, toggleTaskAt } from "./tasks";
 import { SaveController } from "./saver";
-import { frontMatterHide, ISOLATED, replaceAll, undoHistory } from "./fmhide";
+import { frontMatterHide, ISOLATED, replaceAll, stampSelection, undoHistory } from "./fmhide";
 import { stampChange } from "./frontmatter";
 import { openNote, saveNote, type NoteDoc, type NoteMeta } from "./api";
 
@@ -43,6 +45,8 @@ export interface Editor {
   appendLine(text: string): boolean;
   /** Replace [from, to) with `insert` as a user edit (undoable, autosaved); false if not editable. `isolate`: its own undo step, never joined to typing. */
   applyChange(change: { from: number; to: number; insert: string }, isolate?: boolean): boolean;
+  /** The main selection, or null when it is empty. */
+  getSelection(): { from: number; to: number; text: string } | null;
   /** Caret to the start of this 0-based line, scrolled into view (a hidden front matter clamps it to the body). */
   revealLine(line: number): void;
 }
@@ -60,6 +64,9 @@ export type EditorOpts = {
   /** Effective dates/tags/aliases after a successful save of the open note. */
   onMeta?: (meta: NoteMeta) => void;
   rich?: RichOpts;
+  /** `[[` autocomplete over these link targets. */
+  complete?: CompleteSource;
+  onFocus?: () => void;
 };
 
 // Marks the stamped-dates change of a save: not a user edit (no dirty, no new save).
@@ -86,7 +93,10 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       rich.of([]),
       fmHide.of(frontMatterHide(true)),
       editable.of(EditorView.editable.of(false)),
-      keymap.of([{ key: "Escape", run: () => (opts.onEscape?.(), true) }]),
+      opts.complete ? writingCompletions(opts.complete) : [],
+      // an open popup takes Escape itself: close it, keep focus in the editor
+      keymap.of([{ key: "Escape", run: (v) => completionStatus(v.state) === null && (opts.onEscape?.(), true) }]),
+      EditorView.domEventHandlers({ focus: () => opts.onFocus?.() }),
       EditorView.updateListener.of((u) => {
         if (!u.docChanged) return;
         opts.onChange?.(); // also fires on load so the preview follows note switches
@@ -119,8 +129,8 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       const c = stampChange(view.state.doc.toString(), block, sentBlock);
       if (!c) return;
       const changes = view.state.changes(c);
-      // assoc 1: a caret at 0 (empty note) ends up after an inserted block, on the same body character
-      view.dispatch({ changes, selection: view.state.selection.map(changes, 1), annotations: [stamped.of(true), Transaction.addToHistory.of(false)] });
+      // a caret at 0 (empty note) ends up after an inserted block, on the same body character
+      view.dispatch({ changes, selection: stampSelection(view.state.selection, changes), annotations: [stamped.of(true), Transaction.addToHistory.of(false)] });
     },
   });
 
@@ -192,6 +202,10 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       if (!view.state.facet(EditorView.editable)) return false;
       view.dispatch({ changes: change, ...(isolate && ISOLATED) });
       return true;
+    },
+    getSelection() {
+      const { from, to } = view.state.selection.main;
+      return from === to ? null : { from, to, text: view.state.sliceDoc(from, to) };
     },
     revealLine(line) {
       const doc = view.state.doc;

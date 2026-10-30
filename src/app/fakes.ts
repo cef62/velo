@@ -1,6 +1,6 @@
 // Test fakes for the controller: in-memory backend, editor, preview and UI port. Tests only.
 import { vi } from "vitest";
-import type { Connections, Hit, NoteDoc, NoteMeta, Page, RenameResult, RevisionInfo, Settings, TagCount, TaskView } from "../api";
+import type { Connections, Hit, MergeResult, NoteDoc, NoteMeta, Page, RenameResult, RevisionInfo, Settings, TagCount, TaskView } from "../api";
 import type { Editor } from "../editor";
 import type { Preview } from "../preview";
 import type { Api } from "./controller";
@@ -40,6 +40,12 @@ export function fakeApi(notes: Record<string, string> = {}) {
     }),
     listTags: vi.fn(async (): Promise<TagCount[]> => []),
     listTitles: vi.fn(async () => Object.keys(notes)),
+    listLinkTargets: vi.fn(async () => Object.keys(notes).map((title) => ({ name: title, title, path: `/n/${title}.md`, modified: 0, locked: false }))),
+    createFromSelection: vi.fn(async (title: string, text: string) => {
+      if (title in notes) throw "already-exists";
+      notes[title] = text;
+      return `/n/${title}.md`;
+    }),
     openNote: vi.fn(async (path: string) => docOf(path)),
     openOrCreate: vi.fn(async (title: string) => {
       const created = !(title in notes);
@@ -54,6 +60,7 @@ export function fakeApi(notes: Record<string, string> = {}) {
     captureDone: vi.fn(async (_hide: boolean) => {}),
     setBadge: vi.fn(async (_c: number) => {}),
     renameNote: vi.fn(async (_p: string, _t: string, _r: boolean): Promise<RenameResult> => { throw "unset"; }),
+    mergeNotes: vi.fn(async (_s: string, _t: string): Promise<MergeResult> => { throw "unset"; }),
     backlinkCount: vi.fn(async () => 0),
     linkedFromCount: vi.fn(async (_p: string) => 0),
     connections: vi.fn(async (path: string): Promise<Connections> => ({ ...emptyConnections, centre: { ...emptyConnections.centre, path, title: path.slice(3, -3) } })),
@@ -141,6 +148,10 @@ export class FakeEditor implements Editor {
     this.text = this.text.slice(0, c.from) + c.insert + this.text.slice(c.to);
     this.dirty = true;
     return true;
+  }
+  selection: { from: number; to: number } | null = null;
+  getSelection() {
+    return this.selection && { ...this.selection, text: this.text.slice(this.selection.from, this.selection.to) };
   }
   appended: string[] = [];
   appendLine(text: string) {

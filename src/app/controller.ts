@@ -1,5 +1,5 @@
 import type * as ApiModule from "../api";
-import type { AgentReply, AgentWrite, GraphNode, Hit, Mention, NoteDoc, Settings, TagCount, TaskItem } from "../api";
+import type { AgentReply, AgentWrite, GraphNode, Hit, LinkTarget, MergeResult, Mention, NoteDoc, Settings, TagCount, TaskItem } from "../api";
 // Types only: editor.ts loads editortheme.ts, which touches `window` at import time (tests run in node).
 import type { Editor, EditorOpts } from "../editor";
 import type { Preview } from "../preview";
@@ -12,15 +12,19 @@ import { History } from "../history";
 import { errText } from "../errtext";
 import { enterAction, fold, moveSelection } from "../search";
 import { extractTags, pruneSelection, toggleTag } from "../tags";
-import { stripFrontMatter, wordCount } from "../frontmatter";
+import { frontMatterRange, stripFrontMatter, wordCount } from "../frontmatter";
 import { formatBinding, matches, resolve, type Action, type GLOBAL_ACTIONS } from "../shortcuts";
 import { isMenuKey, linkFor, menuModel, type MenuAction } from "../contextmenu";
 import { isLockedPath } from "../passphrase";
 import { localToday } from "../tasks";
+import { prepare, rank, type Ranked } from "../fuzzy";
+import { extractTitle } from "../writing";
 import type { MenuSpec, UiPort } from "./ports";
 import { noInfo, type AppState, type Store } from "./store";
 
 export type Api = typeof ApiModule;
+
+export const INVALID_TITLE = 'A title can\'t contain / \\ : * ? " < > | or start with a dot';
 
 const connectionsSortOf = (v: unknown): Settings["connections_sort"] => (v === "created" || v === "updated" ? v : "ring");
 
@@ -52,6 +56,8 @@ export class Controller {
   // One-shot notice (e.g. keychain unavailable) that survives the next err reset.
   protected notice = "";
   protected titles = new Set<string>(); // folded titles of all notes, for wikilink existence
+  protected linkIndex: Ranked<LinkTarget>[] = []; // [[ autocomplete
+  protected tagIndex: Ranked<TagCount>[] = []; // # autocomplete
   protected readonly newShow = latest();
   protected searchSeq = 0;
   protected searching: Promise<void> = Promise.resolve(); // latest list reset, awaited by Enter so it never acts on stale rows
@@ -98,6 +104,8 @@ export class Controller {
         this.textInfo();
         void this.loadInfo();
       },
+      complete: { links: () => this.linkIndex, tags: () => this.tagIndex, onCreate: (t) => void this.createLinked(t) },
+      onFocus: () => void this.loadLinkTargets(),
     };
   }
 
@@ -201,6 +209,7 @@ export class Controller {
   }
 
   async refreshTitles() {
+    void this.loadLinkTargets();
     try {
       this.titles = new Set((await this.api.listTitles()).map(fold));
       this.preview?.refresh();
@@ -208,6 +217,146 @@ export class Controller {
     } catch (e) {
       console.error("title cache refresh failed", e);
     }
+  }
+
+  async loadLinkTargets() {
+    try {
+      this.linkIndex = prepare(await this.api.listLinkTargets(), (t) => t.name);
+    } catch (e) {
+      console.error("link target refresh failed", e);
+    }
+  }
+
+  /** The Create row of [[ autocomplete: an empty note; the open note stays open. */
+  async createLinked(title: string) {
+    try {
+      await this.api.createFromSelection(title, "");
+    } catch (e) {
+      return this.setErr(e === "already-exists" ? "A note with this title exists" : e === "invalid-title" ? INVALID_TITLE : errText(e));
+    }
+    void this.refreshTitles();
+    await this.runSearch(false);
+  }
+
+  protected extractFrom: { path: string; from: number; to: number; text: string } | null = null;
+
+  /** Move to new note: ask for a title for the selection. Nothing changes until commitExtract. */
+  startExtract() {
+    const path = this.editor.currentPath();
+    const sel = path ? this.editor.getSelection() : null;
+    const s = this.store.get();
+    if (!path) return;
+    if (s.encrypted) return this.setErr("Can't move text out of a locked note");
+    if (this.busy || s.indexing) return this.setErr(BUSY_MSG);
+    if (!sel) return this.setErr("Select the text to move first");
+    if (sel.from < (frontMatterRange(this.editor.getText())?.to ?? 0)) return this.setErr("Select text below the front matter");
+    this.extractFrom = { path, ...sel };
+    this.store.set({ extract: { title: extractTitle(sel.text), err: "" } });
+  }
+
+  /** The dialog finished: a title on Enter, null on Cancel. The note is created first; the source changes only after that. */
+  async commitExtract(input: string | null) {
+    const from = this.extractFrom;
+    if (!from || input === null) {
+      this.extractFrom = null;
+      return this.store.set({ extract: null });
+    }
+    const title = input.trim();
+    const fail = (err: string) => this.store.set({ extract: { title: input, err } });
+    if (!title) return fail("Title required");
+    try {
+      await this.api.createFromSelection(title, from.text);
+    } catch (e) {
+      return fail(e === "already-exists" ? "A note with this title exists" : e === "invalid-title" ? INVALID_TITLE : errText(e));
+    }
+    this.extractFrom = null;
+    this.store.set({ extract: null });
+    const same = this.editor.currentPath() === from.path && this.editor.getText().slice(from.from, from.to) === from.text;
+    if (!same || !this.editor.applyChange({ from: from.from, to: from.to, insert: `[[${title}]]` }, true))
+      this.setErr(`Created “${title}”; the selection changed, so the text was left in place`);
+    void this.refreshTitles();
+    await this.runSearch(false);
+    this.editor.focus();
+  }
+
+  /** Merge into…: the open note is the source. Saved first, so the backend merges what is on screen. */
+  async startMerge() {
+    const path = this.editor.currentPath();
+    const s = this.store.get();
+    if (!path) return this.setErr("Open a note to merge");
+    if (s.encrypted) return this.setErr("Can't merge a locked note");
+    if (this.busy || s.indexing) return this.setErr(BUSY_MSG);
+    if (!(await this.editor.flush())) return this.setErr("Can't merge: unsaved changes couldn't be saved");
+    this.store.set({ merge: { source: path, sourceTitle: s.title, query: "", target: null, err: "" } });
+  }
+
+  /** Plain notes other than the source, by title (aliases left out), most recently modified first on ties. */
+  mergeCandidates(query: string): LinkTarget[] {
+    const source = this.store.get().merge?.source;
+    const rows = this.linkIndex.filter((r) => r.item.name === r.item.title && !r.item.locked && r.item.path !== source);
+    return rank(fold(query), rows, (a, b) => b.modified - a.modified);
+  }
+
+  setMergeQuery(query: string) {
+    this.store.set((s) => (s.merge ? { merge: { ...s.merge, query, err: "" } } : {}));
+  }
+
+  async chooseMergeTarget(t: LinkTarget) {
+    const m = this.store.get().merge;
+    if (!m) return;
+    try {
+      const count = await this.api.backlinkCount(m.sourceTitle);
+      this.store.set((s) => (s.merge ? { merge: { ...s.merge, target: { path: t.path, title: t.title, count }, err: "" } } : {}));
+    } catch (e) {
+      this.store.set((s) => (s.merge ? { merge: { ...s.merge, err: errText(e) } } : {}));
+    }
+  }
+
+  backMerge() {
+    this.store.set((s) => (s.merge && !s.merge.pending ? { merge: { ...s.merge, target: null, err: "" } } : {}));
+  }
+
+  cancelMerge() {
+    if (this.store.get().merge?.pending) return; // the merge result must still land in the dialog
+    this.store.set({ merge: null });
+  }
+
+  /** Same detach order as deleteNote: save, then drop the editor's hold on source/target so autosave can't overwrite the merge. */
+  async commitMerge() {
+    const m = this.store.get().merge;
+    if (!m?.target || this.busy) return;
+    const target = m.target;
+    const patch = (p: { err?: string; pending: boolean }) => this.store.set((s) => (s.merge ? { merge: { ...s.merge, ...p } } : {}));
+    const fail = (err: string) => patch({ err, pending: false });
+    const open = this.editor.currentPath();
+    let reopen: string | null = null;
+    let r: MergeResult | null = null;
+    this.busy = true;
+    patch({ pending: true });
+    try {
+      if (open === m.source || open === target.path) {
+        if (!(await this.editor.flush())) return fail("Can't merge: unsaved changes couldn't be saved");
+        this.editor.discard();
+        this.closedDoc();
+        reopen = open;
+      }
+      r = await this.api.mergeNotes(m.source, target.path);
+      reopen = null;
+      this.history.remove(m.source);
+    } catch (e) {
+      fail(e === "locked" ? "Can't merge a locked note" : e === "same-note" ? "Pick another note" : errText(e));
+    } finally {
+      this.busy = false;
+      patch({ pending: false });
+    }
+    if (reopen) await this.show(reopen); // merge failed after detaching: put the note back
+    if (!r) return;
+    this.store.set({ merge: null });
+    await this.show(r.path); // always from disk: the link rewrite may have written the target again
+    if (r.trash_error) this.setErr(`Merged, but “${m.sourceTitle}” couldn't be moved to the Trash: ${r.trash_error}`);
+    await this.runSearch(false);
+    void this.refreshTitles();
+    void this.refreshTags();
   }
 
   focusSearch() {
@@ -871,6 +1020,7 @@ export class Controller {
     }
     if (renamed) {
       await this.runSearch(false);
+      void this.refreshTitles();
       void this.refreshTags();
     }
     this.editor.focus();
@@ -1119,6 +1269,7 @@ export class Controller {
     const selected = this.store.get().selectedTags;
     const kept = pruneSelection(selected, tags);
     const pruned = kept.length !== selected.length;
+    this.tagIndex = prepare(tags, (t) => t.tag);
     this.store.set({ tags, selectedTags: kept });
     if (pruned) {
       this.filterChanged("highlight");
@@ -1279,6 +1430,7 @@ export class Controller {
         copy_link: () => { const p = open(); if (p) return this.ui.copyText(linkFor(this.store.get().title)); },
         reveal: () => { const p = open(); if (p) return this.ui.reveal(p); },
         delete_note: () => this.deleteNote(),
+        merge_note: () => this.startMerge(),
       };
       const { keys, isMac } = this.store.get();
       const items: MenuSpec[] = menuModel({ encrypted: h.encrypted, platform: this.opts.platform, keys, isMac }).map((m) =>
@@ -1406,6 +1558,8 @@ export class Controller {
     toggle_rich: () => void this.toggleStyle(),
     toggle_layout: () => void this.toggleLayout(),
     daily_note: () => void this.openTitle(localToday(), "enter"),
+    extract_note: () => this.startExtract(),
+    merge_note: () => void this.startMerge(),
     toggle_tasks: () => this.setPaneMode(this.store.get().paneMode === "tasks" ? "notes" : "tasks"),
     toggle_connections: () => this.setPaneMode(this.store.get().paneMode === "connections" ? "notes" : "connections"),
   };

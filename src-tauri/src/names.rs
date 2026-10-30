@@ -23,6 +23,11 @@ pub fn title_to_stem(title: &str) -> String {
     if s.is_empty() { "Untitled".into() } else { s }
 }
 
+/// A title whose file name is the title itself, so a `[[link]]` to it resolves.
+pub fn title_ok(title: &str) -> bool {
+    !title.trim().is_empty() && title_to_stem(title) == title.trim()
+}
+
 pub fn note_path(dir: &Path, title: &str, encrypted: bool) -> PathBuf {
     let ext = if encrypted { "md.age" } else { "md" };
     dir.join(format!("{}.{ext}", title_to_stem(title)))
@@ -56,4 +61,8 @@ mod tests {
         assert!(parse_note_file(Path::new("/n/img.png")).is_none());
     }
     #[test] fn note_path_ext() { assert_eq!(note_path(Path::new("/n"), "a/b", true), PathBuf::from("/n/a-b.md.age")); }
+    #[test] fn title_ok_rules() {
+        assert!(title_ok("Plan") && title_ok(" Plan "));
+        for bad in ["a/b", ".x", "   ", "a:b"] { assert!(!title_ok(bad), "{bad}"); }
+    }
 }

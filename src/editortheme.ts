@@ -34,6 +34,13 @@ const writingTheme = EditorView.theme({
   ".cm-selectionBackground, &.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground": { background: v("selection-idle") },
   ".cm-selectionMatch": { background: v("accent-halo") },
   ".cm-panels": { background: v("chrome"), color: v("fg"), borderColor: v("divider") },
+  // Autocomplete popup; `&.cm-editor` outranks the base theme's &light/&dark row colors.
+  "&.cm-editor .cm-tooltip.cm-tooltip-autocomplete": { background: v("panel"), color: v("fg"), border: `1px solid ${v("border")}`, borderRadius: "6px", overflow: "hidden" },
+  "&.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul": { fontFamily: "inherit", maxHeight: "20em" },
+  "&.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li": { padding: "3px 10px", display: "flex" },
+  "&.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]": { background: v("selection"), color: v("selection-fg") },
+  ".cm-completionDetail": { color: v("fg-muted"), fontStyle: "normal", marginLeft: "auto", paddingLeft: "1.5em" }, // note count on the right
+  "&.cm-editor .cm-tooltip-autocomplete li[aria-selected] .cm-completionDetail": { color: v("selection-muted") },
 });
 
 const darkMq = window.matchMedia?.("(prefers-color-scheme: dark)");

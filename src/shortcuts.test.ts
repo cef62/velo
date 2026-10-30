@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import settingsRs from "../src-tauri/src/settings.rs?raw";
-import { DEFAULTS, GLOBAL_ACTIONS, LABELS, overrides, eventToBinding, formatBinding, isAltGraph, matches, normalizeBinding, resolve, validateBinding } from "./shortcuts";
+import { DEFAULTS, GLOBAL_ACTIONS, LABELS, NONE, overrides, eventToBinding, formatBinding, isAltGraph, matches, normalizeBinding, resolve, validateBinding } from "./shortcuts";
 
 const ev = (code: string, m: Partial<Record<"metaKey" | "ctrlKey" | "altKey" | "shiftKey", boolean>> = {}) =>
   ({ code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...m });
@@ -100,6 +100,19 @@ test("toggle_connections defaults to Mod+Shift+KeyC and does not clash", () => {
   const all = Object.values(DEFAULTS).filter((b) => b !== "none");
   expect(new Set(all).size).toBe(all.length);
   expect(validateBinding(DEFAULTS, "toggle_connections", DEFAULTS.toggle_connections)).toEqual({ ok: true });
+});
+
+test("extract_note defaults to Mod+Shift+KeyN and does not clash", () => {
+  expect(DEFAULTS.extract_note).toBe("Mod+Shift+KeyN");
+  expect(LABELS.extract_note).toBe("Move to new note");
+  const all = Object.values(DEFAULTS).filter((b) => b !== "none");
+  expect(new Set(all).size).toBe(all.length);
+});
+
+test("merge_note has no default", () => {
+  expect(DEFAULTS.merge_note).toBe(NONE);
+  expect(LABELS.merge_note).toBe("Merge into…");
+  expect(formatBinding(DEFAULTS.merge_note, true)).toBe("—");
 });
 
 test("upgrade: a saved binding equal to a new default wins, the new action gets none", () => {

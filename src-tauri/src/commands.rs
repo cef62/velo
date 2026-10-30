@@ -5,7 +5,7 @@ use crate::revisions::RevisionInfo;
 use crate::settings::{self, GlobalAction, Settings};
 use crate::store::{self, SaveResult};
 use crate::tasks::TaskView;
-use crate::vault::{NoteDoc, RenameResult, Vault};
+use crate::vault::{MergeResult, NoteDoc, RenameResult, Vault};
 use crate::watch;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -344,6 +344,17 @@ pub fn list_titles(st: State<'_, AppState>) -> Res<Vec<String>> {
     with_vault(&st, |v, _| v.titles())
 }
 
+#[tauri::command(async)]
+pub fn list_link_targets(st: State<'_, AppState>) -> Res<Vec<crate::index::LinkTarget>> {
+    with_vault(&st, |v, _| v.link_targets())
+}
+
+#[tauri::command(async)]
+pub fn create_from_selection(st: State<'_, AppState>, title: String, text: String) -> Res<String> {
+    let fm = st.settings.lock().unwrap().write_front_matter;
+    with_vault(&st, |v, _| v.create_from_selection(&title, &text, fm))
+}
+
 /// Longest wait for an agent's backend write to the note being opened (it is then opened as it is).
 const AGENT_HOLD_MAX: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -512,6 +523,12 @@ pub fn agent_write_claim(agent: State<'_, AgentState>, id: u64) -> bool {
 #[tauri::command]
 pub fn agent_write_done(agent: State<'_, AgentState>, id: u64, result: serde_json::Value) {
     agent.editors.done(id, result);
+}
+
+#[tauri::command(async)]
+pub fn merge_notes(st: State<'_, AppState>, source: String, target: String) -> Res<MergeResult> {
+    let fm = st.settings.lock().unwrap().write_front_matter;
+    with_vault(&st, |v, _| v.merge_notes(&source, &target, fm))
 }
 
 #[tauri::command(async)]

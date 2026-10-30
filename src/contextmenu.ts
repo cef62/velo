@@ -1,6 +1,6 @@
 import type { Action } from "./shortcuts";
 
-export type MenuAction = "open" | "rename" | "toggle_lock" | "copy_link" | "reveal" | "delete_note" | "link_it";
+export type MenuAction = "open" | "rename" | "toggle_lock" | "copy_link" | "reveal" | "delete_note" | "link_it" | "merge_note";
 export type MenuEntry = { id: MenuAction; text: string; accelerator?: string } | "separator";
 
 const MODS: Record<string, string> = { Mod: "CmdOrCtrl", Ctrl: "Ctrl", Alt: "Alt", Shift: "Shift" };
@@ -35,6 +35,7 @@ export function menuModel(o: {
   return [
     { id: "open", text: "Open in editor" },
     { id: "rename", text: "Rename…", ...acc("rename") },
+    ...(o.encrypted ? [] : [{ id: "merge_note" as const, text: "Merge into…", ...acc("merge_note") }]),
     { id: "toggle_lock", text: o.encrypted ? "Unlock" : "Lock", ...acc("toggle_lock") },
     { id: "copy_link", text: "Copy link" },
     { id: "reveal", text: REVEAL[o.platform] },

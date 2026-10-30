@@ -20,7 +20,6 @@ export function Divider({ store, app }: { store: Store<AppState>; app: React.Ref
     restore.current = mountDivider(
       d,
       a,
-      d.previousElementSibling as HTMLElement,
       a.querySelector<HTMLElement>("[data-titlebar]") ?? undefined,
       () => rowHeight(store.get().fontSize, store.get().layout),
       ctl.signal,

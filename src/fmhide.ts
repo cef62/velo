@@ -1,4 +1,4 @@
-import { Compartment, EditorSelection, EditorState, StateField, Transaction, type Extension, type Text } from "@codemirror/state";
+import { type ChangeSet, Compartment, EditorSelection, EditorState, StateField, Transaction, type Extension, type Text } from "@codemirror/state";
 import { history, isolateHistory } from "@codemirror/commands";
 import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
 import { frontMatterRange } from "./frontmatter";
@@ -66,3 +66,10 @@ export function frontMatterHide(hidden: boolean): Extension {
 
 /** Transaction spec that keeps a change out of the history event of the typing before it, so one undo reverts only it. */
 export const ISOLATED = { annotations: isolateHistory.of("full"), userEvent: "input.link" };
+
+/** The caret for a save's front-matter stamp: only when assoc 1 moves it (a caret at 0 before an inserted block).
+ *  Any explicit selection resets an open autocomplete, so the usual stamp sets none. */
+export function stampSelection(sel: EditorSelection, changes: ChangeSet): EditorSelection | undefined {
+  const after = sel.map(changes, 1);
+  return after.eq(sel.map(changes)) ? undefined : after;
+}

@@ -2,13 +2,18 @@ import type { TagCount } from "./api";
 import { fold } from "./search";
 
 // Mirrors Rust text::extract_tags: '#' at line start or after whitespace/'(', body [alphanumeric _ - /], >=1 letter.
-const BODY = /^[\p{Alphabetic}\p{N}_\-/]+/u;
+export const BODY = /^[\p{Alphabetic}\p{N}_\-/]+/u;
+
+/** True when a '#' at src[i] is in tag position: line start, whitespace or '(' before it. */
+export const tagStartOk = (src: string, i: number): boolean => {
+  const prev = src[i - 1];
+  return prev === undefined || prev === "(" || /\s/.test(prev);
+};
 
 /** The tag whose '#' is at src[i], or null (prefix rule, char class, at least one letter). */
 export function readTag(src: string, i: number): string | null {
   if (src[i] !== "#") return null;
-  const prev = src[i - 1];
-  if (prev !== undefined && prev !== "(" && !/\s/.test(prev)) return null;
+  if (!tagStartOk(src, i)) return null;
   const tag = BODY.exec(src.slice(i + 1))?.[0];
   return tag && /\p{Alphabetic}/u.test(tag) ? tag : null;
 }
@@ -42,3 +47,7 @@ export const toggleTag = (sel: string[], tag: string): string[] =>
 export const pruneSelection = (sel: string[], available: TagCount[]): string[] =>
   sel.filter((s) => available.some((a) => fold(a.tag) === fold(s)));
 
+
+/** Chips for the tag bar: note tags in order, flagged when in the active filter. */
+export const tagBarItems = (tags: string[], selected: string[]): { tag: string; selected: boolean }[] =>
+  tags.map((tag) => ({ tag, selected: selected.some((s) => fold(s) === fold(tag)) }));

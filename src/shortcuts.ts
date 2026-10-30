@@ -2,7 +2,7 @@
 // Mod = ⌘ on macOS, Ctrl elsewhere. Ctrl = physical Control (macOS only).
 export type Action =
   | "focus_search" | "toggle_preview" | "rename" | "toggle_lock"
-  | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "delete_note" | "toggle_tags" | "toggle_rich" | "toggle_layout" | "toggle_window" | "toggle_info" | "toggle_front_matter" | "toggle_tasks" | "toggle_connections" | "capture" | "daily_note";
+  | "lock_all" | "settings" | "toggle_sort" | "back" | "forward" | "delete_note" | "toggle_tags" | "toggle_rich" | "toggle_layout" | "toggle_window" | "toggle_info" | "toggle_front_matter" | "toggle_tasks" | "toggle_connections" | "capture" | "daily_note" | "extract_note" | "merge_note";
 
 /** Handled by the OS-level shortcut in the backend, never by the in-app key handler. */
 export const GLOBAL_ACTIONS = ["toggle_window", "capture"] as const;
@@ -31,6 +31,8 @@ export const DEFAULTS: Record<Action, string> = {
   toggle_connections: "Mod+Shift+KeyC",
   capture: "Mod+Alt+Shift+KeyN", // canonical modifier order, as recorded and as resolve() normalizes saved values
   daily_note: "Mod+Shift+KeyD",
+  extract_note: "Mod+Shift+KeyN",
+  merge_note: NONE,
 };
 
 export const LABELS: Record<Action, string> = {
@@ -54,6 +56,8 @@ export const LABELS: Record<Action, string> = {
   toggle_connections: "Connections",
   capture: "Quick capture (global)",
   daily_note: "Today's daily note",
+  extract_note: "Move to new note",
+  merge_note: "Merge into…",
 };
 
 type Ev = Pick<KeyboardEvent, "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">;

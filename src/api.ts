@@ -8,6 +8,7 @@ export type SaveResult = { kind: "saved"; hash: string; front_matter: string | n
 export type TaskItem = { path: string; title: string; line: number; text: string; due: string | null; done: boolean; done_on: string | null; line_text: string };
 export type TaskView = { overdue: TaskItem[]; today: TaskItem[]; upcoming: TaskItem[]; no_date: TaskItem[]; done: TaskItem[]; due_count: number };
 export type RenameResult = { path: string; rewritten: number };
+export type MergeResult = { path: string; rewritten: number; trash_error: string | null };
 export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; header_labels: boolean; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean; capture_target: "inbox" | "daily"; inbox_title: string; agent_access: boolean; connections_sort: "ring" | "created" | "updated" };
 
 export const getSettings = () => invoke<Settings>("get_settings");
@@ -17,6 +18,11 @@ export type TagCount = { tag: string; count: number };
 export const search = (query: string, sort: "modified" | "title", offset: number, tags: string[], noLinks: boolean) => invoke<Page>("search", { query, sort, offset, tags, noLinks });
 export const listTags = () => invoke<TagCount[]>("list_tags");
 export const listTitles = () => invoke<string[]>("list_titles");
+/** `name == title` rows are titles, the others aliases. */
+export type LinkTarget = { name: string; title: string; path: string; modified: number; locked: boolean };
+export const listLinkTargets = () => invoke<LinkTarget[]>("list_link_targets");
+/** Creates the note `title` holding `text`; rejects with "already-exists" or "invalid-title". */
+export const createFromSelection = (title: string, text: string) => invoke<string>("create_from_selection", { title, text });
 export const openNote = (path: string) => invoke<NoteDoc>("open_note", { path });
 /** `created`: the file did not exist before this call. */
 export const openOrCreate = (title: string) => invoke<NoteDoc & { created: boolean }>("open_or_create", { title });
@@ -46,6 +52,8 @@ export const lockNote = (path: string) => invoke<string>("lock_note", { path });
 export const unlockNote = (path: string) => invoke<string>("unlock_note", { path });
 export const lockAll = () => invoke<void>("lock_all");
 export const deleteNote = (path: string) => invoke<void>("delete_note", { path });
+/** Rejects with "same-note" | "locked" | "conflict" | another backend error. */
+export const mergeNotes = (source: string, target: string) => invoke<MergeResult>("merge_notes", { source, target });
 export type RevisionInfo = { id: string; ts: number; size: number; summary?: string | null; agent: boolean };
 export const listRevisions = (path: string) => invoke<RevisionInfo[]>("list_revisions", { path });
 export const readRevision = (path: string, id: string) => invoke<string>("read_revision", { path, id });

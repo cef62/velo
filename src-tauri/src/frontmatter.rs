@@ -193,15 +193,17 @@ pub fn stamp(text: &str, now: DateTime<FixedOffset>, created_fallback: DateTime<
     out
 }
 
-fn tag_key(s: &str) -> String {
-    crate::text::fold(unquote(s).trim_start_matches('#'))
+/// An item's match key under the list `key`: folded; for `tags` a leading `#` is ignored too.
+fn item_key(key: &str, s: &str) -> String {
+    let v = unquote(s);
+    crate::text::fold(if key == "tags" { v.trim_start_matches('#') } else { &v })
 }
 
-/// The items of the `tags` row `rows[k]`, the row after its list, and whether it is a one-line (flow) value.
-fn tag_row<'a>(rows: &[&'a str], k: usize) -> Result<(Vec<&'a str>, usize, bool), String> {
+/// The items of the `key` row `rows[k]`, the row after its list, and whether it is a one-line (flow) value.
+fn list_row<'a>(rows: &[&'a str], k: usize, key: &str) -> Result<(Vec<&'a str>, usize, bool), String> {
     let row = rows[k].trim_end_matches(['\n', '\r']);
-    let v = row[row.find(':').expect("a tags row") + 1..].trim();
-    let unsupported = || Err("unsupported tags: layout".to_string());
+    let v = row[row.find(':').expect("a list row") + 1..].trim();
+    let unsupported = || Err(format!("unsupported {key}: layout"));
     Ok(if v.starts_with('[') {
         // only a single-line list with nothing after `]`
         // one list ending the line; brackets and `#` only inside quoted items; an unclosed quote: never rewritten
@@ -226,28 +228,42 @@ fn tag_row<'a>(rows: &[&'a str], k: usize) -> Result<(Vec<&'a str>, usize, bool)
 /// uses stays (flow or block list). A new key is a flow list `tags: [a, b]`; with no block at all one is created only
 /// if `create_block`. Several `tags` rows are folded into the first one when a tag changes. `None` when nothing changes.
 pub fn set_tags(text: &str, add: &[String], remove: &[String], create_block: bool) -> Result<Option<String>, String> {
+    set_list(text, "tags", add, remove, create_block)
+}
+
+/// Adds `add` to the `aliases` key (matched with `fold`), as `set_tags` does for tags; a block is always created.
+pub fn add_aliases(text: &str, add: &[String]) -> Result<Option<String>, String> {
+    set_list(text, "aliases", add, &[], true)
+}
+
+/// `set_tags` for any top-level list `key_name`; new items are written through `flow_item`.
+fn set_list(text: &str, key_name: &str, add: &[String], remove: &[String], create_block: bool) -> Result<Option<String>, String> {
+    let tag_key = |s: &str| item_key(key_name, s);
+    let unsupported = || Err(format!("unsupported {key_name}: layout"));
     let rm: Vec<String> = remove.iter().map(|t| tag_key(t)).collect();
     let mut adds: Vec<&str> = vec![];
-    for t in add.iter().map(|t| t.trim().trim_start_matches('#')).filter(|t| !t.is_empty()) {
+    for t in add.iter().map(|t| if key_name == "tags" { t.trim().trim_start_matches('#') } else { t.trim() }).filter(|t| !t.is_empty()) {
         if !adds.iter().any(|a| tag_key(a) == tag_key(t)) { adds.push(t); }
     }
+    let new_flow = |items: &[&str]| items.iter().map(|i| flow_item(i)).collect::<Vec<_>>().join(", ");
     let Some((close, _)) = block(text) else {
         if adds.is_empty() || !create_block { return Ok(None); }
-        return Ok(Some(format!("---\ntags: [{}]\n---\n{text}", adds.join(", "))));
+        let nl = if text.contains("\r\n") { "\r\n" } else { "\n" };
+        return Ok(Some(format!("---{nl}{key_name}: [{}]{nl}---{nl}{text}", new_flow(&adds))));
     };
     let first = text.find('\n').map_or(0, |i| i + 1);
     let nl = if text[..first].ends_with("\r\n") { "\r\n" } else { "\n" };
     let rows: Vec<&str> = text[first..close].split_inclusive('\n').collect();
     let strip = |r: &str| r.trim_end_matches(['\n', '\r']).to_string();
-    let Some(k) = rows.iter().position(|r| key_rest(r.trim_end_matches(['\n', '\r']), "tags").is_some()) else {
+    let Some(k) = rows.iter().position(|r| key_rest(r.trim_end_matches(['\n', '\r']), key_name).is_some()) else {
         if adds.is_empty() { return Ok(None); }
-        return Ok(Some(format!("{}tags: [{}]{nl}{}", &text[..close], adds.join(", "), &text[close..])));
+        return Ok(Some(format!("{}{key_name}: [{}]{nl}{}", &text[..close], new_flow(&adds), &text[close..])));
     };
     let row = strip(rows[k]);
     let key = &row[..row.find(':').expect("key_rest matched") + 1]; // the note's own spelling, kept
-    let (mut items, end, flow) = tag_row(&rows, k)?;
+    let (mut items, end, flow) = list_row(&rows, k, key_name)?;
     // more `tags` rows (an older velo added one under `Tags:`): fold them into this one, as a flow list
-    let more: Vec<usize> = (end..rows.len()).filter(|&j| key_rest(rows[j].trim_end_matches(['\n', '\r']), "tags").is_some()).collect();
+    let more: Vec<usize> = (end..rows.len()).filter(|&j| key_rest(rows[j].trim_end_matches(['\n', '\r']), key_name).is_some()).collect();
     if !more.is_empty() {
         let eol = if rows[k].ends_with("\r\n") { "\r\n" } else { "\n" };
         let mut skip = vec![(k, end)];
@@ -256,14 +272,14 @@ pub fn set_tags(text: &str, add: &[String], remove: &[String], create_block: boo
         // folded row
         let gap = |e: usize| rows[e..].iter().map(|l| l.trim_end_matches(['\n', '\r'])).find(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#')).is_some_and(|l| l.starts_with([' ', '\t', '-']));
         if gap(end) {
-            return Err("unsupported tags: layout".into());
+            return unsupported();
         }
         let as_flow = |it: Vec<&str>, flow: bool| it.into_iter().map(|i| if flow { i.to_string() } else { flow_item(i) }).collect::<Vec<_>>();
         let mut all: Vec<String> = as_flow(std::mem::take(&mut items), flow);
         for j in more {
-            let (it, e, f) = tag_row(&rows, j)?;
+            let (it, e, f) = list_row(&rows, j, key_name)?;
             if gap(e) {
-                return Err("unsupported tags: layout".into());
+                return unsupported();
             }
             all.extend(as_flow(it, f));
             skip.push((j, e));
@@ -280,7 +296,7 @@ pub fn set_tags(text: &str, add: &[String], remove: &[String], create_block: boo
         }
         folded.push_str(&text[close..]);
         // no tag change: leave the note as it is
-        return set_tags(&folded, add, remove, create_block); // None when no tag changes: the note stays as it is
+        return set_list(&folded, key_name, add, remove, create_block); // None when no tag changes: the note stays as it is
     }
     let before = items.len();
     let keep: Vec<bool> = items.iter().map(|i| !rm.contains(&tag_key(i))).collect();
@@ -292,12 +308,12 @@ pub fn set_tags(text: &str, add: &[String], remove: &[String], create_block: boo
     let eol = if rows[k].ends_with("\r\n") { "\r\n" } else if rows[k].ends_with('\n') { "\n" } else { nl };
     let mut out = String::new();
     if flow || (items.is_empty() && fresh.is_empty()) {
-        items.extend(fresh);
-        out.push_str(&format!("{key} [{}]{eol}", items.join(", "))); // flow items (or none): their own bytes
+        let all: Vec<String> = items.into_iter().map(str::to_string).chain(fresh.iter().map(|t| flow_item(t))).collect();
+        out.push_str(&format!("{key} [{}]{eol}", all.join(", "))); // existing flow items (or none): their own bytes
     } else {
         out.push_str(rows[k]);
         let indent: String = rows.get(k + 1).map_or("  ".into(), |l| l.chars().take_while(|c| *c == ' ').collect());
-        let owned: Vec<String> = fresh.iter().map(|t| format!("{indent}- {t}{eol}")).collect();
+        let owned: Vec<String> = fresh.iter().map(|t| format!("{indent}- {}{eol}", flow_item(t))).collect();
         kept_rows.extend(owned.iter().map(String::as_str));
         kept_rows.iter().for_each(|r| out.push_str(r));
     }
@@ -544,5 +560,25 @@ mod tests {
         }
         assert_eq!(set_tags("---\ntags: ~\n---\n", &["x".into()], &[], true).unwrap().unwrap(), "---\ntags: [x]\n---\n");
         assert_eq!(set_tags("---\ntags: null\n---\n", &[], &["x".into()], true), Ok(None));
+    }
+
+    #[test]
+    fn add_aliases_flow_block_and_new() {
+        let add = ["B".to_string(), "a".to_string()];
+        assert_eq!(add_aliases("---\naliases: [a]\n---\nx", &add).unwrap().unwrap(), "---\naliases: [a, B]\n---\nx");
+        assert_eq!(add_aliases("---\naliases:\n  - a\n---\nx", &add).unwrap().unwrap(), "---\naliases:\n  - a\n  - B\n---\nx");
+        assert_eq!(add_aliases("x", &add).unwrap().unwrap(), "---\naliases: [B, a]\n---\nx");
+        assert_eq!(add_aliases("---\naliases: [A, b]\n---\n", &add), Ok(None), "folded, case-insensitive");
+        assert_eq!(add_aliases("---\naliases: [a] # c\n---\n", &add), Err("unsupported aliases: layout".into()));
+        assert_eq!(add_aliases("---\ntags: [#x]\n---\n", &["#x".into()]).unwrap().unwrap(), "---\ntags: [#x]\naliases: [\"#x\"]\n---\n", "`#` is text in an alias");
+    }
+
+    #[test]
+    fn add_aliases_quotes_special() {
+        let t = add_aliases("---\naliases: [a]\n---\n", &["Q3: plan, draft".into()]).unwrap().unwrap();
+        assert_eq!(t, "---\naliases: [a, \"Q3: plan, draft\"]\n---\n");
+        assert_eq!(parse(&t).unwrap().aliases, vec!["a", "Q3: plan, draft"]);
+        let b = add_aliases("---\naliases:\n  - a\n---\n", &["Q3: plan, draft".into()]).unwrap().unwrap();
+        assert_eq!(parse(&b).unwrap().aliases, vec!["a", "Q3: plan, draft"]);
     }
 }

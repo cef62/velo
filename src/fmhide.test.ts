@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { Compartment, EditorSelection, EditorState, type Transaction } from "@codemirror/state";
 import { history, redo, undo } from "@codemirror/commands";
-import { frontMatterHide, replaceAll, undoHistory } from "./fmhide";
+import { frontMatterHide, replaceAll, stampSelection, undoHistory } from "./fmhide";
 import { stampChange } from "./frontmatter";
 
 const FM = "---\ncreated: 1\n---\n"; // 19 chars
@@ -85,4 +85,13 @@ test("a load empties the undo history: undo never brings back the previous note"
   s = s.update({ changes: { from: 6, insert: "?" }, userEvent: "input.type" }).state;
   expect(run(undo)).toBe(true); // edits after the load still undo
   expect(s.doc.toString()).toBe("note B");
+});
+
+test("stampSelection: no selection unless the caret sits on the stamp (a selection closes an open autocomplete)", () => {
+  const body = mk(false, FM + "see [[me");
+  const c = body.changes(stampChange(body.doc.toString(), "---\ncreated: 1\nmodified: 2\n---\n", FM)!);
+  expect(stampSelection(body.selection.replaceRange(EditorSelection.cursor(body.doc.length)), c)).toBeUndefined();
+  const empty = EditorState.create({ doc: "" });
+  const e = empty.changes({ from: 0, insert: FM });
+  expect(stampSelection(empty.selection, e)!.main.head).toBe(FM.length);
 });

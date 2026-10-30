@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import type { Page, TaskItem, TaskView } from "../api";
-import { Controller, type KeyEventLike } from "./controller";
+import { Controller, INVALID_TITLE, type KeyEventLike } from "./controller";
 import { emptyConnections, FakeEditor, FakePreview, deferred, fakeApi, fakeUi, hit, noMeta, settle } from "./fakes";
 import { createStore, initialState } from "./store";
 import { localToday, toggleTaskLine } from "../tasks";
@@ -1936,4 +1936,268 @@ test("link it is an isolated undo step and skips a different note with the same 
   api.linkMention.mockImplementationOnce(async (_p, _t, _n, text) => text!.replace("Bee", "[[Bee]]"));
   await c.linkMention(mention("Bee"));
   expect(editor.isolated).toEqual([true]);
+});
+
+test("link targets load on refreshTitles and editor focus", async () => {
+  const { c, api } = setup();
+  await c.start();
+  await settle();
+  expect(api.listLinkTargets).toHaveBeenCalledTimes(1);
+  c.editorOpts().onFocus();
+  await settle();
+  expect(api.listLinkTargets).toHaveBeenCalledTimes(2);
+});
+
+test("createLinked creates an empty note and keeps the open note", async () => {
+  const { c, api, editor } = setup();
+  await c.runSearch(true);
+  await settle();
+  const open = editor.currentPath();
+  api.listLinkTargets.mockClear();
+  await c.createLinked("Brand new idea");
+  expect(api.createFromSelection).toHaveBeenCalledWith("Brand new idea", "");
+  expect(editor.currentPath()).toBe(open);
+  expect(api.listLinkTargets).toHaveBeenCalled();
+});
+
+test("createLinked shows invalid-title", async () => {
+  const { c, api, store } = setup();
+  api.createFromSelection.mockRejectedValueOnce("invalid-title");
+  await c.createLinked("a/b");
+  expect(store.get().err).toBe(INVALID_TITLE);
+});
+
+test("rename refreshes titles", async () => {
+  const { c, api } = setup();
+  await c.runSearch(true);
+  await settle();
+  api.listTitles.mockClear();
+  api.listLinkTargets.mockClear();
+  api.renameNote.mockResolvedValueOnce({ path: P("Z"), rewritten: 0 });
+  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta });
+  c.startRename();
+  await c.commitRename("Z");
+  await settle();
+  expect(api.listTitles).toHaveBeenCalled();
+  expect(api.listLinkTargets).toHaveBeenCalled();
+});
+
+test("refreshTags feeds the tag completion source", async () => {
+  const { c, api } = setup({ A: "a" });
+  api.listTags.mockResolvedValue([{ tag: "Project", count: 3 }]);
+  await c.refreshTags();
+  expect(c.editorOpts().complete.tags()).toHaveLength(1);
+});
+
+async function extractSetup(text = "Big idea\nbody", sel: [number, number] = [0, text.length]) {
+  const s = setup({ A: text });
+  await s.c.runSearch(true);
+  await settle();
+  s.editor.selection = { from: sel[0], to: sel[1] };
+  return s;
+}
+
+test("extract creates the note then links the selection", async () => {
+  const { c, api, editor, store, notes } = await extractSetup();
+  let linkedAfterCreate = false;
+  api.createFromSelection.mockImplementationOnce(async (t: string, x: string) => {
+    linkedAfterCreate = editor.changes.length === 0;
+    notes[t] = x;
+    return P(t);
+  });
+  c.startExtract();
+  expect(store.get().extract).toEqual({ title: "Big idea", err: "" });
+  await c.commitExtract("Big idea");
+  expect(api.createFromSelection).toHaveBeenCalledWith("Big idea", "Big idea\nbody");
+  expect(linkedAfterCreate).toBe(true);
+  expect(editor.changes).toEqual([{ from: 0, to: 13, insert: "[[Big idea]]" }]);
+  expect(editor.isolated).toEqual([true]);
+  expect(editor.currentPath()).toBe(P("A"));
+  expect(store.get().extract).toBeNull();
+});
+
+test("extract refuses encrypted, empty selection, front matter, busy", async () => {
+  const refused = async (arrange: (s: Awaited<ReturnType<typeof extractSetup>>) => void) => {
+    const s = await extractSetup("---\nt: 1\n---\nbody", [14, 18]);
+    arrange(s);
+    s.c.startExtract();
+    expect(s.store.get().extract).toBeNull();
+    expect(s.store.get().err).not.toBe("");
+    expect(s.api.createFromSelection).not.toHaveBeenCalled();
+  };
+  await refused((s) => s.store.set({ encrypted: true }));
+  await refused((s) => (s.editor.selection = null));
+  await refused((s) => (s.editor.selection = { from: 0, to: 12 })); // starts inside the front matter
+  await refused((s) => (s.c.busy = true));
+  await refused((s) => s.store.set({ indexing: { done: 0, total: 1 } }));
+});
+
+test("extract existing title keeps the dialog open", async () => {
+  const { c, api, editor, store } = await extractSetup();
+  api.createFromSelection.mockRejectedValueOnce("already-exists");
+  c.startExtract();
+  await c.commitExtract("Big idea");
+  expect(store.get().extract?.err).toBe("A note with this title exists");
+  expect(editor.changes).toEqual([]);
+  api.createFromSelection.mockRejectedValueOnce("invalid-title");
+  await c.commitExtract("a/b");
+  expect(store.get().extract?.err).toBe(INVALID_TITLE);
+  await c.commitExtract("  ");
+  expect(store.get().extract?.err).toBe("Title required");
+  await c.commitExtract(null);
+  expect(store.get().extract).toBeNull();
+});
+
+test("extract failure leaves the source untouched", async () => {
+  const { c, api, editor } = await extractSetup();
+  api.createFromSelection.mockRejectedValueOnce("boom");
+  c.startExtract();
+  await c.commitExtract("Big idea");
+  expect(editor.changes).toEqual([]);
+  expect(editor.text).toBe("Big idea\nbody");
+});
+
+test("extract after the text moved never replaces the wrong range", async () => {
+  const { c, editor, store, notes } = await extractSetup();
+  c.startExtract();
+  editor.text = "XX" + editor.text;
+  await c.commitExtract("Big idea");
+  expect(editor.changes).toEqual([]);
+  expect(store.get().err).toContain("left in place");
+  expect(notes["Big idea"]).toBe("Big idea\nbody");
+  expect(store.get().extract).toBeNull();
+});
+
+async function mergeSetup(open = "S") {
+  const s = setup({ S: "s", T: "t", U: "u" });
+  s.api.listLinkTargets.mockResolvedValue([
+    { name: "S", title: "S", path: P("S"), modified: 3, locked: false },
+    { name: "T", title: "T", path: P("T"), modified: 1, locked: false },
+    { name: "U", title: "U", path: P("U"), modified: 2, locked: false },
+    { name: "Tee", title: "T", path: P("T"), modified: 1, locked: false }, // alias row
+    { name: "L", title: "L", path: P("L"), modified: 9, locked: true },
+  ]);
+  await s.c.refreshTitles();
+  await s.c.show(P(open));
+  return s;
+}
+const T_ROW = { name: "T", title: "T", path: P("T"), modified: 1, locked: false };
+const historyOf = (c: Controller) => (c as unknown as { history: { e: string[] } }).history.e;
+
+test("merge candidates skip source, aliases and locked", async () => {
+  const { c, store } = await mergeSetup();
+  await c.startMerge();
+  expect(store.get().merge).toEqual({ source: P("S"), sourceTitle: "S", query: "", target: null, err: "" });
+  expect(c.mergeCandidates("").map((t) => t.name)).toEqual(["U", "T"]);
+  expect(c.mergeCandidates("t").map((t) => t.name)).toEqual(["T"]);
+});
+
+test("merge of the open source ends on the target", async () => {
+  const { c, api, editor, store } = await mergeSetup();
+  api.backlinkCount.mockResolvedValueOnce(2);
+  let detached = false;
+  api.mergeNotes.mockImplementationOnce(async (_s: string, t: string) => {
+    detached = editor.currentPath() === null;
+    return { path: t, rewritten: 2, trash_error: null };
+  });
+  await c.startMerge();
+  await c.chooseMergeTarget(T_ROW);
+  expect(api.backlinkCount).toHaveBeenCalledWith("S");
+  expect(store.get().merge?.target).toEqual({ path: P("T"), title: "T", count: 2 });
+  await c.commitMerge();
+  expect(editor.flush).toHaveBeenCalled();
+  expect(detached).toBe(true);
+  expect(api.mergeNotes).toHaveBeenCalledWith(P("S"), P("T"));
+  expect(editor.currentPath()).toBe(P("T"));
+  expect(historyOf(c)).not.toContain(P("S"));
+  expect(store.get().merge).toBeNull();
+  expect(c.busy).toBe(false);
+});
+
+test("merge with the target open reloads it", async () => {
+  const { c, api, editor, store } = await mergeSetup("T"); // S picked from the list's menu earlier; T is open now
+  store.set({ merge: { source: P("S"), sourceTitle: "S", query: "", target: { path: P("T"), title: "T", count: 1 }, err: "" } });
+  api.mergeNotes.mockResolvedValueOnce({ path: P("T"), rewritten: 1, trash_error: null });
+  api.openNote.mockClear();
+  await c.commitMerge();
+  expect(editor.flush).toHaveBeenCalled();
+  expect(api.mergeNotes).toHaveBeenCalledWith(P("S"), P("T"));
+  expect(api.openNote).toHaveBeenCalledWith(P("T"));
+  expect(editor.currentPath()).toBe(P("T"));
+});
+
+test("merge refused when the flush fails", async () => {
+  const { c, api, editor, store } = await mergeSetup();
+  await c.startMerge();
+  await c.chooseMergeTarget(T_ROW);
+  editor.flushResult = false;
+  await c.commitMerge();
+  expect(api.mergeNotes).not.toHaveBeenCalled();
+  expect(store.get().merge?.err).not.toBe("");
+  expect(editor.currentPath()).toBe(P("S"));
+  expect(c.busy).toBe(false);
+});
+
+test("merge failure puts the note back", async () => {
+  const { c, api, editor, store } = await mergeSetup();
+  api.mergeNotes.mockRejectedValueOnce("conflict");
+  await c.startMerge();
+  await c.chooseMergeTarget(T_ROW);
+  await c.commitMerge();
+  expect(editor.currentPath()).toBe(P("S"));
+  expect(store.get().merge?.err).toBe("conflict");
+  expect(c.busy).toBe(false);
+  api.mergeNotes.mockRejectedValueOnce("locked");
+  await c.commitMerge();
+  expect(store.get().merge?.err).toBe("Can't merge a locked note");
+  api.mergeNotes.mockRejectedValueOnce("same-note");
+  await c.commitMerge();
+  expect(store.get().merge?.err).toBe("Pick another note");
+});
+
+test("cancel and back are ignored while a merge is in flight", async () => {
+  const { c, api, store } = await mergeSetup();
+  let reject!: (e: unknown) => void;
+  api.mergeNotes.mockImplementationOnce(() => new Promise((_r, rj) => (reject = rj)));
+  await c.startMerge();
+  await c.chooseMergeTarget(T_ROW);
+  const done = c.commitMerge();
+  await vi.waitFor(() => expect(api.mergeNotes).toHaveBeenCalled());
+  expect(store.get().merge?.pending).toBe(true);
+  c.cancelMerge();
+  c.backMerge();
+  expect(store.get().merge?.target?.path).toBe(P("T"));
+  reject("conflict");
+  await done;
+  expect(store.get().merge?.err).toBe("conflict");
+  expect(store.get().merge?.pending).toBe(false);
+});
+
+test("merge trash failure shows what was not done", async () => {
+  const { c, api, editor, store } = await mergeSetup();
+  api.mergeNotes.mockResolvedValueOnce({ path: P("T"), rewritten: 0, trash_error: "denied" });
+  await c.startMerge();
+  await c.chooseMergeTarget(T_ROW);
+  await c.commitMerge();
+  expect(store.get().err).toContain("couldn't be moved to the Trash");
+  expect(store.get().err).toContain("denied");
+  expect(editor.currentPath()).toBe(P("T"));
+  expect(store.get().merge).toBeNull();
+});
+
+test("merge refuses encrypted", async () => {
+  const { c, store, editor } = await mergeSetup();
+  store.set({ encrypted: true });
+  await c.startMerge();
+  expect(store.get().merge).toBeNull();
+  expect(store.get().err).toBe("Can't merge a locked note");
+  c.busy = true;
+  store.set({ encrypted: false });
+  await c.startMerge();
+  expect(store.get().merge).toBeNull();
+  c.busy = false;
+  editor.discard(); // no open note
+  await c.startMerge();
+  expect(store.get().merge).toBeNull();
+  expect(store.get().err).toBe("Open a note to merge");
 });

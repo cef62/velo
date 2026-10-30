@@ -91,6 +91,11 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
         input_schema: r#"{"type":"object","properties":{"title":{"type":"string"},"summary":{"type":"string"}},"required":["title","summary"]}"#,
     },
     ToolSpec {
+        name: "merge_notes",
+        description: concat!("Merge note `source` into note `target`: the source's text is appended to the target under a `## Source title` heading, its tags and aliases (and its title, as an alias) join the target's front matter, [[links]] to the source in other notes are rewritten to the target, and the source goes to the OS Trash. Returns the target's title and hash, the number of links rewritten and whether the source was trashed.", conventions!()),
+        input_schema: r#"{"type":"object","properties":{"source":{"type":"string"},"target":{"type":"string"},"summary":{"type":"string"}},"required":["source","target","summary"]}"#,
+    },
+    ToolSpec {
         name: "get_connections",
         description: "Notes one hop around a note: outgoing [[links]], backlinks (alias links included), notes sharing each tag (tags on more than 15 notes give only the count), and unlinked mentions (titles or aliases in this note's text without [[ ]]). To link a mention, read_note then edit_note wrapping the words in [[ ]].",
         input_schema: r#"{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}"#,
@@ -157,7 +162,7 @@ fn occurrences(text: &str, pat: &str) -> usize {
 }
 
 pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String> {
-    let is_write = matches!(name, "create_note" | "append_to_note" | "edit_note" | "replace_note" | "add_tags" | "remove_tags" | "add_task" | "set_task_done" | "rename_note" | "move_to_trash");
+    let is_write = matches!(name, "create_note" | "append_to_note" | "edit_note" | "replace_note" | "add_tags" | "remove_tags" | "add_task" | "set_task_done" | "rename_note" | "move_to_trash" | "merge_notes");
     let summary = if is_write {
         let s = a.get("summary").and_then(Value::as_str).unwrap_or("");
         if s.trim().is_empty() {
@@ -285,6 +290,14 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
             let title = ops.read(&path).map_err(err)?.title;
             ops.trash(&path, summary).map_err(err)?;
             Ok(json!({"title": title, "trashed": true}))
+        }
+        "merge_notes" => {
+            let source = ops.find(arg(&a, "source")?).map_err(err)?.ok_or("not found")?;
+            let target = ops.find(arg(&a, "target")?).map_err(err)?.ok_or("not found")?;
+            let m = ops.merge(&source, &target, summary).map_err(err)?;
+            // read back: the link rewrite may have written the target again
+            let doc = ops.read(&target).map_err(err)?;
+            Ok(json!({"title": doc.title, "hash": doc.hash, "rewritten": m.rewritten, "trashed": m.trash_error.is_none(), "trash_error": m.trash_error}))
         }
         "daily_note" => {
             let date = match a.get("date").and_then(Value::as_str) {
@@ -869,6 +882,41 @@ mod tests {
         assert_eq!(agent_revs(&ops, &p2), ["mine"]);
         assert_eq!(call(&mut ops, "daily_note", json!({"date": "2031-05-06"})).unwrap()["title"], "2031-05-06");
         assert!(call(&mut ops, "daily_note", json!({"date": "2031-13-06"})).unwrap_err().contains("invalid date"));
+    }
+    #[test] fn merge_notes_merges_and_rewrites() {
+        let (mut ops, dir) = task_ops(&[("Source.md", "from source\n"), ("Target.md", "target text\n"), ("C.md", "see [[Source]]\n")]);
+        let r = call(&mut ops, "merge_notes", json!({"source": "Source", "target": "Target", "summary": "merged"})).unwrap();
+        assert_eq!((r["title"].as_str(), r["rewritten"].as_u64(), r["trashed"].as_bool()), (Some("Target"), Some(1), Some(true)));
+        assert_eq!(r["trash_error"], Value::Null);
+        assert_eq!(r["hash"], crate::store::hash(&std::fs::read(dir.join("Target.md")).unwrap()));
+        let t = call(&mut ops, "read_note", json!({"title": "Target"})).unwrap();
+        assert!(t["aliases"].as_array().unwrap().contains(&json!("Source")), "{t}");
+        assert_eq!(call(&mut ops, "read_note", json!({"title": "Source"})).unwrap()["title"], "Target", "the alias resolves it");
+        assert!(!dir.join("Source.md").exists(), "trashed");
+        assert_eq!(std::fs::read_to_string(dir.join("C.md")).unwrap(), "see [[Target]]\n");
+    }
+    #[test] fn merge_notes_needs_summary() {
+        let (mut ops, dir) = task_ops(&[("Source.md", "s\n"), ("Target.md", "t\n")]);
+        assert!(call(&mut ops, "merge_notes", json!({"source": "Source", "target": "Target"})).unwrap_err().contains("summary"));
+        assert!(dir.join("Source.md").exists());
+        assert_eq!(read(&dir, "Target.md"), "t\n");
+    }
+    #[test] fn merge_notes_locked_is_not_found() {
+        let files = [("P.md", "p\n"), ("L.md.age", "ciphertext")];
+        let (mut ops, dir) = task_ops(&files);
+        for (s, t) in [("L", "P"), ("P", "L")] {
+            assert_eq!(call(&mut ops, "merge_notes", json!({"source": s, "target": t, "summary": "m"})), Err("not found".to_string()));
+        }
+        for (f, text) in files {
+            assert_eq!(read(&dir, f), text);
+        }
+    }
+    #[test] fn merge_notes_failure_drops_agent_snapshots() {
+        let (mut ops, dir) = task_ops(&[("Target.md", "t\n")]);
+        let p = dir.join("Target.md").to_string_lossy().into_owned();
+        assert_eq!(call(&mut ops, "merge_notes", json!({"source": "Target", "target": "Target", "summary": "m"})), Err("same-note".to_string()));
+        assert!(agent_revs(&ops, &p).is_empty());
+        assert_eq!(read(&dir, "Target.md"), "t\n");
     }
 }
 

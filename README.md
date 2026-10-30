@@ -40,6 +40,8 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | ⌘⇧C | Ctrl+Shift+C | Show / hide the Connections view |
 | ⌘⇧D | Ctrl+Shift+D | Open today's daily note |
 | ⌘⇧Space | Ctrl+Shift+Space | Show / hide velo (system-wide) |
+| ⌘⇧N | Ctrl+Shift+N | Move the selection to a new note |
+| — | — | Merge the open note into another (set in Settings) |
 | ⌥⇧⌘N | Ctrl+Alt+Shift+N | Quick capture (system-wide) |
 
 Right-click a note in the list (or press the Menu key / Shift+F10 on the highlighted row) for a menu: open, rename, lock/unlock, copy `[[link]]`, show in Finder/Explorer, move to Trash. It opens the note first, so no menu appears if the switch is refused.
@@ -59,6 +61,14 @@ Press ⌘⇧C (Ctrl+Shift+C, remappable in Settings) or use the third segment of
 - **Link it.** Hover an unlinked mention and press Link it to wrap those words in `[[ ]]`. With the note open, ⌘Z (Ctrl+Z) undoes it. It is never offered for locked notes.
 - **No links.** A chip next to the tag filter lists orphans: notes with no links in or out.
 - **Alias links.** `[[Alias]]` counts as a backlink in the graph, in "Linked from" in the info panel and in the No links filter.
+
+## Writing helpers
+
+- **Tag bar.** A bar under the note title lists the note's tags; click one to filter the list by it.
+- **`[[` autocomplete.** Typing `[[` opens a popup of notes, matched by title or alias (up to 20 rows). A Create row makes a new note with the typed title. Esc closes it.
+- **`#` autocomplete.** Typing `#` in tag position opens a popup of existing tags with their note counts. Esc closes it.
+- **Move to new note (⌘⇧N).** Moves the selected text into a new note, leaves a `[[link]]` in its place, and stamps the new note with created / updated front matter when that Settings option is on. The new note is written before the source changes. Encrypted notes are refused. ⌘Z undoes it in the source.
+- **Merge into… (command, no default shortcut; set one in Settings).** Appends the open note to another note, rewrites `[[Title]]` links to point at the target (piped `[[Title|label]]` links are not supported by velo, so they are left alone), adds the source's title as an alias of the target, and moves the source to the Trash. The target is snapshotted first, so its Revisions list can restore the pre-merge text. Encrypted notes are refused on either side.
 
 ## Tasks
 
@@ -86,7 +96,7 @@ modified: 2026-10-27T10:02:41+01:00
 - Everything else in the block (other keys, comments, order) is left byte for byte. velo never overwrites an existing `created:` line, and edits only the first `modified:` line. Other date formats (`2026-10-27`, `2026-10-27 09:14`, quoted) are read; an unreadable value falls back to the file date, shown with a "from file" hint.
 - Turn writing off in Settings, General ("Add created/modified dates to notes"). Existing blocks are still read.
 - The block is hidden in the editor and preview. Show it with the "Show front matter in the editor" checkbox in the info panel, or bind a key to "Show / hide front matter" in Settings (unbound by default).
-- `tags:` and `aliases:` (flow list `[a, b]`, block list or single value) are read. velo itself never writes them; only an agent's `add_tags` / `remove_tags` tools change the `tags:` list. Tags merge with `#tags`. Aliases work as titles for `[[wikilinks]]`, opening by name, and search.
+- `tags:` and `aliases:` (flow list `[a, b]`, block list or single value) are read. velo writes them only when merging notes (the source's tags and aliases, plus its title as an alias, go to the target); otherwise only an agent's `add_tags` / `remove_tags` tools change the `tags:` list. Tags merge with `#tags`. Aliases work as titles for `[[wikilinks]]`, opening by name, and search.
 - The list's date and the Recent sort use the modified date from the note.
 
 ## Revisions
@@ -103,7 +113,7 @@ velo can act as an MCP server, so Claude Code can search, read, create and edit 
 
 **Open or closed.** Claude Code starts `velo --mcp` itself, with no window. If velo is running, the request is forwarded to the app; otherwise velo reads and writes the notes folder directly. The switch is checked on every call.
 
-**Tools (16).**
+**Tools (17).**
 
 - `search_notes`: search like the search field, with tag filters, `no_links` to list orphans, and paging (50 per page).
 - `get_connections`: one hop around a note by title: links, backlinks, shared tags and unlinked mentions. Read-only, titles only, never locked notes. To link a mention, use `edit_note`.
@@ -118,6 +128,7 @@ velo can act as an MCP server, so Claude Code can search, read, create and edit 
 - `add_task`: add a `- [ ]` line to a note, or to the capture target.
 - `set_task_done`: tick or untick a task.
 - `rename_note`: rename, with link updates.
+- `merge_notes`: merge one note into another, rewriting links; the source goes to the Trash.
 - `move_to_trash`: move a note to the Trash.
 - `daily_note`: the daily note for a date, created if missing.
 

@@ -32,4 +32,6 @@ export const tagChip = defineSlotRecipe({
     },
   },
   defaultVariants: { selected: false },
+  // callers pass `selected` as a variable, which Panda can't extract: emit both states
+  staticCss: [{ selected: ['true', 'false'] }],
 })
