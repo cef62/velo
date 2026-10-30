@@ -14,7 +14,7 @@ export const tagChip = defineSlotRecipe({
       px: '2.5',
       borderRadius: 'full',
       borderWidth: '1px',
-      borderColor: 'velo.border',
+      borderColor: 'velo.hairline',
       bg: 'velo.canvas',
       color: 'velo.fg',
       fontSize: 'uiSm',
@@ -27,7 +27,7 @@ export const tagChip = defineSlotRecipe({
   },
   variants: {
     selected: {
-      true: { root: { bg: 'velo.accent', borderColor: 'velo.accent', color: 'white' }, count: { color: 'white' } },
+      true: { root: { bg: 'velo.accent', borderColor: 'velo.accent', color: 'velo.accentFg' }, count: { color: 'velo.accentFg' } },
       false: { root: { _hover: { bg: 'velo.subtle' } } },
     },
   },

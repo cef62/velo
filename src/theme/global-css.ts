@@ -10,7 +10,7 @@ export const globalCss = {
       '--global-color-focus-ring': 'colors.colorPalette.solid.bg',
     },
     html: {
-      colorPalette: 'indigo',
+      colorPalette: 'gray',
     },
     body: {
       background: 'velo.canvas',

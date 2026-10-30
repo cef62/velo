@@ -6,8 +6,9 @@ export const searchMatch = defineRecipe({
   base: {
     bg: 'velo.accentHalo',
     color: 'inherit',
+    fontWeight: '600', // a gray halo alone is too faint (v2 clear)
     borderRadius: '2px',
     px: '1px',
-    '[data-selected=true] &': { bg: 'rgba(255,255,255,.24)', color: 'white' },
+    '[data-selected=true] &': { bg: 'rgba(255,255,255,.24)', color: 'velo.selectionFg' },
   },
 })

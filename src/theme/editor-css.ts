@@ -30,7 +30,7 @@ export const editorGlobalCss = {
       h: '1em',
       m: '0 0.55em 0 0',
       verticalAlign: '-0.1em',
-      accentColor: 'var(--colors-velo-accent)',
+      accentColor: 'var(--colors-velo-positive)',
       cursor: 'pointer',
     },
     [`${task}:has(> input.task:checked), ${task}:has(> p > input.task:checked)`]: {

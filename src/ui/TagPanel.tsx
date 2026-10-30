@@ -9,7 +9,7 @@ import { fold } from "../search";
 import { formatBinding, NONE } from "../shortcuts";
 import { useStore } from "./useStore";
 
-const panel = css({ display: "flex", flexDirection: "column", gap: "2.5", pt: "3", px: "3.5", pb: "3.5", bg: "velo.chrome", borderBottom: "1px solid", borderColor: "velo.divider", flex: "none", maxH: "40vh", overflowY: "auto" });
+const panel = css({ display: "flex", flexDirection: "column", gap: "2.5", pt: "3", px: "3.5", pb: "3.5", bg: "velo.chrome", boxShadow: "inset 0 1px 0 {colors.velo.highlight}", borderBottom: "1px solid", borderColor: "velo.divider", flex: "none", maxH: "40vh", overflowY: "auto" });
 const line = css({ display: "flex", alignItems: "center", gap: "2.5", fontSize: "uiSm" });
 const chips = css({ display: "flex", flexWrap: "wrap", gap: "1.5" });
 

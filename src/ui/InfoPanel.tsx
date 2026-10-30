@@ -9,7 +9,7 @@ import { useStore } from "./useStore";
 
 // The fragment keeps Panda from reading the Tooltip content prop as the CSS `content` property.
 const FROM_FILE = "Not stored in the note yet; it may change when the file is synced or checked out.";
-const root = css({ w: "280px", flex: "none", minH: "0", display: "flex", flexDirection: "column", gap: "4", p: "3.5", overflowY: "auto", bg: "velo.chrome", borderLeftWidth: "1px", borderLeftStyle: "solid", borderLeftColor: "velo.divider", fontSize: "uiSm", color: "velo.fg" });
+const root = css({ w: "280px", flex: "none", minH: "0", display: "flex", flexDirection: "column", gap: "4", p: "3.5", overflowY: "auto", bg: "velo.chrome", boxShadow: "inset 0 1px 0 {colors.velo.highlight}", borderLeftWidth: "1px", borderLeftStyle: "solid", borderLeftColor: "velo.divider", fontSize: "uiSm", color: "velo.fg" });
 const head = css({ fontWeight: "600", mb: "1.5" });
 const row = css({ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "2", py: "0.5" });
 const muted = css({ color: "velo.fgMuted" });

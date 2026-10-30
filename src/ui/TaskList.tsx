@@ -90,7 +90,7 @@ const TaskRow = memo(function TaskRow({ t, overdue, query, controller, stop, onS
         }
       }}
     >
-      <Checkbox.Root size="sm" checked={t.done} onCheckedChange={() => void controller.tickTask(t)} onClick={(e) => e.stopPropagation()}>
+      <Checkbox.Root size="sm" colorPalette="green" checked={t.done} onCheckedChange={() => void controller.tickTask(t)} onClick={(e) => e.stopPropagation()}>
         <Checkbox.Control>
           <Checkbox.Indicator />
         </Checkbox.Control>
@@ -138,7 +138,7 @@ export function TaskList({ controller, store }: { controller: Controller; store:
         ))}
       </div>
       <div className={footer}>
-        <Checkbox.Root size="sm" checked={showDone} onCheckedChange={() => void controller.toggleShowDone()}>
+        <Checkbox.Root size="sm" colorPalette="green" checked={showDone} onCheckedChange={() => void controller.toggleShowDone()}>
           <Checkbox.Control>
             <Checkbox.Indicator />
           </Checkbox.Control>

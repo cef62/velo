@@ -1,6 +1,6 @@
 import { defineRecipe } from '@pandacss/dev'
 
-// Banners: conflict (amber), filter line (indigo), update, preview strip.
+// Banners: conflict (neutral), filter line, update, preview strip.
 export const banner = defineRecipe({
   className: 'banner',
   base: { display: 'flex', alignItems: 'center', gap: '2.5', flex: 'none', fontSize: 'ui' },
