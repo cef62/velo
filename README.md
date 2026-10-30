@@ -96,7 +96,7 @@ modified: 2026-10-27T10:02:41+01:00
 - Everything else in the block (other keys, comments, order) is left byte for byte. velo never overwrites an existing `created:` line, and edits only the first `modified:` line. Other date formats (`2026-10-27`, `2026-10-27 09:14`, quoted) are read; an unreadable value falls back to the file date, shown with a "from file" hint.
 - Turn writing off in Settings, General ("Add created/modified dates to notes"). Existing blocks are still read.
 - The block is hidden in the editor and preview. Show it with the "Show front matter in the editor" checkbox in the info panel, or bind a key to "Show / hide front matter" in Settings (unbound by default).
-- `tags:` and `aliases:` (flow list `[a, b]`, block list or single value) are read. velo itself never writes them; only an agent's `add_tags` / `remove_tags` tools change the `tags:` list. Tags merge with `#tags`. Aliases work as titles for `[[wikilinks]]`, opening by name, and search.
+- `tags:` and `aliases:` (flow list `[a, b]`, block list or single value) are read. velo writes them only when merging notes (the source's tags and aliases, plus its title as an alias, go to the target); otherwise only an agent's `add_tags` / `remove_tags` tools change the `tags:` list. Tags merge with `#tags`. Aliases work as titles for `[[wikilinks]]`, opening by name, and search.
 - The list's date and the Recent sort use the modified date from the note.
 
 ## Revisions
