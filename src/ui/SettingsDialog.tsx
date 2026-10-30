@@ -112,7 +112,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
       <SegmentGroup.Items items={items.map(([v, l]) => ({ value: v, label: l }))} />
     </SegmentGroup.Root>
   );
-  const kbdOn = { background: "transparent", color: "inherit", borderColor: "color-mix(in srgb, currentColor 45%, transparent)", boxShadow: "none" } as const;
+  const kbdOn = { background: "transparent", color: "inherit", boxShadow: "none" } as const;
 
   return (
     <div onKeyDown={(e) => (isMac ? e.metaKey : e.ctrlKey) && e.key === "Enter" && (e.preventDefault(), void save())}>

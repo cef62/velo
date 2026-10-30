@@ -49,7 +49,7 @@ function Body({ init, err: msg, controller }: { init: string; err: string; contr
       </div>
       <div className={css({ display: "flex", justifyContent: "flex-end", gap: "2", px: "5", py: "3.5", borderTop: "1px solid", borderColor: "velo.divider" })}>
         <Button type="button" variant="outline" onClick={() => void controller.commitExtract(null)}>Cancel</Button>
-        <Button type="submit">Move</Button>
+        <Button type="submit" colorPalette="green">Move</Button>
       </div>
     </form>
   );
