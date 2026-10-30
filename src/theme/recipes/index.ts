@@ -22,6 +22,7 @@ import { listRow } from "./velo/list-row";
 import { menuButton } from "./velo/menu-button";
 import { paneBar } from "./velo/pane-bar";
 import { countBadge, sectionHeader } from "./velo/section-header";
+import { commandPalette } from "./velo/command-palette";
 import { lockScreen } from "./velo/lock-screen";
 import { searchChip } from "./velo/search-chip";
 import { searchMatch } from "./velo/search-match";
@@ -47,6 +48,7 @@ export const recipes = {
 }
 export const slotRecipes = {
   checkbox,
+  commandPalette,
   dialog,
   field,
   menu,

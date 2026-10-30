@@ -23,6 +23,7 @@ import { prepare, rank, type Ranked } from "../fuzzy";
 import { extractTitle } from "../writing";
 import { cleanName, defaultName, removeFrom, renameIn, sameFilters, upsert, type Filters } from "../saved";
 import { chipsFor, type Chip } from "../searchChips";
+import { pushRecent } from "../palette";
 import type { MenuSpec, UiPort } from "./ports";
 import { noInfo, type AppState, type Store } from "./store";
 
@@ -1837,8 +1838,25 @@ export class Controller {
     return menuKeyFor(e, keys.context_menu, isMac);
   }
 
+  /** ⌘P: the command palette lists every action by name (v2 §3 #7–#8); it is the overflow at every width. */
+  openPalette() {
+    this.store.set({ palette: true });
+  }
+
+  closePalette() {
+    this.store.set({ palette: false });
+  }
+
+  /** An item chosen in the palette: the palette closes first (focus returns), then the action runs as its shortcut would. */
+  runPaletteAction(a: Action) {
+    if (!(a in this.actions)) return;
+    this.store.set((s) => ({ palette: false, recentActions: pushRecent(s.recentActions, a) }));
+    this.actions[a as keyof typeof this.actions]();
+  }
+
   // context_menu is not a global command: each focused list or chip opens its own menu through isMenuKey
   protected readonly actions: Record<Exclude<Action, (typeof GLOBAL_ACTIONS)[number] | "context_menu">, () => void> = {
+    command_palette: () => (this.store.get().palette ? this.closePalette() : this.openPalette()),
     toggle_info: () => void this.toggleInfo(),
     toggle_front_matter: () => void this.toggleFrontMatter(),
     focus_search: () => this.focusSearch(),
