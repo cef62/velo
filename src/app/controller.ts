@@ -1593,13 +1593,18 @@ export class Controller {
   }
 
   toggleSort() {
-    return this.setSort(this.store.get().sort === "title" ? "modified" : "title");
+    return this.changeSort((cur) => (cur.sort === "title" ? "modified" : "title")); // read inside the queue: two quick presses cancel out
   }
 
   /** The list order (the Notes bar's Sort menu), saved in the settings. */
-  async setSort(next: AppState["sort"]) {
+  setSort(next: AppState["sort"]) {
+    return this.changeSort(() => next);
+  }
+
+  protected async changeSort(pick: (cur: Settings) => AppState["sort"]) {
     try {
       await this.updateSettings(async (cur) => {
+        const next = pick(cur);
         await this.api.setSettings({ ...cur, sort: next });
         this.store.set({ sort: next });
       });

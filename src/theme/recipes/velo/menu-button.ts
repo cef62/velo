@@ -16,7 +16,9 @@ export const menuButton = defineRecipe({
     fontSize: 'uiSm',
     fontWeight: '500',
     whiteSpace: 'nowrap',
-    flex: 'none',
+    flex: '0 1 auto', // shrinks before the bar overflows; the label truncates
+    minW: '0',
+    '& [data-label]': { truncate: true, minW: '0' },
     cursor: 'pointer',
     _hover: { bg: 'velo.muted', color: 'velo.fg' },
     '&[aria-expanded=true], &[aria-pressed=true]': { bg: 'velo.accentSubtleHover', color: 'velo.accentText', boxShadow: 'inset 0 0 0 1px {colors.velo.hairline}, inset 0 1px 0 {colors.velo.highlight}' },

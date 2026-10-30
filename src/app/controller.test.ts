@@ -252,6 +252,8 @@ test("setSort saves the order and re-sorts; toggleSort flips it", async () => {
   expect(store.get().sort).toBe("title");
   await c.toggleSort();
   expect(store.get().sort).toBe("modified");
+  await Promise.all([c.toggleSort(), c.toggleSort()]); // two quick presses cancel out
+  expect(store.get().sort).toBe("modified");
 });
 
 test("a slow auto-show doesn't replace the note Enter just opened", async () => {

@@ -28,6 +28,6 @@ test("range start is exactly N×24 h back; all has none", () => {
 });
 
 test("filtersLine lists only the active parts", () => {
-  expect(filtersLine({ query: "", tags: [], noLinks: false, range: "all" })).toBe("");
+  expect(filtersLine({ query: "  ", tags: [], noLinks: false, range: "all" })).toBe("");
   expect(filtersLine({ query: "roadmap", tags: ["work"], noLinks: true, range: "30" })).toBe("“roadmap” · #work · No links · last 30 days");
 });
