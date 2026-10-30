@@ -22,6 +22,7 @@ import { SettingsDialog } from "./SettingsDialog";
 import { InfoPanel } from "./InfoPanel";
 import { ExtractDialog } from "./ExtractDialog";
 import { MergeDialog } from "./MergeDialog";
+import { SaveSearchDialog } from "./SaveSearchDialog";
 import { PassphraseDialog } from "./PassphraseDialog";
 
 // Layout per design README: vertical = header / list / divider / note; horizontal = header over [list | divider | note].
@@ -88,6 +89,7 @@ export function App({ controller, store }: { controller: Controller; store: Stor
       <SettingsDialog controller={controller} store={store} />
       <ExtractDialog controller={controller} store={store} />
       <MergeDialog controller={controller} store={store} />
+      <SaveSearchDialog controller={controller} store={store} />
       <PassphraseDialog />
     </div>
   );

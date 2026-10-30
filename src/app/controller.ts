@@ -1,5 +1,5 @@
 import type * as ApiModule from "../api";
-import type { AgentReply, AgentWrite, GraphNode, Hit, LinkTarget, MergeResult, Mention, NoteDoc, Settings, TagCount, TaskItem } from "../api";
+import type { AgentReply, AgentWrite, GraphNode, Hit, LinkTarget, MergeResult, Mention, NoteDoc, SavedSearch, Settings, TagCount, TaskItem } from "../api";
 // Types only: editor.ts loads editortheme.ts, which touches `window` at import time (tests run in node).
 import type { Editor, EditorOpts } from "../editor";
 import type { Preview } from "../preview";
@@ -19,6 +19,7 @@ import { isLockedPath } from "../passphrase";
 import { localToday } from "../tasks";
 import { prepare, rank, type Ranked } from "../fuzzy";
 import { extractTitle } from "../writing";
+import { cleanName, defaultName, removeFrom, renameIn, sameFilters, upsert, type Filters } from "../saved";
 import type { MenuSpec, UiPort } from "./ports";
 import { noInfo, type AppState, type Store } from "./store";
 
@@ -192,6 +193,7 @@ export class Controller {
       showFrontMatter: s.show_front_matter === true,
       infoOpen: s.info_panel === true,
       connectionsSort: connectionsSortOf(s.connections_sort),
+      savedSearches: s.saved_searches ?? [],
     });
     this.syncStyle();
     if (!s.notes_dir) this.store.set({ phase: "setup" });
@@ -1054,6 +1056,79 @@ export class Controller {
     this.setTags(toggleTag(this.store.get().selectedTags, tag));
   }
 
+  protected filters(): Filters {
+    const s = this.store.get();
+    return { query: s.query, tags: s.selectedTags, noLinks: s.noLinks };
+  }
+
+  /** Save search…: ask for a name for the current filters. Nothing to save without a filter or search text. */
+  startSaveSearch() {
+    const f = this.filters();
+    if (this.store.get().capture || (!f.query.trim() && f.tags.length === 0 && !f.noLinks)) return;
+    this.store.set({ saveSearch: { name: defaultName(f), err: "", confirmReplace: false } });
+  }
+
+  /** The Save (or Rename) dialog finished: a name on Enter, null on Cancel. A name in use is replaced only on the second, confirmed commit. */
+  async commitSaveSearch(input: string | null) {
+    const cur = this.store.get().saveSearch;
+    if (!cur || input === null) return this.store.set({ saveSearch: null });
+    const name = cleanName(input);
+    if (!name) return this.store.set({ saveSearch: { ...cur, name: input, err: input.trim() ? "Name too long (60 characters at most)" : "Name required", confirmReplace: false } });
+    const taken = this.store.get().savedSearches.some((x) => fold(x.name) === fold(name) && fold(name) !== fold(cur.renaming ?? ""));
+    if (taken && !(cur.confirmReplace && fold(cur.name) === fold(name))) return this.store.set({ saveSearch: { ...cur, name, err: "", confirmReplace: true } });
+    try {
+      if (cur.renaming !== undefined) await this.renameSaved(cur.renaming, name);
+      else {
+        const f = this.filters();
+        await this.writeSaved((l) => upsert(l, { name, query: f.query.trim(), tags: [...f.tags], no_links: f.noLinks }));
+      }
+      this.store.set({ saveSearch: null });
+    } catch (e) {
+      this.store.set({ saveSearch: { ...cur, name, err: errText(e), confirmReplace: false } });
+    }
+  }
+
+  protected writeSaved(f: (list: SavedSearch[]) => SavedSearch[]): Promise<void> {
+    return this.updateSettings(async (cur) => {
+      const next = f(cur.saved_searches ?? []);
+      await this.api.setSettings({ ...cur, saved_searches: next });
+      this.store.set({ savedSearches: next });
+    });
+  }
+
+  /** A saved search's chip: replaces the search text, tags and No links; on the search already applied, clears them. */
+  applySaved(name: string) {
+    const s = this.store.get();
+    const saved = s.savedSearches.find((x) => fold(x.name) === fold(name));
+    if (!saved || s.capture) return; // the search field holds capture text, not a search
+    const on = sameFilters(saved, this.filters());
+    this.keptCapture = false;
+    this.store.set(on ? { query: "", selectedTags: [], noLinks: false } : { query: saved.query, selectedTags: [...saved.tags], noLinks: saved.no_links });
+    this.filterChanged(false);
+  }
+
+  /** A chip's native menu. `atChip`: anchor at the focused chip (keyboard) instead of the cursor. */
+  async savedMenu(name: string, atChip: boolean) {
+    const items: MenuSpec[] = [
+      { id: "rename", text: "Rename…", action: () => this.store.set({ saveSearch: { name, err: "", confirmReplace: false, renaming: name } }) },
+      { id: "delete_note", text: "Delete", action: () => void this.deleteSaved(name) },
+    ];
+    await this.ui.popupMenu(items, atChip ? this.ui.focusAnchor() : null).catch((e) => this.setErr(errText(e)));
+  }
+
+  renameSaved(from: string, to: string): Promise<void> {
+    return this.writeSaved((l) => renameIn(l, from, to));
+  }
+
+  async deleteSaved(name: string) {
+    if (!(await this.ui.confirm(`Delete the saved search “${name}”?`, { title: "Delete saved search", kind: "warning", okLabel: "Delete" }))) return;
+    try {
+      await this.writeSaved((l) => removeFrom(l, name));
+    } catch (e) {
+      this.setErr(errText(e));
+    }
+  }
+
   protected readonly newTagsReq = latest();
   protected tagTimer: ReturnType<typeof setTimeout> | undefined;
   /** After an in-app save (self-writes are skipped by the watcher): coalesce typing bursts into one refresh. */
@@ -1398,7 +1473,7 @@ export class Controller {
       return err === "not-found" ? "Folder not found" : String(err);
     }
     this.applyLook(next);
-    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, headerLabels: next.header_labels, writeFrontMatter: next.write_front_matter, showFrontMatter: next.show_front_matter, infoOpen: next.info_panel, connectionsSort: connectionsSortOf(next.connections_sort), settings: null });
+    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, headerLabels: next.header_labels, writeFrontMatter: next.write_front_matter, showFrontMatter: next.show_front_matter, infoOpen: next.info_panel, connectionsSort: connectionsSortOf(next.connections_sort), savedSearches: next.saved_searches ?? [], settings: null });
     this.preview?.refresh(); // watermark shows the binding
     this.syncStyle();
     if (next.notes_dir !== cur.notes_dir) {
@@ -1577,7 +1652,7 @@ export class Controller {
     toggle_connections: () => this.setPaneMode(this.store.get().paneMode === "connections" ? "notes" : "connections"),
     toggle_timeline: () => {}, // wired by the timeline task
     export: () => {}, // wired by the export task
-    save_search: () => {}, // wired by the saved-searches task
+    save_search: () => this.startSaveSearch(),
   };
 
   /**

@@ -4,6 +4,8 @@ import { tagChip } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { Button, Kbd } from "@/components/ui";
+import { isMenuKey } from "../contextmenu";
+import { sameFilters } from "../saved";
 import { fold } from "../search";
 import { formatBinding, NONE } from "../shortcuts";
 import { useStore } from "./useStore";
@@ -20,6 +22,8 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
   const isMac = useStore(store, (s) => s.isMac);
   const noLinks = useStore(store, (s) => s.noLinks);
   const tags = useStore(store, (s) => s.tags);
+  const query = useStore(store, (s) => s.query);
+  const saved = useStore(store, (s) => s.savedSearches);
   const group = useRef<HTMLDivElement>(null);
   const [cur, setCur] = useState(0); // roving tab stop: Tab enters the group once, arrows move inside
   if (!tagPanelOpen) return null;
@@ -30,6 +34,9 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
     btns[i]?.focus();
   };
   const close = formatBinding(keys.toggle_tags, isMac);
+  const k = saved.length; // one roving sequence: saved chips, No links, tag chips
+  const stop = (i: number) => (i === Math.min(cur, k + tags.length) ? 0 : -1);
+  const filtered = query.trim() !== "" || selectedTags.length > 0 || noLinks;
   return (
     <section
       id="tag-panel"
@@ -49,7 +56,10 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
           {selectedTags.length > 0 && `${selectedTags.length} selected · `}
           {total} notes
         </span>
-        <Button variant="plain" size="sm" marginLeft="auto" disabled={selectedTags.length === 0 && !noLinks} onClick={() => controller.clearFilters()}>
+        <Button variant="plain" size="sm" marginLeft="auto" disabled={!filtered} onClick={() => controller.startSaveSearch()}>
+          Save search…
+        </Button>
+        <Button variant="plain" size="sm" disabled={selectedTags.length === 0 && !noLinks} onClick={() => controller.clearFilters()}>
           Clear
         </Button>
         {keys.toggle_tags !== NONE && (
@@ -60,9 +70,7 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
       </div>
       <div
         ref={group}
-        className={chips}
-        role="group"
-        aria-label="Filter by tag"
+        className={css({ display: "flex", flexDirection: "column", gap: "2.5" })}
         onKeyDown={(e) => {
           const i = [...group.current!.querySelectorAll("button")].indexOf(e.target as HTMLButtonElement);
           if (e.key === "ArrowRight") move(i + 1);
@@ -71,18 +79,50 @@ export function TagPanel({ controller, store }: { controller: Controller; store:
           e.preventDefault();
         }}
       >
-        <button type="button" className={tagChip({ selected: noLinks }).root} aria-pressed={noLinks} tabIndex={cur === 0 ? 0 : -1} onFocus={() => setCur(0)} onClick={() => controller.setNoLinks(!noLinks)}>
-          No links
-        </button>
-        {tags.map((t, i) => {
-          const on = selectedTags.some((x) => fold(x) === fold(t.tag));
-          const c = tagChip({ selected: on });
-          return (
-            <button key={t.tag} type="button" className={c.root} aria-pressed={on} tabIndex={i + 1 === Math.min(cur, tags.length) ? 0 : -1} onFocus={() => setCur(i + 1)} onClick={() => controller.toggleTagFilter(t.tag)}>
-              #{t.tag} <span className={c.count}>{t.count}</span>
-            </button>
-          );
-        })}
+        {k > 0 && (
+          <div className={chips} role="group" aria-label="Saved searches">
+            {saved.map((x, i) => {
+              const on = sameFilters(x, { query, tags: selectedTags, noLinks });
+              return (
+                <button
+                  key={x.name}
+                  type="button"
+                  data-saved
+                  className={tagChip({ selected: on }).root}
+                  aria-pressed={on}
+                  tabIndex={stop(i)}
+                  onFocus={() => setCur(i)}
+                  onClick={() => controller.applySaved(x.name)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    void controller.savedMenu(x.name, false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (!isMenuKey(e.nativeEvent)) return;
+                    e.preventDefault();
+                    void controller.savedMenu(x.name, true);
+                  }}
+                >
+                  {x.name}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <div className={chips} role="group" aria-label="Filter by tag">
+          <button type="button" className={tagChip({ selected: noLinks }).root} aria-pressed={noLinks} tabIndex={stop(k)} onFocus={() => setCur(k)} onClick={() => controller.setNoLinks(!noLinks)}>
+            No links
+          </button>
+          {tags.map((t, i) => {
+            const on = selectedTags.some((x) => fold(x) === fold(t.tag));
+            const c = tagChip({ selected: on });
+            return (
+              <button key={t.tag} type="button" className={c.root} aria-pressed={on} tabIndex={stop(k + i + 1)} onFocus={() => setCur(k + i + 1)} onClick={() => controller.toggleTagFilter(t.tag)}>
+                #{t.tag} <span className={c.count}>{t.count}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </section>
   );

@@ -58,6 +58,10 @@ export const platform: UiPort = {
     const r = document.querySelector(`[data-row="${i}"]`)?.getBoundingClientRect();
     return r ? { x: r.left + 16, y: r.bottom } : null;
   },
+  focusAnchor() {
+    const r = document.activeElement?.getBoundingClientRect();
+    return r ? { x: r.left + 16, y: r.bottom } : null;
+  },
   setWindowTheme(t) {
     void getCurrentWindow()
       .setTheme(t)

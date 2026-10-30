@@ -1,4 +1,4 @@
-import type { Connections, NoteMeta, RevisionInfo, Settings, TagCount, TaskView } from "../api";
+import type { Connections, NoteMeta, RevisionInfo, SavedSearch, Settings, TagCount, TaskView } from "../api";
 import { resolve, type Action } from "../shortcuts";
 
 /** Minimal observable state: React reads it through useSyncExternalStore, the controller writes it. */
@@ -84,6 +84,8 @@ export interface AppState {
   extract: { title: string; err: string } | null; // the Move to new note dialog
   merge: { source: string; sourceTitle: string; query: string; target: { path: string; title: string; count: number } | null; err: string; pending?: boolean } | null; // the Merge into… dialog; target set = confirm step; pending = merge in flight
   capture: { target: string; err: string } | null; // the search field is in quick-capture mode
+  savedSearches: SavedSearch[];
+  saveSearch: { name: string; err: string; confirmReplace: boolean; renaming?: string } | null; // the Save search dialog; renaming = the saved search being renamed; confirmReplace = asking "Replace?" for name
 }
 
 export const initialState = (isMac: boolean): AppState => ({
@@ -135,4 +137,6 @@ export const initialState = (isMac: boolean): AppState => ({
   extract: null,
   merge: null,
   capture: null,
+  savedSearches: [],
+  saveSearch: null,
 });

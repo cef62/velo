@@ -2282,3 +2282,96 @@ test("merge refuses encrypted", async () => {
   expect(store.get().merge).toBeNull();
   expect(store.get().err).toBe("Open a note to merge");
 });
+
+async function savedSetup() {
+  const t = setup();
+  let saved = await t.api.getSettings();
+  t.api.getSettings.mockImplementation(async () => ({ ...saved }));
+  t.api.setSettings.mockImplementation(async (s) => void (saved = s));
+  return { ...t, saved: () => saved.saved_searches };
+}
+
+test("save search does nothing without filters", () => {
+  const { c, store } = setup();
+  c.startSaveSearch();
+  expect(store.get().saveSearch).toBeNull();
+});
+
+test("a saved search applies query, tags and No links", async () => {
+  const { c, api, store, saved } = await savedSetup();
+  c.setQuery("velo");
+  c.setTags(["proj"]);
+  c.setNoLinks(true);
+  c.startSaveSearch();
+  expect(store.get().saveSearch).toEqual({ name: "velo", err: "", confirmReplace: false });
+  await c.commitSaveSearch("w");
+  expect(store.get().saveSearch).toBeNull();
+  expect(api.setSettings).toHaveBeenCalledWith(expect.objectContaining({ saved_searches: [{ name: "w", query: "velo", tags: ["proj"], no_links: true }] }));
+  expect(saved()).toHaveLength(1);
+  c.clearFilters();
+  c.setQuery("");
+  c.applySaved("w");
+  await settle();
+  expect(store.get()).toMatchObject({ query: "velo", selectedTags: ["proj"], noLinks: true });
+  expect(api.search).toHaveBeenLastCalledWith("velo", "modified", 0, ["proj"], true);
+});
+
+test("saving over an existing name asks first", async () => {
+  const { c, api, store, saved } = await savedSetup();
+  c.setQuery("a");
+  c.startSaveSearch();
+  await c.commitSaveSearch("Velo");
+  c.setQuery("b");
+  c.startSaveSearch();
+  api.setSettings.mockClear();
+  await c.commitSaveSearch("velo");
+  expect(store.get().saveSearch).toMatchObject({ name: "velo", confirmReplace: true });
+  expect(api.setSettings).not.toHaveBeenCalled();
+  await c.commitSaveSearch("velo");
+  expect(store.get().saveSearch).toBeNull();
+  expect(saved()).toEqual([{ name: "velo", query: "b", tags: [], no_links: false }]);
+});
+
+test("a blank or long name is refused", async () => {
+  const { c, api, store } = setup();
+  c.setQuery("a");
+  c.startSaveSearch();
+  await c.commitSaveSearch("   ");
+  expect(store.get().saveSearch?.err).toBe("Name required");
+  await c.commitSaveSearch("x".repeat(61));
+  expect(store.get().saveSearch?.err).toBe("Name too long (60 characters at most)");
+  expect(api.setSettings).not.toHaveBeenCalled();
+});
+
+test("applying the current saved search clears the filters", async () => {
+  const { c, store } = await savedSetup();
+  c.setQuery("velo");
+  c.setTags(["proj"]);
+  c.startSaveSearch();
+  await c.commitSaveSearch("w");
+  c.applySaved("w");
+  expect(store.get()).toMatchObject({ query: "", selectedTags: [], noLinks: false });
+});
+
+test("saved search menu renames and deletes", async () => {
+  const { c, store, menus, answers, calls, saved } = await savedSetup();
+  c.setQuery("a");
+  c.startSaveSearch();
+  await c.commitSaveSearch("w");
+  await c.savedMenu("w", true);
+  expect(calls.some((x) => x[0] === "focusAnchor")).toBe(true); // keyboard: anchored at the chip
+  const items = menus[menus.length - 1].items as { text: string; action: () => void }[];
+  expect(items.map((m) => m.text)).toEqual(["Rename…", "Delete"]);
+  items[0].action();
+  expect(store.get().saveSearch).toEqual({ name: "w", err: "", confirmReplace: false, renaming: "w" });
+  await c.commitSaveSearch("x");
+  expect(saved()).toEqual([{ name: "x", query: "a", tags: [], no_links: false }]);
+  answers.confirm = false;
+  await c.deleteSaved("x");
+  expect(saved()).toHaveLength(1);
+  answers.confirm = true;
+  await c.deleteSaved("x");
+  expect(calls.some((x) => x[0] === "confirm")).toBe(true);
+  expect(saved()).toEqual([]);
+  expect(store.get().savedSearches).toEqual([]);
+});

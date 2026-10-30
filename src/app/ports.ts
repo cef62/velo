@@ -19,6 +19,7 @@ export interface UiPort {
    */
   popupMenu(items: MenuSpec[], anchor: { x: number; y: number } | null): Promise<void>;
   rowAnchor(i: number): { x: number; y: number } | null; // keyboard menu anchor (bottom-left of row + 16px)
+  focusAnchor(): { x: number; y: number } | null; // keyboard menu anchor at the focused element (bottom-left + 16px)
   setWindowTheme(t: "light" | "dark" | null): void;
   applyLook(s: { theme: AppState["theme"]; fontSize: number; layout: AppState["layout"] }): void; // data-theme, font scale, layout
 }

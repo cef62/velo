@@ -190,6 +190,7 @@ export function fakeUi() {
       menus.push({ items, closed: false });
     }),
     rowAnchor: rec("rowAnchor", () => null),
+    focusAnchor: rec("focusAnchor", () => null),
     setWindowTheme: rec("setWindowTheme", () => {}),
     applyLook: rec("applyLook", () => {}),
   };
