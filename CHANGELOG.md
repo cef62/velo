@@ -1,5 +1,15 @@
 # velo
 
+## 0.11.0
+
+### Minor Changes
+
+- 7f75a42: Added saved searches (name a search with its tags and No links filter, apply it from the tag panel), a timeline of notes by created or updated date (⌘⇧L), and export of the timeline to Markdown or PDF, as full notes or tasks only, with locked notes never exported.
+
+### Patch Changes
+
+- 7f75a42: The Shift+F10 context-menu shortcut can now be changed or turned off in Settings → Keyboard shortcuts ("Open context menu"); the Menu key always opens the menu.
+
 ## 0.10.1
 
 ### Patch Changes
