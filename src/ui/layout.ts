@@ -3,6 +3,7 @@
 // Width thresholds are component widths; the pixel sizes live in panda.config.ts (sizes.paneBar, searchMin, …).
 const W = {
   paneLabelsAll: 380, // left pane ≥ this: every tab shows its label; else only the active one
+  paneLabelActive: 240, // left pane < this: no tab label at all, so the Timeline controls still fit at the 200px minimum
   paneSortIconOnly: 300, // left pane < this: Sort / Timeline menu buttons go icon-only (labels would truncate to "…" at the 260px default)
   noteViewMenu: 560, // note < this: the Rich · Plain · Preview switch becomes a menu button
   noteLockInMenu: 420, // note < this: Lock moves into the ⋯ note menu
@@ -10,12 +11,12 @@ const W = {
   headerHideHint: 720, // window < this: hide the ⌘L hint in the search field
 } as const
 
-export type PaneBarMode = { labels: 'all' | 'active'; menusIconOnly: boolean }
+export type PaneBarMode = { labels: 'all' | 'active' | 'none'; menusIconOnly: boolean }
 export type TitleBarMode = { viewSwitch: 'segments' | 'menu'; lockInMenu: boolean }
 
-/** Left pane bar: every tab labelled when there is room, else only the selected one. */
+/** Left pane bar: every tab labelled when there is room, else only the selected one, else none (icons only). */
 export const paneBarMode = (paneWidth: number): PaneBarMode => ({
-  labels: paneWidth >= W.paneLabelsAll ? 'all' : 'active',
+  labels: paneWidth >= W.paneLabelsAll ? 'all' : paneWidth >= W.paneLabelActive ? 'active' : 'none',
   menusIconOnly: paneWidth < W.paneSortIconOnly,
 })
 

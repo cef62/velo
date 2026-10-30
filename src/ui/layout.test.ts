@@ -15,7 +15,8 @@ describe('v2 layout rules', () => {
     expect(paneBarMode(1000).labels).toBe('all')
   })
   it('small window 600×400, horizontal: list 200, note 391', () => {
-    expect(paneBarMode(200)).toEqual({ labels: 'active', menusIconOnly: true })
+    expect(paneBarMode(200)).toEqual({ labels: 'none', menusIconOnly: true })
+    expect(paneBarMode(240).labels).toBe('active')
     expect(titleBarMode(391)).toEqual({ viewSwitch: 'menu', lockInMenu: true })
     expect(showSearchHint(600)).toBe(false)
   })
