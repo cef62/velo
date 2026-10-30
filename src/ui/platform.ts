@@ -1,4 +1,4 @@
-import { ask, open } from "@tauri-apps/plugin-dialog";
+import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { LogicalPosition } from "@tauri-apps/api/dpi";
@@ -39,6 +39,7 @@ export const platform: UiPort = {
     const d = await open({ directory: true });
     return typeof d === "string" ? d : null;
   },
+  saveFile: (defaultName) => save({ defaultPath: defaultName, filters: [{ name: "Markdown", extensions: ["md"] }] }),
   openUrl: (url) => openUrl(url),
   reveal: (path) => revealItemInDir(path),
   copyText: (t) => navigator.clipboard.writeText(t),

@@ -1,4 +1,4 @@
-import type { Connections, NoteMeta, RevisionInfo, SavedSearch, Settings, TagCount, TaskView, TimelineRow } from "../api";
+import type { Connections, ExportCounts, NoteMeta, RevisionInfo, SavedSearch, Settings, TagCount, TaskView, TimelineRow } from "../api";
 import { resolve, type Action } from "../shortcuts";
 
 /** Minimal observable state: React reads it through useSyncExternalStore, the controller writes it. */
@@ -87,6 +87,7 @@ export interface AppState {
   capture: { target: string; err: string } | null; // the search field is in quick-capture mode
   savedSearches: SavedSearch[];
   saveSearch: { name: string; err: string; confirmReplace: boolean; renaming?: string } | null; // the Save search dialog; renaming = the saved search being renamed; confirmReplace = asking "Replace?" for name
+  exporting: { counts: ExportCounts | null; format: "md" | "pdf"; tasksOnly: boolean; err: string; pending: boolean } | null; // the Export dialog; counts null = preview loading; pending = save in flight
 }
 
 export const initialState = (isMac: boolean): AppState => ({
@@ -141,4 +142,5 @@ export const initialState = (isMac: boolean): AppState => ({
   capture: null,
   savedSearches: [],
   saveSearch: null,
+  exporting: null,
 });

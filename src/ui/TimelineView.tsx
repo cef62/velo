@@ -125,8 +125,7 @@ export function TimelineView({ controller, store }: { controller: Controller; st
             </SegmentGroup.Item>
           ))}
         </SegmentGroup.Root>
-        {/* wired by the export task */}
-        <Button variant="outline" size="xs" ml="auto" disabled>
+        <Button variant="outline" size="xs" ml="auto" onClick={() => void controller.startExport()}>
           Export…
         </Button>
       </div>

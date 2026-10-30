@@ -1,6 +1,6 @@
 // Test fakes for the controller: in-memory backend, editor, preview and UI port. Tests only.
 import { vi } from "vitest";
-import type { Connections, Hit, MergeResult, NoteDoc, NoteMeta, Page, RenameResult, RevisionInfo, Settings, TagCount, TaskView, TimelineRow } from "../api";
+import type { Connections, ExportCounts, ExportRequest, Hit, MergeResult, NoteDoc, NoteMeta, Page, RenameResult, RevisionInfo, Settings, TagCount, TaskView, TimelineRow } from "../api";
 import type { Editor } from "../editor";
 import type { Preview } from "../preview";
 import type { Api } from "./controller";
@@ -55,6 +55,8 @@ export function fakeApi(notes: Record<string, string> = {}) {
     saveNote: vi.fn(),
     tasks: vi.fn(async (_q: string, _t: string[], _d: boolean): Promise<TaskView> => ({ overdue: [], today: [], upcoming: [], no_date: [], done: [], due_count: 0 })),
     timeline: vi.fn(async (_q: string, _t: string[], _n: boolean, _by: "created" | "updated", _since: number | null): Promise<TimelineRow[]> => []),
+    exportPreview: vi.fn(async (_r: ExportRequest): Promise<ExportCounts> => ({ notes: 0, open: 0, done: 0, locked: 0, over_limit: 0, no_tasks: 0, unreadable: 0 })),
+    exportMarkdown: vi.fn(async (_p: string, _r: ExportRequest): Promise<ExportCounts> => ({ notes: 0, open: 0, done: 0, locked: 0, over_limit: 0, no_tasks: 0, unreadable: 0 })),
     toggleTask: vi.fn(async (_p: string, line: number, line_text: string) => ({ line, line_text })),
     captureTask: vi.fn(async (_t: string) => "/n/Inbox.md"),
     captureTargetTitle: vi.fn(async (): Promise<{ title: string; path: string | null }> => ({ title: "Inbox", path: "Inbox" in notes ? "/n/Inbox.md" : null })),
@@ -183,6 +185,7 @@ export function fakeUi() {
     confirm: rec("confirm", async () => answers.confirm),
     passphrase: rec("passphrase", async () => answers.passphrase),
     chooseDirectory: rec("chooseDirectory", async () => answers.directory),
+    saveFile: rec("saveFile", async (_name: string): Promise<string | null> => null),
     openUrl: rec("openUrl", async () => {}),
     reveal: rec("reveal", async () => {}),
     copyText: rec("copyText", async () => {}),

@@ -2454,3 +2454,78 @@ test("a note saved, renamed or deleted reloads the timeline", async () => {
   await c.deleteNote();
   expect(api.timeline).toHaveBeenCalledTimes(3);
 });
+
+const counts = (notes: number) => ({ notes, open: 0, done: 0, locked: 0, over_limit: 0, no_tasks: 0, unreadable: 0 });
+
+test("export from the notes pane switches to the timeline and previews its date and range", async () => {
+  const { c, api, store } = setup();
+  api.exportPreview.mockResolvedValue(counts(3));
+  c.setQuery("a");
+  await c.setTimelineRange("7");
+  store.set({ paneMode: "notes" });
+  await c.startExport();
+  expect(store.get().paneMode).toBe("timeline");
+  expect(api.exportPreview).toHaveBeenCalledTimes(1);
+  expect(api.exportPreview.mock.lastCall?.[0]).toMatchObject({ query: "a", tags: [], no_links: false, by: "updated", tasks_only: false, title: "a" });
+  expect(api.exportPreview.mock.lastCall?.[0].since_ms).toBeTypeOf("number");
+  expect(store.get().exporting).toEqual({ counts: counts(3), format: "md", tasksOnly: false, err: "", pending: false });
+});
+
+test("Markdown export asks where to save, then writes there; a cancelled save writes nothing", async () => {
+  const { c, api, ui, store } = setup();
+  api.exportPreview.mockResolvedValue(counts(2));
+  store.set({ selectedTags: ["proj"] });
+  c.setQuery("velo");
+  await c.startExport();
+  const save = vi.spyOn(ui, "saveFile").mockResolvedValueOnce(null);
+  await c.commitExport(true);
+  expect(save).toHaveBeenCalledWith(`#proj velo ${localToday()}.md`);
+  expect(api.exportMarkdown).not.toHaveBeenCalled();
+  expect(store.get().exporting).toMatchObject({ pending: false });
+  save.mockResolvedValueOnce("/out/x.md");
+  await c.commitExport(true);
+  expect(api.exportMarkdown).toHaveBeenCalledWith("/out/x.md", expect.objectContaining({ query: "velo", tags: ["proj"], tasks_only: false, title: "#proj velo" }));
+  expect(store.get().exporting).toBeNull();
+});
+
+test("nothing to export: Export does nothing", async () => {
+  const { c, api, calls, store } = setup();
+  api.exportPreview.mockResolvedValue({ ...counts(0), locked: 2 });
+  await c.startExport();
+  await c.commitExport(true);
+  expect(calls.some(([n]) => n === "saveFile")).toBe(false);
+  expect(api.exportMarkdown).not.toHaveBeenCalled();
+  expect(store.get().exporting).not.toBeNull();
+});
+
+test("the export title is the saved search's name when the filters equal it, else All notes", async () => {
+  const { c, api, store } = setup();
+  api.exportPreview.mockResolvedValue(counts(1));
+  await c.startExport();
+  expect(api.exportPreview.mock.lastCall?.[0].title).toBe("All notes");
+  store.set({ savedSearches: [{ name: "Weekly", query: "velo", tags: ["proj"], no_links: false }], selectedTags: ["proj"], exporting: null });
+  c.setQuery("velo ");
+  await c.startExport();
+  expect(api.exportPreview.mock.lastCall?.[0].title).toBe("Weekly");
+});
+
+test("toggling Tasks only fetches the preview again", async () => {
+  const { c, api, store } = setup();
+  api.exportPreview.mockResolvedValue(counts(1));
+  await c.startExport();
+  await c.setExportOptions({ format: "pdf" });
+  expect(api.exportPreview).toHaveBeenCalledTimes(1);
+  await c.setExportOptions({ tasksOnly: true });
+  expect(api.exportPreview).toHaveBeenCalledTimes(2);
+  expect(api.exportPreview.mock.lastCall?.[0].tasks_only).toBe(true);
+  expect(store.get().exporting).toMatchObject({ tasksOnly: true, format: "pdf", counts: counts(1) });
+});
+
+test("the export action opens the export dialog", async () => {
+  const { c, api, store } = setup();
+  api.exportPreview.mockResolvedValue(counts(1));
+  store.set({ keys: { ...store.get().keys, export: "Mod+KeyE" } });
+  expect(c.onKeyDown(key("KeyE", { meta: true }))).toBe(true);
+  await settle();
+  expect(store.get().exporting?.counts).toEqual(counts(1));
+});

@@ -1,5 +1,5 @@
 import type * as ApiModule from "../api";
-import type { AgentReply, AgentWrite, GraphNode, Hit, LinkTarget, MergeResult, Mention, NoteDoc, SavedSearch, Settings, TagCount, TaskItem } from "../api";
+import type { AgentReply, AgentWrite, ExportRequest, GraphNode, Hit, LinkTarget, MergeResult, Mention, NoteDoc, SavedSearch, Settings, TagCount, TaskItem } from "../api";
 // Types only: editor.ts loads editortheme.ts, which touches `window` at import time (tests run in node).
 import type { Editor, EditorOpts } from "../editor";
 import type { Preview } from "../preview";
@@ -18,6 +18,7 @@ import { isMenuKey, linkFor, menuModel, type MenuAction } from "../contextmenu";
 import { isLockedPath } from "../passphrase";
 import { localToday } from "../tasks";
 import { sinceMs } from "../timeline";
+import { exportFileName } from "../export";
 import { prepare, rank, type Ranked } from "../fuzzy";
 import { extractTitle } from "../writing";
 import { cleanName, defaultName, removeFrom, renameIn, sameFilters, upsert, type Filters } from "../saved";
@@ -1204,6 +1205,63 @@ export class Controller {
     return this.loadTimeline();
   }
 
+  /** What the timeline shows, as an export request; titled by the matching saved search, else the filters. */
+  protected exportRequest(tasksOnly: boolean): ExportRequest {
+    const s = this.store.get();
+    const f = this.filters();
+    const named = s.savedSearches.find((x) => sameFilters(x, f))?.name;
+    const title = named ?? ([...f.tags.map((t) => `#${t}`), f.query.trim()].filter(Boolean).join(" ") || "All notes");
+    return { query: s.query, tags: s.selectedTags, no_links: s.noLinks, by: s.timeline.by, since_ms: sinceMs(s.timeline.range, new Date()), tasks_only: tasksOnly, title };
+  }
+
+  /** Export…: always what the timeline shows, so other panes switch to it first. */
+  startExport(): Promise<void> {
+    if (this.store.get().paneMode !== "timeline") this.setPaneMode("timeline");
+    this.store.set({ exporting: { counts: null, format: "md", tasksOnly: false, err: "", pending: false } });
+    return this.loadExportPreview();
+  }
+
+  protected readonly newExportReq = latest();
+  // The backend reads up to 1,000 files: called on open and on a Tasks only change, never per render.
+  protected async loadExportPreview() {
+    const cur = this.store.get().exporting;
+    if (!cur) return;
+    const fresh = this.newExportReq();
+    const done = (p: Partial<NonNullable<AppState["exporting"]>>) => fresh() && this.store.set((s) => ({ exporting: s.exporting && { ...s.exporting, ...p } }));
+    try {
+      done({ counts: await this.api.exportPreview(this.exportRequest(cur.tasksOnly)), err: "" });
+    } catch (e) {
+      done({ err: errText(e) });
+    }
+  }
+
+  setExportOptions(p: { format?: "md" | "pdf"; tasksOnly?: boolean }): Promise<void> {
+    const cur = this.store.get().exporting;
+    if (!cur) return Promise.resolve();
+    const refetch = p.tasksOnly !== undefined && p.tasksOnly !== cur.tasksOnly;
+    this.store.set({ exporting: { ...cur, ...p, counts: refetch ? null : cur.counts } });
+    return refetch ? this.loadExportPreview() : Promise.resolve();
+  }
+
+  /** Export (go) or Cancel. Markdown: the save dialog picks the file; cancelling it keeps the dialog open. */
+  async commitExport(go: boolean) {
+    const cur = this.store.get().exporting;
+    if (!cur) return;
+    if (!go) return this.store.set({ exporting: null });
+    if (cur.pending || !cur.counts?.notes || cur.format !== "md") return; // nothing to export writes no empty file; PDF: Task 7
+    const req = this.exportRequest(cur.tasksOnly);
+    const update = (p: Partial<NonNullable<AppState["exporting"]>>) => this.store.set((s) => ({ exporting: s.exporting && { ...s.exporting, ...p } }));
+    update({ pending: true, err: "" });
+    try {
+      const path = await this.ui.saveFile(exportFileName(req.title, localToday()));
+      if (path === null) return update({ pending: false });
+      await this.api.exportMarkdown(path, req);
+      this.store.set({ exporting: null });
+    } catch (e) {
+      update({ pending: false, err: errText(e) });
+    }
+  }
+
   protected readonly newConnectionsReq = latest();
   /** Open the Connections view centred on the open note (flushed first); nothing happens without one. */
   async showConnections() {
@@ -1705,7 +1763,7 @@ export class Controller {
     toggle_tasks: () => this.setPaneMode(this.store.get().paneMode === "tasks" ? "notes" : "tasks"),
     toggle_connections: () => this.setPaneMode(this.store.get().paneMode === "connections" ? "notes" : "connections"),
     toggle_timeline: () => this.setPaneMode(this.store.get().paneMode === "timeline" ? "notes" : "timeline"),
-    export: () => {}, // wired by the export task
+    export: () => void this.startExport(),
     save_search: () => this.startSaveSearch(),
   };
 

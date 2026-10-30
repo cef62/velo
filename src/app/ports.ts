@@ -10,6 +10,7 @@ export interface UiPort {
   confirm(message: string, o: { title: string; okLabel?: string; kind?: "warning" | "info" }): Promise<boolean>;
   passphrase(req: { mode: "create" | "unlock"; context: string | null; submit: (pw: string) => Promise<void> }): Promise<boolean>;
   chooseDirectory(): Promise<string | null>;
+  saveFile(defaultName: string): Promise<string | null>; // native save dialog: the chosen path, null = cancelled
   openUrl(url: string): Promise<void>;
   reveal(path: string): Promise<void>;
   copyText(t: string): Promise<void>;
