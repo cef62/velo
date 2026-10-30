@@ -18,23 +18,26 @@ const err = css({ display: "flex", alignItems: "center", gap: "1.5", fontSize: "
  *  Create (first lock) is a dialog; unlock (a locked note opened without the key) is the inline LockScreen (v2 §3 #14). */
 export function PassphraseDialog() {
   const [req, setReq] = useState<Req | null>(null);
+  const [n, setN] = useState(0); // a new request remounts the inline field: fresh text, error and focus
   const done = useRef<((ok: boolean) => void) | null>(null);
+  const finish = (ok: boolean) => {
+    done.current?.(ok);
+    done.current = null;
+    setReq(null);
+  };
   useEffect(() => {
     registerPassphrase(
       (r) =>
         new Promise<boolean>((resolve) => {
           done.current?.(false); // a newer request supersedes a pending one
           done.current = resolve;
+          setN((x) => x + 1);
           setReq(r);
         }),
+      () => finish(false),
     );
   }, []);
-  const finish = (ok: boolean) => {
-    done.current?.(ok);
-    done.current = null;
-    setReq(null);
-  };
-  if (req?.mode === "unlock") return <LockScreen req={req} finish={finish} />;
+  if (req?.mode === "unlock" && req.inline) return <LockScreen key={n} req={req} finish={finish} />;
   return (
     <Dialog.Root open={req !== null} onOpenChange={(d) => !d.open && finish(false)} role="dialog" closeOnInteractOutside={false}>
       <Dialog.Backdrop />

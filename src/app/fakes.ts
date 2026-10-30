@@ -186,6 +186,7 @@ export function fakeUi() {
     focusSearch: rec("focusSearch", () => {}),
     confirm: rec("confirm", async () => answers.confirm),
     passphrase: rec("passphrase", async () => answers.passphrase),
+    cancelPassphrase: () => {}, // every open calls it: not recorded, or the call lists of older tests would shift
     chooseDirectory: rec("chooseDirectory", async () => answers.directory),
     saveFile: rec("saveFile", async (_name: string): Promise<string | null> => null),
     nextFrame: rec("nextFrame", async () => {}),

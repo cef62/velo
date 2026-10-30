@@ -606,6 +606,7 @@ export class Controller {
       return false;
     }
     const current = this.newShow();
+    if (!retried) this.ui.cancelPassphrase(); // an inline unlock still up belongs to an older open
     try {
       const doc = await this.loading(() => this.api.openNote(path));
       if (!doc) return false;
@@ -618,8 +619,13 @@ export class Controller {
     } catch (e) {
       if (how === "nav" && e === "not-found") return "missing";
       if (e === "locked" && !retried && how !== "auto") { // never pop the dialog up while typing in search
-        const ok = await this.promptPassphrase({ trigger: "open", context: null });
-        if (ok) return this.show(path, how, true);
+        const ok = await this.promptPassphrase({ trigger: "open", context: null, inline: true });
+        if (!current()) return true; // a newer note was opened while the field was up: leave it alone
+        if (ok) {
+          const r = await this.show(path, how, true);
+          if (r === true && current()) this.editor.focus(); // the unlock field had focus; reading starts in the note
+          return r;
+        }
         if (ok === null) return how !== "nav"; // no key on this computer: keep the copy-identity error
       }
       this.setErr(e === "locked" ? "Note is locked" : errText(e));
@@ -633,7 +639,7 @@ export class Controller {
    * null = opening a locked note with no key anywhere: a new key couldn't decrypt it, so no dialog, just the copy-identity error.
    * context: the note title when locking, for the create dialog's subtitle.
    */
-  protected async promptPassphrase(req: { trigger: "open" | "lock"; context: string | null }): Promise<boolean | null> {
+  protected async promptPassphrase(req: { trigger: "open" | "lock"; context: string | null; inline?: boolean }): Promise<boolean | null> {
     try {
       if (req.trigger === "open" && !(await this.api.hasIdentity()) && !(await this.api.identityFileExists())) {
         this.setErr(NO_KEY_MSG);
@@ -643,6 +649,7 @@ export class Controller {
       return await this.ui.passphrase({
         mode: exists ? "unlock" : "create",
         context: req.context,
+        inline: req.inline,
         submit: async (pw) => {
           if ((await this.api.setupPassphrase(pw)) === "keychain-unavailable") {
             this.notice = "Keychain unavailable — you'll be asked for your passphrase each launch";

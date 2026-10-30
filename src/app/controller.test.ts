@@ -269,6 +269,32 @@ test("setStyle saves the editing style; toggleStyle flips it; hasSelection follo
   expect(c.hasSelection()).toBe(false); // no note open
 });
 
+test("opening a locked note asks inline; a newer open under the field wins and cancels it", async () => {
+  const { c, api, store, ui } = setup();
+  const open = api.openNote.getMockImplementation()!;
+  api.openNote.mockImplementation(async (p: string) => {
+    if (p === P("A")) throw "locked";
+    return open(p);
+  });
+  api.hasIdentity.mockResolvedValue(false);
+  api.identityFileExists.mockResolvedValue(true);
+  let resolveUnlock!: (ok: boolean) => void;
+  let cancelled = 0;
+  ui.passphrase = async (req) => {
+    expect(req).toMatchObject({ mode: "unlock", inline: true });
+    return new Promise<boolean>((r) => (resolveUnlock = r));
+  };
+  ui.cancelPassphrase = () => void cancelled++;
+  const a = c.show(P("A"));
+  await settle();
+  await c.show(P("B")); // clicked another note while the field was up
+  expect(cancelled).toBeGreaterThan(0);
+  expect(store.get().openPath).toBe(P("B"));
+  resolveUnlock(true); // the stale prompt resolves anyway
+  expect(await a).toBe(true);
+  expect(store.get().openPath).toBe(P("B")); // A is not reopened over B
+});
+
 test("a slow auto-show doesn't replace the note Enter just opened", async () => {
   const { c, api, store } = setup();
   const d = deferred<ReturnType<typeof api.openNote> extends Promise<infer T> ? T : never>();
