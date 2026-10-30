@@ -12,7 +12,6 @@ import { ConnectionsView } from "./ConnectionsView";
 import { TimelineView } from "./TimelineView";
 import { TitleBar } from "./TitleBar";
 import { ConflictBanner } from "./ConflictBanner";
-import { UpdateBanner } from "./UpdateBanner";
 import { PreviewStrip } from "./PreviewStrip";
 import { TagBar } from "./TagBar";
 import { Divider } from "./Divider";
@@ -80,7 +79,6 @@ export function App({ controller, store }: { controller: Controller; store: Stor
       <div className={pane}>
       <section className={note}>
         <TitleBar controller={controller} store={store} />
-        <UpdateBanner controller={controller} store={store} />
         <ConflictBanner controller={controller} store={store} />
         <PreviewStrip store={store} />
         <TagBar controller={controller} store={store} />

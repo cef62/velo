@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { cleanName, defaultName, removeFrom, renameIn, sameFilters, upsert } from "./saved";
+import { activeFilterCount, cleanName, defaultName, removeFrom, renameIn, sameFilters, upsert } from "./saved";
 
 const s = (name: string, query = "") => ({ name, query, tags: [], no_links: false });
 
@@ -31,4 +31,13 @@ test("renameIn keeps position and drops a replaced name; removeFrom folds", () =
   expect(renameIn([s("a"), s("b"), s("c")], "a", "x")).toEqual([s("x"), s("b"), s("c")]);
   expect(renameIn([s("a"), s("b")], "A", "B")).toEqual([s("B")]);
   expect(removeFrom([s("a"), s("Velo")], "velo")).toEqual([s("a")]);
+});
+
+test("activeFilterCount: tags + No links, or 1 for an applied saved search, 0 for text alone", () => {
+  const saved = [{ name: "w", query: "", tags: ["work", "idea"], no_links: false }, { name: "t", query: "todo", tags: [], no_links: false }];
+  expect(activeFilterCount(saved, { query: "x", tags: [], noLinks: false })).toBe(0);
+  expect(activeFilterCount(saved, { query: "todo", tags: [], noLinks: false })).toBe(1); // a text-only saved search still counts
+  expect(activeFilterCount(saved, { query: "", tags: ["work"], noLinks: true })).toBe(2);
+  expect(activeFilterCount(saved, { query: "", tags: ["idea", "work"], noLinks: false })).toBe(1);
+  expect(activeFilterCount(saved, { query: "more", tags: ["idea", "work"], noLinks: false })).toBe(2);
 });

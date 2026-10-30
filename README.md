@@ -10,9 +10,9 @@ Inspired by nvALT and Notational Velocity; not affiliated with or endorsed by th
 - Plain files you own: a flat folder of `.md` / `.txt` notes, edited in a CodeMirror editor with autosave.
 - `[[wikilinks]]`: following a link to a missing note creates it; renaming a note rewrites links to it.
 - Markdown preview with clickable wikilinks and external links.
-- Note counts next to every tag and in the filter line; a Retry button when a save fails.
-- Theme: System (follows the OS), Light or Dark, in Settings. Settings can also show text labels next to the header buttons.
-- Rich editing (default): markdown marks are hidden except on the line you are editing; ⌘/Ctrl-click opens links, wikilinks and tags; task checkboxes are clickable. Toggle Rich / Plain with the toolbar button or ⌘⇧R. The file text is never changed by the display.
+- Note counts next to every tag and in the filter line; the Filters button in the header shows how many filters are active; a Retry button when a save fails.
+- Theme: System (follows the OS), Light or Dark, in Settings.
+- Rich editing (default): markdown marks are hidden except on the line you are editing; ⌘/Ctrl-click opens links, wikilinks and tags; task checkboxes are clickable. Toggle Rich / Plain from the header's ⋯ menu or ⌘⇧R. The file text is never changed by the display.
 - Per-note encryption with [age](https://age-encryption.org); locked notes are never written to disk or to the index as plaintext.
 - Live reload of external edits; a concurrent edit produces a `(conflict ...)` copy instead of overwriting anything.
 - Global hotkey (default ⌘⇧Space / Ctrl+Shift+Space) to bring velo up; remappable in Settings. Any shortcut can be cleared with ⌫ in Settings, and conflicting shortcuts are shown instead of refused.
@@ -54,7 +54,7 @@ Fixed: Enter (in search) opens the highlighted note, or creates a note titled wi
 
 ## Tags
 
-Write `#tag` anywhere in a note (at the start of a line, after a space, or after `(`; letters, digits, `_`, `-`, `/`; at least one letter; not in fenced code blocks; `# Heading` is not a tag). The `#` button next to search (or ⌘⇧T) shows every tag with its note count; click chips to filter the list to notes having all selected tags, combined with the search text. A "Filtered by" line stays visible while tags are selected. In the preview, click a `#tag` to filter by it. Locked notes are not listed in the tag panel.
+Write `#tag` anywhere in a note (at the start of a line, after a space, or after `(`; letters, digits, `_`, `-`, `/`; at least one letter; not in fenced code blocks; `# Heading` is not a tag). The Filters button in the header (or ⌘⇧T) shows every tag with its note count; click chips to filter the list to notes having all selected tags, combined with the search text. A "Filtered by" line stays visible while tags are selected. In the preview, click a `#tag` to filter by it. Locked notes are not listed in the tag panel.
 
 ## Saved searches
 
@@ -70,7 +70,7 @@ Press ⌘⇧L (Ctrl+Shift+L) or the Timeline button of the left pane to list not
 
 ## Connections
 
-Press ⌘⇧C (Ctrl+Shift+C, remappable in Settings) or use the third segment of the left-pane switch in the header to see the links, backlinks, shared tags and unlinked mentions around the open note. Choose the layout in Settings: Ring, Created or Updated (saved as `connections_sort`).
+Press ⌘⇧C (Ctrl+Shift+C, remappable in Settings) or choose Connections under Left pane in the header's ⋯ menu to see the links, backlinks, shared tags and unlinked mentions around the open note. Choose the layout in Settings: Ring, Created or Updated (saved as `connections_sort`).
 
 - Click a note to open it; the graph stays. Double-click it, or press ⇧↩, to re-centre the graph on it. ↩ opens the focused node, and Esc returns to Notes.
 - Click a tag node to filter Notes by that tag.
@@ -92,7 +92,7 @@ Any markdown task line is a task: `- [ ] buy milk` (also `*`, `+`, numbered list
 
 - Add a due date with `📅 2026-10-30`. Typing `due:` and a space in the editor turns into `📅 ` as a typing aid; you type the date. velo never writes a due date itself.
 - Ticking a task through velo (the checkbox in the editor, in the preview or in the Tasks view) appends `@done(YYYY-MM-DD)` (local date); unticking removes it. An Obsidian-style `✅ YYYY-MM-DD` is still read as the done date. Typing `x` by hand adds no date.
-- The Tasks view (⌘⇧X, or the toggle by the search box) lists open tasks from every note, grouped Overdue, Today, Upcoming and No date. Search and the tag filter apply to it. "Show done" adds tasks ticked in the last 7 days. Ticking or unticking a task of a note that is not open shows a "Ticked · Undo" (or "Unticked · Undo") toast for 5 seconds. A tick in the open note goes through the editor: undo it there with ⌘Z. Click a task to jump to its line; Enter in the search field opens the first task listed.
+- The Tasks view (⌘⇧X, or Tasks under Left pane in the header's ⋯ menu) lists open tasks from every note, grouped Overdue, Today, Upcoming and No date. Search and the tag filter apply to it. "Show done" adds tasks ticked in the last 7 days. Ticking or unticking a task of a note that is not open shows a "Ticked · Undo" (or "Unticked · Undo") toast for 5 seconds. A tick in the open note goes through the editor: undo it there with ⌘Z. Click a task to jump to its line; Enter in the search field opens the first task listed.
 - The Dock icon shows the count of overdue and due-today tasks on macOS; other platforms show the count inside the app.
 - Quick capture (⌥⇧⌘N, system-wide) shows velo with the search field in capture mode (`→ Inbox`); type the task, press Enter, and velo appends `- [ ] text` to your Inbox note, or to today's daily note. Choose in Settings, General. The Inbox note is called `Inbox` unless you rename it there.
 - The daily note (⌘⇧D) opens or creates a note titled with today's date, `YYYY-MM-DD`.
@@ -196,7 +196,7 @@ Release builds are not notarized: on macOS they carry only an ad-hoc signature, 
 
 ## Updates
 
-velo checks GitHub for a new release 30 seconds after launch and then once a day. When one is out, a banner offers **Install and restart**: velo saves your note, installs the update and relaunches. Check by hand from **velo → Check for Updates…** (macOS) or **Settings → Updates → Check now**; turn the daily check off in Settings. Updates are verified against velo's signing key before they install. On Linux, in-app updates work for the AppImage, .deb and .rpm (the .deb and .rpm installs ask for your password); if one fails, download the new version from the Releases page. Versions before 0.6.0 have no updater: install 0.6.0 by hand once. 0.8.0 is the last build for Intel Macs: they stop getting updates (a manual check shows a "platform not found" error). If you installed the Intel (x64) build on an Apple silicon Mac, download the Apple silicon (aarch64) .dmg from the Releases page once.
+velo checks GitHub for a new release 30 seconds after launch and then once a day. When one is out, a green "velo x.y is ready" pill in the header opens a popover with **What's new** and **Install and restart**: velo saves your note, installs the update and relaunches. Check by hand from **velo → Check for Updates…** (macOS) or **Settings → Updates → Check now**; turn the daily check off in Settings. Updates are verified against velo's signing key before they install. On Linux, in-app updates work for the AppImage, .deb and .rpm (the .deb and .rpm installs ask for your password); if one fails, download the new version from the Releases page. Versions before 0.6.0 have no updater: install 0.6.0 by hand once. 0.8.0 is the last build for Intel Macs: they stop getting updates (a manual check shows a "platform not found" error). If you installed the Intel (x64) build on an Apple silicon Mac, download the Apple silicon (aarch64) .dmg from the Releases page once.
 
 velo writes each update step, and any crash, to `velo.log`: `~/Library/Logs/dev.velo.app/velo.log` on macOS, `~/.local/share/dev.velo.app/logs/velo.log` on Linux, `%LOCALAPPDATA%\dev.velo.app\logs\velo.log` on Windows. Attach it when you report an update problem.
 

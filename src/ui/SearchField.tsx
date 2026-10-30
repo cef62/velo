@@ -5,10 +5,12 @@ import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { Input, Kbd } from "@/components/ui";
 import { searchHint } from "./breakpoints";
+import { showSearchHint } from "./layout";
+import { useWindowWidth } from "./useWindowWidth";
 import { registerSearchInput } from "./platform";
 import { useStore } from "./useStore";
 
-const wrap = css({ position: "relative", flex: "1 1 200px", minW: "180px" });
+const wrap = css({ position: "relative", flex: "1 1 220px", minW: "searchMin", maxW: "searchMax" }); // v2: the search is the header's hero, capped at searchMax
 const icon = css({ position: "absolute", left: "2.5", top: "50%", transform: "translateY(-50%)", w: "4", h: "4", color: "fg.muted", pointerEvents: "none" });
 const capErr = css({ position: "absolute", left: "0", top: "100%", mt: "1", zIndex: "1", fontSize: "uiSm", color: "red.11", bg: "velo.canvas", px: "1", borderRadius: "4px" });
 const hints = css({ position: "absolute", right: "1.5", top: "50%", transform: "translateY(-50%)", display: "inline-flex", gap: "1.5", pointerEvents: "none" });
@@ -34,8 +36,9 @@ export function SearchField({ controller, store }: { controller: Controller; sto
     setHintW(el.offsetWidth);
     return () => ro.disconnect();
   });
+  const hintRoom = showSearchHint(useWindowWidth()); // the ⌘L hint goes first on narrow windows
   // Tasks mode: Enter opens a task, so the Create hints don't apply
-  const hint = capture || tasksMode ? [] : searchHint({ query, sel, exactTitleMatch, keys, isMac });
+  const hint = capture || tasksMode || (query === "" && !hintRoom) ? [] : searchHint({ query, sel, exactTitleMatch, keys, isMac });
   const Icon = capture ? SquareCheck : Search;
   return (
     <div className={wrap}>

@@ -84,7 +84,7 @@ test("none clears a shortcut", () => {
   expect(validateBinding({ ...DEFAULTS, forward: "none" }, "back", "none", true)).toEqual({ ok: true });
 });
 
-test("metadata shortcut defaults", () => { expect(DEFAULTS.toggle_info).toBe("Mod+KeyI"); expect(DEFAULTS.toggle_front_matter).toBe("none"); expect(LABELS.toggle_info).toBe("Note info"); });
+test("metadata shortcut defaults", () => { expect(DEFAULTS.toggle_info).toBe("Mod+KeyI"); expect(DEFAULTS.toggle_front_matter).toBe("none"); expect(LABELS.toggle_info).toBe("Side panel"); });
 test("capture is a global action with a non-conflicting default", () => {
   expect(GLOBAL_ACTIONS).toEqual(["toggle_window", "capture"]);
   expect(LABELS.capture).toBe("Quick capture (global)");
@@ -132,5 +132,5 @@ test("timeline, export and save_search actions", () => {
   expect(DEFAULTS.toggle_timeline).toBe("Mod+Shift+KeyL");
   expect(DEFAULTS.export).toBe(NONE);
   expect(DEFAULTS.save_search).toBe(NONE);
-  expect([LABELS.toggle_timeline, LABELS.export, LABELS.save_search]).toEqual(["Toggle timeline", "Export…", "Save search…"]);
+  expect([LABELS.toggle_timeline, LABELS.export, LABELS.save_search]).toEqual(["Timeline", "Export…", "Save search…"]);
 });

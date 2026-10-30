@@ -9,6 +9,7 @@ import { checkbox } from "./checkbox";
 import { dialog } from "./dialog";
 import { field } from "./field";
 import { menu } from "./menu";
+import { popover } from "./popover";
 import { segmentGroup } from "./segment-group";
 import { select } from "./select";
 import { tabs } from "./tabs";
@@ -42,6 +43,7 @@ export const slotRecipes = {
   dialog,
   field,
   menu,
+  popover,
   segmentGroup,
   listRow,
   select,

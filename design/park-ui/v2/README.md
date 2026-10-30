@@ -144,7 +144,7 @@ Found by reading `src/ui/*` at 0.10.1.
 - `previewPill`: no longer used (#5).
 - `titleBar`: right padding drops to `2.5` (icon buttons sit at the edge).
 
-**Responsive logic:** `panda/layout.ts` (+ `layout.test.ts`, written against the mock sizes). It replaces `src/ui/breakpoints.ts › headerMode()`. Each part decides from its own width (ResizeObserver), so both layouts and the divider position work without window breakpoints.
+**Responsive logic:** `panda/layout.ts` (+ `layout.test.ts`, written against the mock sizes; now `src/ui/layout.ts` in the app). It replaces `src/ui/breakpoints.ts › headerMode()`. Each part decides from its own width (ResizeObserver), so both layouts and the divider position work without window breakpoints.
 
 ## 8. Shortcuts
 
@@ -223,7 +223,7 @@ Found by reading `src/ui/*` at 0.10.1.
 ## 11. Files
 
 - `panda/tokens.ts`
-- `panda/layout.ts`, `panda/layout.test.ts`
+- `panda/layout.ts`, `panda/layout.test.ts` — moved to `src/ui/` when implemented
 - `panda/recipes/*.ts`
 - `panda/clear/velo.ts`, `panda/clear/neutral.ts` — the clear theme (§12)
 - `reference/velo-clear.css` — the clear theme as plain CSS; loads after `velo-v2.css`

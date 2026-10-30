@@ -59,6 +59,14 @@ export default defineConfig({
           controlSm: { value: '28px' },
           header: { value: '48px' },
           titleBar: { value: '48px' },
+          // v2 (design/park-ui/v2/README.md §7)
+          paneBar: { value: '36px' }, // left pane bar: mode tabs + that mode's controls
+          paneTab: { value: '28px' }, // tab / menu-button height inside pane bars (= controlSm)
+          sidePanel: { value: '300px' }, // Related · Info panel, docked
+          searchMax: { value: '680px' }, // the header search stops growing here
+          searchMin: { value: '180px' }, // and never shrinks below this
+          palette: { value: '560px' }, // command palette width
+          relatedRow: { value: '44px' }, // min height of a Related row (title + context line)
         },
         durations: durations,
         zIndex: zIndex
