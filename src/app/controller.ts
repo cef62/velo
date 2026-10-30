@@ -624,7 +624,7 @@ export class Controller {
         if (!current()) return true; // a newer note was opened while the field was up: leave it alone
         if (ok) {
           const r = await this.show(path, how, true);
-          if (r === true && current()) this.editor.focus(); // the unlock field had focus; reading starts in the note
+          if (r === true && this.editor.currentPath() === path) this.editor.focus(); // the unlock field had focus; reading starts in the note
           return r;
         }
         if (ok === null) return how !== "nav"; // no key on this computer: keep the copy-identity error

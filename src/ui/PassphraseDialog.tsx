@@ -20,9 +20,11 @@ export function PassphraseDialog() {
   const [req, setReq] = useState<Req | null>(null);
   const [n, setN] = useState(0); // a new request remounts the inline field: fresh text, error and focus
   const done = useRef<((ok: boolean) => void) | null>(null);
+  const pending = useRef<Req | null>(null); // the canceller drops only an inline prompt; dialogs stay up
   const finish = (ok: boolean) => {
     done.current?.(ok);
     done.current = null;
+    pending.current = null;
     setReq(null);
   };
   useEffect(() => {
@@ -31,10 +33,11 @@ export function PassphraseDialog() {
         new Promise<boolean>((resolve) => {
           done.current?.(false); // a newer request supersedes a pending one
           done.current = resolve;
+          pending.current = r;
           setN((x) => x + 1);
           setReq(r);
         }),
-      () => finish(false),
+      () => pending.current?.inline && finish(false),
     );
   }, []);
   if (req?.mode === "unlock" && req.inline) return <LockScreen key={n} req={req} finish={finish} />;

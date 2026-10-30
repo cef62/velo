@@ -272,8 +272,9 @@ test("setStyle saves the editing style; toggleStyle flips it; hasSelection follo
 test("opening a locked note asks inline; a newer open under the field wins and cancels it", async () => {
   const { c, api, store, ui } = setup();
   const open = api.openNote.getMockImplementation()!;
+  let lockedA = true;
   api.openNote.mockImplementation(async (p: string) => {
-    if (p === P("A")) throw "locked";
+    if (p === P("A") && lockedA) throw "locked";
     return open(p);
   });
   api.hasIdentity.mockResolvedValue(false);
@@ -290,9 +291,13 @@ test("opening a locked note asks inline; a newer open under the field wins and c
   await c.show(P("B")); // clicked another note while the field was up
   expect(cancelled).toBeGreaterThan(0);
   expect(store.get().openPath).toBe(P("B"));
+  lockedA = false; // the key is loaded now: a retry would open A
+  const opened = api.openNote.mock.calls.length;
   resolveUnlock(true); // the stale prompt resolves anyway
   expect(await a).toBe(true);
   expect(store.get().openPath).toBe(P("B")); // A is not reopened over B
+  expect(api.openNote.mock.calls.length).toBe(opened);
+  expect(store.get().err).toBe("");
 });
 
 test("a slow auto-show doesn't replace the note Enter just opened", async () => {
