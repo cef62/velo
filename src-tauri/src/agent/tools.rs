@@ -416,7 +416,7 @@ mod tests {
         let text = serde_json::to_string_pretty(&specs).unwrap() + "\n";
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../site/src/content/reference/mcp-tools.json");
         if std::env::var("VELO_UPDATE_DOCS").is_ok_and(|v| v == "1") { std::fs::write(&path, text).unwrap(); return }
-        assert!(std::fs::read_to_string(&path).is_ok_and(|cur| cur == text), "mcp-tools.json is stale: run `VELO_UPDATE_DOCS=1 cargo test dump_tool_specs`");
+        assert!(std::fs::read_to_string(&path).is_ok_and(|cur| cur.replace("\r\n", "\n") == text), "mcp-tools.json is stale: run `VELO_UPDATE_DOCS=1 cargo test dump_tool_specs`");
     }
 
     fn vault(files: &[(&str, &str)]) -> (DirectOps, PathBuf) {

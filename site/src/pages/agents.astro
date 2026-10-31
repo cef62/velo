@@ -13,7 +13,9 @@ const notes = (p: Prop) =>
   ].filter(Boolean).join(', ');
 const params = (t: (typeof tools)[number]) => {
   const schema = t.input_schema as { properties: Record<string, Prop>; required?: string[] };
-  return Object.entries(schema.properties).map(([name, p]) => ({ name, type: typeOf(p), required: !!schema.required?.includes(name), notes: notes(p) }));
+  // serde_json sorts keys, so schema order is lost: list required parameters first, then alphabetical.
+  const rows = Object.entries(schema.properties).map(([name, p]) => ({ name, type: typeOf(p), required: !!schema.required?.includes(name), notes: notes(p) }));
+  return rows.sort((a, b) => +b.required - +a.required);
 };
 ---
 
@@ -34,7 +36,8 @@ const params = (t: (typeof tools)[number]) => {
     <p>Typical paths:</p>
     <ul>
       <li>macOS: <code>/Applications/velo.app/Contents/MacOS/velo</code></li>
-      <li>Linux: where your package put the binary, for example <code>/usr/bin/velo</code> for the .deb</li>
+      <li>Linux, .deb: the installed binary, typically <code>/usr/bin/velo</code></li>
+      <li>Linux, AppImage: the path of the <code>.AppImage</code> file itself (velo uses <code>$APPIMAGE</code>, because the mounted copy it runs from disappears on exit)</li>
       <li>Windows: not supported yet</li>
     </ul>
     <p>
@@ -43,11 +46,11 @@ const params = (t: (typeof tools)[number]) => {
     </p>
 
     <h2 id="other-clients">Other clients</h2>
-    <p>Any client that launches an MCP server over stdio works with this entry:</p>
+    <p>Any client that launches an MCP server over stdio works with this entry, where <code>/path/to/velo</code> is the path for your system (see Setup):</p>
     <pre><code>{`{
   "mcpServers": {
     "velo": {
-      "command": "/Applications/velo.app/Contents/MacOS/velo",
+      "command": "/path/to/velo",
       "args": ["--mcp"]
     }
   }
@@ -60,7 +63,7 @@ const params = (t: (typeof tools)[number]) => {
       <li>Edits are anchored (<code>old_text</code> must match once) or hash-guarded (<code>replace_note</code> fails if the note changed since you read it).</li>
       <li>A note open in velo is edited through the editor, so nothing is overwritten behind it. If velo does not take the change within 5 seconds the call fails with "velo is busy, retry" and nothing changes.</li>
       <li>Off by default. The running app listens on 127.0.0.1 only, and every request needs a random token.</li>
-      <li>Every write needs a summary. velo saves a revision of the note first, marked as an agent change in the info panel; select it and press Restore.</li>
+      <li>Every write needs a summary (for <code>daily_note</code> it is optional). Before it, velo saves a revision of the note with that summary, marked as an agent change in the info panel; select it and press Restore.</li>
     </ul>
 
     <h2 id="tools">Tools ({tools.length})</h2>
@@ -71,14 +74,17 @@ const params = (t: (typeof tools)[number]) => {
         {params(t).length === 0
           ? <p><em>No parameters.</em></p>
           : (
+            <div class="ref-table" tabindex="0" role="region" aria-label={`${t.name} parameters`}>
             <table>
+              <caption>Parameters of {t.name}</caption>
               <thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
               <tbody>
                 {params(t).map((p) => (
-                  <tr><td><code>{p.name}</code></td><td>{p.type}</td><td>{p.required ? 'yes' : 'no'}</td><td>{p.notes}</td></tr>
+                  <tr><th scope="row"><code>{p.name}</code></th><td>{p.type}</td><td>{p.required ? 'yes' : 'no'}</td><td>{p.notes}</td></tr>
                 ))}
               </tbody>
             </table>
+            </div>
           )}
       </section>
     ))}

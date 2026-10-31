@@ -490,8 +490,27 @@ kbd {
 }
 
 .unbound {
-  color: var(--muted, inherit);
-  opacity: 0.75;
+  color: var(--muted);
+}
+
+.ref-table {
+  overflow-x: auto;
+  margin: 0 0 1.2em;
+}
+
+.ref-table table {
+  display: table;
+  width: 100%;
+  margin: 0;
+}
+
+.ref-table caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .tool {

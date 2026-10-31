@@ -15,12 +15,14 @@ const groups = [...new Set(rows.map((r) => r.group))].map((name) => ({ name, row
     {groups.map((g) => (
       <>
         <h2 id={g.name.toLowerCase().replace(/[^a-z]+/g, '-')}>{g.name}</h2>
+        <div class="ref-table" tabindex="0" role="region" aria-label={`${g.name} shortcuts`}>
         <table>
+          <caption>{g.name} shortcuts</caption>
           <thead><tr><th>Action</th><th>macOS</th><th>Windows / Linux</th></tr></thead>
           <tbody>
             {g.rows.map((r) => (
               <tr>
-                <td>{r.label.replace(' (global)', '')}{r.global && <> <strong>(global)</strong></>}</td>
+                <th scope="row">{r.label.replace(' (global)', '')}{r.global && <> <strong>(global)</strong></>}</th>
                 {r.mac === null
                   ? <td colspan="2" class="unbound">— (no default, bind in Settings)</td>
                   : <><td><kbd>{r.mac}</kbd></td><td><kbd>{r.other}</kbd></td></>}
@@ -28,6 +30,7 @@ const groups = [...new Set(rows.map((r) => r.group))].map((name) => ({ name, row
             ))}
           </tbody>
         </table>
+        </div>
       </>
     ))}
     <p><small>Generated from the app's defaults (<code>src/shortcuts.ts</code>). Your own bindings are not shown here.</small></p>

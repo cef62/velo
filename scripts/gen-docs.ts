@@ -19,7 +19,7 @@ for (const [g, list] of Object.entries(GROUPS)) for (const a of list) {
   if (group.has(a)) throw new Error(`action in two groups: ${a}`);
   group.set(a, g);
 }
-for (const a of actions) if (!group.has(a)) throw new Error(`action without group: ${a}`);
+for (const a of actions) if (!group.has(a)) throw new Error(`action without group: ${a} — add it to GROUPS in scripts/gen-docs.ts`);
 for (const a of group.keys()) if (!(a in DEFAULTS)) throw new Error(`unknown action in groups: ${a}`);
 
 const rows = Object.entries(GROUPS).flatMap(([g, list]) => list.map((action) => ({
@@ -37,5 +37,5 @@ const text = JSON.stringify(rows, null, 2) + "\n";
 if (process.argv.includes("--check")) {
   let cur = "";
   try { cur = readFileSync(out, "utf8"); } catch {}
-  if (cur !== text) { console.error("shortcuts.json is stale: run `pnpm docs:gen`"); process.exit(1); }
+  if (cur.replace(/\r\n/g, "\n") !== text) { console.error("shortcuts.json is stale: run `pnpm docs:gen`"); process.exit(1); }
 } else writeFileSync(out, text);
