@@ -28,6 +28,7 @@ export function FiltersPanel({ controller, store }: { controller: Controller; st
   const saved = useStore(store, (s) => s.savedSearches);
   const group = useRef<HTMLDivElement>(null);
   const capture = useStore(store, (s) => s.capture !== null);
+  const appliedName = useStore(store, (s) => s.appliedSaved);
   const [cur, setCur] = useState(0); // roving tab stop: Tab enters the group once, arrows move inside
   const k = saved.length; // one roving sequence: saved chips, No links, tag chips
   const menuAt = useRef<number | null>(null); // the saved chip whose menu opened last
@@ -50,7 +51,6 @@ export function FiltersPanel({ controller, store }: { controller: Controller; st
   const close = formatBinding(keys.toggle_tags, isMac);
   const stop = (i: number) => (i === Math.min(cur, k + tags.length) ? 0 : -1);
   const filtered = !capture && (query.trim() !== "" || selectedTags.length > 0 || noLinks); // capture text is not a search
-  const appliedName = useStore(store, (s) => s.appliedSaved);
   const applied = appliedSearch(saved, appliedName, { query, tags: selectedTags, noLinks });
   const active = activeFilterCount(saved, appliedName, { query, tags: selectedTags, noLinks });
   return (
