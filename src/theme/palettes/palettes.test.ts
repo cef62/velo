@@ -34,6 +34,9 @@ describe("palettes", () => {
     expect(orange["9"].value._dark._palettePaper).toBe("{colors.velo.accent}");
     expect(JSON.stringify((parkColors.green as Record<string, unknown>).solid)).toContain("velo.positive");
     expect(parkScales.mist.accent).toBe("iris");
+    expect(parkScales.contrast.accent).toBe("blue");
+    const surface = (parkColors.blue as unknown as { surface: { border: { DEFAULT: { value: { _dark: Record<string, string> } } } } }).surface;
+    expect(surface.border.DEFAULT.value._dark._paletteContrast).toBe("{colors.velo.accentBorder}");
   });
 });
 
@@ -47,7 +50,7 @@ describe("custom steps", () => {
       ["grass", "_palettePaper", { 9: "positive", 10: "positiveHover", 11: "positiveText" }],
       ["blue", "_paletteElectric", { 9: "accent", 10: "accentHover", 11: "accentText" }],
       ["teal", "_paletteReef", { 9: "accent", 10: "accentHover", 11: "accentText" }],
-      ["blue", "_paletteContrast", { 11: "accentText", 12: "accentHover" }],
+      ["blue", "_paletteContrast", { 7: "accentBorder", 8: "accentBorder", 9: "accent", 10: "accentHover", 11: "accentText", 12: "accentHover" }],
     ];
     for (const [scale, cond, steps] of cases)
       for (const [n, t] of Object.entries(steps)) for (const k of [n, `a${n}`]) expect(at(scale, k, cond), `${scale}.${k}`).toBe(`{colors.velo.${t}}`);
