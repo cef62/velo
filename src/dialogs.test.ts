@@ -3,7 +3,7 @@ import { isLockedPath, passphraseDialogMode, passphraseError } from "./passphras
 import { DEFAULTS } from "./shortcuts";
 import { clampFont, fixedKeyRefusal, recorderStep, toSettings } from "./settingsform";
 
-const base = { notes_dir: "/n", layout: "vertical" as const, font_size: 14, sort: "modified" as const, editor_style: "rich" as const, theme: "system" as const, write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox" as const, inbox_title: "Inbox", agent_access: false, saved_searches: [], timeline_sort: "updated" as const, shortcuts: { toggle_window: "Mod+KeyA", rename: "Mod+KeyR" } };
+const base = { notes_dir: "/n", layout: "vertical" as const, font_size: 14, sort: "modified" as const, editor_style: "rich" as const, theme: "system" as const, write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox" as const, inbox_title: "Inbox", agent_access: false, saved_searches: [], timeline_sort: "updated" as const, palette: "clear", shortcuts: { toggle_window: "Mod+KeyA", rename: "Mod+KeyR" } };
 
 test("dialog wording follows identity file", () => {
   expect(passphraseDialogMode(true)).toEqual({ title: "Enter your velo passphrase", confirm: false });
@@ -34,13 +34,13 @@ test("font clamps to 10-32, junk falls back", () => {
 });
 
 test("form to settings", () => {
-  const f = { layout: "horizontal", fontSize: "40", theme: "dark", writeFrontMatter: false, autoUpdateCheck: false, agentAccess: true, captureTarget: "inbox", inboxTitle: "Inbox", shortcuts: { ...base.shortcuts, rename: "Mod+KeyB" } as never };
-  expect(toSettings(base, f)).toEqual({ ...base, shortcuts: f.shortcuts, layout: "horizontal", font_size: 32, theme: "dark", write_front_matter: false, auto_update_check: false, agent_access: true });
-  expect(toSettings(base, { ...f, layout: "bogus", fontSize: "12", theme: "bogus" })).toEqual({ ...base, shortcuts: f.shortcuts, font_size: 12, write_front_matter: false, auto_update_check: false, agent_access: true });
+  const f = { layout: "horizontal", fontSize: "40", theme: "dark", palette: "reef", writeFrontMatter: false, autoUpdateCheck: false, agentAccess: true, captureTarget: "inbox", inboxTitle: "Inbox", shortcuts: { ...base.shortcuts, rename: "Mod+KeyB" } as never };
+  expect(toSettings(base, f)).toEqual({ ...base, shortcuts: f.shortcuts, layout: "horizontal", font_size: 32, theme: "dark", palette: "reef", write_front_matter: false, auto_update_check: false, agent_access: true });
+  expect(toSettings(base, { ...f, layout: "bogus", fontSize: "12", theme: "bogus", palette: "toString" })).toEqual({ ...base, shortcuts: f.shortcuts, font_size: 12, write_front_matter: false, auto_update_check: false, agent_access: true });
 });
 
 test("form to settings: capture target and inbox title", () => {
-  const f = { layout: "vertical", fontSize: "14", theme: "system", writeFrontMatter: true, autoUpdateCheck: true, agentAccess: false, captureTarget: "daily", inboxTitle: " Todo ", shortcuts: base.shortcuts as never };
+  const f = { layout: "vertical", fontSize: "14", theme: "system", palette: "clear", writeFrontMatter: true, autoUpdateCheck: true, agentAccess: false, captureTarget: "daily", inboxTitle: " Todo ", shortcuts: base.shortcuts as never };
   expect(toSettings(base, f)).toMatchObject({ capture_target: "daily", inbox_title: "Todo" });
   expect(toSettings(base, { ...f, captureTarget: "bogus", inboxTitle: "  " })).toMatchObject({ capture_target: "inbox", inbox_title: "Inbox" });
 });

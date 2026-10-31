@@ -7,6 +7,7 @@ import type { AppState, Store } from "../app/store";
 import { Button, Checkbox, Dialog, IconButton, Input, Kbd, SegmentGroup, Tabs } from "@/components/ui";
 import { clampFont, recorderStep, toSettings } from "../settingsform";
 import { DEFAULTS, LABELS, formatBinding, resolve, type Action } from "../shortcuts";
+import { PalettePicker } from "./PalettePicker";
 import { conflictsOf } from "./settingsModel";
 import { platform } from "./platform";
 import { useStore } from "./useStore";
@@ -37,7 +38,7 @@ export function SettingsDialog({ controller, store }: { controller: Controller; 
     <Dialog.Root open={settings !== null} onOpenChange={(d) => !d.open && controller.closeSettings()} closeOnInteractOutside={false}>
       <Dialog.Backdrop />
       <Dialog.Positioner>
-        <Dialog.Content className={css({ maxW: "640px", p: "0", gap: "0", overflow: "hidden", maxH: "calc(100dvh - 32px)" })}>
+        <Dialog.Content className={css({ maxW: "720px", p: "0", gap: "0", overflow: "hidden", maxH: "calc(100dvh - 32px)" })}>
           {last.current && <Body cur={last.current} controller={controller} store={store} />}
         </Dialog.Content>
       </Dialog.Positioner>
@@ -51,6 +52,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
     notes_dir: cur.notes_dir,
     layout: cur.layout as string,
     theme: cur.theme as string,
+    palette: cur.palette ?? "clear",
     fontSize: String(cur.font_size),
     writeFrontMatter: cur.write_front_matter !== false,
     autoUpdateCheck: cur.auto_update_check !== false,
@@ -60,6 +62,11 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
     shortcuts: resolve(cur.shortcuts, isMac),
   }));
   const set = (p: Partial<typeof d>) => setD((x) => ({ ...x, ...p }));
+  // theme and palette restyle the window as you pick; Cancel/Esc (controller.closeSettings) puts the saved ones back
+  const look = (p: { theme?: string; palette?: string }) => {
+    set(p);
+    controller.previewLook(toSettings(cur, { ...d, ...p }));
+  };
   const [tab, setTab] = useState("general");
   const [recording, setRecording] = useState<Action | null>(null);
   const [recMsg, setRecMsg] = useState("");
@@ -119,6 +126,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
       <Tabs.Root value={tab} onValueChange={(x) => setTab(x.value)} className={css({ gap: "0" })}>
         <Tabs.List aria-label="Settings sections" className={css({ w: "100%", px: "3.5", borderBottom: "1px solid", borderColor: "velo.subtle", gap: "1" })}>
           <Tabs.Trigger value="general" className={css({ h: "38px", px: "2", fontSize: "ui" })}>General</Tabs.Trigger>
+          <Tabs.Trigger value="appearance" className={css({ h: "38px", px: "2", fontSize: "ui" })}>Appearance</Tabs.Trigger>
           <Tabs.Trigger value="shortcuts" className={css({ h: "38px", px: "2", fontSize: "ui", gap: "1.5" })}>
             Keyboard shortcuts
             {nConflicts > 0 && (
@@ -144,10 +152,6 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
               {seg("Layout", d.layout, [["vertical", "Vertical"], ["horizontal", "Horizontal"]], (v) => set({ layout: v }))}
               <Kbd>{formatBinding(DEFAULTS.toggle_layout, isMac)}</Kbd>
             </div>
-          </div>
-          <div className={frow}>
-            <span className={flab}>Theme</span>
-            <div>{seg("Theme", d.theme, [["system", "System"], ["light", "Light"], ["dark", "Dark"]], (v) => set({ theme: v }))}</div>
           </div>
           <div className={frow}>
             <label className={flab} htmlFor="set-font">Font size</label>
@@ -199,6 +203,16 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
               </div>
               <span className={help}>Lets Claude Code read and edit your notes. Locked notes are never shared; deletes go to the Trash; every change is saved as a revision you can restore.</span>
             </div>
+          </div>
+        </Tabs.Content>
+        <Tabs.Content value="appearance" className={css({ p: "5", display: "flex", flexDirection: "column", gap: "4", overflowY: "auto", maxH: "calc(100dvh - 240px)" })}>
+          <div className={frow}>
+            <span className={flab}>Theme</span>
+            <div>{seg("Theme", d.theme, [["system", "System"], ["light", "Light"], ["dark", "Dark"]], (v) => look({ theme: v }))}</div>
+          </div>
+          <div className={css({ display: "flex", flexDirection: "column", gap: "2.5" })}>
+            <span className={flab}>Palette</span>
+            <PalettePicker value={d.palette} onChange={(v) => look({ palette: v })} />
           </div>
         </Tabs.Content>
         <Tabs.Content value="shortcuts" className={css({ p: "4 5 5", display: "flex", flexDirection: "column", gap: "3", overflowY: "auto", maxH: "calc(100dvh - 240px)" })}>
