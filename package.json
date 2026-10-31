@@ -18,6 +18,8 @@
     "tauri": "tauri",
     "build:app": "TAURI_SIGNING_PRIVATE_KEY=\"$(cat ~/.tauri/velo.key)\" TAURI_SIGNING_PRIVATE_KEY_PASSWORD=\"$(cat ~/.tauri/velo.password)\" tauri build",
     "codegen": "panda codegen",
+    "docs:gen": "node scripts/gen-docs.ts",
+    "docs:check": "node scripts/gen-docs.ts --check",
     "site:dev": "cd site && astro dev",
     "site:build": "astro build --root site",
     "site:preview": "cd site && astro preview",
