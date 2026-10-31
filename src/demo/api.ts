@@ -72,7 +72,7 @@ export function resetDemo(pin?: Date) {
   for (const [file, raw] of Object.entries(seed)) {
     const name = file.slice("./vault/".length, -".md".length);
     const path = name.endsWith(".locked") ? `${DIR}/${name.slice(0, -".locked".length)}.md.age` : `${DIR}/${name}.md`;
-    const text = expandDates(raw, now);
+    const text = expandDates(raw.replace(/\r\n/g, "\n"), now); // Windows checkouts get CRLF
     const at = (k: string, fallback: number) => {
       const t = new Date(fmValue(text, k) ?? "").getTime();
       return Math.min(isNaN(t) ? fallback : t, now.getTime() - 60_000); // a seed time later today would be in the future
