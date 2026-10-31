@@ -28,6 +28,8 @@ pub struct AppState {
     pub locked: AtomicBool,
     /// set by `capture_requested`: velo was hidden (or unfocused) when the capture shortcut fired
     pub capture_was_hidden: AtomicBool,
+    /// set by `quit`: the next close request closes velo even when the close button only hides it
+    pub quitting: AtomicBool,
     pub settings_path: PathBuf,
     pub data_dir: PathBuf,
 }
@@ -167,21 +169,108 @@ fn notify_changed(app: &AppHandle, changed: Vec<String>) {
     }
 }
 
+fn hide_main(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    app.hide().ok(); // hides the whole app so macOS refocuses the previously active one
+    #[cfg(not(target_os = "macos"))]
+    if let Some(w) = app.get_webview_window("main") {
+        w.hide().ok();
+    }
+}
+
+/// Brings the main window to the front; None if it is gone.
+pub fn show_main(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    let w = app.get_webview_window("main")?;
+    #[cfg(target_os = "macos")]
+    app.show().ok();
+    w.show().ok();
+    w.unminimize().ok();
+    w.set_focus().ok();
+    Some(w)
+}
+
 pub fn toggle_window(app: &AppHandle) {
     let Some(w) = app.get_webview_window("main") else { return };
     if w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false) {
-        #[cfg(target_os = "macos")]
-        app.hide().ok(); // hides the whole app so macOS refocuses the previously active one
-        #[cfg(not(target_os = "macos"))]
-        w.hide().ok();
-    } else {
-        #[cfg(target_os = "macos")]
-        app.show().ok();
-        w.show().ok();
-        w.unminimize().ok();
-        w.set_focus().ok();
+        hide_main(app);
+    } else if let Some(w) = show_main(app) {
         w.emit("focus-search", ()).ok();
     }
+}
+
+/// Quit for real: the next close request closes instead of hiding. The window is shown first so the
+/// unsaved-edits prompt of the UI's close flow is visible.
+pub fn quit(app: &AppHandle) {
+    app.state::<AppState>().quitting.store(true, Ordering::SeqCst);
+    if let Some(w) = show_main(app) {
+        w.close().ok();
+    }
+}
+
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    quit(&app);
+}
+
+/// The UI's close-requested handler asks first. true = go on closing (velo quits, after the unsaved-edits check);
+/// false = velo only hid, because it lives in the tray or on its hotkey and has no Dock/taskbar icon to come back from.
+#[tauri::command]
+pub fn close_requested(app: AppHandle, st: State<'_, AppState>) -> bool {
+    if st.quitting.swap(false, Ordering::SeqCst) || st.settings.lock().unwrap().app_icon == "dock" {
+        return true;
+    }
+    hide_main(&app);
+    false
+}
+
+/// Shows velo in the Dock/taskbar ("dock"), the menu bar/system tray ("tray") or neither ("none").
+pub fn apply_app_icon(app: &AppHandle, mode: &str) -> tauri::Result<()> {
+    #[cfg(target_os = "macos")]
+    app.set_activation_policy(if mode == "dock" { tauri::ActivationPolicy::Regular } else { tauri::ActivationPolicy::Accessory })?;
+    #[cfg(not(target_os = "macos"))]
+    if let Some(w) = app.get_webview_window("main") {
+        w.set_skip_taskbar(mode != "dock")?;
+    }
+    if mode != "tray" {
+        app.remove_tray_by_id("main");
+    } else if app.tray_by_id("main").is_none() {
+        build_tray(app)?;
+    }
+    Ok(())
+}
+
+fn build_tray(app: &AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+    let menu = Menu::with_items(app, &[
+        &MenuItem::with_id(app, "tray-show", "Show velo", true, None::<&str>)?,
+        &MenuItem::with_id(app, "tray-capture", "Quick capture", true, None::<&str>)?,
+        &PredefinedMenuItem::separator(app)?,
+        &MenuItem::with_id(app, "tray-quit", "Quit velo", true, None::<&str>)?,
+    ])?;
+    let mut tray = TrayIconBuilder::with_id("main")
+        .tooltip("velo")
+        .menu(&menu)
+        .show_menu_on_left_click(false) // left click toggles the window, right click opens the menu
+        .on_menu_event(|app, ev| match ev.id().as_ref() {
+            "tray-show" => {
+                show_main(app).map(|w| w.emit("focus-search", ()).ok());
+            }
+            "tray-capture" => capture_requested(app),
+            "tray-quit" => quit(app),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, ev| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = ev {
+                toggle_window(tray.app_handle());
+            }
+        });
+    // shortcut: the full-color app icon, not a monochrome macOS template image; add a template PNG if it looks off in the menu bar
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
+    Ok(())
 }
 
 /// Remembers whether velo was hidden (for Task 8's capture_done), then shows it like `toggle_window` and tells the UI.
@@ -189,11 +278,7 @@ pub fn capture_requested(app: &AppHandle) {
     let Some(w) = app.get_webview_window("main") else { return };
     let hidden = !(w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false));
     capture_shown(&app.state::<AppState>().capture_was_hidden, hidden);
-    #[cfg(target_os = "macos")]
-    app.show().ok();
-    w.show().ok();
-    w.unminimize().ok();
-    w.set_focus().ok();
+    show_main(app);
     app.emit("capture", ()).ok();
 }
 
@@ -275,7 +360,13 @@ pub fn get_settings(st: State<AppState>) -> Settings {
 }
 
 #[tauri::command(async)]
-pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings) -> Res<()> {
+pub fn set_settings(app: AppHandle, st: State<'_, AppState>, mut settings: Settings) -> Res<()> {
+    if !settings::APP_ICONS.contains(&settings.app_icon.as_str()) {
+        settings.app_icon = "dock".into();
+    }
+    if settings.app_icon == "none" && settings.global_bindings().iter().any(|(a, k)| *a == GlobalAction::ToggleWindow && k == "none") {
+        return Err("hotkey-required".into()); // no icon and no hotkey: once hidden, velo could not be brought back
+    }
     let old = st.settings.lock().unwrap().clone();
     let changed = changed_globals(&old, &settings);
     // All-or-nothing on purpose: if any new key fails, every action keeps its old key and nothing is saved,
@@ -313,7 +404,14 @@ pub fn set_settings(app: AppHandle, st: State<'_, AppState>, settings: Settings)
         return Err(err(e));
     }
     let on = settings.agent_access;
+    let icon = (old.app_icon != settings.app_icon).then(|| settings.app_icon.clone());
     *st.settings.lock().unwrap() = settings;
+    if let Some(mode) = icon {
+        if let Err(e) = apply_app_icon(&app, &mode) {
+            eprintln!("velo: app icon mode not applied: {e}");
+        }
+        show_main(&app); // a macOS activation-policy switch can drop the window behind other apps
+    }
     if !on {
         set_access(&agent.listener, false, || unreachable!()).ok(); // removes agent.json; later calls see the switch off
     }
@@ -465,14 +563,8 @@ pub fn capture_target_title(st: State<'_, AppState>) -> CaptureTarget {
 /// Capture mode ended. `hide` (Enter or Esc, not a blur): if the shortcut showed velo, hide it again so the previous app is back in front.
 #[tauri::command]
 pub fn capture_done(app: AppHandle, st: State<'_, AppState>, hide: bool) {
-    if !capture_ended(&st.capture_was_hidden, hide) {
-        return;
-    }
-    #[cfg(target_os = "macos")]
-    app.hide().ok();
-    #[cfg(not(target_os = "macos"))]
-    if let Some(w) = app.get_webview_window("main") {
-        w.hide().ok();
+    if capture_ended(&st.capture_was_hidden, hide) {
+        hide_main(&app);
     }
 }
 

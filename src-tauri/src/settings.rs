@@ -41,13 +41,19 @@ pub struct Settings {
     pub timeline_sort: String,
     /// color palette slug (src/theme/palettes); anything outside PALETTES reads as "clear"
     pub palette: String,
+    /// where velo shows itself: "dock" (Dock/taskbar) | "tray" (menu bar/system tray) | "none" (global hotkey only);
+    /// anything else reads as "dock"
+    pub app_icon: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into(), agent_access: false, saved_searches: vec![], timeline_sort: "updated".into(), palette: "clear".into() }
+        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into(), agent_access: false, saved_searches: vec![], timeline_sort: "updated".into(), palette: "clear".into(), app_icon: "dock".into() }
     }
 }
+
+/// `Settings::app_icon` values.
+pub const APP_ICONS: [&str; 3] = ["dock", "tray", "none"];
 
 /// The UI's palette slugs (src/theme/palettes/index.ts).
 pub const PALETTES: [&str; 6] = ["clear", "mist", "paper", "electric", "reef", "contrast"];
@@ -55,10 +61,10 @@ pub const PALETTES: [&str; 6] = ["clear", "mist", "paper", "electric", "reef", "
 const DEFAULT_TOGGLE: &str = "Mod+Shift+Space";
 const DEFAULT_CAPTURE: &str = "Mod+Alt+Shift+KeyN"; // canonical modifier order, as the UI's DEFAULTS
 /// Every action id in the UI's `DEFAULTS` (src/shortcuts.ts); a saved id outside it (e.g. the old `next_note`) is ignored there.
-pub const ACTIONS: [&str; 27] = [
+pub const ACTIONS: [&str; 28] = [
     "focus_search", "toggle_preview", "rename", "toggle_lock", "lock_all", "settings", "toggle_sort", "back", "forward", "delete_note",
     "toggle_tags", "toggle_rich", "toggle_layout", "toggle_window", "toggle_info", "toggle_front_matter", "toggle_tasks", "toggle_connections", "capture", "daily_note", "extract_note",
-    "merge_note", "toggle_timeline", "export", "save_search", "context_menu", "command_palette",
+    "merge_note", "toggle_timeline", "export", "save_search", "context_menu", "command_palette", "quit",
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -170,6 +176,9 @@ pub fn load(path: &Path) -> Settings {
     if !PALETTES.contains(&s.palette.as_str()) {
         s.palette = "clear".into();
     }
+    if !APP_ICONS.contains(&s.app_icon.as_str()) {
+        s.app_icon = "dock".into();
+    }
     if let Some(h) = legacy {
         s.shortcuts.entry("toggle_window".into()).or_insert(h);
     }
@@ -207,6 +216,15 @@ mod tests {
         std::fs::write(&p, r#"{"palette":"reef","font_size":16}"#).unwrap(); assert_eq!(load(&p).palette, "reef");
         std::fs::write(&p, r#"{"palette":"sepia","font_size":16}"#).unwrap();
         let s = load(&p); assert_eq!((s.palette.as_str(), s.font_size), ("clear", 16));
+    }
+    #[test] fn app_icon_defaults_and_validates() {
+        let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");
+        assert_eq!(load(&p).app_icon, "dock");
+        for m in ["tray", "none"] {
+            std::fs::write(&p, format!(r#"{{"app_icon":"{m}"}}"#)).unwrap(); assert_eq!(load(&p).app_icon, m);
+        }
+        std::fs::write(&p, r#"{"app_icon":"hidden","font_size":16}"#).unwrap();
+        let s = load(&p); assert_eq!((s.app_icon.as_str(), s.font_size), ("dock", 16));
     }
     #[test] fn v1_settings_migrate() {
         let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");

@@ -10,7 +10,7 @@ export type TaskView = { overdue: TaskItem[]; today: TaskItem[]; upcoming: TaskI
 export type RenameResult = { path: string; rewritten: number };
 export type MergeResult = { path: string; rewritten: number; trash_error: string | null };
 export type SavedSearch = { name: string; query: string; tags: string[]; no_links: boolean };
-export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean; capture_target: "inbox" | "daily"; inbox_title: string; agent_access: boolean; saved_searches: SavedSearch[]; timeline_sort: "updated" | "created"; palette: string };
+export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean; capture_target: "inbox" | "daily"; inbox_title: string; agent_access: boolean; saved_searches: SavedSearch[]; timeline_sort: "updated" | "created"; palette: string; app_icon: "dock" | "tray" | "none" };
 
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<void>("set_settings", { settings });
@@ -46,6 +46,8 @@ export const captureTask = (text: string) => invoke<string>("capture_task", { te
 export const captureTargetTitle = () => invoke<{ title: string; path: string | null }>("capture_target_title");
 /** Capture finished or cancelled: hides velo again if the capture shortcut showed it. */
 /** Ends the capture session; `hide`: hide velo again if the capture shortcut showed it. */
+export const closeRequested = () => invoke<boolean>("close_requested");
+export const quitApp = () => invoke<void>("quit_app");
 export const captureDone = (hide: boolean) => invoke<void>("capture_done", { hide });
 export const setBadge = (count: number) => invoke<void>("set_badge", { count });
 export const renameNote = (path: string, newTitle: string, rewriteLinks: boolean) => invoke<RenameResult>("rename_note", { path, newTitle, rewriteLinks });

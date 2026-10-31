@@ -85,5 +85,7 @@ window.addEventListener("focus", () => controller.refreshIfNewDay());
 
 window.addEventListener("blur", () => controller.onBlur());
 void getCurrentWindow().onCloseRequested(async (e) => {
-  if (!(await controller.requestClose())) e.preventDefault();
+  // false: velo has no Dock/taskbar icon, so the close button only hid it. A failed ask closes as before.
+  const close = await api.closeRequested().catch(() => true);
+  if (!close || !(await controller.requestClose())) e.preventDefault();
 });

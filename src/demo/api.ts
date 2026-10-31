@@ -89,7 +89,7 @@ export function resetDemo(pin?: Date) {
   settings = {
     notes_dir: DIR, layout: "horizontal", font_size: 14, sort: "modified", editor_style: "rich", theme: urlTheme(), shortcuts: {},
     write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: false, capture_target: "inbox",
-    inbox_title: "Inbox", agent_access: false, timeline_sort: "updated", palette: urlPalette(), // ?palette=<slug>
+    inbox_title: "Inbox", agent_access: false, timeline_sort: "updated", palette: urlPalette(), app_icon: "dock", // ?palette=<slug>
     saved_searches: [
       { name: "Work", query: "", tags: ["work"], no_links: false },
       { name: "Travel plans", query: "", tags: ["travel"], no_links: false },
@@ -379,6 +379,8 @@ export const captureTask = async (text: string): Promise<string> => {
 };
 export const captureTargetTitle = async (): Promise<{ title: string; path: string | null }> => ({ title: captureTitle(), path: byTitle(captureTitle())?.path ?? null });
 export const captureDone = async (_hide: boolean): Promise<void> => {};
+export const closeRequested = async (): Promise<boolean> => true;
+export const quitApp = async (): Promise<void> => {}; // the demo is a web page: nothing to quit
 export const setBadge = async (_count: number): Promise<void> => {};
 
 export const renameNote = async (path: string, newTitle: string, rewrite: boolean): Promise<RenameResult> => {

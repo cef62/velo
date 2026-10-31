@@ -241,5 +241,14 @@
     "other": "Ctrl+Shift+Space",
     "global": true,
     "group": "App"
+  },
+  {
+    "action": "quit",
+    "label": "Quit velo",
+    "keys": "none",
+    "mac": null,
+    "other": null,
+    "global": false,
+    "group": "App"
   }
 ]

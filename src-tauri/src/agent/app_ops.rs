@@ -402,6 +402,7 @@ mod tests {
             open_gen: Default::default(),
             locked: Default::default(),
             capture_was_hidden: Default::default(),
+            quitting: Default::default(),
             settings_path: t.join("settings.json"),
             data_dir: t,
         }

@@ -57,10 +57,8 @@ pub fn run() {
             {
                 app.set_menu(build_menu(app.handle())?)?;
                 app.on_menu_event(|app, ev| {
-                    if ev.id() == "quit"
-                        && let Some(w) = app.get_webview_window("main")
-                    {
-                        w.close().ok();
+                    if ev.id() == "quit" {
+                        commands::quit(app);
                     }
                     if ev.id() == "check-updates" {
                         use tauri::Emitter;
@@ -75,7 +73,7 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)?;
             let settings_path = config_dir.join("settings.json");
             let settings = settings::load(&settings_path);
-            let (dir, globals) = (settings.notes_dir.clone(), settings.global_bindings());
+            let (dir, globals, icon) = (settings.notes_dir.clone(), settings.global_bindings(), settings.app_icon.clone());
             app.manage(commands::AppState {
                 settings: Mutex::new(settings),
                 vault: Mutex::new(None),
@@ -86,6 +84,7 @@ pub fn run() {
                 open_gen: Default::default(),
                 locked: Default::default(),
                 capture_was_hidden: Default::default(),
+                quitting: Default::default(),
                 settings_path,
                 data_dir,
             });
@@ -124,10 +123,17 @@ pub fn run() {
                     }
                 });
             }
+            let mut toggle_live = false;
             for (action, binding) in globals {
-                if let Err(e) = commands::register_global(&h, action, &binding) {
-                    eprintln!("velo: {action:?} hotkey not registered: {e}");
+                match commands::register_global(&h, action, &binding) {
+                    Ok(()) => toggle_live |= action == settings::GlobalAction::ToggleWindow && binding != "none",
+                    Err(e) => eprintln!("velo: {action:?} hotkey not registered: {e}"),
                 }
+            }
+            // "none" leans on the Show/hide hotkey alone: if it did not register (taken by another app), use the tray this session
+            let icon = if icon == "none" && !toggle_live { "tray" } else { icon.as_str() };
+            if let Err(e) = commands::apply_app_icon(&h, icon) {
+                eprintln!("velo: app icon mode not applied: {e}");
             }
             app.manage(Mutex::new(update::UpdateState::default()));
             update::spawn_checker(h.clone());
@@ -176,12 +182,19 @@ pub fn run() {
             commands::agent_setup_command,
             commands::setup_passphrase,
             commands::identity_file_exists,
+            commands::close_requested,
+            commands::quit_app,
             update::check_update,
             update::install_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while running velo")
         .run(|app, ev| {
+            // macOS: opening velo again (Finder, Spotlight, Dock) brings back a window the close button hid
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = ev {
+                commands::show_main(app);
+            }
             if let tauri::RunEvent::Exit = ev {
                 // the process exits without dropping state: drop the vault so an interrupted bulk re-index ends here
                 drop(app.state::<commands::AppState>().vault.lock().map(|mut v| v.take()));
