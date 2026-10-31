@@ -465,6 +465,47 @@ main {
   font: 13px ui-monospace, Menlo, Consolas, monospace;
 }
 
+/* Reference pages (shortcuts, agents) */
+kbd {
+  font: 0.85em ui-monospace, monospace;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.unbound {
+  color: var(--muted);
+}
+
+.ref-table {
+  overflow-x: auto;
+  margin: 0 0 1.2em;
+}
+
+.ref-table table {
+  display: table;
+  width: 100%;
+  margin: 0;
+}
+
+.ref-table caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.tool {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 16px;
+  margin: 0 0 1.2em;
+}
+
 .skip-link {
   position: absolute;
   left: 8px;

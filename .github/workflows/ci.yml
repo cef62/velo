@@ -49,6 +49,9 @@ jobs:
 
       - run: pnpm test
 
+      - name: docs reference up to date
+        run: pnpm docs:check
+
       - name: cargo test
         working-directory: src-tauri
         run: cargo test
