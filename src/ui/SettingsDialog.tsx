@@ -56,7 +56,6 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
     theme: cur.theme as string,
     sort: cur.sort as string,
     fontSize: String(cur.font_size),
-    headerLabels: cur.header_labels === true,
     writeFrontMatter: cur.write_front_matter !== false,
     autoUpdateCheck: cur.auto_update_check !== false,
     agentAccess: cur.agent_access === true,
@@ -160,14 +159,6 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
               <Input id="set-font" type="number" min={10} max={32} value={d.fontSize} onChange={(e) => set({ fontSize: e.target.value })} onBlur={() => set({ fontSize: String(clampFont(d.fontSize, cur.font_size)) })} className={css({ w: "72px", textAlign: "right" })} />
               <span className={help}>px · 10–32 · scales editor and list rows</span>
             </div>
-          </div>
-          <div className={frow}>
-            <span className={flab}>Header</span>
-            <Checkbox.Root checked={d.headerLabels} onCheckedChange={(x) => set({ headerLabels: x.checked === true })} size="sm">
-              <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
-              <Checkbox.Label>Show labels on header buttons</Checkbox.Label>
-              <Checkbox.HiddenInput />
-            </Checkbox.Root>
           </div>
           <div className={frow}>
             <span className={flab}>Notes</span>

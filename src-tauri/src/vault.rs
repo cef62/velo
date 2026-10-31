@@ -603,11 +603,6 @@ impl Vault {
     }
 
     /// Notes whose links a rename of `title` would rewrite (the "Update N links?" count).
-    /// Notes linking here by title or alias (the graph and info panel); rename's `backlink_count` is title-only.
-    pub fn linked_from_count(&self, path: &str) -> anyhow::Result<usize> {
-        Ok(self.index.linked_from(path)?.len())
-    }
-
     /// The one-hop graph around `path`; an encrypted note gives `locked` unless unlocked. `hide`: see `connections::build`.
     pub fn connections(&self, path: &str, hide: &dyn Fn(&str) -> bool) -> anyhow::Result<Connections> {
         let p = Path::new(path);
@@ -1011,10 +1006,10 @@ mod tests {
         std::fs::write(dir.join("Nick.md"), "").unwrap(); std::fs::write(dir.join("C.md"), "see Nick").unwrap();
         let mut v = open(dir.clone(), &db, None).unwrap();
         let (c, n) = (s(&dir.join("C.md")), s(&dir.join("Nick.md")));
-        assert_eq!(v.linked_from_count(&n).unwrap(), 0);
+        assert_eq!(v.index.linked_from(&n).unwrap().len(), 0);
         assert_eq!(v.link_mention(&c, "Nick", 1, None, false).unwrap(), None);
         assert_eq!(std::fs::read_to_string(dir.join("C.md")).unwrap(), "see [[Nick]]");
-        assert_eq!(v.linked_from_count(&n).unwrap(), 1);
+        assert_eq!(v.index.linked_from(&n).unwrap().len(), 1);
     }
     #[test] fn link_mention_with_editor_text_writes_nothing() {
         let (dir, db) = setup();
@@ -1222,7 +1217,7 @@ mod tests {
         for (f, t) in [("Nick.md", "---\naliases: [Nicholas]\n---\n"), ("a.md", "[[Nicholas]]"), ("b.md", "[[Nick]]")] { std::fs::write(dir.join(f), t).unwrap(); }
         let v = open(dir.clone(), &db, None).unwrap();
         assert_eq!(v.backlink_count("Nick").unwrap(), 1);
-        assert_eq!(v.linked_from_count(&dir.join("Nick.md").to_string_lossy()).unwrap(), 2);
+        assert_eq!(v.index.linked_from(&dir.join("Nick.md").to_string_lossy()).unwrap().len(), 2);
     }
     #[test] fn rename_rewrites_links_to_the_saved_title() {
         let (dir, db) = setup();

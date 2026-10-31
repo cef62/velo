@@ -192,7 +192,6 @@ export class Controller {
       keys: resolve(s.shortcuts, this.opts.isMac),
       sort: s.sort ?? "modified", // before the first search, which pages with it
       editorStyle: s.editor_style === "plain" ? "plain" : "rich",
-      headerLabels: s.header_labels === true,
       writeFrontMatter: s.write_front_matter !== false,
       showFrontMatter: s.show_front_matter === true,
       infoOpen: s.info_panel === true,
@@ -554,8 +553,8 @@ export class Controller {
     if (!infoOpen || !openPath) return;
     const fresh = this.infoReq();
     try {
-      const [backlinks, revisions] = await Promise.all([this.api.linkedFromCount(openPath), this.api.listRevisions(openPath)]);
-      if (fresh() && this.store.get().openPath === openPath) this.store.set((s) => ({ info: { ...s.info, backlinks, revisions } }));
+      const revisions = await this.api.listRevisions(openPath);
+      if (fresh() && this.store.get().openPath === openPath) this.store.set((s) => ({ info: { ...s.info, revisions } }));
     } catch (e) {
       if (e !== "locked") console.error("info load failed", e);
     }
@@ -1669,7 +1668,7 @@ export class Controller {
       return err === "not-found" ? "Folder not found" : String(err);
     }
     this.applyLook(next);
-    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, headerLabels: next.header_labels, writeFrontMatter: next.write_front_matter, showFrontMatter: next.show_front_matter, infoOpen: next.info_panel, savedSearches: next.saved_searches ?? [], settings: null });
+    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, writeFrontMatter: next.write_front_matter, showFrontMatter: next.show_front_matter, infoOpen: next.info_panel, savedSearches: next.saved_searches ?? [], settings: null });
     this.preview?.refresh(); // watermark shows the binding
     this.syncStyle();
     if (next.notes_dir !== cur.notes_dir) {

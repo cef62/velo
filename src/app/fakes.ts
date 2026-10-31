@@ -29,7 +29,7 @@ export function fakeApi(notes: Record<string, string> = {}) {
     if (!(title in notes)) throw "not-found";
     return { path, title, text: notes[title], hash: "h", encrypted: false, meta: noMeta };
   };
-  const settings: Settings = { notes_dir: "/n", layout: "vertical", font_size: 14, sort: "modified", editor_style: "rich", theme: "system", header_labels: false, shortcuts: {}, write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox", inbox_title: "Inbox", agent_access: false, connections_sort: "ring", saved_searches: [], timeline_sort: "updated" };
+  const settings: Settings = { notes_dir: "/n", layout: "vertical", font_size: 14, sort: "modified", editor_style: "rich", theme: "system", shortcuts: {}, write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox", inbox_title: "Inbox", agent_access: false, saved_searches: [], timeline_sort: "updated" };
   const api = {
     getSettings: vi.fn(async () => ({ ...settings })),
     setSettings: vi.fn(async (_s: Settings) => {}),
@@ -67,7 +67,6 @@ export function fakeApi(notes: Record<string, string> = {}) {
     renameNote: vi.fn(async (_p: string, _t: string, _r: boolean): Promise<RenameResult> => { throw "unset"; }),
     mergeNotes: vi.fn(async (_s: string, _t: string): Promise<MergeResult> => { throw "unset"; }),
     backlinkCount: vi.fn(async () => 0),
-    linkedFromCount: vi.fn(async (_p: string) => 0),
     connections: vi.fn(async (path: string): Promise<Connections> => ({ ...emptyConnections, centre: { ...emptyConnections.centre, path, title: path.slice(3, -3) } })),
     linkMention: vi.fn(async (_p: string, _t: string, _n: number, _e: string | null): Promise<string | null> => null),
     lockNote: vi.fn(async (_p: string): Promise<string> => { throw "unset"; }),
