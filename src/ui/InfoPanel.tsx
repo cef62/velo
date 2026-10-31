@@ -1,19 +1,17 @@
 import { css } from "styled-system/css";
-import { tagChip } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
 import type { RevisionInfo } from "../api";
 import type { AppState, Store } from "../app/store";
-import { Badge, Button, Checkbox, Tooltip } from "@/components/ui";
-import { fold } from "../search";
+import { Badge, Button, Tooltip } from "@/components/ui";
 import { useStore } from "./useStore";
 
 // The fragment keeps Panda from reading the Tooltip content prop as the CSS `content` property.
 const FROM_FILE = "Not stored in the note yet; it may change when the file is synced or checked out.";
-const root = css({ w: "280px", flex: "none", minH: "0", display: "flex", flexDirection: "column", gap: "4", p: "3.5", overflowY: "auto", bg: "velo.chrome", boxShadow: "inset 0 1px 0 {colors.velo.highlight}", borderLeftWidth: "1px", borderLeftStyle: "solid", borderLeftColor: "velo.divider", fontSize: "uiSm", color: "velo.fg" });
+// The Info tab of the side panel (v2 §3 #13): dates, words, aliases, revisions. Tags live in the tag bar, links in Related.
+const root = css({ display: "flex", flexDirection: "column", gap: "4", p: "2", fontSize: "uiSm", color: "velo.fg" });
 const head = css({ fontWeight: "600", mb: "1.5" });
 const row = css({ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "2", py: "0.5" });
 const muted = css({ color: "velo.fgMuted" });
-const chips = css({ display: "flex", flexWrap: "wrap", gap: "1.5" });
 const list = css({ display: "flex", flexDirection: "column", gap: "0.5", listStyle: "none", m: "0", p: "0" });
 const rev = css({ w: "full", textAlign: "left", px: "2", py: "1", borderRadius: "l2", cursor: "pointer", display: "flex", justifyContent: "space-between", _hover: { bg: "velo.subtle" }, "&[aria-pressed=true]": { bg: "velo.accentSubtleHover", color: "velo.accentText" } });
 const preview = css({ mt: "2", maxH: "180px", overflow: "auto", p: "2", borderRadius: "l2", bg: "velo.canvas", borderWidth: "1px", borderColor: "velo.border", whiteSpace: "pre-wrap", fontSize: "uiXs", m: "0" });
@@ -27,13 +25,9 @@ function rel(ms: number): string {
   return new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(Math.round(d / n), u);
 }
 
-export function InfoPanel({ controller, store }: { controller: Controller; store: Store<AppState> }) {
-  const open = useStore(store, (s) => s.infoOpen);
+export function InfoTab({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const openPath = useStore(store, (s) => s.openPath);
   const info = useStore(store, (s) => s.info);
-  const showFm = useStore(store, (s) => s.showFrontMatter);
-  const selected = useStore(store, (s) => s.selectedTags);
-  if (!open) return null;
   const m = info.meta;
   const date = (label: string, ms: number, src: string) => (
     <div className={row}>
@@ -49,7 +43,7 @@ export function InfoPanel({ controller, store }: { controller: Controller; store
     </div>
   );
   return (
-    <aside className={root} aria-label="Note info" data-info-panel="">
+    <div className={root} data-info-panel="">
       {openPath && m && (
         <>
           <section>
@@ -61,18 +55,6 @@ export function InfoPanel({ controller, store }: { controller: Controller; store
           <section>
             <div className={head}>Info</div>
             <div className={row}><span className={muted}>Words</span><span>{info.words}</span></div>
-            <div className={row}>
-              <span className={muted}>Linked from</span>
-              <span>{info.backlinks === null ? "…" : `${info.backlinks} ${info.backlinks === 1 ? "note" : "notes"}`}</span>
-            </div>
-            {info.tags.length > 0 && (
-              <div className={chips} role="group" aria-label="Tags">
-                {info.tags.map((t) => {
-                  const c = tagChip({ selected: selected.some((x) => fold(x) === fold(t)) });
-                  return <button key={t} type="button" className={c.root} aria-pressed={selected.some((x) => fold(x) === fold(t))} onClick={() => controller.toggleTagFilter(t)}>#{t}</button>;
-                })}
-              </div>
-            )}
             {m.aliases.length > 0 && <div className={row}><span className={muted}>Aliases</span><span>{m.aliases.join(", ")}</span></div>}
           </section>
           <section>
@@ -98,13 +80,9 @@ export function InfoPanel({ controller, store }: { controller: Controller; store
               </>
             )}
           </section>
-          <Checkbox.Root checked={showFm} onCheckedChange={() => void controller.toggleFrontMatter()} size="sm">
-            <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
-            <Checkbox.Label>Show front matter in the editor</Checkbox.Label>
-            <Checkbox.HiddenInput />
-          </Checkbox.Root>
         </>
       )}
-    </aside>
+      {!openPath && <div className={muted}>Open a note to see its info.</div>}
+    </div>
   );
 }

@@ -913,63 +913,79 @@ test("toggle_tasks switches the pane and notes-changed refreshes tasks", async (
 const KEY_C = { key: "c", code: "KeyC", metaKey: true, ctrlKey: false, altKey: false, shiftKey: true, inEditor: false, inSearchWithText: false, inDialog: false, inRename: false };
 const KEY_P = { key: "p", code: "KeyP", metaKey: true, ctrlKey: false, altKey: false, shiftKey: false, inEditor: false, inSearchWithText: false, inDialog: false, inRename: false };
 
-test("toggle_connections opens the view centred on the open note", async () => {
+test("⌘⇧C opens the side panel on Related for the open note; again, it closes; ⌘I keeps the tab", async () => {
   const { c, api, store, editor } = setup();
+  let saved = await api.getSettings(); // the fake api must hand back what was saved: toggleInfo reads it
+  api.getSettings.mockImplementation(async () => ({ ...saved }));
+  api.setSettings.mockImplementation(async (x) => void (saved = x));
   await c.show(P("A"));
   const order: string[] = [];
-  editor.flush.mockImplementationOnce(async () => (order.push("flush"), true));
+  editor.flush.mockImplementation(async () => (order.push("flush"), true));
   api.connections.mockImplementationOnce(async (p: string) => (order.push("connections"), { ...emptyConnections, centre: { ...emptyConnections.centre, path: p } }));
   c.onKeyDown(KEY_C);
   await settle();
-  expect(store.get().paneMode).toBe("connections");
+  expect(store.get()).toMatchObject({ infoOpen: true, sideTab: "related", paneMode: "notes", focusRelated: 1 });
   expect(api.connections).toHaveBeenCalledWith(P("A"));
-  expect(order).toEqual(["flush", "connections"]);
-  expect(store.get().connections).toMatchObject({ centre: P("A"), err: "" });
-  expect(store.get().connections?.data?.centre.path).toBe(P("A"));
+  expect(store.get().related).toMatchObject({ centre: P("A"), err: "" });
+  expect(store.get().related?.data?.centre.path).toBe(P("A"));
+  expect(api.setSettings).toHaveBeenLastCalledWith(expect.objectContaining({ info_panel: true }));
+  c.onKeyDown(KEY_C);
+  await settle();
+  expect(store.get().infoOpen).toBe(false);
+  await c.toggleInfo();
+  expect(store.get()).toMatchObject({ infoOpen: true, sideTab: "related" });
 });
 
-test("toggle_connections without an open note does nothing", async () => {
+test("the Related tab follows the open note, reloads when notes change, and is idle on the Info tab", async () => {
+  const { c, api, store } = setup();
+  await c.show(P("A"));
+  await c.toggleRelated();
+  api.connections.mockClear();
+  await c.show(P("B"));
+  await settle();
+  expect(api.connections).toHaveBeenLastCalledWith(P("B"));
+  expect(store.get().related?.centre).toBe(P("B"));
+  api.connections.mockClear();
+  await c.onNotesChanged([]);
+  await settle();
+  expect(api.connections).toHaveBeenCalledWith(P("B"));
+  c.setSideTab("info");
+  api.connections.mockClear();
+  await c.show(P("A"));
+  await settle();
+  expect(api.connections).not.toHaveBeenCalled();
+  c.setSideTab("related");
+  await settle();
+  expect(api.connections).toHaveBeenCalledWith(P("A"));
+});
+
+test("⌘⇧C without an open note shows the panel's empty state and loads nothing", async () => {
   const { c, api, store } = setup();
   c.onKeyDown(KEY_C);
   await settle();
-  expect(store.get().paneMode).toBe("notes");
+  expect(store.get()).toMatchObject({ infoOpen: true, sideTab: "related", related: null });
   expect(api.connections).not.toHaveBeenCalled();
 });
 
-test("openFromGraph keeps the centre", async () => {
-  const { c, api, store } = setup();
-  await c.show(P("A"));
-  await c.showConnections();
-  await c.openFromGraph(P("B"));
-  expect(store.get().openPath).toBe(P("B"));
-  expect(store.get().connections?.centre).toBe(P("A"));
-  expect(api.connections).toHaveBeenCalledTimes(1);
-});
-
-test("recentre reloads on the new centre", async () => {
-  const { c, api, store } = setup();
-  await c.show(P("A"));
-  await c.showConnections();
-  await c.recentre(P("B"));
-  expect(api.connections).toHaveBeenLastCalledWith(P("B"));
-  expect(store.get().connections?.centre).toBe(P("B"));
-});
-
-test("locked centre shows Note is locked", async () => {
+test("a locked note shows Note is locked in Related", async () => {
   const { c, api, store } = setup();
   await c.show(P("A"));
   api.connections.mockRejectedValueOnce("locked");
-  await c.showConnections();
-  expect(store.get().connections?.err).toBe("Note is locked");
-  expect(store.get().connections?.data).toBeNull();
+  await c.toggleRelated();
+  expect(store.get().related).toMatchObject({ centre: P("A"), err: "Note is locked", data: null });
 });
 
-test("setConnectionsSort persists the setting", async () => {
+test("the trail row: previousPath is where back would go; createMissing opens a new note", async () => {
   const { c, api, store } = setup();
-  await c.setConnectionsSort("created");
-  expect(api.setSettings).toHaveBeenCalledWith(expect.objectContaining({ connections_sort: "created" }));
-  expect(store.get().connectionsSort).toBe("created");
+  expect(c.previousPath()).toBeNull();
+  await c.show(P("A"));
+  await c.show(P("B"));
+  expect(c.previousPath()).toBe(P("A"));
+  await c.createMissing("New one");
+  expect(api.openOrCreate).toHaveBeenCalledWith("New one");
+  expect(store.get().title).toBe("New one");
 });
+
 
 test("info panel counts alias backlinks", async () => {
   const { c, api, store } = setup();
@@ -1223,18 +1239,22 @@ test("Lock all reloads the tasks: decrypted rows, the due count and the badge go
   expect(api.setBadge).toHaveBeenLastCalledWith(0);
 });
 
-test("Lock all reloads the Connections graph and the link targets", async () => {
+test("Lock all reloads the Related tab and the link targets", async () => {
   const { c, api, store } = setup();
   await c.show(P("A"));
   c.onKeyDown(KEY_C);
   await settle();
-  expect(store.get().paneMode).toBe("connections");
+  expect(store.get()).toMatchObject({ infoOpen: true, sideTab: "related" });
   api.connections.mockClear();
   api.listLinkTargets.mockClear();
+  c.setSideTab("info"); // closed to Related: the stale tree (its missing link texts are plaintext) must go, not linger
   await c.lockEverything();
   await settle();
-  expect(api.connections).toHaveBeenCalledWith(P("A"));
+  expect(store.get().related).toBeNull();
   expect(api.listLinkTargets).toHaveBeenCalled();
+  c.setSideTab("related");
+  await settle();
+  expect(api.connections).toHaveBeenCalledWith(P("A"));
 });
 
 test("typing a filter in Tasks mode never opens a note; back in Notes the list follows without opening", async () => {
@@ -2031,12 +2051,12 @@ test("filter results are never replaced by an older load's reply (#15 simplifica
   expect(store.get().taskView!.no_date.map((t) => t.path)).toEqual([P("B")]);
 });
 
-const mention = (title: string, count = 1) => ({ node: { ...emptyConnections.centre, path: P(title), title }, name: title, count });
+const mention = (title: string, count = 1) => ({ node: { ...emptyConnections.centre, path: P(title), title }, name: title, count, context: "" });
 
-test("link it on the open centre goes through the editor", async () => {
+test("link it on the open note goes through the editor", async () => {
   const { c, api, store, editor } = setup({ A: "see Bee here" });
   await c.show(P("A"));
-  await c.showConnections();
+  await c.toggleRelated();
   editor.replaceText("typed see Bee here"); // unsaved typing
   api.linkMention.mockImplementationOnce(async (_p, _t, _n, text) => text!.replace("Bee", "[[Bee]]"));
   api.connections.mockClear();
@@ -2049,39 +2069,28 @@ test("link it on the open centre goes through the editor", async () => {
   expect(api.connections).toHaveBeenCalledTimes(1);
 });
 
-test("link it on a closed centre calls the backend", async () => {
-  const { c, api, store } = setup();
-  await c.show(P("A"));
-  await c.showConnections();
-  await c.openFromGraph(P("B"));
-  await c.recentre(P("A")); // A is the centre, B is open
-  await c.openFromGraph(P("B"));
-  api.connections.mockClear();
-  await c.linkMention(mention("C", 2));
-  expect(api.linkMention).toHaveBeenCalledWith(P("A"), "C", 2, null);
-  expect(api.connections).toHaveBeenCalledTimes(1);
-  expect(store.get().connections?.err).toBe("");
-});
-
 test("mention-moved refreshes silently, other errors show", async () => {
   const { c, api, store } = setup();
   await c.show(P("A"));
-  await c.showConnections();
+  await c.toggleRelated();
   api.linkMention.mockRejectedValueOnce("mention-moved");
   api.connections.mockClear();
   await c.linkMention(mention("B"));
   expect(api.connections).toHaveBeenCalledTimes(1);
-  expect(store.get().connections?.err).toBe("");
+  expect(store.get().related?.err).toBe("");
   api.linkMention.mockRejectedValueOnce("conflict");
   await c.linkMention(mention("B"));
-  expect(store.get().connections?.err).not.toBe("");
+  expect(store.get().related?.err).not.toBe("");
 });
 
-test("link it never runs on a locked centre", async () => {
+test("link it never runs on a locked note, nor when the panel shows another note", async () => {
   const { c, api, store } = setup();
   await c.show(P("A"));
-  await c.showConnections();
-  store.set((s) => ({ connections: { ...s.connections!, data: { ...emptyConnections, centre: { ...emptyConnections.centre, locked: true } } } }));
+  await c.toggleRelated();
+  store.set((s) => ({ related: { ...s.related!, data: { ...emptyConnections, centre: { ...emptyConnections.centre, locked: true } } } }));
+  await c.linkMention(mention("B"));
+  expect(api.linkMention).not.toHaveBeenCalled();
+  store.set((s) => ({ related: { ...s.related!, centre: P("Z") } }));
   await c.linkMention(mention("B"));
   expect(api.linkMention).not.toHaveBeenCalled();
 });
@@ -2099,10 +2108,10 @@ test("no links chip filters the list", async () => {
   expect(api.search).toHaveBeenLastCalledWith("", "modified", 0, [], false);
 });
 
-test("link it flushes the editor before the graph reloads", async () => {
+test("link it flushes the editor before Related reloads", async () => {
   const { c, api, editor } = setup({ A: "see Bee here" });
   await c.show(P("A"));
-  await c.showConnections();
+  await c.toggleRelated();
   api.linkMention.mockImplementationOnce(async (_p, _t, _n, text) => text!.replace("Bee", "[[Bee]]"));
   const order: string[] = [];
   editor.flush.mockImplementationOnce(async () => (order.push("flush"), true));
@@ -2114,14 +2123,14 @@ test("link it flushes the editor before the graph reloads", async () => {
 test("link it is an isolated undo step and skips a different note with the same text", async () => {
   const { c, api, editor } = setup({ A: "see Bee", B: "see Bee" });
   await c.show(P("A"));
-  await c.showConnections();
+  await c.toggleRelated();
   api.linkMention.mockImplementationOnce(async (_p, _t, _n, text) => {
-    await c.openFromGraph(P("B")); // switch notes during the call: identical text
+    await c.show(P("B")); // switch notes during the call: identical text
     return text!.replace("Bee", "[[Bee]]");
   });
   await c.linkMention(mention("Bee"));
   expect(editor.changes).toEqual([]);
-  await c.recentre(P("B"));
+  await settle(); // the panel now follows B
   api.linkMention.mockImplementationOnce(async (_p, _t, _n, text) => text!.replace("Bee", "[[Bee]]"));
   await c.linkMention(mention("Bee"));
   expect(editor.isolated).toEqual([true]);

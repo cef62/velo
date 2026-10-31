@@ -9,7 +9,7 @@ pub fn fold(s: &str) -> String {
 }
 
 /// Byte ranges of the inner text of each `[[...]]` (no `]` or newline inside) outside fenced code.
-fn link_spans(body: &str) -> Vec<(usize, usize)> {
+pub(crate) fn link_spans(body: &str) -> Vec<(usize, usize)> {
     let mut spans = Vec::new();
     for (at, line, _) in lines(body).filter(|l| l.2) {
         let mut i = 0;
@@ -25,6 +25,25 @@ fn link_spans(body: &str) -> Vec<(usize, usize)> {
         }
     }
     spans
+}
+
+/// The line holding `start..end`, trimmed, cut to about `max` chars around the span with `…` on the cut sides.
+/// The Related panel shows it under a backlink or a mention (design v2 §5).
+pub fn context_line(body: &str, start: usize, end: usize, max: usize) -> String {
+    let ls = body[..start].rfind(['\n', '\r']).map_or(0, |i| i + 1);
+    let le = body[end..].find(['\n', '\r']).map_or(body.len(), |i| end + i);
+    let line = &body[ls..le];
+    let (a, b) = (start - ls, end - ls);
+    if line.chars().count() <= max { return line.trim().to_string(); }
+    // a window of `max` chars centred on the span, on char boundaries
+    let span_chars = line[a..b].chars().count();
+    let before = (max.saturating_sub(span_chars)) / 2;
+    let mut ws = a;
+    for _ in 0..before { match line[..ws].char_indices().next_back() { Some((i, _)) => ws = i, None => break } }
+    let mut we = b;
+    let mut n = line[ws..b].chars().count();
+    for (i, c) in line[b..].char_indices() { if n >= max { break; } we = b + i + c.len_utf8(); n += 1; }
+    format!("{}{}{}", if ws > 0 { "…" } else { "" }, line[ws..we].trim(), if we < line.len() { "…" } else { "" })
 }
 
 pub fn extract_links(body: &str) -> Vec<String> {
@@ -297,6 +316,16 @@ mod tests {
     use super::*;
 
     #[test] fn fold_strips_diacritics() { assert_eq!(fold("Résumé CAFÉ naïve"), "resume cafe naive"); }
+    #[test] fn context_line_cuts_around_the_span() {
+        let body = "first\nSee the [[velo roadmap]] after the list work\nlast";
+        let (a, b) = (body.find("velo").unwrap(), body.find("]]").unwrap());
+        assert_eq!(context_line(body, a, b, 120), "See the [[velo roadmap]] after the list work");
+        let long = format!("{} [[x]] {}", "a".repeat(80), "b".repeat(80));
+        let (a, b) = (long.find("x").unwrap(), long.find("x").unwrap() + 1);
+        let c = context_line(&long, a, b, 40);
+        assert!(c.starts_with('…') && c.ends_with('…') && c.contains("[[x]]"), "{c}");
+        assert!(c.chars().count() <= 42);
+    }
     #[test] fn links_extracted_dedup() { assert_eq!(extract_links("see [[Foo]] and [[ foo ]] and [[Bar Baz]] [[]] [[a\nb]]"), vec!["Foo", "Bar Baz"]); }
     #[test] fn extract_tags_rules() {
         let b = "#Work and #idea, (#nested/path) C# x#y #1 #2024 http://h.com/#frag\n# Heading\n```\n#incode\n```\n#Café #work";

@@ -33,6 +33,8 @@ window.addEventListener(
     if (t.closest?.("[data-divider]") && e.key.startsWith("Arrow") && !(e.metaKey || e.ctrlKey || e.altKey)) return;
     // a focused saved-search chip opens its own menu, not the selected note's
     if (t.closest?.("[data-saved]") && controller.isMenuKey(e)) return;
+    // the side panel's tree and tabs keep their arrow keys and menu key: they never step the note list
+    if (t.closest?.("[data-side-panel]") && ((e.key.startsWith("Arrow") && !(e.metaKey || e.ctrlKey || e.altKey)) || controller.isMenuKey(e))) return;
     const handled = controller.onKeyDown({
       key: e.key,
       code: e.code,

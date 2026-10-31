@@ -49,10 +49,10 @@ export const captureTargetTitle = () => invoke<{ title: string; path: string | n
 export const captureDone = (hide: boolean) => invoke<void>("capture_done", { hide });
 export const setBadge = (count: number) => invoke<void>("set_badge", { count });
 export const renameNote = (path: string, newTitle: string, rewriteLinks: boolean) => invoke<RenameResult>("rename_note", { path, newTitle, rewriteLinks });
-export type GraphNode = { path: string; title: string; created: number; modified: number; preview: string; locked: boolean };
+export type GraphNode = { path: string; title: string; created: number; modified: number; preview: string; locked: boolean; context: string }; // context: the linking line, for links_in
 export type TagGroup = { tag: string; count: number; notes: GraphNode[] };
-export type Mention = { node: GraphNode; name: string; count: number };
-export type Connections = { centre: GraphNode; links_out: GraphNode[]; links_in: GraphNode[]; tags: TagGroup[]; mentions: Mention[] };
+export type Mention = { node: GraphNode; name: string; count: number; context: string };
+export type Connections = { centre: GraphNode; links_out: GraphNode[]; links_in: GraphNode[]; tags: TagGroup[]; mentions: Mention[]; missing: string[] };
 export const connections = (path: string) => invoke<Connections>("connections", { path });
 /** Wraps the first mention in [[…]]; with editorText: resolves to the rewritten text (the editor applies it); without: saves and resolves null. Rejects "mention-moved" | "locked" | "conflict". */
 export const linkMention = (path: string, targetTitle: string, expectedCount: number, editorText: string | null) => invoke<string | null>("link_mention", { path, targetTitle, expectedCount, editorText });

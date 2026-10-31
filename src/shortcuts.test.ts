@@ -96,7 +96,7 @@ test("capture is a global action with a non-conflicting default", () => {
 
 test("toggle_connections defaults to Mod+Shift+KeyC and does not clash", () => {
   expect(DEFAULTS.toggle_connections).toBe("Mod+Shift+KeyC");
-  expect(LABELS.toggle_connections).toBe("Connections");
+  expect(LABELS.toggle_connections).toBe("Related notes");
   const all = Object.values(DEFAULTS).filter((b) => b !== "none");
   expect(new Set(all).size).toBe(all.length);
   expect(validateBinding(DEFAULTS, "toggle_connections", DEFAULTS.toggle_connections)).toEqual({ ok: true });

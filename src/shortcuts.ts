@@ -58,7 +58,7 @@ export const LABELS: Record<Action, string> = {
   toggle_info: "Side panel",
   toggle_front_matter: "Show / hide front matter",
   toggle_tasks: "Tasks",
-  toggle_connections: "Connections",
+  toggle_connections: "Related notes",
   capture: "Quick capture (global)",
   daily_note: "Today's daily note",
   extract_note: "Move to new note",

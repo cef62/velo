@@ -41,7 +41,7 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
   }, []);
   const mode = paneBarMode(w);
   const c = paneBar({ labels: mode.labels });
-  const cur: PaneTab = paneMode === "connections" ? "notes" : paneMode;
+  const cur: PaneTab = paneMode;
   const kbd = (a: Action) => (keys[a] === NONE ? null : <Kbd marginLeft="auto">{formatBinding(keys[a], isMac)}</Kbd>);
   const tip = (a: Action | null, text: string) => (!a || keys[a] === NONE ? text : `${text} (${formatBinding(keys[a], isMac)})`);
   const menuBtn = (text: string, aria: string, glyph: ReactNode, extra: Record<string, unknown> = {}) => (

@@ -21,6 +21,8 @@ import { keyCap } from "./velo/key-cap";
 import { listRow } from "./velo/list-row";
 import { menuButton } from "./velo/menu-button";
 import { paneBar } from "./velo/pane-bar";
+import { relatedRow } from "./velo/related-row";
+import { sidePanel } from "./velo/side-panel";
 import { countBadge, sectionHeader } from "./velo/section-header";
 import { commandPalette } from "./velo/command-palette";
 import { lockScreen } from "./velo/lock-screen";
@@ -57,7 +59,9 @@ export const slotRecipes = {
   listRow,
   lockScreen,
   paneBar,
+  relatedRow,
   select,
+  sidePanel,
   tabs,
   tagChip,
   titleBar,
