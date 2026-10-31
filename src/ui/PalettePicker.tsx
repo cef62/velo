@@ -24,7 +24,7 @@ const mini = css({
   "& .h": { h: "24px", flex: "none", bg: "var(--p-chrome)", borderBottom: "1px solid var(--p-divider)", display: "flex", alignItems: "center", gap: "5px", px: "8px" },
   "& .h i": { w: "44%", h: "12px", borderRadius: "4px", bg: "var(--p-canvas)", border: "1px solid var(--p-accentBorder)" },
   "& .h b": { ml: "auto", w: "16px", h: "12px", borderRadius: "4px", bg: "var(--p-accent)" },
-  "& .r": { m: "6px 6px 0", h: "22px", flex: "none", borderRadius: "5px", display: "flex", alignItems: "center", px: "7px", overflow: "hidden" },
+  "& .r": { m: "6px 6px 0", h: "22px", flex: "none", borderRadius: "5px", display: "flex", alignItems: "center", px: "5px", overflow: "hidden" },
   "& .r.s": { bg: "var(--p-selection)", color: "var(--p-selectionFg)" },
   "& mark": { bg: "var(--p-matchBg)", color: "var(--p-matchFg)", borderRadius: "2px", px: "1px", fontWeight: "600" },
   "& .r.s mark": { bg: "var(--p-matchOnSelectionBg)", color: "var(--p-matchOnSelectionFg)" },
