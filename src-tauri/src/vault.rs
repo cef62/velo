@@ -602,7 +602,6 @@ impl Vault {
         Ok(MergeResult { path: target.to_string(), rewritten, trash_error })
     }
 
-    /// Notes whose links a rename of `title` would rewrite (the "Update N links?" count).
     /// The one-hop graph around `path`; an encrypted note gives `locked` unless unlocked. `hide`: see `connections::build`.
     pub fn connections(&self, path: &str, hide: &dyn Fn(&str) -> bool) -> anyhow::Result<Connections> {
         let p = Path::new(path);
@@ -616,6 +615,7 @@ impl Vault {
         connections::build(&self.index, &self.unlocked, path, text, hide)
     }
 
+    /// Notes whose links a rename of `title` would rewrite (the "Update N links?" count).
     pub fn backlink_count(&self, title: &str) -> anyhow::Result<usize> {
         Ok(self.index.backlinks(title)?.iter().filter(|p| self.rewritable(Path::new(p))).count())
     }

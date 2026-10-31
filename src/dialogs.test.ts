@@ -34,13 +34,13 @@ test("font clamps to 10-32, junk falls back", () => {
 });
 
 test("form to settings", () => {
-  const f = { layout: "horizontal", fontSize: "40", sort: "title", theme: "dark", writeFrontMatter: false, autoUpdateCheck: false, agentAccess: true, captureTarget: "inbox", inboxTitle: "Inbox", shortcuts: { ...base.shortcuts, rename: "Mod+KeyB" } as never };
-  expect(toSettings(base, f)).toEqual({ ...base, shortcuts: f.shortcuts, layout: "horizontal", font_size: 32, sort: "title", theme: "dark", write_front_matter: false, auto_update_check: false, agent_access: true });
-  expect(toSettings(base, { ...f, layout: "bogus", fontSize: "12", sort: "bogus", theme: "bogus" })).toEqual({ ...base, shortcuts: f.shortcuts, font_size: 12, write_front_matter: false, auto_update_check: false, agent_access: true });
+  const f = { layout: "horizontal", fontSize: "40", theme: "dark", writeFrontMatter: false, autoUpdateCheck: false, agentAccess: true, captureTarget: "inbox", inboxTitle: "Inbox", shortcuts: { ...base.shortcuts, rename: "Mod+KeyB" } as never };
+  expect(toSettings(base, f)).toEqual({ ...base, shortcuts: f.shortcuts, layout: "horizontal", font_size: 32, theme: "dark", write_front_matter: false, auto_update_check: false, agent_access: true });
+  expect(toSettings(base, { ...f, layout: "bogus", fontSize: "12", theme: "bogus" })).toEqual({ ...base, shortcuts: f.shortcuts, font_size: 12, write_front_matter: false, auto_update_check: false, agent_access: true });
 });
 
 test("form to settings: capture target and inbox title", () => {
-  const f = { layout: "vertical", fontSize: "14", sort: "modified", theme: "system", writeFrontMatter: true, autoUpdateCheck: true, agentAccess: false, captureTarget: "daily", inboxTitle: " Todo ", shortcuts: base.shortcuts as never };
+  const f = { layout: "vertical", fontSize: "14", theme: "system", writeFrontMatter: true, autoUpdateCheck: true, agentAccess: false, captureTarget: "daily", inboxTitle: " Todo ", shortcuts: base.shortcuts as never };
   expect(toSettings(base, f)).toMatchObject({ capture_target: "daily", inbox_title: "Todo" });
   expect(toSettings(base, { ...f, captureTarget: "bogus", inboxTitle: "  " })).toMatchObject({ capture_target: "inbox", inbox_title: "Inbox" });
 });
