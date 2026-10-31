@@ -2,6 +2,7 @@
 // vite.demo.config.ts swaps it in for src/api.ts; the Rust rules it mirrors are simplified (see each function).
 import type { AgentReply, Connections, ExportCounts, ExportRequest, GraphNode, Hit, LinkTarget, MergeResult, Mention, NoteDoc, NoteMeta, Page, RenameResult, RevisionInfo, SaveResult, Settings, TagCount, TagGroup, TaskItem, TaskView, TimelineRow } from "../api";
 import { fold } from "../search";
+import { palettes } from "../theme/palettes";
 import { extractTags } from "../tags";
 import { frontMatterRange, stripFrontMatter } from "../frontmatter";
 import { TASK_ITEM } from "../preview";
@@ -45,6 +46,10 @@ const fmValue = (text: string, key: string): string | null => {
 
 const newHash = () => `h${++hashSeq}`;
 const param = (k: string) => (typeof location === "undefined" ? null : new URLSearchParams(location.search).get(k));
+const urlPalette = () => {
+  const p = param("palette") ?? "";
+  return Object.keys(palettes).includes(p) ? p : "clear";
+};
 const urlTheme = () => {
   const t = param("theme");
   return t === "dark" || t === "light" ? t : "system";
@@ -84,7 +89,7 @@ export function resetDemo(pin?: Date) {
   settings = {
     notes_dir: DIR, layout: "horizontal", font_size: 14, sort: "modified", editor_style: "rich", theme: urlTheme(), shortcuts: {},
     write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: false, capture_target: "inbox",
-    inbox_title: "Inbox", agent_access: false, timeline_sort: "updated",
+    inbox_title: "Inbox", agent_access: false, timeline_sort: "updated", palette: urlPalette(), // ?palette=<slug>
     saved_searches: [
       { name: "Work", query: "", tags: ["work"], no_links: false },
       { name: "Travel plans", query: "", tags: ["travel"], no_links: false },
