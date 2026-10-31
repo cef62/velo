@@ -172,12 +172,18 @@ fn notify_changed(app: &AppHandle, changed: Vec<String>) {
 }
 
 fn hide_main(app: &AppHandle) {
-    // the window too on macOS: a menu-bar click re-activates velo, and activation unhides a merely hidden app
-    if let Some(w) = app.get_webview_window("main") {
+    let mode = app.try_state::<AppState>().map(|s| s.icon_mode.lock().unwrap().clone());
+    if let Some(w) = app.get_webview_window("main").filter(|_| orders_out(mode.as_deref().unwrap_or("dock"))) {
         w.hide().ok();
     }
     #[cfg(target_os = "macos")]
     app.hide().ok(); // hides the whole app so macOS refocuses the previously active one
+}
+
+/// Whether hiding also orders the window out. macOS in dock mode keeps it: Cmd+Tab unhides the app but sends no
+/// Reopen, so an ordered-out window would not come back. Tray/none (Accessory) apps are not in Cmd+Tab.
+fn orders_out(mode: &str) -> bool {
+    !cfg!(target_os = "macos") || mode != "dock"
 }
 
 /// velo's About box: the macOS app menu and the tray menu share it.
@@ -188,6 +194,8 @@ pub fn about_item(app: &AppHandle) -> tauri::Result<tauri::menu::PredefinedMenuI
         copyright: Some("© 2026 Matteo Ronchi · MIT License".into()),
         website: Some("https://cef62.github.io/velo".into()),
         website_label: Some("cef62.github.io/velo".into()),
+        // macOS's About panel ignores website: credits is the field it shows
+        credits: cfg!(target_os = "macos").then(|| "https://cef62.github.io/velo".into()),
         ..Default::default()
     };
     tauri::menu::PredefinedMenuItem::about(app, Some("About velo"), Some(meta))
@@ -910,6 +918,10 @@ mod global_tests {
         assert!(!capture_ended(&f, false), "a blur ends the session without hiding");
         capture_shown(&f, false);
         assert!(!capture_ended(&f, true), "the flag never outlives its session");
+    }
+    #[test] fn hiding_orders_out_except_macos_dock() {
+        assert!(orders_out("tray") && orders_out("none"));
+        assert_eq!(orders_out("dock"), !cfg!(target_os = "macos"), "macOS dock mode keeps the window for Cmd+Tab");
     }
     #[test] fn hotkey_only_needs_a_live_toggle_hotkey() {
         let mut s = Settings::default();
