@@ -42,6 +42,11 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
 
 pub fn run() {
     tauri::Builder::default()
+        // first plugin, as its docs ask: launching velo again (common once the close button only hides it) shows the
+        // running window instead of starting a second process on the same notes
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            commands::show_main(app);
+        }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -123,15 +128,19 @@ pub fn run() {
                     }
                 });
             }
-            let mut toggle_live = false;
             for (action, binding) in globals {
-                match commands::register_global(&h, action, &binding) {
-                    Ok(()) => toggle_live |= action == settings::GlobalAction::ToggleWindow && binding != "none",
-                    Err(e) => eprintln!("velo: {action:?} hotkey not registered: {e}"),
+                if let Err(e) = commands::register_global(&h, action, &binding) {
+                    eprintln!("velo: {action:?} hotkey not registered: {e}");
                 }
             }
-            // "none" leans on the Show/hide hotkey alone: if it did not register (taken by another app), use the tray this session
-            let icon = if icon == "none" && !toggle_live { "tray" } else { icon.as_str() };
+            // "none" leans on the Show/hide hotkey alone: if it did not register (taken by another app), fall back for
+            // this session. Linux falls back to the taskbar: a tray needs libappindicator and a desktop that shows it.
+            let live = commands::hotkey_only_ok(&app.state::<commands::AppState>().settings.lock().unwrap(), |k| commands::hotkey_live(&h, k));
+            let icon = match icon.as_str() {
+                "none" if !live && cfg!(target_os = "linux") => "dock",
+                "none" if !live => "tray",
+                m => m,
+            };
             if let Err(e) = commands::apply_app_icon(&h, icon) {
                 eprintln!("velo: app icon mode not applied: {e}");
             }

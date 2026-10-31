@@ -184,6 +184,11 @@ pub fn show_main(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     #[cfg(target_os = "macos")]
     app.show().ok();
     w.show().ok();
+    // Windows drops the taskbar tab once (DeleteTab); a later show can bring it back
+    #[cfg(not(target_os = "macos"))]
+    if let Some(st) = app.try_state::<AppState>() {
+        w.set_skip_taskbar(st.settings.lock().unwrap().app_icon != "dock").ok();
+    }
     w.unminimize().ok();
     w.set_focus().ok();
     Some(w)
@@ -221,6 +226,16 @@ pub fn close_requested(app: AppHandle, st: State<'_, AppState>) -> bool {
     }
     hide_main(&app);
     false
+}
+
+/// "none" leaves the Show/hide hotkey as the only way back to a hidden velo: it must be registered, not only set
+/// (another app can hold the keys, and then registration failed at startup or in `set_settings`).
+pub fn hotkey_only_ok(s: &Settings, live: impl Fn(&str) -> bool) -> bool {
+    s.app_icon != "none" || s.global_bindings().iter().any(|(a, k)| *a == GlobalAction::ToggleWindow && live(k))
+}
+
+pub fn hotkey_live(app: &AppHandle, binding: &str) -> bool {
+    settings::parse_hotkey(binding).ok().flatten().is_some_and(|sc| app.global_shortcut().is_registered(sc))
 }
 
 /// Shows velo in the Dock/taskbar ("dock"), the menu bar/system tray ("tray") or neither ("none").
@@ -262,7 +277,13 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         })
         .on_tray_icon_event(|tray, ev| {
             if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = ev {
-                toggle_window(tray.app_handle());
+                let app = tray.app_handle();
+                // Windows/Linux: the click makes the taskbar the foreground window first, so velo never reads as focused
+                #[cfg(not(target_os = "macos"))]
+                if app.get_webview_window("main").is_some_and(|w| w.is_visible().unwrap_or(false)) {
+                    return hide_main(app);
+                }
+                toggle_window(app);
             }
         });
     // shortcut: the full-color app icon, not a monochrome macOS template image; add a template PNG if it looks off in the menu bar
@@ -364,9 +385,6 @@ pub fn set_settings(app: AppHandle, st: State<'_, AppState>, mut settings: Setti
     if !settings::APP_ICONS.contains(&settings.app_icon.as_str()) {
         settings.app_icon = "dock".into();
     }
-    if settings.app_icon == "none" && settings.global_bindings().iter().any(|(a, k)| *a == GlobalAction::ToggleWindow && k == "none") {
-        return Err("hotkey-required".into()); // no icon and no hotkey: once hidden, velo could not be brought back
-    }
     let old = st.settings.lock().unwrap().clone();
     let changed = changed_globals(&old, &settings);
     // All-or-nothing on purpose: if any new key fails, every action keeps its old key and nothing is saved,
@@ -374,6 +392,10 @@ pub fn set_settings(app: AppHandle, st: State<'_, AppState>, mut settings: Setti
     let (mut reg, mut unreg) = (|a, k: &str| register_global(&app, a, k), |k: &str| unregister_hotkey(&app, k));
     let held: Vec<String> = old.global_bindings().into_iter().filter(|(a, _)| !changed.iter().any(|(c, ..)| c == a)).map(|(_, k)| k).collect();
     swap_globals(&changed, &held, &mut reg, &mut unreg)?;
+    if !hotkey_only_ok(&settings, |k| hotkey_live(&app, k)) {
+        revert_globals(&changed, &mut reg, &mut unreg);
+        return Err("Hotkey only needs a working Show / hide velo shortcut: set one, or pick another that no other app uses".into());
+    }
     let (no_vault, indexing) = (st.vault.lock().unwrap().is_none(), st.indexing.lock().unwrap().is_some());
     if needs_reopen(&old.notes_dir, &settings.notes_dir, no_vault, indexing) {
         let opened = match &settings.notes_dir {
@@ -844,6 +866,17 @@ mod global_tests {
         assert!(!capture_ended(&f, false), "a blur ends the session without hiding");
         capture_shown(&f, false);
         assert!(!capture_ended(&f, true), "the flag never outlives its session");
+    }
+    #[test] fn hotkey_only_needs_a_live_toggle_hotkey() {
+        let mut s = Settings::default();
+        assert!(hotkey_only_ok(&s, |_| false), "dock never depends on the hotkey");
+        s.app_icon = "tray".into();
+        assert!(hotkey_only_ok(&s, |_| false), "tray has its icon");
+        s.app_icon = "none".into();
+        assert!(hotkey_only_ok(&s, |k| k == "Mod+Shift+Space"));
+        assert!(!hotkey_only_ok(&s, |_| false), "set but taken by another app");
+        s.shortcuts.insert("toggle_window".into(), "none".into());
+        assert!(!hotkey_only_ok(&s, |k| k != "none"), "cleared");
     }
     #[test] fn changed_globals_lists_only_real_changes() {
         let (a, mut b) = (Settings::default(), Settings::default());

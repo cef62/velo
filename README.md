@@ -16,7 +16,7 @@ Inspired by nvALT and Notational Velocity; not affiliated with or endorsed by th
 - Per-note encryption with [age](https://age-encryption.org); locked notes are never written to disk or to the index as plaintext.
 - Live reload of external edits; a concurrent edit produces a `(conflict ...)` copy instead of overwriting anything.
 - Global hotkey (default ⌘⇧Space / Ctrl+Shift+Space) to bring velo up; remappable in Settings. Any shortcut can be cleared with ⌫ in Settings, and conflicting shortcuts are shown instead of refused.
-- Settings › General › Show velo in: **Dock** / **Taskbar** (default), **Menu bar** / **System tray** (an icon there instead: click it to show or hide velo, right-click for Show velo, Quick capture and Quit velo), or **Hotkey only** (no icon anywhere; needs the Show / hide hotkey set). Outside Dock mode the close button hides velo instead of quitting; quit from the tray menu, ⌘Q, or "Quit velo" in the command palette. If the hotkey cannot register at launch, Hotkey only falls back to the tray for that session.
+- Settings › General › Show velo in: **Dock** / **Taskbar** (default), **Menu bar** / **System tray** (an icon there instead: click it to show or hide velo, right-click for Show velo, Quick capture and Quit velo), or **Hotkey only** (no icon anywhere; needs the Show / hide hotkey set). Outside Dock mode the close button hides velo instead of quitting; quit from the tray menu, ⌘Q, or "Quit velo" in the command palette. Hotkey only saves only while the Show / hide hotkey is registered (not taken by another app); if it cannot register at launch, velo falls back to the tray (the taskbar on Linux) for that session. Launching velo again shows the running window instead of starting a second one.
 
 ## Keyboard shortcuts
 
