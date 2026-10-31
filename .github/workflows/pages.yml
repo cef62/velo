@@ -13,6 +13,8 @@ on:
       # the live demo at /velo/demo/ is the app's own UI over src/demo
       - src/**
       - index.html
+      - tsconfig.json
+      - src-tauri/icons/**
       - panda.config.ts
       - vite.config.ts
       - vite.demo.config.ts

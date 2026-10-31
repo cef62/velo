@@ -47,6 +47,9 @@ jobs:
 
       - run: pnpm build
 
+      # pnpm build type-checks src; the docs capture scripts have their own tsconfig
+      - run: pnpm exec tsc -p e2e --noEmit
+
       - run: pnpm test
 
       - name: docs reference up to date

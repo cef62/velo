@@ -23,7 +23,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: brew install ffmpeg && npx playwright install --with-deps chromium
+      - run: brew install ffmpeg && pnpm exec playwright install --with-deps chromium
 
       - run: pnpm docs:capture
 

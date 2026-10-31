@@ -1,4 +1,6 @@
 // Docs media capture (`pnpm docs:capture`): screenshots and clips of the browser demo into docs/media/. Not a test suite.
+// Re-runs write byte-identical PNGs on the same machine and browser build; another OS, Chrome version or font
+// rendering changes pixels, so commit media from one machine (or the docs-media workflow) at a time.
 import { defineConfig } from "@playwright/test";
 import process from "node:process";
 
@@ -27,7 +29,7 @@ export default defineConfig({
     command: `pnpm demo:build && pnpm exec vite preview --config vite.demo.config.ts --port ${PORT} --strictPort`,
     cwd: "..",
     url: `http://localhost:${PORT}`,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false, // a server left running may serve a stale demo build
     timeout: 300_000,
   },
 });

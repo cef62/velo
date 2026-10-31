@@ -13,7 +13,7 @@ const poster = posters[`../../../docs/media/${name}.poster.png`];
 
 {
   src ? (
-    <video class="shot clip" autoplay muted loop playsinline preload="none" poster={poster?.src} width={poster?.width} height={poster?.height} aria-label={alt}>
+    <video class="shot clip" controls muted loop playsinline preload="none" poster={poster?.src} width={poster?.width} height={poster?.height} aria-label={alt}>
       <source src={src} type="video/mp4" />
     </video>
   ) : !import.meta.env.PROD ? (
@@ -24,12 +24,13 @@ const poster = posters[`../../../docs/media/${name}.poster.png`];
 }
 
 <script>
-  // Reduced motion: no autoplay; the poster shows and the controls let the reader play it.
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  // Served paused with controls and preload="none", so reduced-motion (and no-JS) readers get the poster and fetch the
+  // mp4 only if they press play. Otherwise autoplay it, looping and silent.
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
     for (const v of document.querySelectorAll<HTMLVideoElement>('video.clip')) {
-      v.autoplay = false;
-      v.pause();
-      v.controls = true;
+      v.controls = false;
+      v.autoplay = true;
+      void v.play().catch(() => (v.controls = true)); // autoplay blocked: hand the reader the controls back
     }
   }
 </script>

@@ -3,9 +3,10 @@
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
-const SRC = new URL("../test-results/capture/clips/", import.meta.url).pathname;
-const OUT = new URL("../docs/media/", import.meta.url).pathname;
+const SRC = fileURLToPath(new URL("../test-results/capture/clips/", import.meta.url));
+const OUT = fileURLToPath(new URL("../docs/media/", import.meta.url));
 const FFMPEG = process.env.FFMPEG ?? "ffmpeg";
 const MAX_BYTES = 3 * 1024 * 1024;
 
