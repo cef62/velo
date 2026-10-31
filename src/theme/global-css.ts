@@ -1,5 +1,6 @@
 import { editorGlobalCss } from './editor-css'
 import { printGlobalCss } from './print-css'
+import { paletteColorPalettes } from './palettes/park'
 
 export const globalCss = {
   extend: {
@@ -9,9 +10,7 @@ export const globalCss = {
       '--global-color-selection': 'colors.velo.accentSubtleHover', // gray.a3 on canvas is ~1.1:1: too faint
       '--global-color-focus-ring': 'colors.velo.accent', // one ring colour for Park and velo controls
     },
-    html: {
-      colorPalette: 'gray',
-    },
+    ...paletteColorPalettes, // html { colorPalette } per data-palette
     body: {
       background: 'velo.canvas',
       color: 'velo.fg',

@@ -47,11 +47,14 @@ describe("searchMatch", () => {
     expect(base["[data-active=true] [data-selected=true] &"]).toEqual({ bg: "velo.matchOnSelectionBg", color: "velo.matchOnSelectionFg" });
   });
 
-  it("velo tokens are the Clear palette, match tokens included", async () => {
-    const { velo, veloPopoverClear } = await import("../tokens/velo");
+  it("velo tokens default to the Clear palette, match tokens included", async () => {
+    const { velo, veloPopover } = await import("../tokens/velo");
     const clear = await import("../palettes/clear");
-    expect(velo).toEqual(clear.colors);
-    expect(veloPopoverClear).toEqual(clear.popover);
+    for (const [k, t] of Object.entries(clear.colors)) {
+      expect(velo[k as keyof typeof velo].value._light.base).toBe(t.value._light);
+      expect(velo[k as keyof typeof velo].value._dark.base).toBe(t.value._dark);
+    }
+    expect(veloPopover.value._light.base).toBe(clear.popover.value._light);
     for (const k of ["matchBg", "matchFg", "matchOnSelectionBg", "matchOnSelectionFg", "matchOnIdleBg", "matchOnIdleFg"]) expect(velo).toHaveProperty(k);
   });
 });
