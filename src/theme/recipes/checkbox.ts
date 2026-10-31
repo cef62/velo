@@ -58,7 +58,11 @@ export const checkbox = defineSlotRecipe({
     variant: {
       solid: {
         control: {
-          borderColor: 'border',
+          // unchecked outline: inputBorder (≥ 3:1 in every palette); High contrast wants its blue accentBorder (9:1).
+          // accentBorder, not colorPalette.outline.border, so colorPalette="green" task boxes stay strong there too;
+          // unchecked only, so a checked green box keeps its green edge.
+          borderColor: 'velo.inputBorder',
+          '[data-palette=contrast] &[data-state=unchecked]': { borderColor: 'velo.accentBorder' },
           _checked: {
             bg: 'colorPalette.solid.bg',
             borderColor: 'colorPalette.solid.bg',

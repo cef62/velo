@@ -3,7 +3,7 @@
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import type { UiPort } from "../app/ports";
-import { platform as real } from "../ui/platform";
+import { applyPalette, platform as real } from "../ui/platform";
 import { DIR, pinnedNow } from "./api";
 import { DemoChrome, demoChrome } from "./DemoChrome";
 
@@ -20,6 +20,8 @@ export const platform: UiPort = {
   popupMenu: async (items, anchor) => demoChrome.menu(items, anchor),
   setWindowTheme: () => {},
 };
+
+applyPalette(new URLSearchParams(location.search).get("palette")); // ?palette=<slug>: checks and captures
 
 createRoot(document.body.appendChild(document.createElement("div"))).render(createElement(DemoChrome));
 

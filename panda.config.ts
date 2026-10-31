@@ -1,7 +1,5 @@
-import { neutral } from "./src/theme/colors/neutral";
-import { green } from "./src/theme/colors/green";
-import { red } from "./src/theme/colors/red";
-import { velo, veloPopoverClear } from "./src/theme/tokens/velo";
+import { velo, veloPopover } from "./src/theme/tokens/velo";
+import { parkColors } from "./src/theme/palettes/park";
 import { amber } from "./src/theme/colors/amber";
 import { animationStyles } from "./src/theme/animation-styles";
 import { zIndex } from "./src/theme/tokens/z-index";
@@ -112,16 +110,14 @@ export default defineConfig({
           },
 
           amber: amber,
-          gray: neutral,
           velo: velo,
-          red: red,
-          green: green
+          ...parkColors
 
         },
 
         shadows: {
           ...shadows,
-          veloPopover: veloPopoverClear,
+          veloPopover: veloPopover,
         },
 
         radii: {
