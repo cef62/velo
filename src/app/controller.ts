@@ -171,10 +171,10 @@ export class Controller {
     this.editor?.setReadOnly(on);
   }
 
-  /** Layout, font and theme; the native window (title bar, menus, dialogs) follows the theme too. */
+  /** Layout, font, theme and palette; the native window (title bar, menus, dialogs) follows the theme too. */
   protected applyLook(s: Settings) {
     this.store.set({ theme: s.theme ?? "system", fontSize: s.font_size, layout: s.layout });
-    this.ui.applyLook({ theme: s.theme ?? "system", fontSize: s.font_size, layout: s.layout });
+    this.ui.applyLook({ theme: s.theme ?? "system", palette: s.palette ?? "clear", fontSize: s.font_size, layout: s.layout });
     this.ui.setWindowTheme(s.theme === "light" || s.theme === "dark" ? s.theme : null);
   }
 
@@ -1653,7 +1653,15 @@ export class Controller {
     }
   }
 
+  /** Settings dialog: restyle live with the draft theme and palette; closeSettings puts the saved ones back. */
+  previewLook(p: Pick<Settings, "theme" | "palette">) {
+    const s = this.store.get().settings;
+    if (s) this.applyLook({ ...s, ...p });
+  }
+
   closeSettings() {
+    const s = this.store.get().settings;
+    if (s) this.applyLook(s);
     this.store.set({ settings: null });
   }
 

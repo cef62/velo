@@ -599,6 +599,17 @@ test("saveSettings applies look, keys and sort, and closes the dialog", async ()
   expect(calls).toContainEqual(["setWindowTheme", "dark"]);
 });
 
+test("previewLook restyles live; closeSettings reverts to the saved theme and palette", async () => {
+  const { c, store, calls } = setup();
+  await c.openSettings();
+  c.previewLook({ theme: "dark", palette: "reef" });
+  expect(calls).toContainEqual(["applyLook", expect.objectContaining({ theme: "dark", palette: "reef" })]);
+  expect(calls).toContainEqual(["setWindowTheme", "dark"]);
+  c.closeSettings();
+  expect(calls[calls.length - 2]).toEqual(["applyLook", expect.objectContaining({ theme: "system", palette: "clear" })]);
+  expect(store.get()).toMatchObject({ settings: null, theme: "system" });
+});
+
 test("changing the notes folder closes the note from the old folder", async () => {
   const { c, api, store, editor } = setup();
   await c.show(P("A"));

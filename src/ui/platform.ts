@@ -4,7 +4,8 @@ import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { LogicalPosition } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { applyFontScale } from "../app/fontscale";
-export { applyPalette } from "../theme/palettes"; // Settings › Appearance (PR 3) calls it; default Clear
+import { applyPalette } from "../theme/palettes";
+export { applyPalette };
 import type { UiPort } from "../app/ports";
 import type { AppState } from "../app/store";
 
@@ -75,6 +76,7 @@ export const platform: UiPort = {
   applyLook(s) {
     theme = s.theme;
     writeTheme();
+    applyPalette(s.palette);
     applyFontScale(s.fontSize);
     document.documentElement.dataset.layout = s.layout; // the App grid reads it
   },

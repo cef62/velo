@@ -39,13 +39,18 @@ pub struct Settings {
     pub saved_searches: Vec<SavedSearch>,
     /// Timeline order: "updated" | "created"; anything else reads as "updated"
     pub timeline_sort: String,
+    /// color palette slug (src/theme/palettes); anything outside PALETTES reads as "clear"
+    pub palette: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into(), agent_access: false, saved_searches: vec![], timeline_sort: "updated".into() }
+        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into(), agent_access: false, saved_searches: vec![], timeline_sort: "updated".into(), palette: "clear".into() }
     }
 }
+
+/// The UI's palette slugs (src/theme/palettes/index.ts).
+pub const PALETTES: [&str; 6] = ["clear", "mist", "paper", "electric", "reef", "contrast"];
 
 const DEFAULT_TOGGLE: &str = "Mod+Shift+Space";
 const DEFAULT_CAPTURE: &str = "Mod+Alt+Shift+KeyN"; // canonical modifier order, as the UI's DEFAULTS
@@ -162,6 +167,9 @@ pub fn load(path: &Path) -> Settings {
     if !["updated", "created"].contains(&s.timeline_sort.as_str()) {
         s.timeline_sort = "updated".into();
     }
+    if !PALETTES.contains(&s.palette.as_str()) {
+        s.palette = "clear".into();
+    }
     if let Some(h) = legacy {
         s.shortcuts.entry("toggle_window".into()).or_insert(h);
     }
@@ -192,6 +200,13 @@ mod tests {
         let mut s2 = s.clone(); s2.font_size = 18; s2.write_front_matter = false; s2.info_panel = true; s2.sort = "title".into(); s2.shortcuts.insert("rename".into(), "Mod+KeyR".into());
         save(&p, &s2).unwrap();
         let back = load(&p); assert_eq!((back.font_size, back.sort.as_str()), (18, "title")); assert_eq!(back.shortcuts, s2.shortcuts); assert!(!back.write_front_matter && back.info_panel);
+    }
+    #[test] fn palette_defaults_and_validates() {
+        let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");
+        assert_eq!(load(&p).palette, "clear");
+        std::fs::write(&p, r#"{"palette":"reef","font_size":16}"#).unwrap(); assert_eq!(load(&p).palette, "reef");
+        std::fs::write(&p, r#"{"palette":"sepia","font_size":16}"#).unwrap();
+        let s = load(&p); assert_eq!((s.palette.as_str(), s.font_size), ("clear", 16));
     }
     #[test] fn v1_settings_migrate() {
         let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");

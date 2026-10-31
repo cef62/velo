@@ -84,7 +84,7 @@ export function resetDemo(pin?: Date) {
   settings = {
     notes_dir: DIR, layout: "horizontal", font_size: 14, sort: "modified", editor_style: "rich", theme: urlTheme(), shortcuts: {},
     write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: false, capture_target: "inbox",
-    inbox_title: "Inbox", agent_access: false, timeline_sort: "updated",
+    inbox_title: "Inbox", agent_access: false, timeline_sort: "updated", palette: param("palette") ?? "clear", // ?palette=<slug>
     saved_searches: [
       { name: "Work", query: "", tags: ["work"], no_links: false },
       { name: "Travel plans", query: "", tags: ["travel"], no_links: false },
