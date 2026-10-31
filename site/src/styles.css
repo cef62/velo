@@ -213,6 +213,15 @@ main {
   justify-items: center;
 }
 
+/* No screenshot yet (Shot renders nothing in production): the copy takes the full row. */
+.feature:has(.feature-shots:empty) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.feature-shots:empty {
+  display: none;
+}
+
 /* Alternate the picture side so the page reads as a conversation, not a list of cards. */
 .feature:nth-of-type(odd) .feature-shots {
   order: -1;
