@@ -28,16 +28,21 @@ const nav = [
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content={description} />
+    <link rel="icon" type="image/png" href={`${base}/favicon.png`} />
     <title>{title}</title>
   </head>
   <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
-      <nav>
-        {nav.map((n) => <a href={`${base}${n.path}`}>{n.label}</a>)}
+      <nav aria-label="Main">
+        {nav.map((n) => {
+          const href = `${base}${n.path}`;
+          return <a href={href} aria-current={Astro.url.pathname === href ? 'page' : undefined}>{n.label}</a>;
+        })}
         <a href="https://github.com/cef62/velo">GitHub</a>
       </nav>
     </header>
-    <main>
+    <main id="main">
       <slot />
     </main>
     <footer class="site-footer">
