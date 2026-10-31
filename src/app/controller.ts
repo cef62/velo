@@ -1855,6 +1855,11 @@ export class Controller {
     void this.ui.nextFrame().then(() => this.actions[a as keyof typeof this.actions]());
   }
 
+  /** An action sent by the backend (tray menu); unknown names are ignored. */
+  runAction(a: string) {
+    if (a in this.actions) this.actions[a as keyof typeof this.actions]();
+  }
+
   // context_menu is not a global command: each focused list or chip opens its own menu through isMenuKey
   protected readonly actions: Record<Exclude<Action, (typeof GLOBAL_ACTIONS)[number] | "context_menu">, () => void> = {
     command_palette: () => (this.store.get().palette ? this.closePalette() : this.openPalette()),

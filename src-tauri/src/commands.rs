@@ -172,12 +172,25 @@ fn notify_changed(app: &AppHandle, changed: Vec<String>) {
 }
 
 fn hide_main(app: &AppHandle) {
-    #[cfg(target_os = "macos")]
-    app.hide().ok(); // hides the whole app so macOS refocuses the previously active one
-    #[cfg(not(target_os = "macos"))]
+    // the window too on macOS: a menu-bar click re-activates velo, and activation unhides a merely hidden app
     if let Some(w) = app.get_webview_window("main") {
         w.hide().ok();
     }
+    #[cfg(target_os = "macos")]
+    app.hide().ok(); // hides the whole app so macOS refocuses the previously active one
+}
+
+/// velo's About box: the macOS app menu and the tray menu share it.
+pub fn about_item(app: &AppHandle) -> tauri::Result<tauri::menu::PredefinedMenuItem<tauri::Wry>> {
+    let meta = tauri::menu::AboutMetadata {
+        name: Some("velo".into()),
+        version: Some(app.package_info().version.to_string()),
+        copyright: Some("© 2026 Matteo Ronchi · MIT License".into()),
+        website: Some("https://cef62.github.io/velo".into()),
+        website_label: Some("cef62.github.io/velo".into()),
+        ..Default::default()
+    };
+    tauri::menu::PredefinedMenuItem::about(app, Some("About velo"), Some(meta))
 }
 
 /// Brings the main window to the front; None if it is gone.
@@ -263,11 +276,17 @@ pub fn apply_app_icon(app: &AppHandle, mode: &str) -> tauri::Result<()> {
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+    let item = |id: &str, text: &str| MenuItem::with_id(app, id, text, true, None::<&str>);
     let menu = Menu::with_items(app, &[
-        &MenuItem::with_id(app, "tray-show", "Show velo", true, None::<&str>)?,
-        &MenuItem::with_id(app, "tray-capture", "Quick capture", true, None::<&str>)?,
+        &item("tray-show", "Show velo")?,
+        &item("tray-capture", "Quick capture")?,
+        &item("tray-daily", "Today's daily note")?,
         &PredefinedMenuItem::separator(app)?,
-        &MenuItem::with_id(app, "tray-quit", "Quit velo", true, None::<&str>)?,
+        &item("tray-settings", "Settings…")?,
+        &item("tray-updates", "Check for Updates…")?,
+        &about_item(app)?,
+        &PredefinedMenuItem::separator(app)?,
+        &item("tray-quit", "Quit velo")?,
     ])?;
     let mut tray = TrayIconBuilder::with_id("main")
         .tooltip("velo")
@@ -278,21 +297,36 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 show_main(app).map(|w| w.emit("focus-search", ()).ok());
             }
             "tray-capture" => capture_requested(app, true),
+            // the UI runs these as their shortcuts would; check-updates shows its result in the window
+            "tray-daily" | "tray-settings" | "tray-updates" => {
+                show_main(app);
+                match ev.id().as_ref() {
+                    "tray-daily" => app.emit("run-action", "daily_note"),
+                    "tray-settings" => app.emit("run-action", "settings"),
+                    _ => app.emit("check-updates", ()),
+                }
+                .ok();
+            }
             "tray-quit" => quit(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, ev| {
             if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = ev {
+                // on screen = hide, whatever has focus: a tray click takes focus first (Windows) or not at all (macOS)
                 let app = tray.app_handle();
-                // Windows/Linux: the click makes the taskbar the foreground window first, so velo never reads as focused
-                #[cfg(not(target_os = "macos"))]
                 if app.get_webview_window("main").is_some_and(|w| w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false)) {
-                    return hide_main(app);
+                    hide_main(app);
+                } else if let Some(w) = show_main(app) {
+                    w.emit("focus-search", ()).ok();
                 }
-                toggle_window(app);
             }
         });
-    // shortcut: the full-color app icon, not a monochrome macOS template image; add a template PNG if it looks off in the menu bar
+    // macOS: a black glyph that the menu bar tints for light/dark (icons/tray-template.svg is the source)
+    #[cfg(target_os = "macos")]
+    {
+        tray = tray.icon(tauri::image::Image::from_bytes(include_bytes!("../icons/tray-template.png"))?).icon_as_template(true);
+    }
+    #[cfg(not(target_os = "macos"))]
     if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
     }

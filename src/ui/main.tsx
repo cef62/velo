@@ -67,6 +67,7 @@ void listen<{ version: string }>("update-available", (ev) => controller.onUpdate
 void listen<{ downloaded: number; total: number | null }>("update-progress", (ev) => controller.onUpdateProgress(ev.payload.downloaded, ev.payload.total));
 void listen("update-installing", () => controller.onUpdateInstalling());
 void listen("check-updates", () => void controller.checkUpdates());
+void listen<string>("run-action", (e) => controller.runAction(e.payload)); // tray menu: Today's daily note, Settings…
 void listen<api.AgentWrite>("agent-write", (ev) => void controller.onAgentWrite(ev.payload));
 
 // "today" rolls over at local midnight: refresh the Tasks groups and the due count/badge then.

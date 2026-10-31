@@ -29,7 +29,7 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
     let check = MenuItem::with_id(app, "check-updates", "Check for Updates…", true, None::<&str>)?;
     tauri::menu::Menu::with_items(app, &[
         &Submenu::with_items(app, "velo", true, &[
-            &P::about(app, None, None)?, &check, &P::separator(app)?, &P::hide(app, None)?, &P::hide_others(app, None)?,
+            &crate::commands::about_item(app)?, &check, &P::separator(app)?, &P::hide(app, None)?, &P::hide_others(app, None)?,
             &P::show_all(app, None)?, &P::separator(app)?, &quit,
         ])?,
         &Submenu::with_items(app, "Edit", true, &[
