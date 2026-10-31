@@ -47,11 +47,13 @@ function alias(base: Tree, role: 'gray' | 'green' | 'red', skip: string[] = [], 
   )
 }
 
-/** Step overrides under one palette: `{ 9: 'accent' }` → step 9 = {colors.velo.accent} there; `dark` overrides only _dark. */
-function custom(scale: Tree, slug: PaletteSlug, steps: Record<string, string>, dark = false): Tree {
+/** Step overrides under one palette: `{ 9: 'accent' }` → steps 9 and a9 = {colors.velo.accent} there (a-steps back Park's
+ * outline / plain / kbd text); `dark` overrides only _dark; `alpha: false` leaves the a-steps alone. */
+function custom(scale: Tree, slug: PaletteSlug, steps: Record<string, string>, dark = false, alpha = true): Tree {
   const out = { ...scale }
-  for (const [step, token] of Object.entries(steps)) {
-    const v = byCond((scale[step] as Leaf).value)
+  const all = alpha ? Object.entries(steps).flatMap(([n, t]) => [[n, t], [`a${n}`, t]]) : Object.entries(steps)
+  for (const [step, token] of all) {
+    const v = byCond((out[step] as Leaf).value)
     const ref = `{colors.velo.${token}}`
     v[`_${paletteCondition(slug)}`] = dark ? { _light: (v.base as { _light: string })._light, _dark: ref } : ref
     out[step] = { value: v }
@@ -70,7 +72,7 @@ const positive3 = { 9: 'positive', 10: 'positiveHover', 11: 'positiveText' }
 
 export const parkColors = Object.fromEntries(Object.entries({
   // green.solid stays velo.positive (already palette-aware), so it is not aliased
-  gray: custom(alias(neutral, 'gray'), 'contrast', { 1: 'canvas', 12: 'fg' }), // contrast: ends pushed to #fff / #000
+  gray: custom(alias(neutral, 'gray'), 'contrast', { 1: 'canvas', 12: 'fg' }, false, false), // contrast: ends pushed to #fff / #000
   green: custom(alias(radixGreen, 'green', ['solid']), 'contrast', { 11: 'positiveText' }, true),
   red: custom(alias(radixRed, 'red'), 'contrast', { 11: 'danger' }, true),
   slate,
