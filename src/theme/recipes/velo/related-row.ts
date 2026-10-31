@@ -19,7 +19,7 @@ export const relatedRow = defineSlotRecipe({
       minW: '0',
       cursor: 'default',
       _hover: { bg: 'velo.muted' },
-      '&[aria-selected=true]': { bg: 'velo.selectionIdle' },
+      '&[aria-selected=true]': { bg: 'velo.selectionIdle' }, // the open note: always the idle look, so the tree never sets data-active (matches use matchOnIdle*)
       _focusVisible: { outline: '2px solid', outlineColor: 'velo.accent', outlineOffset: '-2px' },
     },
     line: { display: 'flex', alignItems: 'baseline', gap: '2', minW: '0' },
