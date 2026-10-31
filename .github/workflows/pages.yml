@@ -11,6 +11,8 @@ on:
       - pnpm-lock.yaml
       - docs/media/**
       - .github/workflows/pages.yml
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -20,7 +22,7 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -38,6 +40,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm site:build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 

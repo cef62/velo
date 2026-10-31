@@ -49,7 +49,6 @@ html {
 html,
 body {
   margin: 0;
-  overflow-x: hidden;
 }
 
 body {
@@ -160,14 +159,6 @@ main {
   margin: 0 0 28px;
 }
 
-.hero-shot {
-  max-width: 100%;
-  height: auto;
-  justify-self: center;
-  border-radius: 14px;
-  box-shadow: var(--shadow);
-}
-
 .downloads {
   display: flex;
   flex-wrap: wrap;
@@ -203,19 +194,16 @@ main {
   border-top: 1px solid var(--line);
 }
 
-.feature h2,
-.notes h2 {
+.feature h2 {
   font-size: 1.5rem;
 }
 
-.feature ul,
-.notes ul {
+.feature ul {
   padding-left: 1.2em;
   margin: 0;
 }
 
-.feature li,
-.notes li {
+.feature li {
   margin: 0.4em 0;
 }
 
@@ -228,21 +216,6 @@ main {
 /* Alternate the picture side so the page reads as a conversation, not a list of cards. */
 .feature:nth-of-type(odd) .feature-shots {
   order: -1;
-}
-
-.feature-shots img {
-  max-width: 100%;
-  height: auto;
-  border-radius: 12px;
-  box-shadow: var(--shadow);
-}
-
-.notes {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 48px;
-  padding: 40px 0 0;
-  border-top: 1px solid var(--line);
 }
 
 /* Guide: table of contents beside the README. */
@@ -409,8 +382,7 @@ main {
 
 @media (max-width: 860px) {
   .hero,
-  .feature,
-  .notes {
+  .feature {
     grid-template-columns: 1fr;
     gap: 24px;
   }
@@ -473,8 +445,27 @@ main {
   width: 100%;
   aspect-ratio: 16 / 10;
   background: var(--surface);
-  border: 1px dashed var(--line);
+  border: 1px dashed var(--muted);
   box-shadow: none;
   color: var(--muted);
   font: 13px ui-monospace, Menlo, Consolas, monospace;
+}
+
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -48px;
+  padding: 8px 12px;
+  background: var(--bg);
+  color: var(--fg);
+  z-index: 10;
+}
+
+.skip-link:focus {
+  top: 8px;
+}
+
+.site-header a[aria-current="page"] {
+  text-decoration: underline;
+  text-underline-offset: 6px;
 }

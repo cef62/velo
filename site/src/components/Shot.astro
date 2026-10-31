@@ -3,8 +3,9 @@
 interface Props {
   name: string;
   alt: string;
+  eager?: boolean;
 }
-const { name, alt } = Astro.props;
+const { name, alt, eager = false } = Astro.props;
 const shots = import.meta.glob<ImageMetadata>('../../../docs/media/*.png', {
   eager: true,
   import: 'default',
@@ -14,10 +15,10 @@ const img = shots[`../../../docs/media/${name}.png`];
 
 {
   img ? (
-    <img class="shot" src={img.src} width={img.width} height={img.height} alt={alt} loading="lazy" />
-  ) : (
+    <img class="shot" src={img.src} width={img.width} height={img.height} alt={alt} loading={eager ? 'eager' : 'lazy'} />
+  ) : !import.meta.env.PROD ? (
     <div class="shot shot-missing" role="img" aria-label={alt}>
       <span>{name}.png</span>
     </div>
-  )
+  ) : null
 }
