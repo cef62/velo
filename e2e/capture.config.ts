@@ -20,6 +20,8 @@ export default defineConfig({
     locale: "en-US",
     colorScheme: "light",
     actionTimeout: 10_000,
+    // software raster and a fixed colour profile: GPU raster left stray antialiasing differences between runs
+    launchOptions: { args: ["--disable-gpu", "--force-color-profile=srgb"] },
   },
   webServer: {
     command: `pnpm demo:build && pnpm exec vite preview --config vite.demo.config.ts --port ${PORT} --strictPort`,

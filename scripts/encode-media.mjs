@@ -1,5 +1,5 @@
 // Encodes the clips e2e/capture.spec.ts recorded (test-results/capture/clips/<name>.webm + .json) into
-// docs/media/<name>.mp4 (H.264, web-ready) and <name>.poster.png. Needs ffmpeg on PATH (FFMPEG overrides).
+// docs/media/<name>.mp4 (H.264, web-ready); the spec writes <name>.poster.png itself. Needs ffmpeg on PATH (FFMPEG overrides).
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import process from "node:process";
@@ -21,7 +21,6 @@ for (const name of names) {
   // -map_metadata -1 + bitexact: no encoder/creation-time tags, so a re-encode of the same input is identical
   ff("-ss", ss, "-i", `${SRC}${name}.webm`, "-an", "-c:v", "libx264", "-preset", "slow", "-crf", "28", "-pix_fmt", "yuv420p",
     "-r", "25", "-movflags", "+faststart", "-map_metadata", "-1", "-fflags", "+bitexact", "-flags:v", "+bitexact", mp4);
-  ff("-ss", (Number(ss) + 0.2).toFixed(2), "-i", `${SRC}${name}.webm`, "-frames:v", "1", "-update", "1", `${OUT}${name}.poster.png`);
   const size = statSync(mp4).size;
   console.log(`${name}.mp4 ${(size / 1024).toFixed(0)} KB`);
   if (size > MAX_BYTES) throw new Error(`${name}.mp4 is over 3 MB: shorten the clip or raise -crf`);

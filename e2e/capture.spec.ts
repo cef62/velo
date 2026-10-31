@@ -1,5 +1,6 @@
-// Screenshots (docs/media/<name>.png) and clips (test-results/capture/clips/<name>.webm + .json, encoded to mp4 by
-// scripts/encode-media.mjs) of the browser demo for the docs site. Every Shot/Clip name the site uses is made here.
+// Screenshots (docs/media/<name>.png) and clips (docs/media/<name>.poster.png, plus test-results/capture/clips/<name>.webm
+// + .json, encoded to docs/media/<name>.mp4 by scripts/encode-media.mjs) of the browser demo for the docs site.
+// Every Shot/Clip name the site uses is made here.
 import { test, type Browser, type BrowserContextOptions, type Page } from "@playwright/test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -173,6 +174,9 @@ async function clip(browser: Browser, name: string, act: (page: Page) => Promise
   await beat(page, 600);
   await act(page);
   await beat(page, 1200);
+  // the poster is a screenshot of where the clip ends (the key pill has faded), not a video frame: the same pixels on
+  // every run, and it shows what the clip is about when reduced motion keeps it from playing
+  await page.screenshot({ path: `${MEDIA}${name}.poster.png`, animations: "disabled", caret: "hide" });
   const video = page.video()!;
   await page.context().close();
   await video.saveAs(`${CLIPS}${name}.webm`);
