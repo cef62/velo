@@ -17,3 +17,5 @@ styled-system
 
 # Browser demo build
 dist-demo/
+site/dist/
+site/.astro/

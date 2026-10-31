@@ -18,6 +18,11 @@
     "tauri": "tauri",
     "build:app": "TAURI_SIGNING_PRIVATE_KEY=\"$(cat ~/.tauri/velo.key)\" TAURI_SIGNING_PRIVATE_KEY_PASSWORD=\"$(cat ~/.tauri/velo.password)\" tauri build",
     "codegen": "panda codegen",
+    "docs:gen": "node scripts/gen-docs.ts",
+    "docs:check": "node scripts/gen-docs.ts --check",
+    "site:dev": "cd site && astro dev",
+    "site:build": "astro build --root site",
+    "site:preview": "cd site && astro preview",
     "prepare": "panda codegen"
   },
   "pnpm": {
@@ -26,6 +31,7 @@
     ]
   },
   "devDependencies": {
+    "@astrojs/markdown-remark": "7.3.1",
     "@changesets/cli": "3.0.3",
     "@pandacss/dev": "1.12.1",
     "@pandacss/preset-base": "1.12.1",
@@ -36,6 +42,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "astro": "7.3.3",
     "typescript": "~6.0.3",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
