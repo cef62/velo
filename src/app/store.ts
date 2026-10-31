@@ -74,7 +74,8 @@ export interface AppState {
   update: { version: string; status: "available" | "current" | "installing" | "failed"; message?: string } | null; // the update banner; message: install progress or the failure
   paneMode: "notes" | "tasks" | "timeline"; // what the left pane lists
   sideTab: "related" | "info"; // the side panel's tab (infoOpen = the panel is shown)
-  related: { centre: string; data: Connections | null; err: string } | null; // the Related tab: follows the open note
+  related: { centre: string; data: Connections | null; err: string } | null; // the Related tab: follows the open note (shown only while centre is the open note)
+  focusRelated: number; // bumped by ⌘⇧C: the Related tree takes focus once it shows the open note
   timeline: { rows: TimelineRow[] | null; by: "created" | "updated"; range: "7" | "30" | "all"; err: string; sel: string | null }; // rows filtered like the list; range is not saved; sel = selected row path (none or gone = the first row)
   taskView: TaskView | null; // filtered by query/selectedTags like the notes list
   dueCount: number; // overdue + today, unfiltered: the Tasks switch count and the Dock badge
@@ -132,6 +133,7 @@ export const initialState = (isMac: boolean): AppState => ({
   paneMode: "notes",
   sideTab: "related",
   related: null,
+  focusRelated: 0,
   noLinks: false,
   timeline: { rows: null, by: "updated", range: "all", err: "", sel: null },
   taskView: null,

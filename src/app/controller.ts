@@ -984,7 +984,7 @@ export class Controller {
       }
       // decrypted task text must not come back: drop the rows, the undo payload and any tasks reply in flight
       clearTimeout(this.undoTimer);
-      this.store.set({ taskView: null, tickUndo: null });
+      this.store.set({ taskView: null, tickUndo: null, related: null }); // its missing link texts are plaintext of the note
       void this.loadTasks(); // a new request: older replies are stale
       void this.loadRelated(); // its links and tags may come from now-locked notes
       void this.refreshTitles(); // link targets carry each note's locked flag
@@ -1182,6 +1182,7 @@ export class Controller {
       void this.refreshTags(true);
       void this.loadTasks();
       this.refreshTimeline();
+      void this.loadRelated(); // self-writes skip the watcher: links out, missing targets and mentions changed
     }, 300);
   }
 
@@ -1354,11 +1355,11 @@ export class Controller {
     void this.loadRelated();
   }
 
-  /** ⌘⇧C: the side panel on Related; pressed again there, it closes. */
+  /** ⌘⇧C: the side panel on Related, with focus in its tree; pressed again there, it closes. */
   async toggleRelated() {
     const { infoOpen, sideTab } = this.store.get();
     if (infoOpen && sideTab === "related") return this.toggleInfo();
-    this.store.set({ sideTab: "related" });
+    this.store.set((s) => ({ sideTab: "related", focusRelated: s.focusRelated + 1 }));
     if (!infoOpen) return this.toggleInfo();
     await this.loadRelated();
   }

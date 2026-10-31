@@ -921,7 +921,7 @@ test("⌘⇧C opens the side panel on Related for the open note; again, it close
   api.connections.mockImplementationOnce(async (p: string) => (order.push("connections"), { ...emptyConnections, centre: { ...emptyConnections.centre, path: p } }));
   c.onKeyDown(KEY_C);
   await settle();
-  expect(store.get()).toMatchObject({ infoOpen: true, sideTab: "related", paneMode: "notes" });
+  expect(store.get()).toMatchObject({ infoOpen: true, sideTab: "related", paneMode: "notes", focusRelated: 1 });
   expect(api.connections).toHaveBeenCalledWith(P("A"));
   expect(store.get().related).toMatchObject({ centre: P("A"), err: "" });
   expect(store.get().related?.data?.centre.path).toBe(P("A"));
@@ -1233,10 +1233,14 @@ test("Lock all reloads the Related tab and the link targets", async () => {
   expect(store.get()).toMatchObject({ infoOpen: true, sideTab: "related" });
   api.connections.mockClear();
   api.listLinkTargets.mockClear();
+  c.setSideTab("info"); // closed to Related: the stale tree (its missing link texts are plaintext) must go, not linger
   await c.lockEverything();
   await settle();
-  expect(api.connections).toHaveBeenCalledWith(P("A"));
+  expect(store.get().related).toBeNull();
   expect(api.listLinkTargets).toHaveBeenCalled();
+  c.setSideTab("related");
+  await settle();
+  expect(api.connections).toHaveBeenCalledWith(P("A"));
 });
 
 test("typing a filter in Tasks mode never opens a note; back in Notes the list follows without opening", async () => {

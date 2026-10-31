@@ -32,14 +32,18 @@ export function RelatedPanel({ controller, store }: { controller: Controller; st
   const title = useStore(store, (s) => s.title);
   const keys = useStore(store, (s) => s.keys);
   const isMac = useStore(store, (s) => s.isMac);
-  const data = related?.data ?? null;
-  const centre = related?.centre ?? null;
+  const focusRelated = useStore(store, (s) => s.focusRelated);
+  // only the open note's tree: a stale one (another note, or one locked away) must never show or answer keys
+  const data = related?.centre === openPath ? (related?.data ?? null) : null;
+  const centre = data ? related!.centre : null;
   const [closed, setClosed] = useState<Set<string>>(() => new Set());
   const [cur, setCur] = useState(""); // the row that is the tab stop, by id; the first row when gone
   const [peek, setPeek] = useState<string | null>(null);
   const el = useRef<HTMLDivElement>(null);
   const focusNext = useRef(false); // a key moved the stop: focus it once rendered
+  const hadFocus = useRef(false); // focus was in the tree: a re-render that unmounts the row must not drop it to <body>
   const lastCentre = useRef<string | null>(null);
+  const lastFocusReq = useRef(focusRelated);
   useEffect(() => {
     if (data && centre !== lastCentre.current) {
       lastCentre.current = centre; // a new note: big tag groups start closed, no peek
@@ -50,8 +54,12 @@ export function RelatedPanel({ controller, store }: { controller: Controller; st
   const rows = useMemo(() => (data ? relatedRows(data, closed) : []), [data, closed]);
   const curIdx = Math.max(0, rows.findIndex((r) => r.id === cur));
   useLayoutEffect(() => {
-    if (!focusNext.current) return;
+    if (!data) return; // the new note's tree is not here yet: keep the request
+    const wanted = focusNext.current || lastFocusReq.current !== focusRelated;
+    const lost = hadFocus.current && !el.current?.contains(document.activeElement);
+    if (!wanted && !lost) return;
     focusNext.current = false;
+    lastFocusReq.current = focusRelated;
     el.current?.querySelector<HTMLElement>(`[data-i="${curIdx}"]`)?.focus();
   });
   const go = (i: number) => {
@@ -77,9 +85,12 @@ export function RelatedPanel({ controller, store }: { controller: Controller; st
       case "note":
         return open(row.node.path, mod === "cmd" ? "edit" : "stay");
       case "missing":
-        return void controller.createMissing(row.title);
+        return mod === "shift" ? void controller.createMissing(row.title) : undefined; // ⇧↩ creates; a plain ↩ must not make notes by accident
       case "mention":
-        return mod === "shift" ? void controller.linkMention(row.mention) : open(row.mention.node.path, mod === "cmd" ? "edit" : "stay");
+        if (mod !== "shift") return open(row.mention.node.path, mod === "cmd" ? "edit" : "stay");
+        if (row.mention.node.locked || data?.centre.locked) return; // never offered for locked notes
+        focusNext.current = true; // the row goes away once linked: stay in the tree
+        return void controller.linkMention(row.mention);
       case "more":
         return controller.setTags([row.tag]);
     }
@@ -109,7 +120,7 @@ export function RelatedPanel({ controller, store }: { controller: Controller; st
     return <div className={empty}>Open a note to see what's related.</div>;
   }
   const row = (r: RelatedRow, i: number) => {
-    const common = { role: "treeitem" as const, "data-i": i, "data-row": "", tabIndex: i === curIdx ? 0 : -1, "aria-level": r.level, onFocus: () => setCur(r.id), onKeyDown: (e: KeyboardEvent) => onKey(e, r, i) };
+    const common = { role: "treeitem" as const, "data-i": i, "data-row": "", tabIndex: i === curIdx ? 0 : -1, "aria-level": r.level, onFocus: () => { setCur(r.id); hadFocus.current = true; }, onKeyDown: (e: KeyboardEvent) => onKey(e, r, i) };
     if (r.kind === "section")
       return (
         <div key={r.id} {...common} aria-expanded={r.open} className={sectionHeader()} onClick={() => toggle(r.id, !r.open)}>
@@ -131,7 +142,7 @@ export function RelatedPanel({ controller, store }: { controller: Controller; st
     const c = relatedRow({ kind: r.kind === "missing" ? "missing" : r.kind === "mention" ? "mention" : r.level === 3 ? "nested" : "note" });
     if (r.kind === "missing")
       return (
-        <div key={r.id} {...common} className={c.root} aria-selected={false} onClick={() => activate(r, "")}>
+        <div key={r.id} {...common} className={c.root} aria-selected={false} onClick={() => activate(r, "shift")}>
           <div className={c.line}><span className={c.title}>{r.title}</span></div>
           <span className={c.context}>No note yet · <Kbd>{shiftEnter}</Kbd> create</span>
         </div>
@@ -139,7 +150,7 @@ export function RelatedPanel({ controller, store }: { controller: Controller; st
     const node = r.kind === "mention" ? r.mention.node : r.node;
     const peeking = peek === r.id;
     return (
-      <div key={r.id} {...common} className={c.root} aria-selected={node.path === openPath} aria-expanded={peeking} onClick={() => activate(r, "")} onDoubleClick={() => open(node.path, "edit")}>
+      <div key={r.id} {...common} className={c.root} aria-selected={node.path === openPath} onClick={() => activate(r, "")} onDoubleClick={() => open(node.path, "edit")}>
         <div className={c.line}>
           {node.locked && <Lock aria-label="Locked" size={12} />}
           <span className={c.title}>{node.title}</span>
@@ -147,7 +158,7 @@ export function RelatedPanel({ controller, store }: { controller: Controller; st
         </div>
         {r.kind === "mention" ? (
           <span className={c.context}>
-            mentions “{r.mention.name}” {r.mention.count}× · <Kbd>{shiftEnter}</Kbd> link
+            mentions “{r.mention.name}” {r.mention.count}×{!node.locked && !data?.centre.locked && <> · <Kbd>{shiftEnter}</Kbd> link</>}
           </span>
         ) : r.context ? (
           <span className={c.context}>{r.parent === "in" ? <HighlightedText text={r.context} query={title} /> : r.context}</span>
@@ -183,7 +194,7 @@ export function RelatedPanel({ controller, store }: { controller: Controller; st
           <span>Notes that link here, notes it links to, and notes that mention its title will show up in this panel. Type <Kbd>[[</Kbd> in the note to link one.</span>
         </div>
       ) : (
-        <div ref={el} role="tree" aria-label="Related notes" className={tree}>
+        <div ref={el} role="tree" aria-label="Related notes" className={tree} onBlur={(e) => { if (!el.current?.contains(e.relatedTarget as Node | null)) hadFocus.current = false; }}>
           {rows.map(row)}
         </div>
       )}

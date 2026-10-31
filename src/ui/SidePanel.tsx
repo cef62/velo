@@ -1,7 +1,10 @@
+import { X } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
+import { css } from "styled-system/css";
 import { countBadge, sidePanel } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
+import { IconButton, Tooltip } from "@/components/ui";
 import { relatedCount } from "../related";
 import { InfoTab } from "./InfoPanel";
 import { sidePanelMode } from "./layout";
@@ -16,7 +19,7 @@ export function SidePanel({ controller, store }: { controller: Controller; store
   const open = useStore(store, (s) => s.infoOpen);
   const tab = useStore(store, (s) => s.sideTab);
   const layout = useStore(store, (s) => s.layout);
-  const count = useStore(store, (s) => relatedCount(s.related?.data ?? null));
+  const count = useStore(store, (s) => relatedCount(s.related?.centre === s.openPath ? (s.related?.data ?? null) : null));
   const el = useRef<HTMLElement>(null);
   const [paneW, setPaneW] = useState(1000);
   useLayoutEffect(() => {
@@ -38,11 +41,10 @@ export function SidePanel({ controller, store }: { controller: Controller; store
       data-side-panel=""
       data-mode={mode}
       onKeyDown={(e) => {
-        if (e.key === "Escape" && mode === "overlay" && !e.defaultPrevented) {
-          e.preventDefault();
-          void controller.toggleInfo();
-          controller.focusEditor();
-        }
+        if (e.key !== "Escape" || e.defaultPrevented) return;
+        e.preventDefault();
+        if (mode === "overlay") void controller.toggleInfo();
+        controller.focusEditor();
       }}
     >
       <div
@@ -64,6 +66,13 @@ export function SidePanel({ controller, store }: { controller: Controller; store
             {t === "related" && count > 0 && <span className={countBadge({ tone: "neutral" })}>{count}</span>}
           </button>
         ))}
+        {mode === "overlay" && (
+          <Tooltip content="Close panel (Esc)" openDelay={500}>
+            <IconButton variant="plain" size="xs" aria-label="Close panel" className={css({ ml: "auto" })} onClick={() => { void controller.toggleInfo(); controller.focusEditor(); }}>
+              <X />
+            </IconButton>
+          </Tooltip>
+        )}
       </div>
       <div id="side-panel-body" role="tabpanel" aria-labelledby={`side-tab-${tab}`} className={c.body}>
         {tab === "related" ? <RelatedPanel controller={controller} store={store} /> : <InfoTab controller={controller} store={store} />}
