@@ -9,6 +9,8 @@
     "dev": "vite",
     "build": "panda codegen && tsc && vite build",
     "preview": "vite preview",
+    "demo:dev": "panda codegen && vite --config vite.demo.config.ts",
+    "demo:build": "panda codegen && tsc && vite build --config vite.demo.config.ts",
     "test": "panda codegen && vitest run",
     "changeset": "changeset",
     "version-packages": "changeset version && node scripts/sync-version.mjs",
