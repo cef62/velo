@@ -2,6 +2,7 @@
 // DEMO_BASE sets the public path (e.g. /velo/demo/ for the docs site).
 import { defineConfig, mergeConfig, type Plugin, type UserConfig } from "vite";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import process from "node:process";
 import appConfig from "./vite.config.ts";
 
@@ -33,6 +34,10 @@ const demo: Plugin = {
     const to = r && swaps[r.id];
     return to && importer !== to ? to : r;
   },
+  // the app's index.html has no icon (Tauri supplies one): inline the app icon so the browser doesn't 404 on /favicon.ico
+  transformIndexHtml: () => [
+    { tag: "link", attrs: { rel: "icon", type: "image/png", href: `data:image/png;base64,${readFileSync(new URL("./src-tauri/icons/32x32.png", import.meta.url)).toString("base64")}` }, injectTo: "head" },
+  ],
 };
 
 export default defineConfig(async (env) =>

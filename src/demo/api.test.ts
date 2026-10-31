@@ -102,9 +102,17 @@ describe("demo api", () => {
     expect(await demo.hasIdentity()).toBe(true);
     const doc = await demo.openNote(LOCKED);
     expect(doc).toMatchObject({ encrypted: true, title: "Private journal" });
-    expect(await titles("part-time", "modified", 0, [], false)).toEqual(["Private journal"]);
+    const unlockedHit = (await demo.search("part-time", "modified", 0, [], false)).hits;
+    expect(unlockedHit.map((h) => h.title)).toEqual(["Private journal"]);
+    expect(unlockedHit[0].snippet).toMatch(/^# Private journal/); // the first 120 body chars, as Rust's unlocked group
+    expect((await demo.search("side", "modified", 0, [], false)).hits.slice(-1)[0]?.title).toBe("Private journal"); // after the indexed hits
+    expect(await titles("", "modified", 0, ["personal"], false)).toContain("Private journal");
+    expect((await demo.tasks("", [], false)).upcoming.map((t) => t.title)).toContain("Private journal");
+    expect((await demo.timeline("", [], false, "updated", null)).find((r) => r.locked)?.snippet).toBe(""); // never a locked note's text
+    expect((await demo.connections(p("Gift ideas"))).centre.preview).not.toBe("");
     await demo.lockAll();
     await expect(demo.openNote(LOCKED)).rejects.toBe("locked");
+    expect(await titles("", "modified", 0, ["personal"], false)).not.toContain("Private journal");
   });
 
   it("rename rewrites links; merge folds one note into another", async () => {
@@ -113,8 +121,46 @@ describe("demo api", () => {
     expect((await demo.openNote(p("Welcome to velo"))).text).toContain("[[Books to read]]");
     const m = await demo.mergeNotes(p("Lisbon packing list"), p("Trip — Lisbon in spring"));
     expect(m.path).toBe(p("Trip — Lisbon in spring"));
-    expect((await demo.openNote(m.path)).text).toContain("Power adapter");
+    const merged = (await demo.openNote(m.path)).text;
+    expect(merged).toContain("\n## Lisbon packing list\n\n# Lisbon packing list\n\nFor [[Trip — Lisbon in spring]].");
+    expect(merged).toMatch(/^aliases: \[Lisbon packing list\]$/m);
+    expect((await demo.openNote(m.path)).meta.aliases).toEqual(["Lisbon packing list"]);
     await expect(demo.openNote(p("Lisbon packing list"))).rejects.toBe("not-found");
+  });
+
+  it("mergedText matches Rust merged_text", () => {
+    expect(demo.mergedText("---\ntags: [a]\naliases: [T2]\n---\nbody T\n", "Target", "---\ntags: [A, b]\naliases: [S2]\n---\nbody S\n", "Source"))
+      .toBe("---\ntags: [a, b]\naliases: [T2, S2, Source]\n---\nbody T\n\n## Source\n\nbody S\n");
+    expect(demo.mergedText("x", "Target", "---\ntags: []\n---\n\n\n", "Source")).toBe("---\naliases: [Source]\n---\nx\n\n## Source\n");
+    expect(demo.mergedText("", "Target", "body S\n", "Source")).toBe("---\naliases: [Source]\n---\n## Source\n\nbody S\n");
+  });
+
+  it("short terms match titles only; export counts tasks", async () => {
+    const pa = await titles("pa", "title", 0, [], false);
+    expect(pa).toContain("Payments migration");
+    expect(pa).not.toContain("Inbox"); // "passport" is in its body only
+    const c = await demo.exportPreview({ query: "", tags: ["travel"], no_links: false, by: "updated", since_ms: null, tasks_only: false, title: "" });
+    expect(c).toMatchObject({ notes: 3, locked: 0 });
+    expect(c.open).toBeGreaterThan(0);
+    expect(c.done).toBeGreaterThan(0);
+  });
+
+  it("a pinned now drives seed dates, Tasks and writes", async () => {
+    const now = new Date(2026, 9, 30, 16, 0);
+    demo.resetDemo(now);
+    expect((await demo.openNote(p("Inbox"))).text).toContain("Book dentist appointment 📅 2026-11-03");
+    const rows = await demo.timeline("", [], false, "updated", null);
+    expect(rows[0]).toMatchObject({ title: "Welcome to velo", date: new Date(2026, 9, 30, 8, 5).getTime() });
+    const v = await demo.tasks("", [], false);
+    expect(v.today.map((t) => t.text)).toEqual(["Meal-prep [[Recipe — Weeknight dal]] for Tuesday"]);
+    const r = await demo.toggleTask(v.today[0].path, v.today[0].line, v.today[0].line_text);
+    expect(r.line_text).toContain("@done(2026-10-30)");
+    expect((await demo.openNote(v.today[0].path)).meta.modified).toBe(now.getTime());
+    // an early-morning now: seed times later today are pulled just before it, never hidden or in the future
+    demo.resetDemo(new Date(2026, 9, 30, 6, 0));
+    const early = await demo.timeline("", [], false, "updated", null);
+    expect(early.length).toBe(30);
+    expect(Math.max(...early.map((x) => x.date))).toBeLessThan(new Date(2026, 9, 30, 6, 0).getTime());
   });
 
   it("revisions and settings stay in memory", async () => {

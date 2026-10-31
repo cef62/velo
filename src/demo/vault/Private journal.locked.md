@@ -10,3 +10,5 @@ This note is locked — in the real app it is encrypted on disk. You unlocked it
 Tired but happy this week. The talk proposal is in, the Lisbon flat is booked, and the sync prototype finally merged two logs without losing a check-in.
 
 Thinking about whether to go part-time next year to spend more time on side projects.
+
+- [ ] Decide about going part-time 📅 {{+30}}

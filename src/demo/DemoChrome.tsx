@@ -21,12 +21,14 @@ export const demoChrome = {
   toast: (t: string) => showToast(t),
 };
 
+// top-left corner of the header (empty: room for the macOS window buttons), so it never covers note text
 const pill: CSSProperties = {
-  position: "fixed", right: 12, bottom: 12, zIndex: 9999, pointerEvents: "none", padding: "3px 10px", borderRadius: 999,
+  position: "fixed", left: 8, top: 14, zIndex: 9999, pointerEvents: "none", padding: "1px 7px", borderRadius: 999,
   font: "500 11px/18px var(--fonts-ui, system-ui)", color: "var(--colors-velo-fg-muted, #666)",
   background: "var(--colors-velo-chrome, #f4f4f4)", border: "1px solid var(--colors-velo-border, #ddd)", opacity: 0.9,
 };
-const toastStyle: CSSProperties = { ...pill, right: "auto", left: "50%", bottom: 44, transform: "translateX(-50%)", color: "var(--colors-velo-fg, #222)", maxWidth: "80vw" };
+const toastStyle: CSSProperties = { ...pill, top: "auto", left: "50%", bottom: 24, padding: "3px 10px", transform: "translateX(-50%)", color: "var(--colors-velo-fg, #222)", maxWidth: "80vw" };
+const showPill = new URLSearchParams(location.search).get("pill") !== "0"; // ?pill=0: screenshots without it
 
 export function DemoChrome() {
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -39,10 +41,13 @@ export function DemoChrome() {
       clearTimeout(timer);
       timer = setTimeout(() => setToast(null), 3000);
     };
+    const onNotice = (e: Event) => showToast((e as CustomEvent<string>).detail);
+    window.addEventListener("velo-demo-notice", onNotice);
+    return () => window.removeEventListener("velo-demo-notice", onNotice);
   }, []);
   return (
     <>
-      <div style={pill} data-demo-pill>Demo · nothing is saved</div>
+      {showPill && <div style={pill} title="Demo: nothing you change is saved" aria-label="Demo: nothing you change is saved" data-demo-pill>Demo</div>}
       {toast && <div style={toastStyle} role="status">{toast}</div>}
       {menu && (
         <Menu.Root
@@ -53,7 +58,7 @@ export function DemoChrome() {
           onSelect={(d) => menu.items.find((m) => m !== "separator" && m.id === d.value && (m.action(), true))}
         >
           <Menu.Positioner>
-            <Menu.Content minW="180px">
+            <Menu.Content minW="180px" aria-label="Note actions">
               {menu.items.map((m, i) =>
                 m === "separator" ? <Menu.Separator key={i} /> : <Menu.Item key={m.id} value={m.id}><Menu.ItemText>{m.text}</Menu.ItemText></Menu.Item>,
               )}

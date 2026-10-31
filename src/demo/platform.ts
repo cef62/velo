@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import type { UiPort } from "../app/ports";
 import { platform as real } from "../ui/platform";
-import { DIR } from "./api";
+import { DIR, pinnedNow } from "./api";
 import { DemoChrome, demoChrome } from "./DemoChrome";
 
 export * from "../ui/platform";
@@ -25,8 +25,12 @@ createRoot(document.body.appendChild(document.createElement("div"))).render(crea
 
 declare global {
   interface Window {
-    /** For Playwright: `ready` resolves once the note list has rows; `reset()` reloads the seed vault. */
-    __veloDemo: { ready: Promise<void>; reset(): void };
+    /**
+     * For Playwright: `ready` resolves once the note list has rows; `reset()` reloads the seed vault; `now` is the
+     * `?now=` instant in ms (null = real clock). The UI's relative ages read the browser clock, so a capture pins
+     * both: `page.clock.setFixedTime(now)` before `goto(".../?now=<same ISO>")`.
+     */
+    __veloDemo: { ready: Promise<void>; reset(): void; now: number | null };
   }
 }
 window.__veloDemo = {
@@ -35,4 +39,5 @@ window.__veloDemo = {
     check();
   }),
   reset: () => location.reload(), // nothing persists, so a reload is a fresh seed vault
+  now: pinnedNow,
 };

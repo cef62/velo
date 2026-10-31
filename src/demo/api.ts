@@ -5,7 +5,7 @@ import { fold } from "../search";
 import { extractTags } from "../tags";
 import { frontMatterRange, stripFrontMatter } from "../frontmatter";
 import { TASK_ITEM } from "../preview";
-import { localToday, toggleTaskLine } from "../tasks";
+import { toggleTaskLine } from "../tasks";
 import { version } from "../../package.json";
 
 export type * from "../api";
@@ -44,13 +44,29 @@ const fmValue = (text: string, key: string): string | null => {
 };
 
 const newHash = () => `h${++hashSeq}`;
+const param = (k: string) => (typeof location === "undefined" ? null : new URLSearchParams(location.search).get(k));
 const urlTheme = () => {
-  const t = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("theme");
+  const t = param("theme");
   return t === "dark" || t === "light" ? t : "system";
 };
 
-/** Rebuilds the seed vault and settings as of `now`. */
-export function resetDemo(now = new Date()) {
+/**
+ * `?now=<ISO date-time>` pins the demo backend's clock: seed dates, write times and "today" for Tasks; null = the real clock.
+ * The UI reads the real clock for list ages, Timeline headers and Info/Related dates, so captures also pin the
+ * browser clock to the same instant (Playwright: `page.clock.setFixedTime(...)`, see `window.__veloDemo.now`).
+ */
+export const pinnedNow: number | null = (() => {
+  const t = new Date(param("now") ?? "").getTime();
+  return isNaN(t) ? null : t;
+})();
+let clock: number | null = pinnedNow;
+const nowMs = () => clock ?? Date.now();
+const today = () => isoDay(new Date(nowMs()));
+
+/** Rebuilds the seed vault and settings as of `now` (given: pins the clock there; omitted: `?now=` or the real clock). */
+export function resetDemo(pin?: Date) {
+  clock = pin ? pin.getTime() : pinnedNow;
+  const now = new Date(nowMs());
   notes = new Map();
   unlocked = false;
   for (const [file, raw] of Object.entries(seed)) {
@@ -105,11 +121,40 @@ const getReadable = (path: string): Note => {
   return n;
 };
 const byTitle = (t: string) => [...notes.values()].find((n) => fold(titleOf(n.path)) === fold(t.trim()));
+/** A [[link]] target: a title, else an alias (Rust names). */
+const resolve = (t: string) => byTitle(t) ?? [...notes.values()].find((n) => readable(n) && aliasesOf(n).some((a) => fold(a) === fold(t.trim())));
+
+/** A front-matter list (`key: [a, b]` or `key: a, b`). */
+const fmList = (text: string, key: string) =>
+  (fmValue(text, key) ?? "").replace(/^\[|\]$/g, "").split(",").map((t) => t.trim()).filter(Boolean);
+const aliasesOf = (n: Note) => fmList(n.text, "aliases");
 
 function tagsOf(n: Note): string[] {
-  const fm = (fmValue(n.text, "tags") ?? "").replace(/^\[|\]$/g, "").split(",").map((t) => t.trim().replace(/^#/, "")).filter(Boolean);
+  const fm = fmList(n.text, "tags").map((t) => t.replace(/^#/, ""));
   const seen = new Set<string>();
   return [...fm, ...extractTags(bodyOf(n))].filter((t) => !seen.has(fold(t)) && seen.add(fold(t)));
+}
+
+/** Rust frontmatter::set_list, simplified: unions `add` into `key` (folded), creating the line or the block. */
+function addToList(text: string, key: string, add: string[], createBlock: boolean): string {
+  const cur = fmList(text, key);
+  const extra = add.filter((a, i) => !cur.some((c) => fold(c) === fold(a)) && add.findIndex((b) => fold(b) === fold(a)) === i);
+  if (!extra.length) return text;
+  const line = `${key}: [${[...cur, ...extra].join(", ")}]`;
+  const r = frontMatterRange(text);
+  if (r && fmValue(text, key) !== null) return text.slice(0, r.to).replace(new RegExp(`^${key}:.*$`, "m"), line) + text.slice(r.to);
+  if (r) return text.slice(0, r.to).replace(/---\r?\n?$/, `${line}\n---\n`) + text.slice(r.to);
+  return createBlock ? `---\n${line}\n---\n${text}` : text;
+}
+
+/** Rust vault::merged_text: source tags and title (as an alias) into the target's front matter, its body under `## Source`. */
+export function mergedText(target: string, targetTitle: string, source: string, sourceTitle: string): string {
+  const t = addToList(addToList(target, "tags", fmList(source, "tags"), false), "aliases", [...fmList(source, "aliases"), sourceTitle].filter((a) => fold(a) !== fold(targetTitle)), true);
+  const src = stripFrontMatter(source).replace(/^(\s*\n)+/, "").trimEnd();
+  const head = t.trimEnd();
+  let out = head;
+  if (head) out += stripFrontMatter(t).trim() ? "\n\n" : "\n";
+  return `${out}## ${sourceTitle}\n${src ? `\n${src}\n` : ""}`;
 }
 
 const LINK = /\[\[([^\]\n]+?)\]\]/g;
@@ -119,11 +164,12 @@ function linksOf(body: string): string[] {
   const seen = new Set<string>();
   return [...body.matchAll(LINK)].map((m) => linkTarget(m[1])).filter((t) => t && !seen.has(fold(t)) && seen.add(fold(t)));
 }
-const linksTo = (n: Note, title: string) => linksOf(bodyOf(n)).some((t) => fold(t) === fold(title));
-const hasLinks = (n: Note) => linksOf(bodyOf(n)).some((t) => byTitle(t)) || [...notes.values()].some((o) => o !== n && readable(o) && linksTo(o, titleOf(n.path)));
+const linksTo = (n: Note, target: Note) => linksOf(bodyOf(n)).some((t) => resolve(t) === target);
+const hasLinks = (n: Note) => linksOf(bodyOf(n)).some((t) => resolve(t)) || [...notes.values()].some((o) => o !== n && readable(o) && linksTo(o, n));
 
-/** Rust index::preview: the body minus a leading `# title` line, first 120 chars. */
+/** Rust index::preview: the body minus a leading `# title` line, first 120 chars; "" for a locked note, unlocked or not. */
 function preview(n: Note): string {
+  if (isLocked(n.path)) return "";
   const body = bodyOf(n);
   const [first, ...rest] = body.split("\n");
   return [...(first.trimEnd() === `# ${titleOf(n.path)}` ? rest.join("\n") : body)].slice(0, 120).join("");
@@ -151,24 +197,29 @@ function contextLine(body: string, a: number, b: number, max = CONTEXT_CHARS): s
   return `${ws > 0 ? "…" : ""}${line.slice(ws, we).trim()}${we < line.length ? "…" : ""}`;
 }
 
-/** Notes passing the shared search filters (query over title + body, every tag, orphans only). */
+const inTitle = (n: Note, terms: string[]) => terms.every((t) => [titleOf(n.path), ...(readable(n) ? aliasesOf(n) : [])].some((x) => fold(x).includes(t)));
+
+/** Notes passing the shared search filters: terms under 3 chars match titles/aliases only, longer ones the body too; every tag; orphans only. */
 function filtered(query: string, tags: string[], noLinks: boolean): Note[] {
   const terms = termsOf(query);
+  const short = terms.filter((t) => t.length < 3);
+  const long = terms.filter((t) => t.length >= 3);
   return [...notes.values()].filter((n) => {
-    const hay = fold(readable(n) ? `${titleOf(n.path)}\n${bodyOf(n)}` : titleOf(n.path)); // a locked note's text is not indexed
-    if (!terms.every((t) => hay.includes(t))) return false;
-    if (tags.length && (isLocked(n.path) || !tags.every((t) => tagsOf(n).some((x) => fold(x) === fold(t))))) return false;
+    if (!inTitle(n, short)) return false;
+    const hay = fold(readable(n) ? `${titleOf(n.path)}\n${bodyOf(n)}` : titleOf(n.path)); // a locked note's text is searched only once unlocked
+    if (!inTitle(n, long) && !long.every((t) => hay.includes(t))) return false;
+    if (tags.length && (!readable(n) || !tags.every((t) => tagsOf(n).some((x) => fold(x) === fold(t))))) return false;
     return !noLinks || (!isLocked(n.path) && !hasLinks(n));
   });
 }
 
-const meta = (n: Note): NoteMeta => ({ created: n.created, created_src: "frontmatter", modified: n.modified, modified_src: "frontmatter", tags: readable(n) ? tagsOf(n) : [], aliases: [] });
+const meta = (n: Note): NoteMeta => ({ created: n.created, created_src: "frontmatter", modified: n.modified, modified_src: "frontmatter", tags: readable(n) ? tagsOf(n) : [], aliases: readable(n) ? aliasesOf(n) : [] });
 const doc = (n: Note): NoteDoc => ({ path: n.path, title: titleOf(n.path), text: n.text, hash: n.hash, encrypted: isLocked(n.path), meta: meta(n) });
-const node = (n: Note, context = ""): GraphNode => ({ path: n.path, title: titleOf(n.path), created: n.created, modified: n.modified, preview: readable(n) ? preview(n) : "", locked: isLocked(n.path), context });
+const node = (n: Note, context = ""): GraphNode => ({ path: n.path, title: titleOf(n.path), created: n.created, modified: n.modified, preview: preview(n), locked: isLocked(n.path), context });
 
 function write(n: Note, text: string) {
   n.text = text;
-  n.modified = Date.now();
+  n.modified = nowMs();
   n.hash = newHash();
 }
 
@@ -176,7 +227,7 @@ function create(title: string, text: string): Note {
   if (!title.trim() || INVALID.test(title)) throw "invalid-title";
   if (byTitle(title)) throw "already-exists";
   const path = `${DIR}/${title.trim()}.md`;
-  const now = Date.now();
+  const now = nowMs();
   const n: Note = { path, text, created: now, modified: now, hash: newHash(), revs: [] };
   notes.set(path, n);
   return n;
@@ -209,31 +260,39 @@ export const setSettings = async (s: Settings): Promise<void> => void (settings 
 export const search = async (query: string, sort: "modified" | "title", offset: number, tags: string[], noLinks: boolean): Promise<Page> => {
   const terms = termsOf(query);
   const long = terms.filter((t) => t.length >= 3).sort((a, b) => b.length - a.length)[0];
-  const inTitle = (n: Note) => terms.length > 0 && terms.every((t) => fold(titleOf(n.path)).includes(t));
+  const filtering = terms.length > 0 || tags.length > 0;
+  // Rust groups: title hits, then indexed body hits, then unlocked notes matched by their decrypted text or tags
+  const group = (n: Note) => (terms.length && inTitle(n, terms) ? 0 : filtering && isLocked(n.path) ? 2 : 1);
   const rows = filtered(query, tags, noLinks).sort(
-    (a, b) => Number(inTitle(b)) - Number(inTitle(a)) || (sort === "title" ? fold(titleOf(a.path)).localeCompare(fold(titleOf(b.path))) : b.modified - a.modified),
+    (a, b) => group(a) - group(b) || (sort === "title" ? fold(titleOf(a.path)).localeCompare(fold(titleOf(b.path))) : b.modified - a.modified),
   );
   const hits = rows.slice(offset, offset + PAGE).map((n): Hit => {
-    const fallback = readable(n) ? preview(n) : "";
-    return { path: n.path, title: titleOf(n.path), snippet: long && readable(n) && !inTitle(n) ? snippet(bodyOf(n), long, fallback) : fallback, mtime: n.modified, encrypted: isLocked(n.path) };
+    const g = group(n);
+    const text = g === 2 ? [...bodyOf(n)].slice(0, 120).join("") : g === 1 && long ? snippet(bodyOf(n), long, preview(n)) : preview(n);
+    return { path: n.path, title: titleOf(n.path), snippet: text, mtime: n.modified, encrypted: isLocked(n.path) };
   });
   return { hits, has_more: offset + PAGE < rows.length, total: rows.length };
 };
 
 export const timeline = async (query: string, tags: string[], noLinks: boolean, by: "created" | "updated", sinceMs: number | null): Promise<TimelineRow[]> =>
   filtered(query, tags, noLinks)
-    .map((n): TimelineRow => ({ path: n.path, title: titleOf(n.path), date: by === "created" ? n.created : n.modified, snippet: readable(n) ? preview(n) : "", locked: isLocked(n.path) }))
+    .map((n): TimelineRow => ({ path: n.path, title: titleOf(n.path), date: by === "created" ? n.created : n.modified, snippet: preview(n), locked: isLocked(n.path) }))
     .filter((r) => sinceMs === null || r.date >= sinceMs)
     .sort((a, b) => b.date - a.date);
 
-const noCounts = (): ExportCounts => ({ notes: 0, open: 0, done: 0, locked: 0, over_limit: 0, no_tasks: 0, unreadable: 0 });
+/** The UI listens for this to show a toast (the demo has no files or printer). */
+const notice = (text: string) => typeof window !== "undefined" && window.dispatchEvent(new CustomEvent("velo-demo-notice", { detail: text }));
+const taskLines = (n: Note) => bodyOf(n).split("\n").map((l) => TASK_ITEM.exec(l)).filter((m) => m !== null);
 export const exportPreview = async (r: ExportRequest): Promise<ExportCounts> => {
   const ns = filtered(r.query, r.tags, r.no_links).filter((n) => r.since_ms === null || (r.by === "created" ? n.created : n.modified) >= r.since_ms);
-  return { ...noCounts(), notes: ns.length, locked: ns.filter((n) => isLocked(n.path)).length };
+  const plain = ns.filter((n) => !isLocked(n.path)); // locked notes are left out of an export
+  const boxes = plain.flatMap(taskLines);
+  const open = boxes.filter((m) => m[2] === " ").length;
+  return { notes: plain.length, open, done: boxes.length - open, locked: ns.length - plain.length, over_limit: 0, no_tasks: plain.filter((n) => !taskLines(n).length).length, unreadable: 0 };
 };
-export const exportText = async (_r: ExportRequest): Promise<string> => ""; // demo: export is a no-op
-export const printPage = async (): Promise<void> => {};
-export const exportMarkdown = async (_path: string, r: ExportRequest): Promise<ExportCounts> => exportPreview(r);
+export const exportText = async (_r: ExportRequest): Promise<string> => "";
+export const printPage = async (): Promise<void> => void notice("Demo: export skipped");
+export const exportMarkdown = async (_path: string, r: ExportRequest): Promise<ExportCounts> => (notice("Demo: export skipped"), exportPreview(r));
 
 export const listTags = async (): Promise<TagCount[]> => {
   const counts = new Map<string, TagCount>();
@@ -249,7 +308,9 @@ export const listTags = async (): Promise<TagCount[]> => {
 };
 export const listTitles = async (): Promise<string[]> => [...notes.keys()].map(titleOf);
 export const listLinkTargets = async (): Promise<LinkTarget[]> =>
-  [...notes.values()].map((n) => ({ name: titleOf(n.path), title: titleOf(n.path), path: n.path, modified: n.modified, locked: isLocked(n.path) }));
+  [...notes.values()].flatMap((n) =>
+    [titleOf(n.path), ...(readable(n) ? aliasesOf(n) : [])].map((name) => ({ name, title: titleOf(n.path), path: n.path, modified: n.modified, locked: isLocked(n.path) })),
+  );
 export const createFromSelection = async (title: string, text: string): Promise<string> => create(title, text).path;
 export const openNote = async (path: string): Promise<NoteDoc> => doc(getReadable(path));
 export const openOrCreate = async (title: string): Promise<NoteDoc & { created: boolean }> => {
@@ -264,11 +325,11 @@ export const saveNote = async (path: string, text: string, _baseHash: string): P
 };
 
 export const tasks = async (query: string, tags: string[], showDone: boolean): Promise<TaskView> => {
-  const today = localToday();
+  const day = today();
   const terms = termsOf(query);
   const all: TaskItem[] = [];
   for (const n of filtered("", tags, false)) {
-    if (isLocked(n.path)) continue; // a locked note's tasks leave the index
+    if (!readable(n)) continue; // a locked note's tasks come back once it is unlocked
     const first = n.text.length - bodyOf(n).length;
     const skip = n.text.slice(0, first).split("\n").length - 1;
     bodyOf(n).split("\n").forEach((l, i) => {
@@ -283,12 +344,12 @@ export const tasks = async (query: string, tags: string[], showDone: boolean): P
   }
   const open = all.filter((t) => !t.done);
   const byDue = (a: TaskItem, b: TaskItem) => a.due!.localeCompare(b.due!);
-  const overdue = open.filter((t) => t.due && t.due < today).sort(byDue);
-  const dueToday = open.filter((t) => t.due === today);
+  const overdue = open.filter((t) => t.due && t.due < day).sort(byDue);
+  const dueToday = open.filter((t) => t.due === day);
   return {
     overdue,
     today: dueToday,
-    upcoming: open.filter((t) => t.due && t.due > today).sort(byDue),
+    upcoming: open.filter((t) => t.due && t.due > day).sort(byDue),
     no_date: open.filter((t) => !t.due),
     done: showDone ? all.filter((t) => t.done).sort((a, b) => (b.done_on ?? "").localeCompare(a.done_on ?? "")) : [],
     due_count: overdue.length + dueToday.length,
@@ -297,13 +358,13 @@ export const tasks = async (query: string, tags: string[], showDone: boolean): P
 export const toggleTask = async (path: string, line: number, expected: string): Promise<{ line: number; line_text: string }> => {
   const n = getReadable(path);
   const lines = n.text.split("\n");
-  const next = lines[line] === expected ? toggleTaskLine(expected, localToday()) : null;
+  const next = lines[line] === expected ? toggleTaskLine(expected, today()) : null;
   if (next === null) throw "task-moved";
   lines[line] = next;
   write(n, lines.join("\n"));
   return { line, line_text: next };
 };
-const captureTitle = () => (settings.capture_target === "daily" ? localToday() : settings.inbox_title);
+const captureTitle = () => (settings.capture_target === "daily" ? today() : settings.inbox_title);
 export const captureTask = async (text: string): Promise<string> => {
   if (!text.trim()) throw "empty";
   const n = byTitle(captureTitle()) ?? create(captureTitle(), `# ${captureTitle()}\n`);
@@ -329,17 +390,16 @@ export const renameNote = async (path: string, newTitle: string, rewrite: boolea
 
 export const connections = async (path: string): Promise<Connections> => {
   const c = getReadable(path);
-  const title = titleOf(path);
   const body = bodyOf(c);
   const others = [...notes.values()].filter((n) => n !== c);
   const targets = linksOf(body);
-  const out = targets.map(byTitle).filter((n): n is Note => !!n && n !== c);
+  const out = targets.map(resolve).filter((n): n is Note => !!n && n !== c);
   const links_in = others
-    .filter((n) => readable(n) && linksTo(n, title))
+    .filter((n) => readable(n) && linksTo(n, c))
     .map((n) => {
       if (isLocked(n.path)) return node(n); // a locked source shows its title and nothing else
       const b = bodyOf(n);
-      const m = [...b.matchAll(LINK)].find((x) => fold(linkTarget(x[1])) === fold(title))!;
+      const m = [...b.matchAll(LINK)].find((x) => resolve(linkTarget(x[1])) === c)!;
       return node(n, contextLine(b, m.index, m.index + m[0].length));
     });
   const tags = tagsOf(c).map((tag): TagGroup => {
@@ -355,7 +415,7 @@ export const connections = async (path: string): Promise<Connections> => {
     mentions.push({ node: node(n), name: body.slice(a, b), count: spans.length, context: isLocked(path) ? "" : contextLine(body, a, b) });
   }
   mentions.sort((x, y) => y.node.modified - x.node.modified);
-  return { centre: node(c), links_out: out.map((n) => node(n)), links_in, tags, mentions, missing: targets.filter((t) => !byTitle(t)) };
+  return { centre: node(c), links_out: out.map((n) => node(n)), links_in, tags, mentions, missing: targets.filter((t) => !resolve(t)) };
 };
 export const linkMention = async (path: string, targetTitle: string, expectedCount: number, editorText: string | null): Promise<string | null> => {
   const n = getReadable(path);
@@ -369,7 +429,10 @@ export const linkMention = async (path: string, targetTitle: string, expectedCou
   write(n, next);
   return null;
 };
-export const backlinkCount = async (title: string): Promise<number> => [...notes.values()].filter((n) => readable(n) && fold(titleOf(n.path)) !== fold(title) && linksTo(n, title)).length;
+export const backlinkCount = async (title: string): Promise<number> => {
+  const t = byTitle(title);
+  return t ? [...notes.values()].filter((n) => n !== t && readable(n) && linksTo(n, t)).length : 0;
+};
 
 function move(path: string, to: string): string {
   const n = getReadable(path);
@@ -388,7 +451,7 @@ export const mergeNotes = async (source: string, target: string): Promise<MergeR
   const s = get(source);
   const t = get(target);
   if (isLocked(source) || isLocked(target)) throw "locked";
-  write(t, `${t.text.replace(/\n*$/, "")}\n\n${bodyOf(s).trim()}\n`);
+  write(t, mergedText(t.text, titleOf(target), s.text, titleOf(source)));
   notes.delete(source);
   return { path: target, rewritten: rewriteLinks(titleOf(source), titleOf(target)), trash_error: null };
 };
@@ -405,7 +468,7 @@ export const agentWriteDone = async (_id: number, _result: AgentReply): Promise<
 export const snapshotAgent = async (_path: string, _summary: string): Promise<string | null> => null;
 export const dropAgentSnapshot = async (_path: string, _id: string): Promise<void> => {};
 export const snapshotText = async (_path: string, _text: string): Promise<void> => {};
-export const agentSetupCommand = async (): Promise<string> => "claude mcp add velo -- /Applications/velo.app/Contents/MacOS/velo --mcp";
+export const agentSetupCommand = async (): Promise<string> => "claude mcp add velo -- <path to velo> --mcp";
 export const hasIdentity = async (): Promise<boolean> => unlocked;
 export const setupPassphrase = async (passphrase: string): Promise<string | null> => {
   if (passphrase !== PASSPHRASE) throw "wrong-passphrase";
