@@ -58,7 +58,7 @@ export function DemoChrome() {
           onSelect={(d) => menu.items.find((m) => m !== "separator" && m.id === d.value && (m.action(), true))}
         >
           <Menu.Positioner>
-            <Menu.Content minW="180px" aria-label="Note actions">
+            <Menu.Content minW="180px" aria-label="Menu">
               {menu.items.map((m, i) =>
                 m === "separator" ? <Menu.Separator key={i} /> : <Menu.Item key={m.id} value={m.id}><Menu.ItemText>{m.text}</Menu.ItemText></Menu.Item>,
               )}
