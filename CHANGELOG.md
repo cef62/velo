@@ -1,5 +1,16 @@
 # velo
 
+## 0.13.0
+
+### Minor Changes
+
+- eb2d040: Added six color palettes in Settings › Appearance, alongside Theme.
+
+### Patch Changes
+
+- ab584d6: Unchecked checkboxes now have a clearly visible outline (WCAG non-text contrast).
+- 86e43da: Fixed unreadable search highlights on selected rows and raised input, select, tag-chip and divider-grip outlines to WCAG contrast.
+
 ## 0.12.1
 
 ### Patch Changes
