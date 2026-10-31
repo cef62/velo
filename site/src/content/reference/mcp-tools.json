@@ -1,0 +1,396 @@
+[
+  {
+    "description": "Search velo notes like the velo search field (titles, aliases, then text). Empty query lists all notes. `tags` keeps notes having every tag. `no_links` true keeps only notes with no [[links]] in or out (orphans; alias links count). At most 50 results per call; page with `offset`. Returns title, snippet, modified, tags.",
+    "input_schema": {
+      "properties": {
+        "limit": {
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "no_links": {
+          "type": "boolean"
+        },
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "query": {
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "name": "search_notes"
+  },
+  {
+    "description": "All tags in velo notes (front-matter `tags:` and inline #tag words) with the number of notes carrying each.",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "name": "list_tags"
+  },
+  {
+    "description": "Read a note by title (or alias). Returns the full text (front matter included), `hash` (pass it to replace_note), created, modified, tags, aliases, outgoing [[links]] and backlinks (titles of notes linking here).",
+    "input_schema": {
+      "properties": {
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "type": "object"
+    },
+    "name": "read_note"
+  },
+  {
+    "description": "Create a new note. Fails if a note with that title or alias exists. Front matter is stamped as for any new note. Returns the title and new hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions.",
+    "input_schema": {
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "text",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "name": "create_note"
+  },
+  {
+    "description": "Append text at the end of a note, on a new line. Creates the note if it does not exist. Returns the title and new hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions.",
+    "input_schema": {
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "text",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "name": "append_to_note"
+  },
+  {
+    "description": "Replace `old_text` with `new_text` in a note. `old_text` must occur exactly once in the current text (include surrounding text to make it unique); otherwise nothing changes and the error gives the match count. Returns the new hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions.",
+    "input_schema": {
+      "properties": {
+        "new_text": {
+          "type": "string"
+        },
+        "old_text": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "old_text",
+        "new_text",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "name": "edit_note"
+  },
+  {
+    "description": "Replace a note's whole text (front matter included). `expected_hash` must be the hash from your latest read_note or write; if the note changed since, nothing changes. Prefer edit_note for small changes. Returns the new hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions.",
+    "input_schema": {
+      "properties": {
+        "expected_hash": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "text",
+        "expected_hash",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "name": "replace_note"
+  },
+  {
+    "description": "Add up to 50 tags to up to 200 notes (`titles`). Each note is its own write; the result lists `changed` (with the new hash), `unchanged` (already has the tag, in front matter or inline) or `failed` with a reason per title. Tags go in the front-matter `tags:` list (or as a #tag line at the end of the note when velo's front-matter setting is off). velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions.",
+    "input_schema": {
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "type": "array"
+        },
+        "titles": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 200,
+          "type": "array"
+        }
+      },
+      "required": [
+        "titles",
+        "tags",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "name": "add_tags"
+  },
+  {
+    "description": "Remove up to 50 tags from up to 200 notes (`titles`): from the front-matter `tags:` list and exact inline #tag words (never inside code or links). Each note is its own write; the result lists `changed` (with the new hash), `unchanged` or `failed` with a reason per title. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions.",
+    "input_schema": {
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "type": "array"
+        },
+        "titles": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 200,
+          "type": "array"
+        }
+      },
+      "required": [
+        "titles",
+        "tags",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "name": "remove_tags"
+  },
+  {
+    "description": "The Tasks view: open tasks from all notes grouped as overdue, today, upcoming, no_date (and done = ticked in the last 7 days when `show_done`), plus due_count (overdue + today). `query` filters task or note text, `tags` keeps notes having every tag. Each task has title (note), text, due, line, line_text (pass line and line_text to set_task_done).",
+    "input_schema": {
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "show_done": {
+          "type": "boolean"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "name": "list_tasks"
+  },
+  {
+    "description": "Add a `- [ ] text` task line. Without `title` it goes to velo's capture target (the Inbox or today's daily note, per the user's setting); the note is created if missing. `due` (YYYY-MM-DD) adds ` 📅 due`. Returns the note title and new hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions.",
+    "input_schema": {
+      "properties": {
+        "due": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "name": "add_task"
+  },
+  {
+    "description": "Tick (`done` true) or untick a task in a note, with velo's done date handling (`@done(YYYY-MM-DD)`). Pass `line` and `line_text` from list_tasks or read_note; if the line changed since, it fails with task-moved. Returns status `changed` (with the new hash and line) or `unchanged` when the task is already in that state. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions.",
+    "input_schema": {
+      "properties": {
+        "done": {
+          "type": "boolean"
+        },
+        "line": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "line_text": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "line",
+        "line_text",
+        "done",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "name": "set_task_done"
+  },
+  {
+    "description": "Rename a note. With `rewrite_links` true, [[links]] to it in other notes are updated. Returns the new title and hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions.",
+    "input_schema": {
+      "properties": {
+        "new_title": {
+          "type": "string"
+        },
+        "rewrite_links": {
+          "type": "boolean"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "new_title",
+        "rewrite_links",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "name": "rename_note"
+  },
+  {
+    "description": "Move a note to the OS Trash (recoverable there; nothing is deleted permanently). Its revisions are kept. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions.",
+    "input_schema": {
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "name": "move_to_trash"
+  },
+  {
+    "description": "Merge note `source` into note `target`: the source's text is appended to the target under a `## Source title` heading, its tags and aliases (and its title, as an alias) join the target's front matter, [[links]] to the source in other notes are rewritten to the target, and the source goes to the OS Trash. Returns the target's title and hash, the number of links rewritten and whether the source was trashed. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions.",
+    "input_schema": {
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "target",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "name": "merge_notes"
+  },
+  {
+    "description": "Notes one hop around a note: outgoing [[links]], backlinks (alias links included), notes sharing each tag (tags on more than 15 notes give only the count), and unlinked mentions (titles or aliases in this note's text without [[ ]]). To link a mention, read_note then edit_note wrapping the words in [[ ]].",
+    "input_schema": {
+      "properties": {
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "type": "object"
+    },
+    "name": "get_connections"
+  },
+  {
+    "description": "The daily note for a date (`date` YYYY-MM-DD, default today, local time): title, text and whether this call created it (no template; optional `summary` describes the creation in the note's revisions).",
+    "input_schema": {
+      "properties": {
+        "date": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "daily_note"
+  }
+]

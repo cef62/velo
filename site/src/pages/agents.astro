@@ -1,10 +1,87 @@
 ---
 import Base from '../layouts/Base.astro';
+import tools from '../content/reference/mcp-tools.json';
+
+interface Prop { type?: string; items?: { type?: string }; minimum?: number; maximum?: number; maxItems?: number; pattern?: string }
+const typeOf = (p: Prop) => (p.type === 'array' ? `${p.items?.type ?? 'any'}[]` : (p.type ?? 'any'));
+const notes = (p: Prop) =>
+  [
+    p.minimum !== undefined && `min ${p.minimum}`,
+    p.maximum !== undefined && `max ${p.maximum}`,
+    p.maxItems !== undefined && `at most ${p.maxItems} items`,
+    p.pattern && (p.pattern === '^\\d{4}-\\d{2}-\\d{2}$' ? 'YYYY-MM-DD' : `pattern ${p.pattern}`),
+  ].filter(Boolean).join(', ');
+const params = (t: (typeof tools)[number]) => {
+  const schema = t.input_schema as { properties: Record<string, Prop>; required?: string[] };
+  return Object.entries(schema.properties).map(([name, p]) => ({ name, type: typeOf(p), required: !!schema.required?.includes(name), notes: notes(p) }));
+};
 ---
 
 <Base title="Agents · velo">
   <article class="prose">
-    <h1>Agents</h1>
-    <p>Coming soon.</p>
+    <h1>Agents (MCP)</h1>
+    <p>
+      velo can act as an MCP server, so Claude Code (or any MCP client) can search, read, create and edit your notes.
+      It is off by default.
+    </p>
+
+    <h2 id="setup">Setup</h2>
+    <p>
+      Turn on <strong>Agent access (MCP)</strong> in Settings › General and save. Reopen Settings and press
+      <strong>Copy setup command</strong>; it holds the exact path of your install. It runs:
+    </p>
+    <pre><code>claude mcp add velo -- &lt;path to velo&gt; --mcp</code></pre>
+    <p>Typical paths:</p>
+    <ul>
+      <li>macOS: <code>/Applications/velo.app/Contents/MacOS/velo</code></li>
+      <li>Linux: where your package put the binary, for example <code>/usr/bin/velo</code> for the .deb</li>
+      <li>Windows: not supported yet</li>
+    </ul>
+    <p>
+      The client starts <code>velo --mcp</code> itself, with no window. If velo is running, the request is forwarded
+      to the app; otherwise velo reads and writes the notes folder directly. The switch is checked on every call.
+    </p>
+
+    <h2 id="other-clients">Other clients</h2>
+    <p>Any client that launches an MCP server over stdio works with this entry:</p>
+    <pre><code>{`{
+  "mcpServers": {
+    "velo": {
+      "command": "/Applications/velo.app/Contents/MacOS/velo",
+      "args": ["--mcp"]
+    }
+  }
+}`}</code></pre>
+
+    <h2 id="safety">Safety</h2>
+    <ul>
+      <li>Locked notes are never listed, searched or returned, and the agent never decrypts anything.</li>
+      <li>Deletes go to the Trash. There is no permanent delete.</li>
+      <li>Edits are anchored (<code>old_text</code> must match once) or hash-guarded (<code>replace_note</code> fails if the note changed since you read it).</li>
+      <li>A note open in velo is edited through the editor, so nothing is overwritten behind it. If velo does not take the change within 5 seconds the call fails with "velo is busy, retry" and nothing changes.</li>
+      <li>Off by default. The running app listens on 127.0.0.1 only, and every request needs a random token.</li>
+      <li>Every write needs a summary. velo saves a revision of the note first, marked as an agent change in the info panel; select it and press Restore.</li>
+    </ul>
+
+    <h2 id="tools">Tools ({tools.length})</h2>
+    {tools.map((t) => (
+      <section class="tool" id={t.name}>
+        <h3><a href={`#${t.name}`}><code>{t.name}</code></a></h3>
+        <p>{t.description}</p>
+        {params(t).length === 0
+          ? <p><em>No parameters.</em></p>
+          : (
+            <table>
+              <thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+              <tbody>
+                {params(t).map((p) => (
+                  <tr><td><code>{p.name}</code></td><td>{p.type}</td><td>{p.required ? 'yes' : 'no'}</td><td>{p.notes}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+      </section>
+    ))}
+    <p><small>Generated from the tool specs in the app (<code>src-tauri/src/agent/tools.rs</code>).</small></p>
   </article>
 </Base>

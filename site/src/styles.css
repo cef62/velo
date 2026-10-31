@@ -478,3 +478,25 @@ main {
   color: var(--muted);
   font: 13px ui-monospace, Menlo, Consolas, monospace;
 }
+
+/* Reference pages (shortcuts, agents) */
+kbd {
+  font: 0.85em ui-monospace, monospace;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.unbound {
+  color: var(--muted, inherit);
+  opacity: 0.75;
+}
+
+.tool {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 16px;
+  margin: 0 0 1.2em;
+}
