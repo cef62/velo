@@ -602,8 +602,8 @@ test("saveSettings applies look, keys and sort, and closes the dialog", async ()
 test("previewLook restyles live; closeSettings reverts to the saved theme and palette", async () => {
   const { c, store, calls } = setup();
   await c.openSettings();
-  c.previewLook({ theme: "dark", palette: "reef" });
-  expect(calls).toContainEqual(["applyLook", expect.objectContaining({ theme: "dark", palette: "reef" })]);
+  c.previewLook({ theme: "dark", palette: "reef", layout: "horizontal", font_size: 30 } as never); // draft General edits stay out
+  expect(calls).toContainEqual(["applyLook", { theme: "dark", palette: "reef", fontSize: 14, layout: "vertical" }]);
   expect(calls).toContainEqual(["setWindowTheme", "dark"]);
   c.closeSettings();
   expect(calls[calls.length - 2]).toEqual(["applyLook", expect.objectContaining({ theme: "system", palette: "clear" })]);

@@ -185,9 +185,9 @@ export class Controller {
 
   async start() {
     const s = await this.api.getSettings();
+    this.applyLook(s); // first, so the saved palette and theme don't wait on the index
     const st = await this.api.indexStatus();
     if (st) this.setIndexing(true, st[0], st[1]);
-    this.applyLook(s);
     this.store.set({
       keys: resolve(s.shortcuts, this.opts.isMac),
       sort: s.sort ?? "modified", // before the first search, which pages with it
@@ -1656,7 +1656,7 @@ export class Controller {
   /** Settings dialog: restyle live with the draft theme and palette; closeSettings puts the saved ones back. */
   previewLook(p: Pick<Settings, "theme" | "palette">) {
     const s = this.store.get().settings;
-    if (s) this.applyLook({ ...s, ...p });
+    if (s) this.applyLook({ ...s, theme: p.theme, palette: p.palette }); // never the draft layout or font
   }
 
   closeSettings() {

@@ -26,7 +26,14 @@ let theme: AppState["theme"] = "system";
 const writeTheme = () => {
   document.documentElement.dataset.theme = theme === "system" ? (dark.matches ? "dark" : "light") : theme;
 };
-writeTheme(); // first frame follows the OS before settings load
+// The last applied theme and palette, so the first frame isn't System/Clear while settings load.
+const LOOK = "velo.look";
+try {
+  const l = JSON.parse(localStorage.getItem(LOOK) ?? "null");
+  if (l?.theme === "light" || l?.theme === "dark") theme = l.theme;
+  applyPalette(l?.palette);
+} catch {}
+writeTheme(); // first frame follows the cached look (else the OS) before settings load
 dark.addEventListener("change", writeTheme);
 
 let lastMenu: { close(): Promise<void> }[] = []; // popup() resolves when shown, so free the previous menu's Rust-side resources on the next open
@@ -77,6 +84,9 @@ export const platform: UiPort = {
     theme = s.theme;
     writeTheme();
     applyPalette(s.palette);
+    try {
+      localStorage.setItem(LOOK, JSON.stringify({ theme: s.theme, palette: s.palette }));
+    } catch {}
     applyFontScale(s.fontSize);
     document.documentElement.dataset.layout = s.layout; // the App grid reads it
   },

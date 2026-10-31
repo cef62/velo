@@ -56,6 +56,7 @@ export function PalettePicker({ value, onChange }: { value: string; onChange: (s
   const [focus, setFocus] = useState(() => Math.max(0, slugs.indexOf(value as PaletteSlug)));
   const refs = useRef<(HTMLDivElement | null)[]>([]);
   const key = (e: KeyboardEvent, i: number) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return; // app and system shortcuts keep their arrows
     const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
     if (step) {
       const n = (i + step + slugs.length) % slugs.length;
@@ -66,7 +67,9 @@ export function PalettePicker({ value, onChange }: { value: string; onChange: (s
     e.preventDefault();
   };
   return (
-    <div role="radiogroup" aria-label="Palette" className={grid}>
+    <div role="radiogroup" aria-label="Palette" className={grid}
+      // leaving the group: the next Tab in lands on the checked card again
+      onBlur={(e) => !e.currentTarget.contains(e.relatedTarget) && setFocus(Math.max(0, slugs.indexOf(value as PaletteSlug)))}>
       {slugs.map((s, i) => {
         const { name, mood } = palettes[s].meta;
         return (
