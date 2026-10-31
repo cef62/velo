@@ -1,3 +1,5 @@
+import { paletteConditions } from './tokens/velo'
+
 export const conditions = {
   extend: {
     // velo writes data-theme=light|dark on <html>, resolving System via matchMedia
@@ -10,5 +12,7 @@ export const conditions = {
       '&:is(:checked, [data-checked], [data-state=checked], [aria-checked=true], [data-state=indeterminate])',
     on: '&:is([data-state=on])',
     pinned: '&:is([data-pinned])',
+    // velo writes data-palette=<slug> on <html>; none (or clear) = Clear, the base values
+    ...paletteConditions,
   },
 } as const
