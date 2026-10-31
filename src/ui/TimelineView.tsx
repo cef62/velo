@@ -96,7 +96,7 @@ export function TimelineView({ controller, store }: { controller: Controller; st
 
   return (
     <div className={pane}>
-      <div ref={el} className={scroller} onScroll={measure}>
+      <div ref={el} className={scroller} data-active={listActive || undefined} onScroll={measure}>
         {tl.err ? (
           <div className={empty} role="alert">{tl.err}</div>
         ) : !tl.rows ? (
@@ -127,6 +127,7 @@ export function TimelineView({ controller, store }: { controller: Controller; st
                     aria-posinset={it.n}
                     tabIndex={i === stopIdx ? 0 : -1} // roving: one tab stop for the whole list, ↑/↓ move
                     data-row={i}
+                    data-selected={r.path === active || undefined}
                     className={c.root}
                     style={pos}
                     onFocus={() => setCur(r.path)}
