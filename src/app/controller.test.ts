@@ -755,13 +755,10 @@ test("info loads only while open", async () => {
   await c.runSearch(true);
   await settle();
   expect(api.listRevisions).not.toHaveBeenCalled();
-  expect(api.linkedFromCount).not.toHaveBeenCalled();
   api.listRevisions.mockResolvedValue([{ id: "1", ts: 5, size: 1, agent: false }]);
-  api.linkedFromCount.mockResolvedValue(3);
   await c.toggleInfo();
   await settle();
   expect(api.setSettings).toHaveBeenCalledWith(expect.objectContaining({ info_panel: true }));
-  expect(store.get().info.backlinks).toBe(3);
   expect(store.get().info.revisions).toEqual([{ id: "1", ts: 5, size: 1, agent: false }]);
 });
 
@@ -986,17 +983,6 @@ test("the trail row: previousPath is where back would go; createMissing opens a 
   expect(store.get().title).toBe("New one");
 });
 
-
-test("info panel counts alias backlinks", async () => {
-  const { c, api, store } = setup();
-  api.linkedFromCount.mockResolvedValue(4);
-  await c.show(P("A"));
-  await c.toggleInfo();
-  await settle();
-  expect(api.linkedFromCount).toHaveBeenCalledWith(P("A"));
-  expect(api.backlinkCount).not.toHaveBeenCalled();
-  expect(store.get().info.backlinks).toBe(4);
-});
 
 test("capture into the open Inbox appends through the editor", async () => {
   const { c, api, editor, store } = setup({ Inbox: "- [ ] old", B: "b" });

@@ -19,8 +19,6 @@ pub struct Settings {
     pub editor_style: String,
     /// "system" | "light" | "dark"
     pub theme: String,
-    /// show text labels next to the header buttons
-    pub header_labels: bool,
     /// action id -> binding ("Mod+Shift+KeyP"); missing ids use the UI defaults
     pub shortcuts: BTreeMap<String, String>,
     /// stamp created/modified front matter on save and new notes
@@ -37,8 +35,6 @@ pub struct Settings {
     pub inbox_title: String,
     /// let AI agents use the notes through `velo --mcp`; the headless server re-reads this on every tool call
     pub agent_access: bool,
-    /// Connections view ring order: "ring" | "created" | "updated"; anything else reads as "ring"
-    pub connections_sort: String,
     /// named searches (query + tag filter + no-links); `load` keeps only valid, uniquely named entries
     pub saved_searches: Vec<SavedSearch>,
     /// Timeline order: "updated" | "created"; anything else reads as "updated"
@@ -47,7 +43,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), header_labels: false, shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into(), agent_access: false, connections_sort: "ring".into(), saved_searches: vec![], timeline_sort: "updated".into() }
+        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into(), agent_access: false, saved_searches: vec![], timeline_sort: "updated".into() }
     }
 }
 
@@ -166,9 +162,6 @@ pub fn load(path: &Path) -> Settings {
     if !["updated", "created"].contains(&s.timeline_sort.as_str()) {
         s.timeline_sort = "updated".into();
     }
-    if !["ring", "created", "updated"].contains(&s.connections_sort.as_str()) {
-        s.connections_sort = "ring".into();
-    }
     if let Some(h) = legacy {
         s.shortcuts.entry("toggle_window".into()).or_insert(h);
     }
@@ -205,7 +198,7 @@ mod tests {
         std::fs::write(&p, r#"{"notes_dir":"/n","hotkey":"CommandOrControl+Alt+KeyN","layout":"horizontal","font_size":16}"#).unwrap();
         let s = load(&p);
         assert_eq!(s.shortcuts.get("toggle_window").map(String::as_str), Some("Mod+Alt+KeyN"));
-        assert_eq!(s.sort, "modified"); assert_eq!(s.editor_style, "rich"); assert_eq!(s.theme, "system"); assert!(!s.header_labels); assert_eq!(s.layout, "horizontal"); assert_eq!(s.font_size, 16);
+        assert_eq!(s.sort, "modified"); assert_eq!(s.editor_style, "rich"); assert_eq!(s.theme, "system"); assert_eq!(s.layout, "horizontal"); assert_eq!(s.font_size, 16);
     }
     #[test] fn migrate_when_shortcuts_lack_toggle_and_keeps_existing_toggle() {
         let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");
@@ -229,16 +222,6 @@ mod tests {
         std::fs::write(&p, r#"{"font_size":16}"#).unwrap();
         assert!(!load(&p).agent_access);
         assert!(!Settings::default().agent_access);
-    }
-    #[test] fn connections_sort_defaults_to_ring() {
-        let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");
-        assert_eq!(Settings::default().connections_sort, "ring");
-        std::fs::write(&p, r#"{"font_size":16}"#).unwrap();
-        assert_eq!(load(&p).connections_sort, "ring");
-        std::fs::write(&p, r#"{"connections_sort":"bogus"}"#).unwrap();
-        assert_eq!(load(&p).connections_sort, "ring");
-        std::fs::write(&p, r#"{"connections_sort":"created"}"#).unwrap();
-        assert_eq!(load(&p).connections_sort, "created");
     }
     #[test] fn saved_searches_load_and_sanitise() {
         let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");

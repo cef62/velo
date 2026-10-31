@@ -1,19 +1,16 @@
 import { CircleAlert, FolderOpen, RotateCcw, TriangleAlert, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { createListCollection } from "@ark-ui/react/select";
-import { Portal } from "@ark-ui/react/portal";
 import { css } from "styled-system/css";
 import type { Settings } from "../api";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
-import { Button, Checkbox, Dialog, IconButton, Input, Kbd, SegmentGroup, Select, Tabs } from "@/components/ui";
+import { Button, Checkbox, Dialog, IconButton, Input, Kbd, SegmentGroup, Tabs } from "@/components/ui";
 import { clampFont, recorderStep, toSettings } from "../settingsform";
 import { DEFAULTS, LABELS, formatBinding, resolve, type Action } from "../shortcuts";
 import { conflictsOf } from "./settingsModel";
 import { platform } from "./platform";
 import { useStore } from "./useStore";
 
-const sorts = createListCollection({ items: [{ value: "modified", label: "Most recent first" }, { value: "title", label: "Title A→Z" }] });
 const actions = Object.keys(DEFAULTS) as Action[];
 
 const frow = css({ display: "grid", gridTemplateColumns: "140px minmax(0, 1fr)", alignItems: "center", gap: "4", minH: "36px" });
@@ -54,9 +51,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
     notes_dir: cur.notes_dir,
     layout: cur.layout as string,
     theme: cur.theme as string,
-    sort: cur.sort as string,
     fontSize: String(cur.font_size),
-    headerLabels: cur.header_labels === true,
     writeFrontMatter: cur.write_front_matter !== false,
     autoUpdateCheck: cur.auto_update_check !== false,
     agentAccess: cur.agent_access === true,
@@ -162,14 +157,6 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
             </div>
           </div>
           <div className={frow}>
-            <span className={flab}>Header</span>
-            <Checkbox.Root checked={d.headerLabels} onCheckedChange={(x) => set({ headerLabels: x.checked === true })} size="sm">
-              <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
-              <Checkbox.Label>Show labels on header buttons</Checkbox.Label>
-              <Checkbox.HiddenInput />
-            </Checkbox.Root>
-          </div>
-          <div className={frow}>
             <span className={flab}>Notes</span>
             <Checkbox.Root checked={d.writeFrontMatter} onCheckedChange={(x) => set({ writeFrontMatter: x.checked === true })} size="sm">
               <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
@@ -212,30 +199,6 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
               </div>
               <span className={help}>Lets Claude Code read and edit your notes. Locked notes are never shared; deletes go to the Trash; every change is saved as a revision you can restore.</span>
             </div>
-          </div>
-          <div className={frow}>
-            <span className={flab} id="set-sort">Sort</span>
-            <Select.Root collection={sorts} value={[d.sort]} onValueChange={(x) => x.value[0] && set({ sort: x.value[0] })} positioning={{ sameWidth: false }} size="sm" className={css({ w: "fit-content" })}>
-              <Select.Control>
-                <Select.Trigger aria-labelledby="set-sort" className={css({ minW: "200px" })}>
-                  <Select.ValueText />
-                  <Select.IndicatorGroup><Select.Indicator /></Select.IndicatorGroup>
-                </Select.Trigger>
-              </Select.Control>
-              <Portal>
-                <Select.Positioner>
-                  <Select.Content>
-                    {sorts.items.map((it) => (
-                      <Select.Item key={it.value} item={it}>
-                        <Select.ItemText>{it.label}</Select.ItemText>
-                        <Select.ItemIndicator />
-                      </Select.Item>
-                    ))}
-                  </Select.Content>
-                </Select.Positioner>
-              </Portal>
-              <Select.HiddenSelect />
-            </Select.Root>
           </div>
         </Tabs.Content>
         <Tabs.Content value="shortcuts" className={css({ p: "4 5 5", display: "flex", flexDirection: "column", gap: "3", overflowY: "auto", maxH: "calc(100dvh - 240px)" })}>

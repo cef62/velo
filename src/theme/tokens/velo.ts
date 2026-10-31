@@ -28,7 +28,7 @@ export const velo = defineSemanticTokens.colors({
   fgMuted: c('#646464', '#b4b4b4'), // snippets, dates — 5.9:1 / 9.1:1
   mark: c('#646464', '#959595'), // markdown syntax marks — 5.9:1 / 6.3:1
 
-  // graphite accent (was indigo)
+  // graphite accent
   accent: c('#3b3b3b', '#d4d4d4'), // focus ring, caret, chip on, Preview segment — 11.2:1 / 12.7:1 vs canvas
   accentHover: c('#2a2a2a', '#eeeeee'),
   accentFg: c('#ffffff', '#111111'), // NEW — text on accent (was hard-coded white)

@@ -493,11 +493,6 @@ pub fn rename_note(st: State<'_, AppState>, path: String, new_title: String, rew
 }
 
 #[tauri::command(async)]
-pub fn linked_from_count(st: State<'_, AppState>, path: String) -> Res<usize> {
-    with_vault(&st, |v, _| v.linked_from_count(&path))
-}
-
-#[tauri::command(async)]
 pub fn connections(st: State<'_, AppState>, path: String) -> Res<crate::connections::Connections> {
     with_vault(&st, |v, _| v.connections(&path, &|_| false))
 }
