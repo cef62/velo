@@ -1,5 +1,12 @@
 # velo
 
+## 0.12.1
+
+### Patch Changes
+
+- 901d070: Fixed the window going blank when opening the Filters panel.
+- 901d070: Fixed a crash that blanked the window when the Merge dialog moved its selection on Windows.
+
 ## 0.12.0
 
 ### Minor Changes
