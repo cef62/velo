@@ -82,3 +82,12 @@ describe("applyPalette", () => {
     }
   });
 });
+
+describe("checkbox recipe", () => {
+  it("unchecked border is inputBorder, High contrast's accentBorder", async () => {
+    const { checkbox } = await import("../recipes/checkbox");
+    const control = (checkbox.variants!.variant.solid as { control: Record<string, unknown> }).control;
+    expect(control.borderColor).toBe("velo.inputBorder");
+    expect(control["[data-palette=contrast] &[data-state=unchecked]"]).toEqual({ borderColor: "velo.accentBorder" });
+  });
+});
