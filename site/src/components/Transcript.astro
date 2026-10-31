@@ -1,0 +1,69 @@
+---
+// A recipe's steps. `keys`: what you press or type and what you see, with the app's real default shortcuts.
+// `agent`: a chat with Claude whose tool calls and results are a real run (transcripts.json, written by
+// src-tauri/src/agent/recipes.rs).
+import MarkdownIt from 'markdown-it';
+import type { KeyStep } from '../content/recipes/recipes.ts';
+import transcripts from '../content/recipes/transcripts.json';
+import TranscriptKeys from './TranscriptKeys.astro';
+
+type Props =
+  | { mode: 'keys'; steps: KeyStep[] }
+  | { mode: 'agent'; transcript: string; prompt: string; answer: string };
+
+const props = Astro.props;
+const steps = props.mode === 'agent' ? transcripts.find((t) => t.recipe === props.transcript)?.steps : undefined;
+if (props.mode === 'agent' && !steps) throw new Error(`no transcript "${props.transcript}" in transcripts.json`);
+const pretty = (s: string) => JSON.stringify(JSON.parse(s), null, 2);
+const answer = props.mode === 'agent' ? new MarkdownIt({ html: false }).render(props.answer) : '';
+---
+
+{
+  props.mode === 'keys' ? (
+    <ol class="transcript t-keys">
+      {props.steps.map((s) => (
+        <li class="t-step">
+          <div class="t-do">
+            {s.keys && <TranscriptKeys keys={s.keys} />}
+            {s.act && <span class="t-act" set:html={s.act} />}
+            {s.text && (
+              <code class="t-typed">
+                {s.text}
+                <span class="t-caret" aria-hidden="true" />
+              </code>
+            )}
+            {s.after && <TranscriptKeys keys={s.after} />}
+          </div>
+          <p class="t-result" set:html={s.result} />
+        </li>
+      ))}
+    </ol>
+  ) : (
+    <div class="transcript t-agent">
+      <div class="t-msg t-user">
+        <p class="t-who">You</p>
+        <p>{props.prompt}</p>
+      </div>
+      {steps!.map((s, i) => (
+        <div class="t-tool">
+          <details>
+            <summary>
+              <span class="t-label">Tool call {i + 1}</span> <code>{s.tool}</code>
+            </summary>
+            <pre><code>{JSON.stringify(s.arguments, null, 2)}</code></pre>
+          </details>
+          <details>
+            <summary>
+              <span class="t-label">Result</span> <code>{s.tool}</code>
+            </summary>
+            <pre><code>{pretty(s.result)}</code></pre>
+          </details>
+        </div>
+      ))}
+      <div class="t-msg t-assistant">
+        <p class="t-who">Claude</p>
+        <Fragment set:html={answer} />
+      </div>
+    </div>
+  )
+}

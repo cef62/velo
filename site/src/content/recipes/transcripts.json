@@ -1,0 +1,113 @@
+[
+  {
+    "recipe": "summarise-week",
+    "steps": [
+      {
+        "arguments": {},
+        "result": "{\"has_more\":false,\"notes\":[{\"modified\":\"2026-10-29T17:45:00+00:00\",\"snippet\":\"- Reviewed [[Atlas roadmap]] with Dana\\n- Ran two hiring onsites\\n\",\"tags\":[],\"title\":\"2026-10-29\"},{\"modified\":\"2026-10-29T11:40:00+00:00\",\"snippet\":\"#hiring\\n\\nTwo onsites this week; both strong on systems design.\\nWe still need a frontend interviewer for the loop.\\n\\n- [ ]\",\"tags\":[\"hiring\"],\"title\":\"Hiring loop notes\"},{\"modified\":\"2026-10-28T14:30:00+00:00\",\"snippet\":\"#atlas\\n\\n## Milestones\\n- November: sync engine prototype\\n- December: private beta\\n- January: sharing\\n\\nRisk: conflict hand\",\"tags\":[\"atlas\"],\"title\":\"Atlas roadmap\"},{\"modified\":\"2026-10-27T21:25:00+00:00\",\"snippet\":\"#reading\\n\\nAppetite instead of estimates: fix the time, vary the scope.\\nBreadboarding before wireframes.\\n\",\"tags\":[\"reading\"],\"title\":\"Reading - Shape Up\"},{\"modified\":\"2026-10-26T10:02:00+00:00\",\"snippet\":\"Kickoff with Dana and Lee. #atlas #meeting\\n\\n- Scope: sync engine first, sharing later\\n- Ship a beta by mid-December\\n- Pl\",\"tags\":[\"atlas\",\"meeting\"],\"title\":\"Project Atlas kickoff\"},{\"modified\":\"2026-10-14T18:05:00+00:00\",\"snippet\":\"- [ ] Coffee beans\\n- [ ] Oat milk\\n\",\"tags\":[],\"title\":\"Grocery list\"}]}",
+        "tool": "search_notes"
+      },
+      {
+        "arguments": {
+          "title": "Project Atlas kickoff"
+        },
+        "result": "{\"aliases\":[],\"backlinks\":[],\"created\":\"2026-10-26T09:15:00+00:00\",\"hash\":\"9e3779b97f4a7c15\",\"links\":[\"Atlas roadmap\"],\"modified\":\"2026-10-26T10:02:00+00:00\",\"tags\":[\"atlas\",\"meeting\"],\"text\":\"---\\ncreated: 2026-10-26T09:15:00+00:00\\nmodified: 2026-10-26T10:02:00+00:00\\n---\\nKickoff with Dana and Lee. #atlas #meeting\\n\\n- Scope: sync engine first, sharing later\\n- Ship a beta by mid-December\\n- Plan lives in [[Atlas roadmap]]\\n\\n- [ ] Send kickoff recap\\n- [ ] Book the design review\\n\",\"title\":\"Project Atlas kickoff\"}",
+        "tool": "read_note"
+      },
+      {
+        "arguments": {
+          "title": "Atlas roadmap"
+        },
+        "result": "{\"aliases\":[],\"backlinks\":[\"2026-10-29\",\"Project Atlas kickoff\"],\"created\":\"2026-10-20T08:00:00+00:00\",\"hash\":\"3c6ef372fe94f82a\",\"links\":[],\"modified\":\"2026-10-28T14:30:00+00:00\",\"tags\":[\"atlas\"],\"text\":\"---\\ncreated: 2026-10-20T08:00:00+00:00\\nmodified: 2026-10-28T14:30:00+00:00\\n---\\n#atlas\\n\\n## Milestones\\n- November: sync engine prototype\\n- December: private beta\\n- January: sharing\\n\\nRisk: conflict handling on flaky networks.\\n\",\"title\":\"Atlas roadmap\"}",
+        "tool": "read_note"
+      },
+      {
+        "arguments": {
+          "title": "Hiring loop notes"
+        },
+        "result": "{\"aliases\":[],\"backlinks\":[],\"created\":\"2026-10-29T11:00:00+00:00\",\"hash\":\"daa66d2c7ddf743f\",\"links\":[],\"modified\":\"2026-10-29T11:40:00+00:00\",\"tags\":[\"hiring\"],\"text\":\"---\\ncreated: 2026-10-29T11:00:00+00:00\\nmodified: 2026-10-29T11:40:00+00:00\\n---\\n#hiring\\n\\nTwo onsites this week; both strong on systems design.\\nWe still need a frontend interviewer for the loop.\\n\\n- [ ] Write feedback for candidate B\\n\",\"title\":\"Hiring loop notes\"}",
+        "tool": "read_note"
+      }
+    ]
+  },
+  {
+    "recipe": "file-meeting-notes",
+    "steps": [
+      {
+        "arguments": {
+          "summary": "Filed design review notes",
+          "text": "Design review for [[Project Atlas kickoff]].\n\n- Sync engine: go with operation log, not snapshots\n- Sharing waits until after the beta\n",
+          "title": "Atlas design review"
+        },
+        "result": "{\"hash\":\"9e3779b97f4a7c15\",\"title\":\"Atlas design review\"}",
+        "tool": "create_note"
+      },
+      {
+        "arguments": {
+          "summary": "Tagged the design review",
+          "tags": [
+            "atlas",
+            "meeting"
+          ],
+          "titles": [
+            "Atlas design review"
+          ]
+        },
+        "result": "{\"results\":[{\"hash\":\"3c6ef372fe94f82a\",\"status\":\"changed\",\"title\":\"Atlas design review\"}]}",
+        "tool": "add_tags"
+      },
+      {
+        "arguments": {
+          "due": "2026-11-06",
+          "summary": "Added follow-up task",
+          "text": "Write the operation log RFC",
+          "title": "Atlas design review"
+        },
+        "result": "{\"hash\":\"daa66d2c7ddf743f\",\"title\":\"Atlas design review\"}",
+        "tool": "add_task"
+      },
+      {
+        "arguments": {
+          "summary": "Added follow-up task",
+          "text": "Share the review notes with Lee",
+          "title": "Atlas design review"
+        },
+        "result": "{\"hash\":\"78dde6e5fd29f054\",\"title\":\"Atlas design review\"}",
+        "tool": "add_task"
+      }
+    ]
+  },
+  {
+    "recipe": "daily-standup",
+    "steps": [
+      {
+        "arguments": {
+          "date": "2026-10-30"
+        },
+        "result": "{\"created\":true,\"text\":\"---\\ncreated: 2026-10-30T16:00:00+00:00\\nmodified: 2026-10-30T16:00:00+00:00\\n---\\n\",\"title\":\"2026-10-30\"}",
+        "tool": "daily_note"
+      },
+      {
+        "arguments": {
+          "title": "2026-10-29"
+        },
+        "result": "{\"aliases\":[],\"backlinks\":[],\"created\":\"2026-10-29T08:30:00+00:00\",\"hash\":\"9e3779b97f4a7c15\",\"links\":[\"Atlas roadmap\"],\"modified\":\"2026-10-29T17:45:00+00:00\",\"tags\":[],\"text\":\"---\\ncreated: 2026-10-29T08:30:00+00:00\\nmodified: 2026-10-29T17:45:00+00:00\\n---\\n- Reviewed [[Atlas roadmap]] with Dana\\n- Ran two hiring onsites\\n\",\"title\":\"2026-10-29\"}",
+        "tool": "read_note"
+      },
+      {
+        "arguments": {},
+        "result": "{\"done\":[],\"due_count\":0,\"no_date\":[{\"done\":false,\"done_on\":null,\"due\":null,\"line\":9,\"line_text\":\"- [ ] Write feedback for candidate B\",\"text\":\"Write feedback for candidate B\",\"title\":\"Hiring loop notes\"},{\"done\":false,\"done_on\":null,\"due\":null,\"line\":10,\"line_text\":\"- [ ] Send kickoff recap\",\"text\":\"Send kickoff recap\",\"title\":\"Project Atlas kickoff\"},{\"done\":false,\"done_on\":null,\"due\":null,\"line\":11,\"line_text\":\"- [ ] Book the design review\",\"text\":\"Book the design review\",\"title\":\"Project Atlas kickoff\"},{\"done\":false,\"done_on\":null,\"due\":null,\"line\":4,\"line_text\":\"- [ ] Coffee beans\",\"text\":\"Coffee beans\",\"title\":\"Grocery list\"},{\"done\":false,\"done_on\":null,\"due\":null,\"line\":5,\"line_text\":\"- [ ] Oat milk\",\"text\":\"Oat milk\",\"title\":\"Grocery list\"}],\"overdue\":[],\"today\":[],\"upcoming\":[]}",
+        "tool": "list_tasks"
+      },
+      {
+        "arguments": {
+          "summary": "Added standup",
+          "text": "## Standup\n- Yesterday: reviewed the Atlas roadmap, ran two hiring onsites\n- Today: send the kickoff recap, write feedback for candidate B\n- Blocked: need a frontend interviewer",
+          "title": "2026-10-30"
+        },
+        "result": "{\"hash\":\"3c6ef372fe94f82a\",\"title\":\"2026-10-30\"}",
+        "tool": "append_to_note"
+      }
+    ]
+  }
+]

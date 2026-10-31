@@ -4,6 +4,8 @@ pub mod client;
 pub mod listener;
 pub mod ops;
 pub mod paths;
+#[cfg(test)]
+mod recipes;
 pub mod server;
 pub mod tools;
 
