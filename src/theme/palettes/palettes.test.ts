@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applyPalette, palettes, type PaletteSlug } from ".";
+import { palettes, type PaletteSlug } from ".";
+import { applyPalette } from "./apply";
 import { OTHER_PALETTES, velo, veloPopover } from "../tokens/velo";
 import { parkColors, parkScales } from "./park";
 
@@ -52,6 +53,13 @@ describe("custom steps", () => {
       for (const [n, t] of Object.entries(steps)) for (const k of [n, `a${n}`]) expect(at(scale, k, cond), `${scale}.${k}`).toBe(`{colors.velo.${t}}`);
     expect(at("green", "a11", "_paletteContrast", "_dark")).toBe("{colors.velo.positiveText}");
     expect(at("red", "a11", "_paletteContrast", "_dark")).toBe("{colors.velo.danger}");
+  });
+
+  it("text on a custom solid fill is the palette's velo fg token", () => {
+    const fg = (scale: string) =>
+      ((parkColors[scale as keyof typeof parkColors] as unknown as { solid: { fg: S } }).solid.fg.DEFAULT.value);
+    for (const [scale, cond, token] of [["orange", "_palettePaper", "accentFg"], ["grass", "_palettePaper", "positiveFg"], ["blue", "_paletteElectric", "accentFg"], ["teal", "_paletteReef", "accentFg"], ["blue", "_paletteContrast", "accentFg"]])
+      for (const m of ["_light", "_dark"] as const) expect(fg(scale)[m][cond], `${scale} ${cond} ${m}`).toBe(`{colors.velo.${token}}`);
   });
 });
 

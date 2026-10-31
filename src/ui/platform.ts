@@ -4,7 +4,7 @@ import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { LogicalPosition } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { applyFontScale } from "../app/fontscale";
-import { applyPalette } from "../theme/palettes";
+import { applyPalette } from "../theme/palettes/apply";
 export { applyPalette };
 import type { UiPort } from "../app/ports";
 import type { AppState } from "../app/store";

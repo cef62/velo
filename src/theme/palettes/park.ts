@@ -61,6 +61,15 @@ function custom(scale: Tree, slug: PaletteSlug, steps: Record<string, string>, d
   return out
 }
 
+/** Text on the custom solid fill (steps 9–10): `solid.fg` = {colors.velo.<token>} under that palette. */
+function solidFg(scale: Tree, slug: PaletteSlug, token: string): Tree {
+  const solid = scale.solid as Tree
+  const fg = solid.fg as Tree
+  const v = byCond((fg.DEFAULT as Leaf).value)
+  v[`_${paletteCondition(slug)}`] = `{colors.velo.${token}}`
+  return { ...scale, solid: { ...solid, fg: { ...fg, DEFAULT: { value: v } } } }
+}
+
 /** Leaves still in `{ base, _palette… }` form → Panda's per-mode shape. */
 const finish = (t: Tree): Tree =>
   Object.fromEntries(
@@ -79,14 +88,16 @@ export const parkColors = Object.fromEntries(Object.entries({
   sand,
   iris,
   jade,
-  orange: custom(orange, 'paper', accent3),
-  grass: custom(grass, 'paper', positive3),
+  orange: solidFg(custom(orange, 'paper', accent3), 'paper', 'accentFg'),
+  grass: solidFg(custom(grass, 'paper', positive3), 'paper', 'positiveFg'),
   crimson,
-  blue: custom(custom(blue, 'electric', accent3), 'contrast', { 11: 'accentText', 12: 'accentHover' }),
-  teal: custom(teal, 'reef', accent3),
+  blue: solidFg(solidFg(custom(custom(blue, 'electric', accent3), 'contrast', { 11: 'accentText', 12: 'accentHover' }), 'electric', 'accentFg'), 'contrast', 'accentFg'),
+  teal: solidFg(custom(teal, 'reef', accent3), 'reef', 'accentFg'),
 }).map(([k, t]) => [k, finish(t as Tree)]))
 
-/** globalCss: the default colorPalette on <html>, per palette. */
+/** globalCss: the default colorPalette on <html>, per palette (none where it repeats Clear's). */
 export const paletteColorPalettes = Object.fromEntries(
-  Object.entries(parkScales).map(([slug, m]) => [slug === 'clear' ? 'html' : `html[data-palette=${slug}]`, { colorPalette: m.accent }]),
+  Object.entries(parkScales)
+    .filter(([slug, m]) => slug === 'clear' || m.accent !== parkScales.clear.accent)
+    .map(([slug, m]) => [slug === 'clear' ? 'html' : `html[data-palette=${slug}]`, { colorPalette: m.accent }]),
 )
