@@ -37,3 +37,21 @@ describe("velo recipes", () => {
     for (const slot of ["root", "title", "status", "actions"] as const) nonEmpty(t[slot]);
   });
 });
+
+describe("searchMatch", () => {
+  it("uses the idle match tokens unless the list is active", async () => {
+    const { searchMatch: config } = await import("./velo/search-match");
+    const base = config.base as Record<string, unknown>;
+    expect(base).toMatchObject({ bg: "velo.matchBg", color: "velo.matchFg" });
+    expect(base["[data-selected=true] &"]).toEqual({ bg: "velo.matchOnIdleBg", color: "velo.matchOnIdleFg" });
+    expect(base["[data-active=true] [data-selected=true] &"]).toEqual({ bg: "velo.matchOnSelectionBg", color: "velo.matchOnSelectionFg" });
+  });
+
+  it("velo tokens are the Clear palette, match tokens included", async () => {
+    const { velo, veloPopoverClear } = await import("../tokens/velo");
+    const clear = await import("../palettes/clear");
+    expect(velo).toEqual(clear.colors);
+    expect(veloPopoverClear).toEqual(clear.popover);
+    for (const k of ["matchBg", "matchFg", "matchOnSelectionBg", "matchOnSelectionFg", "matchOnIdleBg", "matchOnIdleFg"]) expect(velo).toHaveProperty(k);
+  });
+});

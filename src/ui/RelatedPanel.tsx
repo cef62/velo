@@ -157,7 +157,7 @@ export function RelatedPanel({ controller, store }: { controller: Controller; st
     const node = r.kind === "mention" ? r.mention.node : r.node;
     const peeking = peek === r.id;
     return (
-      <div key={r.id} {...common} className={c.root} aria-selected={node.path === openPath} onClick={() => activate(r, "")} onDoubleClick={() => open(node.path, "edit")}>
+      <div key={r.id} {...common} className={c.root} aria-selected={node.path === openPath} data-selected={node.path === openPath || undefined} onClick={() => activate(r, "")} onDoubleClick={() => open(node.path, "edit")}>
         <div className={c.line}>
           {node.locked && <Lock aria-label="Locked" size={12} />}
           <span className={c.title}>{node.title}</span>

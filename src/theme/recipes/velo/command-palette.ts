@@ -2,7 +2,7 @@ import { defineSlotRecipe } from '@pandacss/dev'
 
 // Command palette (⌘P): Park UI Dialog for the shell + Ark Combobox (or a plain input + listbox)
 // for the list. Actions only; notes stay in the search field.
-// Items: label (query matches in <mark>), optional context ("Velo roadmap", "select text first"),
+// Items: label (query matches in <mark class=searchMatch>), optional context ("Velo roadmap", "select text first"),
 // the live binding as <Kbd>. Disabled items stay listed with their reason.
 export const commandPalette = defineSlotRecipe({
   className: 'commandPalette',
@@ -30,7 +30,6 @@ export const commandPalette = defineSlotRecipe({
       fontSize: 'ui',
       color: 'velo.fg',
       cursor: 'default',
-      '& mark': { bg: 'transparent', color: 'inherit', fontWeight: '700' },
       '& [data-part=kbd]': { ml: 'auto' },
       '&[data-highlighted]': {
         bg: 'velo.selection',

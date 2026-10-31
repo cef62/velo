@@ -84,7 +84,7 @@ function Body({ controller, store }: { controller: Controller; store: Store<AppS
         />
       </div>
       <div className={empty} role="status" hidden={flat.length > 0}>{flat.length === 0 ? `No command matches “${query}”` : ""}</div>
-      <div ref={list} id="palette-list" role="listbox" aria-label="Commands" className={c.list}>
+      <div ref={list} id="palette-list" role="listbox" aria-label="Commands" className={c.list} data-active="true">
         {groups.map((g, gi) => (
           <div key={`${gi}:${g.title}`} role="group" aria-label={g.title || "Matches"}>
             {g.title && <div className={sectionHeader()} aria-hidden="true">{g.title}</div>}
@@ -100,6 +100,7 @@ function Body({ controller, store }: { controller: Controller; store: Store<AppS
                   aria-disabled={it.disabled ? true : undefined}
                   data-i={n}
                   data-highlighted={n === cur ? "" : undefined}
+                  data-selected={n === cur || undefined}
                   data-disabled={it.disabled ? "" : undefined}
                   className={c.item}
                   onMouseMove={() => setSel(n)}

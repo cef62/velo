@@ -14,7 +14,7 @@ export const tagChip = defineSlotRecipe({
       px: '2.5',
       borderRadius: 'full',
       borderWidth: '1px',
-      borderColor: 'velo.hairline',
+      borderColor: 'velo.inputBorder',
       bg: 'velo.canvas',
       color: 'velo.fg',
       fontSize: 'uiSm',
