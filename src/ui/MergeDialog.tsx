@@ -44,7 +44,9 @@ function Pick({ m, controller }: { m: Merge; controller: Controller }) {
   const rows = useMemo(() => controller.mergeCandidates(m.query), [controller, m.query]);
   const [active, setActive] = useState(0);
   const at = Math.min(active, rows.length - 1);
-  useEffect(() => document.getElementById(`merge-target-${at}`)?.scrollIntoView({ block: "nearest" }), [at]);
+  useEffect(() => {
+    document.getElementById(`merge-target-${at}`)?.scrollIntoView({ block: "nearest" }); // braces: Chromium returns a Promise, which React would call as cleanup
+  }, [at]);
   return (
     <>
       <div className={css({ p: "14px 20px 18px" })}>
