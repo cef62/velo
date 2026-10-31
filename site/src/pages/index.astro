@@ -1,6 +1,7 @@
 ---
 import { getRelease } from '../lib/release';
 import Base from '../layouts/Base.astro';
+import Clip from '../components/Clip.astro';
 import Shot from '../components/Shot.astro';
 
 const rel = await getRelease();
@@ -33,7 +34,7 @@ const features = [
     'A side panel shows who links here, where this note links, and unlinked mentions.',
     '<strong>Link it</strong> turns a mention into a wikilink; walk everything from the keyboard.',
   ] },
-  { id: 'agents', title: 'Agents (MCP)', shot: 'agents', alt: 'Claude Code reading and editing notes through velo', items: [
+  { id: 'agents', title: 'Agents (MCP)', shot: 'agents', alt: 'A note’s Info tab listing its revisions, the latest marked “agent”: Agent: tidied the task list', items: [
     'Claude Code can search, read, create and edit your notes through 17 tools. Off by default; macOS and Linux only.',
     'Every write saves a revision first; deletes go to the Trash; locked notes are never returned.',
   ], more: { href: '/agents/', label: 'Agents guide' } },
@@ -64,6 +65,12 @@ const features = [
     </div>
     <Shot eager name="hero" alt="velo: the note list, editor and search box" />
   </section>
+
+  <div class="see-it">
+    <h2>See it</h2>
+    <p>Search as you type, open a note, narrow with tag chips. <a href={`${base}/try/`}>Try the live demo</a>.</p>
+    <Clip name="clip-search" alt="Typing “lantern” filters the list; Enter opens the note; the Filters panel narrows it by tag" />
+  </div>
 
   {features.map((f) => (
     <section class="feature" id={f.id}>

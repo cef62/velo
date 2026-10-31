@@ -23,6 +23,8 @@ type Common = {
   goal: string;
   prerequisites: string[];
   shot: string;
+  /** A recorded run of the recipe: docs/media/<clip>.mp4. */
+  clip?: string;
   /** Inline HTML allowed. */
   why: string;
 };
@@ -59,18 +61,19 @@ export const recipes: Recipe[] = [
     slug: 'search',
     title: 'Find anything: search, tags, filter chips, saved searches',
     summary: 'Type to filter, narrow with tag chips, and keep the combination as a saved search.',
-    goal: 'Get from “I wrote something about Atlas meetings” to the list of those notes, and keep that view for next time.',
+    goal: 'Get from “I had an idea about Lantern” to the list of those notes, and keep that view for next time.',
     prerequisites: ['A few notes with <code>#tags</code> in them.'],
     shot: 'recipe-search',
+    clip: 'clip-search',
     steps: [
       { keys: 'focus_search', result: 'The search box has focus.' },
-      { text: 'atlas', result: 'The list filters on every keystroke, with matches highlighted. Enter opens the highlighted note, or creates a note titled “atlas” if nothing matches.' },
+      { text: 'lantern', result: 'The list filters on every keystroke, with matches highlighted. Enter opens the highlighted note, or creates a note titled “lantern” if nothing matches.' },
       { keys: 'toggle_tags', result: 'The Filters panel opens with every tag and its note count.' },
-      { act: 'Click the <code>#meeting</code> chip', result: 'Only notes tagged <code>#meeting</code> that also match “atlas” stay. A <code>#meeting</code> chip shows inside the search box; the Filters button counts it.' },
-      { act: 'Click Save search… in the Filters panel', text: 'Atlas meetings', after: ENTER, result: '“Atlas meetings” appears in the Saved row, above the tags, already applied (its chip is pressed). The search box now shows it as one chip in place of <code>#meeting</code>.' },
+      { act: 'Click the <code>#ideas</code> chip', result: 'Only notes tagged <code>#ideas</code> that also match “lantern” stay. A <code>#ideas</code> chip shows inside the search box; the Filters button counts it.' },
+      { act: 'Click Save search… in the Filters panel', text: 'Lantern ideas', after: ENTER, result: '“Lantern ideas” appears in the Saved row, above the tags, already applied (its chip is pressed). The search box now shows it as one chip in place of <code>#ideas</code>.' },
       { keys: ['⌘←', 'Home'], result: 'The caret moves to the start of the search box.' },
       { keys: ['⌫', 'Backspace'], result: 'Backspace at the start removes the last chip. Here that is the saved search, which clears as one: its search text and tag go too. (The × at the right of the box clears every chip the same way.)' },
-      { act: 'Click the “Atlas meetings” chip in the Filters panel', result: 'Its search text and tags come back, replacing the current filters. Click it again to clear them.' },
+      { act: 'Click the “Lantern ideas” chip in the Filters panel', result: 'Its search text and tags come back, replacing the current filters. Click it again to clear them.' },
     ],
     why: 'Tag chips keep notes having all selected tags, combined with the search text. Saved searches are stored per machine in the settings, and the list, Tasks, the timeline and export all follow the active filters. Right-click a saved chip (or Shift+F10) to rename or delete it.',
   },
@@ -82,9 +85,10 @@ export const recipes: Recipe[] = [
     goal: 'See what is open everywhere, tick things off, and check what you finished this week.',
     prerequisites: ['Notes with task lines: <code>- [ ] text</code>, optionally ending in <code>📅 YYYY-MM-DD</code>.'],
     shot: 'recipe-tasks',
+    clip: 'clip-tasks',
     steps: [
       { keys: 'toggle_tasks', result: 'The left pane switches to Tasks: open tasks grouped Overdue, Today, Upcoming and No date, each with its note.' },
-      { keys: 'focus_search', text: 'atlas', result: 'Tasks follow the search box: only tasks whose text or note matches stay.' },
+      { keys: 'focus_search', text: 'lantern', result: 'Tasks follow the search box: only tasks whose text or note matches stay.' },
       { keys: ENTER, result: 'In the search box, Enter opens the first task shown: its note opens with the cursor on that line.' },
       { keys: ['Space', 'Space'], act: 'on a focused task row (click a row first: the editor now has focus and Tab indents there; in the list ↑/↓ move), or click its checkbox', result: 'The task is ticked, with its <code>@done</code> date, and “Ticked · Undo” shows under the list. Enter on a focused row opens its note.' },
       { act: 'Click Show done in the Tasks bar', result: 'A Done group lists the tasks ticked in the last 7 days.' },
@@ -134,6 +138,7 @@ export const recipes: Recipe[] = [
     goal: 'Explore what is connected to the note you are in without losing your place, and link the notes you mention.',
     prerequisites: ['A note open that links to, or mentions, other notes.'],
     shot: 'recipe-related',
+    clip: 'clip-related',
     steps: [
       { keys: 'toggle_connections', result: 'The side panel opens on Related: Linked from, Links to, Mentions and Shared tags.' },
       { keys: ['↓', '↓'], result: 'Moves through the tree, section headers included; ← and → collapse and expand.' },
@@ -152,6 +157,7 @@ export const recipes: Recipe[] = [
     goal: 'Run any action without remembering its shortcut, and learn the shortcut while you are at it.',
     prerequisites: ['None.'],
     shot: 'recipe-palette',
+    clip: 'clip-palette',
     steps: [
       { keys: 'command_palette', result: 'The palette opens: Recent, then the open note’s actions, then All commands, each with its shortcut.' },
       { text: 'lock', result: '“Lock all notes” and “Lock / unlock note” match; names that start with what you typed come first.' },

@@ -23,6 +23,9 @@
     "site:dev": "cd site && astro dev",
     "site:build": "astro build --root site",
     "site:preview": "cd site && astro preview",
+    "docs:build": "DEMO_BASE=/velo/demo/ pnpm demo:build && pnpm site:build && rm -rf site/dist/demo && cp -R dist-demo site/dist/demo",
+    "docs:preview": "pnpm docs:build && pnpm site:preview",
+    "docs:capture": "playwright install ffmpeg && playwright test -c e2e/capture.config.ts && node scripts/encode-media.mjs",
     "prepare": "panda codegen"
   },
   "pnpm": {
@@ -36,6 +39,7 @@
     "@pandacss/dev": "1.12.1",
     "@pandacss/preset-base": "1.12.1",
     "@pandacss/preset-panda": "1.12.1",
+    "@playwright/test": "1.64.1",
     "@tauri-apps/cli": "^2.12.4",
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^26.6.5",

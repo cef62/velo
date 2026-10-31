@@ -1,4 +1,5 @@
 ---
+import Clip from '../../components/Clip.astro';
 import Shot from '../../components/Shot.astro';
 import Transcript from '../../components/Transcript.astro';
 import { recipes, type Recipe } from '../../content/recipes/recipes.ts';
@@ -34,6 +35,7 @@ const [prev, next] = [recipes[i - 1], recipes[i + 1]];
     {recipe.kind === 'agent' && <p class="recipe-note">A real run: the tool calls and results come from velo’s own tools on a sample vault, checked by its test suite. Dates are shown in UTC and hashes are replaced by stable placeholders.</p>}
 
     <Shot name={recipe.shot} alt={recipe.title} />
+    {recipe.clip && <Clip name={recipe.clip} alt={`${recipe.title}: a recorded run in the demo`} />}
 
     <h2>Why it works</h2>
     <p set:html={recipe.why} />
