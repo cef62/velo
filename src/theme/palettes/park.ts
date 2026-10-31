@@ -23,8 +23,8 @@ export const parkScales: Record<PaletteSlug, { gray: Scale; accent: Scale; green
   paper: { gray: 'sand', accent: 'orange', green: 'grass', red: 'crimson' },
   electric: { gray: 'slate', accent: 'blue', green: 'grass', red: 'red' },
   reef: { gray: 'gray', accent: 'teal', green: 'grass', red: 'crimson' },
-  // the table's accent (blue) is velo.accent* via blue.11–12; Park controls stay black / white
-  contrast: { gray: 'gray', accent: 'gray', green: 'green', red: 'red' },
+  // owner decision (PR #56): blue, per README §3 (contrast.ts's comment still says gray)
+  contrast: { gray: 'gray', accent: 'blue', green: 'green', red: 'red' },
 }
 
 type Leaf = { value: unknown } // Value, ByCond or perMode() output
@@ -61,14 +61,16 @@ function custom(scale: Tree, slug: PaletteSlug, steps: Record<string, string>, d
   return out
 }
 
-/** Text on the custom solid fill (steps 9–10): `solid.fg` = {colors.velo.<token>} under that palette. */
-function solidFg(scale: Tree, slug: PaletteSlug, token: string): Tree {
-  const solid = scale.solid as Tree
-  const fg = solid.fg as Tree
-  const v = byCond((fg.DEFAULT as Leaf).value)
+/** One keyed leaf (e.g. solid.fg) = {colors.velo.<token>} under that palette. */
+function setKey(scale: Tree, slug: PaletteSlug, path: string[], token: string): Tree {
+  const [k, ...rest] = path
+  if (rest.length) return { ...scale, [k]: setKey(scale[k] as Tree, slug, rest, token) }
+  const v = byCond((scale[k] as Leaf).value)
   v[`_${paletteCondition(slug)}`] = `{colors.velo.${token}}`
-  return { ...scale, solid: { ...solid, fg: { ...fg, DEFAULT: { value: v } } } }
+  return { ...scale, [k]: { value: v } }
 }
+/** Text on the custom solid fill (steps 9–10). */
+const solidFg = (scale: Tree, slug: PaletteSlug, token: string) => setKey(scale, slug, ['solid', 'fg', 'DEFAULT'], token)
 
 /** Leaves still in `{ base, _palette… }` form → Panda's per-mode shape. */
 const finish = (t: Tree): Tree =>
@@ -77,6 +79,8 @@ const finish = (t: Tree): Tree =>
   )
 
 const accent3 = { 9: 'accent', 10: 'accentHover', 11: 'accentText' }
+// High contrast: Radix blue 7–8 borders are < 4.5:1 on canvas, so outline / surface borders take accentBorder too
+const contrastBlue = { ...accent3, 12: 'accentHover', 7: 'accentBorder', 8: 'accentBorder' }
 const positive3 = { 9: 'positive', 10: 'positiveHover', 11: 'positiveText' }
 
 export const parkColors = Object.fromEntries(Object.entries({
@@ -91,7 +95,7 @@ export const parkColors = Object.fromEntries(Object.entries({
   orange: solidFg(custom(orange, 'paper', accent3), 'paper', 'accentFg'),
   grass: solidFg(custom(grass, 'paper', positive3), 'paper', 'positiveFg'),
   crimson,
-  blue: solidFg(solidFg(custom(custom(blue, 'electric', accent3), 'contrast', { 11: 'accentText', 12: 'accentHover' }), 'electric', 'accentFg'), 'contrast', 'accentFg'),
+  blue: setKey(solidFg(solidFg(custom(custom(blue, 'electric', accent3), 'contrast', contrastBlue), 'electric', 'accentFg'), 'contrast', 'accentFg'), 'contrast', ['surface', 'border', 'DEFAULT'], 'accentBorder'),
   teal: solidFg(custom(teal, 'reef', accent3), 'reef', 'accentFg'),
 }).map(([k, t]) => [k, finish(t as Tree)]))
 
