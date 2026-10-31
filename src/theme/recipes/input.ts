@@ -26,7 +26,7 @@ export const input = {
     variant: {
       outline: {
         borderWidth: '1px',
-        borderColor: 'gray.outline.border',
+        borderColor: 'velo.inputBorder',
         focusVisibleRing: 'inside',
         _invalid: {
           focusRingColor: 'error',
@@ -36,7 +36,7 @@ export const input = {
       surface: {
         bg: 'gray.surface.bg',
         borderWidth: '1px',
-        borderColor: 'gray.surface.border',
+        borderColor: 'velo.inputBorder',
         focusVisibleRing: 'inside',
 
         _invalid: {
@@ -58,7 +58,7 @@ export const input = {
       },
       flushed: {
         borderBottomWidth: '1px',
-        borderBottomColor: 'gray.outline.border',
+        borderBottomColor: 'velo.inputBorder',
         borderRadius: '0',
         color: 'fg.default',
         px: '0',
