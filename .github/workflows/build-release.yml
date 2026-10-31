@@ -115,6 +115,9 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
     steps:
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -125,3 +128,5 @@ jobs:
           gh release download "$TAG" -p latest.json -O - \
             | jq -e '.platforms | has("darwin-aarch64") and has("linux-x86_64") and has("windows-x86_64")'
           gh release edit "$TAG" --draft=false
+          # Events made with GITHUB_TOKEN start no workflows, so ask Pages to rebuild the download links.
+          gh workflow run pages.yml --ref main || echo "::warning::could not trigger the Pages rebuild"

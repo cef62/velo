@@ -1,0 +1,245 @@
+[
+  {
+    "action": "focus_search",
+    "label": "Focus search",
+    "keys": "Mod+KeyL",
+    "mac": "⌘L",
+    "other": "Ctrl+L",
+    "global": false,
+    "group": "Navigation"
+  },
+  {
+    "action": "back",
+    "label": "Back",
+    "keys": "Mod+KeyJ",
+    "mac": "⌘J",
+    "other": "Ctrl+J",
+    "global": false,
+    "group": "Navigation"
+  },
+  {
+    "action": "forward",
+    "label": "Forward",
+    "keys": "Mod+KeyK",
+    "mac": "⌘K",
+    "other": "Ctrl+K",
+    "global": false,
+    "group": "Navigation"
+  },
+  {
+    "action": "command_palette",
+    "label": "Command palette",
+    "keys": "Mod+KeyP",
+    "mac": "⌘P",
+    "other": "Ctrl+P",
+    "global": false,
+    "group": "Navigation"
+  },
+  {
+    "action": "daily_note",
+    "label": "Today's daily note",
+    "keys": "Mod+Shift+KeyD",
+    "mac": "⌘⇧D",
+    "other": "Ctrl+Shift+D",
+    "global": false,
+    "group": "Navigation"
+  },
+  {
+    "action": "rename",
+    "label": "Rename note",
+    "keys": "Mod+KeyR",
+    "mac": "⌘R",
+    "other": "Ctrl+R",
+    "global": false,
+    "group": "Notes"
+  },
+  {
+    "action": "delete_note",
+    "label": "Move note to Trash",
+    "keys": "Mod+Backspace",
+    "mac": "⌘⌫",
+    "other": "Ctrl+Backspace",
+    "global": false,
+    "group": "Notes"
+  },
+  {
+    "action": "extract_note",
+    "label": "Move to new note",
+    "keys": "Mod+Shift+KeyN",
+    "mac": "⌘⇧N",
+    "other": "Ctrl+Shift+N",
+    "global": false,
+    "group": "Notes"
+  },
+  {
+    "action": "merge_note",
+    "label": "Merge into…",
+    "keys": "none",
+    "mac": null,
+    "other": null,
+    "global": false,
+    "group": "Notes"
+  },
+  {
+    "action": "export",
+    "label": "Export…",
+    "keys": "none",
+    "mac": null,
+    "other": null,
+    "global": false,
+    "group": "Notes"
+  },
+  {
+    "action": "capture",
+    "label": "Quick capture (global)",
+    "keys": "Mod+Alt+Shift+KeyN",
+    "mac": "⌥⌘⇧N",
+    "other": "Ctrl+Alt+Shift+N",
+    "global": true,
+    "group": "Notes"
+  },
+  {
+    "action": "toggle_preview",
+    "label": "Toggle preview",
+    "keys": "Mod+Shift+KeyP",
+    "mac": "⌘⇧P",
+    "other": "Ctrl+Shift+P",
+    "global": false,
+    "group": "View"
+  },
+  {
+    "action": "toggle_rich",
+    "label": "Rich / plain editing",
+    "keys": "Mod+Shift+KeyR",
+    "mac": "⌘⇧R",
+    "other": "Ctrl+Shift+R",
+    "global": false,
+    "group": "View"
+  },
+  {
+    "action": "toggle_layout",
+    "label": "Vertical / horizontal layout",
+    "keys": "Mod+Shift+KeyJ",
+    "mac": "⌘⇧J",
+    "other": "Ctrl+Shift+J",
+    "global": false,
+    "group": "View"
+  },
+  {
+    "action": "toggle_info",
+    "label": "Side panel",
+    "keys": "Mod+KeyI",
+    "mac": "⌘I",
+    "other": "Ctrl+I",
+    "global": false,
+    "group": "View"
+  },
+  {
+    "action": "toggle_tags",
+    "label": "Show / hide tags",
+    "keys": "Mod+Shift+KeyT",
+    "mac": "⌘⇧T",
+    "other": "Ctrl+Shift+T",
+    "global": false,
+    "group": "View"
+  },
+  {
+    "action": "toggle_front_matter",
+    "label": "Show / hide front matter",
+    "keys": "none",
+    "mac": null,
+    "other": null,
+    "global": false,
+    "group": "View"
+  },
+  {
+    "action": "toggle_connections",
+    "label": "Related notes",
+    "keys": "Mod+Shift+KeyC",
+    "mac": "⌘⇧C",
+    "other": "Ctrl+Shift+C",
+    "global": false,
+    "group": "View"
+  },
+  {
+    "action": "toggle_sort",
+    "label": "Toggle sort",
+    "keys": "Mod+Shift+KeyS",
+    "mac": "⌘⇧S",
+    "other": "Ctrl+Shift+S",
+    "global": false,
+    "group": "View"
+  },
+  {
+    "action": "context_menu",
+    "label": "Open context menu",
+    "keys": "Shift+F10",
+    "mac": "⇧F10",
+    "other": "Shift+F10",
+    "global": false,
+    "group": "View"
+  },
+  {
+    "action": "save_search",
+    "label": "Save search…",
+    "keys": "none",
+    "mac": null,
+    "other": null,
+    "global": false,
+    "group": "Search & filters"
+  },
+  {
+    "action": "toggle_tasks",
+    "label": "Tasks",
+    "keys": "Mod+Shift+KeyX",
+    "mac": "⌘⇧X",
+    "other": "Ctrl+Shift+X",
+    "global": false,
+    "group": "Tasks & timeline"
+  },
+  {
+    "action": "toggle_timeline",
+    "label": "Timeline",
+    "keys": "Mod+Shift+KeyL",
+    "mac": "⌘⇧L",
+    "other": "Ctrl+Shift+L",
+    "global": false,
+    "group": "Tasks & timeline"
+  },
+  {
+    "action": "toggle_lock",
+    "label": "Lock / unlock note",
+    "keys": "Mod+Shift+KeyE",
+    "mac": "⌘⇧E",
+    "other": "Ctrl+Shift+E",
+    "global": false,
+    "group": "Security"
+  },
+  {
+    "action": "lock_all",
+    "label": "Lock all notes",
+    "keys": "Mod+Alt+KeyE",
+    "mac": "⌥⌘E",
+    "other": "Ctrl+Alt+E",
+    "global": false,
+    "group": "Security"
+  },
+  {
+    "action": "settings",
+    "label": "Settings",
+    "keys": "Mod+Comma",
+    "mac": "⌘,",
+    "other": "Ctrl+,",
+    "global": false,
+    "group": "App"
+  },
+  {
+    "action": "toggle_window",
+    "label": "Show / hide velo (global)",
+    "keys": "Mod+Shift+Space",
+    "mac": "⌘⇧Space",
+    "other": "Ctrl+Shift+Space",
+    "global": true,
+    "group": "App"
+  }
+]
