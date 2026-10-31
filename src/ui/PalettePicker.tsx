@@ -30,8 +30,9 @@ const mini = css({
   "& .r.s mark": { bg: "var(--p-matchOnSelectionBg)", color: "var(--p-matchOnSelectionFg)" },
   "& .t": { m: "6px 10px 0", fontWeight: "400", lineHeight: "1.5", color: "var(--p-fgMuted)", overflow: "hidden" },
   "& .t u": { color: "var(--p-accentText)", textDecorationColor: "var(--p-accentLine)" },
-  "& .f": { m: "auto 8px 8px", display: "flex", gap: "5px", alignItems: "center", overflow: "hidden" },
-  "& .f span": { flex: "none", h: "16px", px: "6px", borderRadius: "4px", font: "600 9px/16px Inter, system-ui, sans-serif" },
+  // wraps to two lines at the ~95px a mini gets in the dialog, so every chip stays whole
+  "& .f": { m: "auto 6px 6px", display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center" },
+  "& .f span": { flex: "none", h: "14px", px: "4px", borderRadius: "4px", font: "600 8px/14px Inter, system-ui, sans-serif" },
   "& .f .g": { bg: "var(--p-positive)", color: "var(--p-positiveFg)" },
   "& .f .d": { bg: "var(--p-dangerSubtle)", color: "var(--p-danger)" },
   "& .f .c": { borderRadius: "999px", fontWeight: "500", bg: "var(--p-accentSubtle)", color: "var(--p-accentText)" },
@@ -44,7 +45,7 @@ function Mini({ slug, mode }: { slug: PaletteSlug; mode: "_light" | "_dark" }) {
       <div className="h"><i /><b /></div>
       <div className="r s">Velo&nbsp;<mark>road</mark>map</div>
       <div className="r"><mark>Road</mark>&nbsp;trip</div>
-      <div className="t">See the <u>Tauri docs</u>.</div>
+      <div className="t">See <u>docs</u>.</div>
       <div className="f"><span className="g">Save</span><span className="d">Oct 28</span><span className="c">#work</span></div>
     </div>
   );
