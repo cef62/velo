@@ -40,6 +40,7 @@
     "@pandacss/preset-base": "1.12.1",
     "@pandacss/preset-panda": "1.12.1",
     "@playwright/test": "1.64.1",
+    "@radix-ui/colors": "3.0.0",
     "@tauri-apps/cli": "^2.12.4",
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^26.6.5",
