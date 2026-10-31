@@ -86,7 +86,7 @@ export const recipes: Recipe[] = [
       { keys: 'toggle_tasks', result: 'The left pane switches to Tasks: open tasks grouped Overdue, Today, Upcoming and No date, each with its note.' },
       { keys: 'focus_search', text: 'atlas', result: 'Tasks follow the search box: only tasks whose text or note matches stay.' },
       { keys: ENTER, result: 'In the search box, Enter opens the first task shown: its note opens with the cursor on that line.' },
-      { keys: ['Space', 'Space'], act: 'on a focused task row (Tab to the list: it is one Tab stop, ↑/↓ move), or click its checkbox',  result: 'The task is ticked, with its <code>@done</code> date, and “Ticked · Undo” shows under the list. Enter on a focused row opens its note.' },
+      { keys: ['Space', 'Space'], act: 'on a focused task row (click a row first: the editor now has focus and Tab indents there; in the list ↑/↓ move), or click its checkbox', result: 'The task is ticked, with its <code>@done</code> date, and “Ticked · Undo” shows under the list. Enter on a focused row opens its note.' },
       { act: 'Click Show done in the Tasks bar', result: 'A Done group lists the tasks ticked in the last 7 days.' },
       { keys: 'toggle_tasks', result: 'Back to Notes.' },
     ],
