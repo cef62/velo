@@ -30,6 +30,8 @@ pub struct AppState {
     pub capture_was_hidden: AtomicBool,
     /// set by `quit`: the next close request closes velo even when the close button only hides it
     pub quitting: AtomicBool,
+    /// the app-icon mode in effect: `settings.app_icon`, or the startup fallback when "none" lost its hotkey
+    pub icon_mode: Mutex<String>,
     pub settings_path: PathBuf,
     pub data_dir: PathBuf,
 }
@@ -187,7 +189,8 @@ pub fn show_main(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     // Windows drops the taskbar tab once (DeleteTab); a later show can bring it back
     #[cfg(not(target_os = "macos"))]
     if let Some(st) = app.try_state::<AppState>() {
-        w.set_skip_taskbar(st.settings.lock().unwrap().app_icon != "dock").ok();
+        let skip = *st.icon_mode.lock().unwrap() != "dock";
+        w.set_skip_taskbar(skip).ok();
     }
     w.unminimize().ok();
     w.set_focus().ok();
@@ -221,7 +224,7 @@ pub fn quit_app(app: AppHandle) {
 /// false = velo only hid, because it lives in the tray or on its hotkey and has no Dock/taskbar icon to come back from.
 #[tauri::command]
 pub fn close_requested(app: AppHandle, st: State<'_, AppState>) -> bool {
-    if st.quitting.swap(false, Ordering::SeqCst) || st.settings.lock().unwrap().app_icon == "dock" {
+    if st.quitting.swap(false, Ordering::SeqCst) || *st.icon_mode.lock().unwrap() == "dock" {
         return true;
     }
     hide_main(&app);
@@ -251,6 +254,9 @@ pub fn apply_app_icon(app: &AppHandle, mode: &str) -> tauri::Result<()> {
     } else if app.tray_by_id("main").is_none() {
         build_tray(app)?;
     }
+    if let Some(st) = app.try_state::<AppState>() {
+        *st.icon_mode.lock().unwrap() = mode.into();
+    }
     Ok(())
 }
 
@@ -271,7 +277,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             "tray-show" => {
                 show_main(app).map(|w| w.emit("focus-search", ()).ok());
             }
-            "tray-capture" => capture_requested(app),
+            "tray-capture" => capture_requested(app, true),
             "tray-quit" => quit(app),
             _ => {}
         })
@@ -280,7 +286,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 let app = tray.app_handle();
                 // Windows/Linux: the click makes the taskbar the foreground window first, so velo never reads as focused
                 #[cfg(not(target_os = "macos"))]
-                if app.get_webview_window("main").is_some_and(|w| w.is_visible().unwrap_or(false)) {
+                if app.get_webview_window("main").is_some_and(|w| w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false)) {
                     return hide_main(app);
                 }
                 toggle_window(app);
@@ -295,9 +301,11 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 }
 
 /// Remembers whether velo was hidden (for Task 8's capture_done), then shows it like `toggle_window` and tells the UI.
-pub fn capture_requested(app: &AppHandle) {
+/// `tray`: Windows/Linux give the foreground to the tray first, so velo on screen never reads as focused there.
+pub fn capture_requested(app: &AppHandle, tray: bool) {
     let Some(w) = app.get_webview_window("main") else { return };
-    let hidden = !(w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false));
+    let shown = w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false);
+    let hidden = if tray && !cfg!(target_os = "macos") { !shown } else { !(shown && w.is_focused().unwrap_or(false)) };
     capture_shown(&app.state::<AppState>().capture_was_hidden, hidden);
     show_main(app);
     app.emit("capture", ()).ok();
@@ -321,7 +329,7 @@ pub fn register_global(app: &AppHandle, action: GlobalAction, binding: &str) -> 
             if ev.state == ShortcutState::Pressed {
                 match action {
                     GlobalAction::ToggleWindow => toggle_window(app),
-                    GlobalAction::Capture => capture_requested(app),
+                    GlobalAction::Capture => capture_requested(app, false),
                 }
             }
         })
@@ -392,7 +400,9 @@ pub fn set_settings(app: AppHandle, st: State<'_, AppState>, mut settings: Setti
     let (mut reg, mut unreg) = (|a, k: &str| register_global(&app, a, k), |k: &str| unregister_hotkey(&app, k));
     let held: Vec<String> = old.global_bindings().into_iter().filter(|(a, _)| !changed.iter().any(|(c, ..)| c == a)).map(|(_, k)| k).collect();
     swap_globals(&changed, &held, &mut reg, &mut unreg)?;
-    if !hotkey_only_ok(&settings, |k| hotkey_live(&app, k)) {
+    // only when the mode or the Show/hide key changes: a startup fallback (key taken, tray shown) must not block every other setting
+    let recheck = old.app_icon != settings.app_icon || changed.iter().any(|(a, ..)| *a == GlobalAction::ToggleWindow);
+    if recheck && !hotkey_only_ok(&settings, |k| hotkey_live(&app, k)) {
         revert_globals(&changed, &mut reg, &mut unreg);
         return Err("Hotkey only needs a working Show / hide velo shortcut: set one, or pick another that no other app uses".into());
     }

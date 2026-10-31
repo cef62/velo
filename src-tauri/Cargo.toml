@@ -34,7 +34,6 @@ tauri-plugin-updater = "2.11"
 tokio = { version = "1", features = ["rt"] }
 trash = "5.2.9"
 unicode-normalization = "0.1.26"
-tauri-plugin-single-instance = "2.5.5"
 
 [profile.release]
 codegen-units = 1
@@ -45,3 +44,6 @@ strip = true
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+tauri-plugin-single-instance = "2.5.5"

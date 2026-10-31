@@ -41,12 +41,15 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
 }
 
 pub fn run() {
-    tauri::Builder::default()
-        // first plugin, as its docs ask: launching velo again (common once the close button only hides it) shows the
-        // running window instead of starting a second process on the same notes
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            commands::show_main(app);
-        }))
+    let builder = tauri::Builder::default();
+    // first plugin, as its docs ask: launching velo again (common once the close button only hides it) shows the
+    // running window instead of starting a second process on the same notes. Not on macOS: LaunchServices keeps one
+    // instance and RunEvent::Reopen shows it, and the plugin's socket in shared /tmp could be squatted to block launch.
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
+        commands::show_main(app);
+    }));
+    builder
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -90,6 +93,7 @@ pub fn run() {
                 locked: Default::default(),
                 capture_was_hidden: Default::default(),
                 quitting: Default::default(),
+                icon_mode: Mutex::new("dock".into()), // apply_app_icon sets it at the end of setup
                 settings_path,
                 data_dir,
             });
