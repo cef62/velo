@@ -1,0 +1,14 @@
+---
+// One shortcut: the macOS glyphs in <kbd>, then the Windows/Linux keys when they differ. An Action shows its default.
+import { DEFAULTS, LABELS, formatBinding, type Action } from '../../../src/shortcuts.ts';
+import type { Fixed } from '../content/recipes/recipes.ts';
+
+interface Props {
+  keys: Action | Fixed;
+}
+const { keys } = Astro.props;
+const [mac, other, label] =
+  typeof keys === 'string' ? [formatBinding(DEFAULTS[keys], true), formatBinding(DEFAULTS[keys], false), LABELS[keys]] : [keys[0], keys[1], undefined];
+---
+
+<span class="t-keyset" title={label}><kbd>{mac}</kbd>{other !== mac && <span class="t-alt">{other}</span>}</span>

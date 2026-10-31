@@ -1,0 +1,81 @@
+---
+import { getRelease } from '../lib/release';
+import Base from '../layouts/Base.astro';
+import Shot from '../components/Shot.astro';
+
+const rel = await getRelease();
+const releases = 'https://github.com/cef62/velo/releases';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+
+const features = [
+  { id: 'features', title: 'Search or create, in one box', shot: 'search', alt: 'The search box filtering a list of notes', items: [
+    'Results update on every keystroke; Enter opens the match or creates a note with that title.',
+    'Plain <code>.md</code> / <code>.txt</code> files in a folder you own, edited with autosave.',
+    '<code>[[wikilinks]]</code> create missing notes; renaming a note rewrites links to it.',
+  ] },
+  { id: 'tags', title: 'Tags', shot: 'tags', alt: 'The Filters panel listing tags with note counts', items: [
+    'Write <code>#tag</code> anywhere; the Filters panel (⌘⇧T) shows every tag with its count.',
+    'Select several to filter to notes having all of them, combined with the search text.',
+  ] },
+  { id: 'saved-searches', title: 'Saved searches', shot: 'saved-searches', alt: 'Saved searches as chips above the tags', items: [
+    'Name a search, its tags and the No links filter; apply it with one click.',
+    'Rename or delete from the right-click menu.',
+  ] },
+  { id: 'timeline', title: 'Timeline', shot: 'timeline', alt: 'Notes grouped by day, newest first', items: [
+    'Notes newest first, grouped by day, by Created or Updated date (⌘⇧L).',
+    'Narrow to 7 days, 30 days or all; the list follows your filters.',
+  ] },
+  { id: 'export', title: 'Export', shot: 'export', alt: 'The Export dialog stating what it exports', items: [
+    'Export what the timeline shows as Markdown or PDF, full notes or tasks only.',
+    'Starts with a task summary: open tasks and tasks done in the range.',
+  ] },
+  { id: 'related', title: 'Related notes', shot: 'related', alt: 'The Related tab: linked from, links to, mentions, shared tags', items: [
+    'A side panel shows who links here, where this note links, and unlinked mentions.',
+    '<strong>Link it</strong> turns a mention into a wikilink; walk everything from the keyboard.',
+  ] },
+  { id: 'agents', title: 'Agents (MCP)', shot: 'agents', alt: 'Claude Code reading and editing notes through velo', items: [
+    'Claude Code can search, read, create and edit your notes through 17 tools. Off by default; macOS and Linux only.',
+    'Every write saves a revision first; deletes go to the Trash; locked notes are never returned.',
+  ], more: { href: '/agents/', label: 'Agents guide' } },
+  { id: 'encryption', title: 'Encryption', shot: 'encryption', alt: 'A locked note asking for the passphrase', items: [
+    'Lock notes per note with <a href="https://age-encryption.org">age</a>; locked notes never touch disk or the index as plaintext.',
+    'Key in the OS keychain, passphrase-wrapped copy in your folder, decryptable with the <code>age</code> CLI.',
+  ] },
+];
+---
+
+<Base title="velo — fast keyboard-first notes">
+  <section class="hero">
+    <div class="hero-copy">
+      <h1>velo — fast keyboard-first notes</h1>
+      <p class="lede">
+        One box searches and creates. Plain files you own, on macOS, Windows and Linux.
+        Inspired by nvALT.
+      </p>
+      <div class="downloads">
+        <a class="button" href={rel.mac}>macOS (Apple silicon)</a>
+        <a class="button" href={rel.linux}>Linux</a>
+        <a class="button" href={rel.windows}>Windows</a>
+      </div>
+      <p class="downloads-note">
+        {rel.version && <>Version {rel.version} · </>}<a href={`${releases}/latest`}>all downloads</a>
+        {rel.deb && <> · <a href={rel.deb}>Linux .deb</a></>} ·{' '}
+        <a href={`${base}/guide/#unsigned-builds`}>first launch on macOS and Windows</a>
+      </p>
+    </div>
+    <Shot eager name="hero" alt="velo: the note list, editor and search box" />
+  </section>
+
+  {features.map((f) => (
+    <section class="feature" id={f.id}>
+      <div class="feature-copy">
+        <h2>{f.title}</h2>
+        <ul>{f.items.map((i) => <li set:html={i} />)}</ul>
+        {f.more && <p><a href={`${base}${f.more.href}`}>{f.more.label}</a></p>}
+      </div>
+      <div class="feature-shots"><Shot name={f.shot} alt={f.alt} /></div>
+    </section>
+  ))}
+
+  <p>Read the <a href={`${base}/guide/`}>guide</a> or the <a href={`${base}/changelog/`}>changelog</a>.</p>
+</Base>
