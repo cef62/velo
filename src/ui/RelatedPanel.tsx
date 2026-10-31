@@ -25,6 +25,7 @@ const trail = css({ display: "flex", alignItems: "center", gap: "1.5", h: "30px"
 const empty = css({ display: "flex", flexDirection: "column", gap: "2", p: "7 4.5", color: "velo.fgMuted", fontSize: "ui", lineHeight: "1.5", "& strong": { color: "velo.fg", fontWeight: "600" } });
 const actions = css({ display: "none", "[data-row]:hover &, [data-row]:focus-within &": { display: "flex" } });
 const hint = css({ color: "velo.fgMuted", fontSize: "uiXs", whiteSpace: "nowrap" });
+let consumedFocusReq = 0; // the last ⌘⇧C request the tree answered (module-level: the panel remounts with every open)
 
 export function RelatedPanel({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const related = useStore(store, (s) => s.related);
@@ -43,7 +44,6 @@ export function RelatedPanel({ controller, store }: { controller: Controller; st
   const focusNext = useRef(false); // a key moved the stop: focus it once rendered
   const hadFocus = useRef(false); // focus was in the tree: a re-render that unmounts the row must not drop it to <body>
   const lastCentre = useRef<string | null>(null);
-  const lastFocusReq = useRef(focusRelated);
   useEffect(() => {
     if (data && centre !== lastCentre.current) {
       lastCentre.current = centre; // a new note: big tag groups start closed, no peek
@@ -54,12 +54,18 @@ export function RelatedPanel({ controller, store }: { controller: Controller; st
   const rows = useMemo(() => (data ? relatedRows(data, closed) : []), [data, closed]);
   const curIdx = Math.max(0, rows.findIndex((r) => r.id === cur));
   useLayoutEffect(() => {
-    if (!data) return; // the new note's tree is not here yet: keep the request
-    const wanted = focusNext.current || lastFocusReq.current !== focusRelated;
-    const lost = hadFocus.current && !el.current?.contains(document.activeElement);
-    if (!wanted && !lost) return;
+    if (!data) {
+      if (!openPath) consumedFocusReq = focusRelated; // nothing to focus: the request is spent
+      return; // the open note's tree is not here yet: keep the request
+    }
+    const active = document.activeElement;
+    const inTree = !!el.current?.contains(active);
+    const lost = active === null || active === document.body; // the focused row unmounted
+    const requested = focusRelated !== consumedFocusReq;
+    if (requested) consumedFocusReq = focusRelated;
+    if (focusNext.current && !inTree && !lost) focusNext.current = false; // focus went elsewhere meanwhile: never steal it back
+    if (!requested && !focusNext.current && !(hadFocus.current && lost)) return;
     focusNext.current = false;
-    lastFocusReq.current = focusRelated;
     el.current?.querySelector<HTMLElement>(`[data-i="${curIdx}"]`)?.focus();
   });
   const go = (i: number) => {
