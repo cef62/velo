@@ -51,11 +51,12 @@ export function RelatedPanel({ controller, store }: { controller: Controller; st
       setPeek(null);
     }
   }, [data, centre]);
+  useEffect(() => () => void (consumedFocusReq = store.get().focusRelated), [store]); // the panel closed before the tree landed: the request is spent
   const rows = useMemo(() => (data ? relatedRows(data, closed) : []), [data, closed]);
   const curIdx = Math.max(0, rows.findIndex((r) => r.id === cur));
   useLayoutEffect(() => {
     if (!data) {
-      if (!openPath) consumedFocusReq = focusRelated; // nothing to focus: the request is spent
+      if (!openPath || (related?.centre === openPath && related.err)) consumedFocusReq = focusRelated; // nothing to focus: the request is spent
       return; // the open note's tree is not here yet: keep the request
     }
     const active = document.activeElement;
