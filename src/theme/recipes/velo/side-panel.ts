@@ -38,7 +38,7 @@ export const sidePanel = defineSlotRecipe({
   variants: {
     mode: {
       docked: {},
-      overlay: { root: { position: 'absolute', top: '0', right: '0', bottom: '0', zIndex: '4', boxShadow: 'veloPopover', w: '280px' } },
+      overlay: { root: { position: 'absolute', top: '{sizes.titleBar}', right: '0', bottom: '0', zIndex: '4', boxShadow: 'veloPopover', w: '280px' } }, // under the title bar: its controls stay reachable
     },
   },
   defaultVariants: { mode: 'docked' },

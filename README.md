@@ -36,7 +36,7 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | ⌘⇧T | Ctrl+Shift+T | Show / hide the Filters panel (saved searches and tags) |
 | ⌘⇧R | Ctrl+Shift+R | Rich / plain editing |
 | ⌘⇧J | Ctrl+Shift+J | Vertical / horizontal layout |
-| ⌘I | Ctrl+I | Show / hide the side panel (note info) |
+| ⌘I | Ctrl+I | Show / hide the side panel (Related · Info) |
 | ⌘⇧X | Ctrl+Shift+X | Switch between Notes and Tasks |
 | ⌘⇧C | Ctrl+Shift+C | Related notes: the side panel on its Related tab |
 | ⌘⇧D | Ctrl+Shift+D | Open today's daily note |
