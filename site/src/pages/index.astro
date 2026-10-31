@@ -1,12 +1,10 @@
 ---
-import pkg from '../../../package.json';
+import { getRelease } from '../lib/release';
 import Base from '../layouts/Base.astro';
 import Shot from '../components/Shot.astro';
 
-const version = pkg.version;
+const rel = await getRelease();
 const releases = 'https://github.com/cef62/velo/releases';
-// Asset names follow tauri-action's bundle naming for productName "velo".
-const download = (file: string) => `${releases}/download/v${version}/${file}`;
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 
 const features = [
@@ -36,7 +34,7 @@ const features = [
     '<strong>Link it</strong> turns a mention into a wikilink; walk everything from the keyboard.',
   ] },
   { id: 'agents', title: 'Agents (MCP)', shot: 'agents', alt: 'Claude Code reading and editing notes through velo', items: [
-    'Claude Code can search, read, create and edit your notes through 17 tools. Off by default.',
+    'Claude Code can search, read, create and edit your notes through 17 tools. Off by default; macOS and Linux only.',
     'Every write saves a revision first; deletes go to the Trash; locked notes are never returned.',
   ], more: { href: '/agents/', label: 'Agents guide' } },
   { id: 'encryption', title: 'Encryption', shot: 'encryption', alt: 'A locked note asking for the passphrase', items: [
@@ -52,19 +50,20 @@ const features = [
       <h1>velo — fast keyboard-first notes</h1>
       <p class="lede">
         One box searches and creates. Plain files you own, on macOS, Windows and Linux.
-        A successor to nvALT.
+        Inspired by nvALT.
       </p>
       <div class="downloads">
-        <a class="button" href={download(`velo_${version}_aarch64.dmg`)}>macOS (Apple silicon)</a>
-        <a class="button" href={download(`velo_${version}_amd64.AppImage`)}>Linux</a>
-        <a class="button" href={download(`velo_${version}_x64-setup.exe`)}>Windows</a>
+        <a class="button" href={rel.mac}>macOS (Apple silicon)</a>
+        <a class="button" href={rel.linux}>Linux</a>
+        <a class="button" href={rel.windows}>Windows</a>
       </div>
       <p class="downloads-note">
-        Version {version} · <a href={`${releases}/latest`}>all downloads</a> ·
+        {rel.version && <>Version {rel.version} · </>}<a href={`${releases}/latest`}>all downloads</a>
+        {rel.deb && <> · <a href={rel.deb}>Linux .deb</a></>} ·{' '}
         <a href={`${base}/guide/#unsigned-builds`}>first launch on macOS and Windows</a>
       </p>
     </div>
-    <Shot name="hero" alt="velo: the note list, editor and search box" />
+    <Shot eager name="hero" alt="velo: the note list, editor and search box" />
   </section>
 
   {features.map((f) => (

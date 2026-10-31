@@ -20,7 +20,7 @@
     "docs:check": "node scripts/gen-docs.ts --check",
     "site:dev": "cd site && astro dev",
     "site:build": "astro build --root site",
-    "site:preview": "astro preview --root site",
+    "site:preview": "cd site && astro preview",
     "prepare": "panda codegen"
   },
   "pnpm": {
