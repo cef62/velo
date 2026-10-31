@@ -48,7 +48,7 @@ export const recipes: Recipe[] = [
     shot: 'recipe-capture',
     steps: [
       { keys: 'capture', result: 'velo comes up with the search box in capture mode: it reads <code>→ Inbox</code>.' },
-      { text: 'Call Dana about the beta', after: ENTER, result: 'The line <code>- [ ] Call Dana about the beta</code> is added to the Inbox note and capture mode ends. Esc instead cancels.' },
+      { text: 'Call Dana about the beta', after: ENTER, result: 'The line <code>- [ ] Call Dana about the beta</code> is added to the Inbox note and capture mode ends (Esc cancels instead). If the shortcut brought velo up, Enter or Esc hides it again, so you are back in the app you were using.' },
       { keys: 'daily_note', result: 'Today’s daily note opens, titled with the date (for example <code>2026-10-30</code>); it is created if missing.' },
       { text: '- [ ] Review the roadmap', result: 'Autosave keeps it; like every <code>- [ ]</code> line it shows up in Tasks.' },
     ],
@@ -66,10 +66,11 @@ export const recipes: Recipe[] = [
       { keys: 'focus_search', result: 'The search box has focus.' },
       { text: 'atlas', result: 'The list filters on every keystroke, with matches highlighted. Enter opens the highlighted note, or creates a note titled “atlas” if nothing matches.' },
       { keys: 'toggle_tags', result: 'The Filters panel opens with every tag and its note count.' },
-      { act: 'Click the <code>meeting</code> chip', result: 'Only notes tagged <code>#meeting</code> that also match “atlas” stay. The tag shows as a chip inside the search box; the Filters button counts it.' },
-      { act: 'Click Save search… in the Filters panel', text: 'Atlas meetings', after: ENTER, result: 'A dashed “Atlas meetings” chip appears in the Saved row, above the tags.' },
-      { keys: ['⌫', 'Backspace'], result: 'At the start of the search box, Backspace removes the last filter chip; the × at the right clears them all.' },
-      { act: 'Click the “Atlas meetings” chip', result: 'Its search text and tags come back, replacing the current filters, shown as one chip in the search field. Click it again to clear.' },
+      { act: 'Click the <code>#meeting</code> chip', result: 'Only notes tagged <code>#meeting</code> that also match “atlas” stay. A <code>#meeting</code> chip shows inside the search box; the Filters button counts it.' },
+      { act: 'Click Save search… in the Filters panel', text: 'Atlas meetings', after: ENTER, result: '“Atlas meetings” appears in the Saved row, above the tags, already applied (its chip is pressed). The search box now shows it as one chip in place of <code>#meeting</code>.' },
+      { keys: ['⌘←', 'Home'], result: 'The caret moves to the start of the search box.' },
+      { keys: ['⌫', 'Backspace'], result: 'Backspace at the start removes the last chip. Here that is the saved search, which clears as one: its search text and tag go too. (The × at the right of the box clears every chip the same way.)' },
+      { act: 'Click the “Atlas meetings” chip in the Filters panel', result: 'Its search text and tags come back, replacing the current filters. Click it again to clear them.' },
     ],
     why: 'Tag chips keep notes having all selected tags, combined with the search text. Saved searches are stored per machine in the settings, and the list, Tasks, the timeline and export all follow the active filters. Right-click a saved chip (or Shift+F10) to rename or delete it.',
   },
@@ -84,9 +85,9 @@ export const recipes: Recipe[] = [
     steps: [
       { keys: 'toggle_tasks', result: 'The left pane switches to Tasks: open tasks grouped Overdue, Today, Upcoming and No date, each with its note.' },
       { keys: 'focus_search', text: 'atlas', result: 'Tasks follow the search box: only tasks whose text or note matches stay.' },
-      { keys: ['Space', 'Space'], result: 'On a highlighted task (or click its checkbox) the task is ticked, with its <code>@done</code> date, and “Ticked · Undo” shows under the list.' },
+      { keys: ENTER, result: 'In the search box, Enter opens the first task shown: its note opens with the cursor on that line.' },
+      { keys: ['Space', 'Space'], act: 'on a focused task row (Tab to the list: it is one Tab stop, ↑/↓ move), or click its checkbox',  result: 'The task is ticked, with its <code>@done</code> date, and “Ticked · Undo” shows under the list. Enter on a focused row opens its note.' },
       { act: 'Click Show done in the Tasks bar', result: 'A Done group lists the tasks ticked in the last 7 days.' },
-      { keys: ENTER, result: 'Opens the task’s note with the cursor on that line.' },
       { keys: 'toggle_tasks', result: 'Back to Notes.' },
     ],
     why: 'Tasks are plain markdown lines, so they live in whatever note they belong to and stay readable outside velo. Ticking edits the file (<code>- [x]</code> plus a done date), so the Tasks view, export and agents all agree on what is done.',
@@ -156,7 +157,7 @@ export const recipes: Recipe[] = [
       { text: 'lock', result: '“Lock all notes” and “Lock / unlock note” match; names that start with what you typed come first.' },
       { keys: ['↓', '↓'], result: 'Moves the highlight. A note action without an open note is listed as disabled with the reason (“open a note first”).' },
       { keys: ENTER, result: 'Runs the action as its shortcut would, and it moves to Recent.' },
-      { keys: 'command_palette', text: 'export', result: 'Actions with no default shortcut, like Export…, Save search… and Merge into…, are here too.' },
+      { keys: 'command_palette', text: 'export', result: '“Export…” is the only match. It has no default shortcut, so the palette is the keyboard way to run it; Save search… and Merge into… work the same way.' },
       { keys: ESC, result: 'Closes the palette. While you type, its footer points the other way: “Looking for a note? Esc, then ⌘L”.' },
     ],
     why: 'The palette lists actions by the same names as Settings → Keyboard shortcuts and shows your current bindings, so a remapped or cleared shortcut shows up here at once.',
@@ -179,7 +180,7 @@ export const recipes: Recipe[] = [
       '- **Hiring loop notes** (Thu): two strong onsites; you still need a frontend interviewer. Open: feedback for candidate B.\n' +
       '- **2026-10-29** (daily note): reviewed the roadmap with Dana, ran the onsites.\n\n' +
       'Grocery list was last changed on 14 Oct, so I left it out.',
-    why: '<code>search_notes</code> with an empty query lists every note with its modified date, tags and a snippet, so one call finds the week; <code>read_note</code> fills in the notes the snippets cut short. Read-only tools need no summary and change nothing. Locked notes are never listed.',
+    why: '<code>search_notes</code> with an empty query lists notes newest first, 50 per page (page on with <code>offset</code>), each with its modified date, tags and a snippet, so one call finds the week; <code>read_note</code> fills in the notes the snippets cut short. Read-only tools need no summary and change nothing. Locked notes are never listed.',
   },
   {
     kind: 'agent',
@@ -196,7 +197,7 @@ export const recipes: Recipe[] = [
       'Filed **Atlas design review**, linked to [[Project Atlas kickoff]] and tagged #atlas and #meeting (in its front matter). It has two tasks:\n\n' +
       '- Write the operation log RFC, due 2026-11-06\n' +
       '- Share the review notes with Lee\n\n' +
-      'Each change is a separate revision in the note’s Info tab (⌘I), so you can restore any step.',
+      'Each change is a separate revision, marked as an agent change, in the note’s revision list (side panel, Info tab), so you can restore any step.',
     why: 'Every write tool takes a one-line <code>summary</code>; velo saves a revision with it, marked as an agent change, before writing. <code>add_tags</code> puts tags in the front-matter <code>tags:</code> list (or a <code>#tag</code> line when front matter is off) and reports each note as changed, unchanged or failed. <code>add_task</code> with <code>due</code> appends <code>📅 YYYY-MM-DD</code>, so the task lands in the right Tasks group.',
   },
   {

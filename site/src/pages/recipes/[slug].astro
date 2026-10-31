@@ -31,7 +31,7 @@ const [prev, next] = [recipes[i - 1], recipes[i + 1]];
         <Transcript mode="agent" transcript={recipe.transcript} prompt={recipe.prompt} answer={recipe.answer} />
       )
     }
-    {recipe.kind === 'agent' && <p class="recipe-note">A real run: the tool calls and results come from velo’s own tools on a sample vault, checked by its test suite.</p>}
+    {recipe.kind === 'agent' && <p class="recipe-note">A real run: the tool calls and results come from velo’s own tools on a sample vault, checked by its test suite. Dates are shown in UTC and hashes are replaced by stable placeholders.</p>}
 
     <Shot name={recipe.shot} alt={recipe.title} />
 

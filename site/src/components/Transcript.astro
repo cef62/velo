@@ -50,13 +50,13 @@ const answer = props.mode === 'agent' ? new MarkdownIt({ html: false }).render(p
             <summary>
               <span class="t-label">Tool call {i + 1}</span> <code>{s.tool}</code>
             </summary>
-            <pre><code>{JSON.stringify(s.arguments, null, 2)}</code></pre>
+            <pre tabindex="0"><code>{JSON.stringify(s.arguments, null, 2)}</code></pre>
           </details>
           <details>
             <summary>
               <span class="t-label">Result</span> <code>{s.tool}</code>
             </summary>
-            <pre><code>{pretty(s.result)}</code></pre>
+            <pre tabindex="0"><code>{pretty(s.result)}</code></pre>
           </details>
         </div>
       ))}

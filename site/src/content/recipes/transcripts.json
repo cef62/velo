@@ -74,6 +74,13 @@
         },
         "result": "{\"hash\":\"78dde6e5fd29f054\",\"title\":\"Atlas design review\"}",
         "tool": "add_task"
+      },
+      {
+        "arguments": {
+          "title": "Atlas design review"
+        },
+        "result": "{\"aliases\":[],\"backlinks\":[],\"created\":\"2026-10-30T16:00:00+00:00\",\"hash\":\"78dde6e5fd29f054\",\"links\":[\"Project Atlas kickoff\"],\"modified\":\"2026-10-30T16:00:00+00:00\",\"tags\":[\"atlas\",\"meeting\"],\"text\":\"---\\ncreated: 2026-10-30T16:00:00+00:00\\nmodified: 2026-10-30T16:00:00+00:00\\ntags: [atlas, meeting]\\n---\\nDesign review for [[Project Atlas kickoff]].\\n\\n- Sync engine: go with operation log, not snapshots\\n- Sharing waits until after the beta\\n- [ ] Write the operation log RFC 📅 2026-11-06\\n- [ ] Share the review notes with Lee\\n\",\"title\":\"Atlas design review\"}",
+        "tool": "read_note"
       }
     ]
   },

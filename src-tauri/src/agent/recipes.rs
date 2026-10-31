@@ -35,6 +35,7 @@ fn recipes() -> Vec<(&'static str, Vec<(&'static str, Value)>)> {
             ("add_tags", json!({"titles": ["Atlas design review"], "tags": ["atlas", "meeting"], "summary": "Tagged the design review"})),
             ("add_task", json!({"title": "Atlas design review", "text": "Write the operation log RFC", "due": "2026-11-06", "summary": "Added follow-up task"})),
             ("add_task", json!({"title": "Atlas design review", "text": "Share the review notes with Lee", "summary": "Added follow-up task"})),
+            ("read_note", json!({"title": "Atlas design review"})),
         ]),
         ("daily-standup", vec![
             ("daily_note", json!({"date": "2026-10-30"})),

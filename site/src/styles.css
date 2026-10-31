@@ -616,6 +616,8 @@ kbd {
 
 .t-agent {
   display: grid;
+  /* minmax(0, …): a long line in an opened <pre> must scroll inside it, not widen the transcript. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 
@@ -648,6 +650,7 @@ kbd {
 
 .t-tool {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   margin-left: 16px;
   padding-left: 12px;
