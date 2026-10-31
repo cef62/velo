@@ -232,6 +232,21 @@ main {
   order: -1;
 }
 
+/* Landing: a recorded run under the hero (a div, not a section, so the features keep their odd/even sides). */
+.see-it {
+  padding: 40px 0;
+  border-top: 1px solid var(--line);
+}
+
+.see-it h2 {
+  font-size: 1.5rem;
+}
+
+.clip {
+  width: 100%;
+  background: var(--surface);
+}
+
 /* Guide: table of contents beside the README. */
 .guide {
   display: grid;
@@ -495,6 +510,10 @@ main {
 
 .recipe .lede {
   max-width: none;
+}
+
+.recipe .shot + .clip {
+  margin-top: 16px;
 }
 
 .recipe .shot {

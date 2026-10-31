@@ -10,7 +10,12 @@ on:
       - package.json
       - pnpm-lock.yaml
       - docs/media/**
-      - src/shortcuts.ts
+      # the live demo at /velo/demo/ is the app's own UI over src/demo
+      - src/**
+      - index.html
+      - panda.config.ts
+      - vite.config.ts
+      - vite.demo.config.ts
       - src-tauri/src/agent/**
       - .github/workflows/pages.yml
   workflow_dispatch:
@@ -37,7 +42,8 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm site:build
+      # site + demo (dist-demo copied into site/dist/demo); `pnpm docs:preview` serves the same build locally
+      - run: pnpm docs:build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

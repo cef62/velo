@@ -1,0 +1,35 @@
+---
+// docs/media/<name>.mp4 (+ <name>.poster.png), made by `pnpm docs:capture`; until then a placeholder box, like Shot.
+interface Props {
+  name: string;
+  alt: string;
+}
+const { name, alt } = Astro.props;
+const clips = import.meta.glob<string>('../../../docs/media/*.mp4', { eager: true, query: '?url', import: 'default' });
+const posters = import.meta.glob<ImageMetadata>('../../../docs/media/*.poster.png', { eager: true, import: 'default' });
+const src = clips[`../../../docs/media/${name}.mp4`];
+const poster = posters[`../../../docs/media/${name}.poster.png`];
+---
+
+{
+  src ? (
+    <video class="shot clip" autoplay muted loop playsinline preload="none" poster={poster?.src} width={poster?.width} height={poster?.height} aria-label={alt}>
+      <source src={src} type="video/mp4" />
+    </video>
+  ) : !import.meta.env.PROD ? (
+    <div class="shot shot-missing" role="img" aria-label={alt}>
+      <span>{name}.mp4</span>
+    </div>
+  ) : null
+}
+
+<script>
+  // Reduced motion: no autoplay; the poster shows and the controls let the reader play it.
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    for (const v of document.querySelectorAll<HTMLVideoElement>('video.clip')) {
+      v.autoplay = false;
+      v.pause();
+      v.controls = true;
+    }
+  }
+</script>

@@ -1,6 +1,7 @@
 ---
 import { getRelease } from '../lib/release';
 import Base from '../layouts/Base.astro';
+import Clip from '../components/Clip.astro';
 import Shot from '../components/Shot.astro';
 
 const rel = await getRelease();
@@ -65,6 +66,12 @@ const features = [
     </div>
     <Shot eager name="hero" alt="velo: the note list, editor and search box" />
   </section>
+
+  <div class="see-it">
+    <h2>See it</h2>
+    <p>Search as you type, open a note, narrow with tag chips. <a href={`${base}/try/`}>Try the live demo</a>.</p>
+    <Clip name="clip-search" alt="Typing “lantern” filters the list; Enter opens the note; the Filters panel narrows it by tag" />
+  </div>
 
   {features.map((f) => (
     <section class="feature" id={f.id}>

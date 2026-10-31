@@ -19,3 +19,6 @@ styled-system
 dist-demo/
 site/dist/
 site/.astro/
+
+# Docs media capture (Playwright output; the media itself goes to docs/media)
+test-results/

@@ -1,0 +1,30 @@
+---
+// The intro page; the demo app is at /demo/ (built with DEMO_BASE=/velo/demo/ and copied into site/dist/demo by docs:build).
+import Base from '../layouts/Base.astro';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+
+<Base title="Demo · velo" description="Try velo in your browser: the real interface over a made-up notes folder.">
+  <article class="prose">
+    <h1>Demo</h1>
+    <p class="lede">The real velo interface, running in your browser over a made-up notes folder.</p>
+    <p><a class="button" href={`${base}/demo/`}>Open the demo</a></p>
+
+    <h2>What is different</h2>
+    <ul>
+      <li>Nothing is saved: everything stays in the page, and a reload starts over.</li>
+      <li>Search is simplified: it matches words and titles, but it is not the app’s full-text index.</li>
+      <li>One note is locked. Its passphrase is <code>demo</code>.</li>
+      <li>Things that need your computer (choosing a folder, Finder, the global shortcuts, agents) are stand-ins or absent.</li>
+    </ul>
+
+    <h2>Things to try</h2>
+    <ul>
+      <li><kbd>⌘P</kbd> (Ctrl+P): the command palette, every action by name.</li>
+      <li><kbd>⌘L</kbd> (Ctrl+L): back to the search box; type to filter, Enter to open.</li>
+      <li><kbd>⌘⇧T</kbd> (Ctrl+Shift+T): the Filters panel, to combine tags and saved searches.</li>
+    </ul>
+    <p>More in the <a href={`${base}/shortcuts/`}>shortcuts</a> and the <a href={`${base}/recipes/`}>recipes</a>.</p>
+  </article>
+</Base>

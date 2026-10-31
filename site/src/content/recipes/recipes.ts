@@ -23,6 +23,8 @@ type Common = {
   goal: string;
   prerequisites: string[];
   shot: string;
+  /** A recorded run of the recipe: docs/media/<clip>.mp4. */
+  clip?: string;
   /** Inline HTML allowed. */
   why: string;
 };
@@ -62,6 +64,7 @@ export const recipes: Recipe[] = [
     goal: 'Get from “I wrote something about Atlas meetings” to the list of those notes, and keep that view for next time.',
     prerequisites: ['A few notes with <code>#tags</code> in them.'],
     shot: 'recipe-search',
+    clip: 'clip-search',
     steps: [
       { keys: 'focus_search', result: 'The search box has focus.' },
       { text: 'atlas', result: 'The list filters on every keystroke, with matches highlighted. Enter opens the highlighted note, or creates a note titled “atlas” if nothing matches.' },
@@ -82,6 +85,7 @@ export const recipes: Recipe[] = [
     goal: 'See what is open everywhere, tick things off, and check what you finished this week.',
     prerequisites: ['Notes with task lines: <code>- [ ] text</code>, optionally ending in <code>📅 YYYY-MM-DD</code>.'],
     shot: 'recipe-tasks',
+    clip: 'clip-tasks',
     steps: [
       { keys: 'toggle_tasks', result: 'The left pane switches to Tasks: open tasks grouped Overdue, Today, Upcoming and No date, each with its note.' },
       { keys: 'focus_search', text: 'atlas', result: 'Tasks follow the search box: only tasks whose text or note matches stay.' },
@@ -134,6 +138,7 @@ export const recipes: Recipe[] = [
     goal: 'Explore what is connected to the note you are in without losing your place, and link the notes you mention.',
     prerequisites: ['A note open that links to, or mentions, other notes.'],
     shot: 'recipe-related',
+    clip: 'clip-related',
     steps: [
       { keys: 'toggle_connections', result: 'The side panel opens on Related: Linked from, Links to, Mentions and Shared tags.' },
       { keys: ['↓', '↓'], result: 'Moves through the tree, section headers included; ← and → collapse and expand.' },
@@ -152,6 +157,7 @@ export const recipes: Recipe[] = [
     goal: 'Run any action without remembering its shortcut, and learn the shortcut while you are at it.',
     prerequisites: ['None.'],
     shot: 'recipe-palette',
+    clip: 'clip-palette',
     steps: [
       { keys: 'command_palette', result: 'The palette opens: Recent, then the open note’s actions, then All commands, each with its shortcut.' },
       { text: 'lock', result: '“Lock all notes” and “Lock / unlock note” match; names that start with what you typed come first.' },
