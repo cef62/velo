@@ -1,5 +1,21 @@
 # velo
 
+## 0.12.0
+
+### Minor Changes
+
+- 8e89e1e: Switched to the "clear" look: neutral grays with a graphite accent, green only for primary buttons, done ticks and updates, red only for errors; selection, focus and links are now shades of gray.
+- b3ba62b: Added a command palette (⌘P / Ctrl+P, remappable) that lists every action by name with its current shortcut, recent ones first; the header's ⋯ menu is gone.
+- fcf1409: Active tag filters, No links and an applied saved search now show as chips inside the search field (Backspace at the start removes the last one, × clears them; many chips fold into "+N"), and the tag panel became a Filters panel with Saved and Tags rows; the "Filtered by" banner is gone.
+- 54dde6c: Decluttered the header to search, Filters and Settings so it fits the default window; the Filters button shows how many filters are active; the pane switch, sort, edit style, preview, lock, lock all and trash moved to the ⋯ menu for now, and the update banner became a pill in the header with a popover.
+- 2859036: Added a bar on top of the left pane with Notes, Tasks and Timeline tabs; Sort, Show done and the Timeline date and range menu moved there, the Export dialog now states what it exports, and every list uses the same group headers.
+- 3b1f620: Replaced the Connections graph with a Related tab in the side panel beside the note: notes linking here with the sentence that links, links out (missing targets can be created), unlinked mentions with Link it, and shared tags, all walkable from the keyboard; the Info tab keeps dates, words, aliases and revisions.
+- 5f13022: The title bar now holds the note's controls: a Rich · Plain · Preview switch (the preview strip is gone), the lock, the side panel toggle and a ⋯ menu with Rename, Move selection to new note, Merge into…, Show front matter and Move to Trash; a locked note opened without the key asks for the passphrase in place of the note instead of in a dialog.
+
+### Patch Changes
+
+- e3c2751: Removed the settings the v2 design made redundant ("Show labels on header buttons", Sort and Connections order: sort lives in the Notes bar) and the info panel's "linked from" count, which the Related tab replaces; old settings files still load.
+
 ## 0.11.0
 
 ### Minor Changes
