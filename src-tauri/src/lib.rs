@@ -29,7 +29,7 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
     let check = MenuItem::with_id(app, "check-updates", "Check for Updates…", true, None::<&str>)?;
     tauri::menu::Menu::with_items(app, &[
         &Submenu::with_items(app, "velo", true, &[
-            &P::about(app, None, None)?, &check, &P::separator(app)?, &P::hide(app, None)?, &P::hide_others(app, None)?,
+            &crate::commands::about_item(app)?, &check, &P::separator(app)?, &P::hide(app, None)?, &P::hide_others(app, None)?,
             &P::show_all(app, None)?, &P::separator(app)?, &quit,
         ])?,
         &Submenu::with_items(app, "Edit", true, &[
@@ -41,7 +41,15 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // first plugin, as its docs ask: launching velo again (common once the close button only hides it) shows the
+    // running window instead of starting a second process on the same notes. Not on macOS: LaunchServices keeps one
+    // instance and RunEvent::Reopen shows it, and the plugin's socket in shared /tmp could be squatted to block launch.
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
+        commands::show_main(app);
+    }));
+    builder
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -57,10 +65,8 @@ pub fn run() {
             {
                 app.set_menu(build_menu(app.handle())?)?;
                 app.on_menu_event(|app, ev| {
-                    if ev.id() == "quit"
-                        && let Some(w) = app.get_webview_window("main")
-                    {
-                        w.close().ok();
+                    if ev.id() == "quit" {
+                        commands::quit(app);
                     }
                     if ev.id() == "check-updates" {
                         use tauri::Emitter;
@@ -75,7 +81,7 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)?;
             let settings_path = config_dir.join("settings.json");
             let settings = settings::load(&settings_path);
-            let (dir, globals) = (settings.notes_dir.clone(), settings.global_bindings());
+            let (dir, globals, icon) = (settings.notes_dir.clone(), settings.global_bindings(), settings.app_icon.clone());
             app.manage(commands::AppState {
                 settings: Mutex::new(settings),
                 vault: Mutex::new(None),
@@ -86,6 +92,8 @@ pub fn run() {
                 open_gen: Default::default(),
                 locked: Default::default(),
                 capture_was_hidden: Default::default(),
+                quitting: Default::default(),
+                icon_mode: Mutex::new("dock".into()), // apply_app_icon sets it at the end of setup
                 settings_path,
                 data_dir,
             });
@@ -128,6 +136,17 @@ pub fn run() {
                 if let Err(e) = commands::register_global(&h, action, &binding) {
                     eprintln!("velo: {action:?} hotkey not registered: {e}");
                 }
+            }
+            // "none" leans on the Show/hide hotkey alone: if it did not register (taken by another app), fall back for
+            // this session. Linux falls back to the taskbar: a tray needs libappindicator and a desktop that shows it.
+            let live = commands::hotkey_only_ok(&app.state::<commands::AppState>().settings.lock().unwrap(), |k| commands::hotkey_live(&h, k));
+            let icon = match icon.as_str() {
+                "none" if !live && cfg!(target_os = "linux") => "dock",
+                "none" if !live => "tray",
+                m => m,
+            };
+            if let Err(e) = commands::apply_app_icon(&h, icon) {
+                eprintln!("velo: app icon mode not applied: {e}");
             }
             app.manage(Mutex::new(update::UpdateState::default()));
             update::spawn_checker(h.clone());
@@ -176,12 +195,19 @@ pub fn run() {
             commands::agent_setup_command,
             commands::setup_passphrase,
             commands::identity_file_exists,
+            commands::close_requested,
+            commands::quit_app,
             update::check_update,
             update::install_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while running velo")
         .run(|app, ev| {
+            // macOS: opening velo again (Finder, Spotlight, Dock) brings back a window the close button hid
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = ev {
+                commands::show_main(app);
+            }
             if let tauri::RunEvent::Exit = ev {
                 // the process exits without dropping state: drop the vault so an interrupted bulk re-index ends here
                 drop(app.state::<commands::AppState>().vault.lock().map(|mut v| v.take()));

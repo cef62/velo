@@ -8,7 +8,7 @@ export function clampFont(raw: string, fallback: number): number {
   return raw.trim() === "" || !Number.isFinite(n) ? fallback : Math.min(FONT_MAX, Math.max(FONT_MIN, n));
 }
 
-export interface SettingsForm { layout: string; fontSize: string; theme: string; palette: string; writeFrontMatter: boolean; autoUpdateCheck: boolean; agentAccess: boolean; captureTarget: string; inboxTitle: string; shortcuts: Record<Action, string> }
+export interface SettingsForm { layout: string; fontSize: string; theme: string; palette: string; appIcon: string; writeFrontMatter: boolean; autoUpdateCheck: boolean; agentAccess: boolean; captureTarget: string; inboxTitle: string; shortcuts: Record<Action, string> }
 
 /** Form values -> Settings, keeping `cur` where input is blank or invalid. notes_dir is untouched. */
 export function toSettings(cur: Settings, f: SettingsForm): Settings {
@@ -24,8 +24,12 @@ export function toSettings(cur: Settings, f: SettingsForm): Settings {
     inbox_title: f.inboxTitle.trim() || "Inbox",
     theme: f.theme === "system" || f.theme === "light" || f.theme === "dark" ? f.theme : cur.theme,
     palette: Object.keys(palettes).includes(f.palette) ? f.palette : cur.palette,
+    app_icon: f.appIcon === "dock" || f.appIcon === "tray" || f.appIcon === "none" ? f.appIcon : cur.app_icon,
   };
 }
+
+/** "Hotkey only" with no Show/hide hotkey would leave velo unreachable once hidden. */
+export const unreachable = (f: Pick<SettingsForm, "appIcon" | "shortcuts">) => f.appIcon === "none" && f.shortcuts.toggle_window === NONE;
 
 // Keys with fixed meanings in the UI; they can't be the key of a binding.
 const FIXED = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", "Tab"];

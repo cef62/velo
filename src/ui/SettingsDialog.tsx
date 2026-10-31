@@ -5,8 +5,8 @@ import type { Settings } from "../api";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { Button, Checkbox, Dialog, IconButton, Input, Kbd, SegmentGroup, Tabs } from "@/components/ui";
-import { clampFont, recorderStep, toSettings } from "../settingsform";
-import { DEFAULTS, LABELS, formatBinding, resolve, type Action } from "../shortcuts";
+import { clampFont, recorderStep, toSettings, unreachable } from "../settingsform";
+import { DEFAULTS, LABELS, NONE, formatBinding, resolve, type Action } from "../shortcuts";
 import { PalettePicker } from "./PalettePicker";
 import { conflictsOf } from "./settingsModel";
 import { platform } from "./platform";
@@ -53,6 +53,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
     layout: cur.layout as string,
     theme: cur.theme as string,
     palette: cur.palette ?? "clear",
+    appIcon: (cur.app_icon ?? "dock") as string,
     fontSize: String(cur.font_size),
     writeFrontMatter: cur.write_front_matter !== false,
     autoUpdateCheck: cur.auto_update_check !== false,
@@ -77,6 +78,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
 
   const conflicts = conflictsOf(d.shortcuts);
   const nConflicts = new Set(Object.keys(conflicts).map((a) => d.shortcuts[a as Action])).size;
+  const noHotkey = unreachable(d);
   const setKey = (a: Action, v: string) => set({ shortcuts: { ...d.shortcuts, [a]: v } });
 
   // While recording the dialog owns the keys: capture phase, before Ark's Esc handling and the app's shortcuts.
@@ -98,7 +100,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
   }, [recording, isMac]);
 
   const save = async () => {
-    if (nConflicts || saving) return;
+    if (nConflicts || noHotkey || saving) return;
     setSaving(true);
     setMsg(await controller.saveSettings(toSettings({ ...cur, notes_dir: d.notes_dir }, d)));
     setSaving(false);
@@ -107,10 +109,10 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
     const dir = await platform.chooseDirectory();
     if (dir) set({ notes_dir: dir });
   };
-  const seg = (label: string, value: string, items: [string, string][], on: (v: string) => void) => (
+  const seg = (label: string, value: string, items: [string, string, boolean?][], on: (v: string) => void) => (
     <SegmentGroup.Root size="sm" value={value} onValueChange={(x) => x.value && on(x.value)} aria-label={label}>
       <SegmentGroup.Indicator />
-      <SegmentGroup.Items items={items.map(([v, l]) => ({ value: v, label: l }))} />
+      <SegmentGroup.Items items={items.map(([v, l, disabled]) => ({ value: v, label: l, disabled }))} />
     </SegmentGroup.Root>
   );
   const kbdOn = { background: "transparent", color: "inherit", boxShadow: "none" } as const;
@@ -175,6 +177,18 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
           <div className={frow}>
             <label className={flab} htmlFor="set-inbox">Inbox note</label>
             <Input id="set-inbox" value={d.inboxTitle} placeholder="Inbox" onChange={(e) => set({ inboxTitle: e.target.value })} spellCheck={false} autoComplete="off" className={css({ w: "200px" })} />
+          </div>
+          <div className={frow}>
+            <span className={flab}>Show velo in</span>
+            <div className={css({ display: "flex", flexDirection: "column", gap: "1.5" })}>
+              {seg("Show velo in", d.appIcon, [["dock", isMac ? "Dock" : "Taskbar"], ["tray", isMac ? "Menu bar" : "System tray"], ["none", "Hotkey only", d.shortcuts.toggle_window === NONE && d.appIcon !== "none"]], (v) => set({ appIcon: v }))}
+              {d.appIcon !== "dock" && (
+                <span className={help}>
+                  {d.shortcuts.toggle_window === NONE ? "Set a Show / hide velo shortcut to bring velo back." : <>Closing the window hides velo; {formatBinding(d.shortcuts.toggle_window, isMac)} brings it back.</>}
+                  {d.appIcon === "none" && " Quit from the command palette."}
+                </span>
+              )}
+            </div>
           </div>
           <div className={frow}>
             <span className={flab}>Updates</span>
@@ -260,11 +274,13 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
       <div className={css({ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "2", px: "5", py: "3.5", borderTop: "1px solid", borderColor: "velo.divider" })}>
         {nConflicts > 0 ? (
           <span className={ferr} style={{ marginRight: "auto" }}>{nConflicts} conflict{nConflicts > 1 ? "s" : ""} — fix it to save</span>
+        ) : noHotkey ? (
+          <span className={ferr} style={{ marginRight: "auto" }}>Hotkey only needs a Show / hide velo shortcut</span>
         ) : (
           msg && <span className={ferr} role="alert" style={{ marginRight: "auto" }}><CircleAlert aria-hidden />{msg}</span>
         )}
         <Button variant="outline" onClick={() => controller.closeSettings()}>Cancel</Button>
-        <Button colorPalette="green" disabled={nConflicts > 0 || saving} onClick={() => void save()}>Save <Kbd {...kbdOn}>{isMac ? "⌘↩" : "Ctrl+↩"}</Kbd></Button>
+        <Button colorPalette="green" disabled={nConflicts > 0 || noHotkey || saving} onClick={() => void save()}>Save <Kbd {...kbdOn}>{isMac ? "⌘↩" : "Ctrl+↩"}</Kbd></Button>
       </div>
     </div>
   );
