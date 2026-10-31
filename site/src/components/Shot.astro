@@ -1,0 +1,23 @@
+---
+// Drop docs/media/<name>.png into the repo and it shows up here; until then a placeholder box.
+interface Props {
+  name: string;
+  alt: string;
+}
+const { name, alt } = Astro.props;
+const shots = import.meta.glob<ImageMetadata>('../../../docs/media/*.png', {
+  eager: true,
+  import: 'default',
+});
+const img = shots[`../../../docs/media/${name}.png`];
+---
+
+{
+  img ? (
+    <img class="shot" src={img.src} width={img.width} height={img.height} alt={alt} loading="lazy" />
+  ) : (
+    <div class="shot shot-missing" role="img" aria-label={alt}>
+      <span>{name}.png</span>
+    </div>
+  )
+}

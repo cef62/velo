@@ -8,5 +8,5 @@ export default defineConfig({
       "styled-system": fileURLToPath(new URL("./styled-system", import.meta.url)),
     },
   },
-  test: { exclude: [...configDefaults.exclude, "styled-system/**"] },
+  test: { exclude: [...configDefaults.exclude, "styled-system/**", "site/**"] },
 });
