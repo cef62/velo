@@ -1,7 +1,5 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
-    "ignoreDeprecations": "6.0",
     "paths": { "@/*": ["./src/*"], "styled-system/*": ["./styled-system/*"] },
     "target": "ES2020",
     "useDefineForClassFields": true,
