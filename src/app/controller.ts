@@ -771,11 +771,18 @@ export class Controller {
 
   async enter(force = false, checklist = false) {
     if (this.store.get().paneMode === "tasks") {
-      // the field filters tasks here: Enter opens the first one shown, never creates a note
+      // the field filters tasks here: Enter opens the first one shown; with none shown, or with Shift/Alt, it opens or creates the note as typed
       await settled(() => this.tasksLoading);
       const v = this.store.get().taskView;
       const first = v && [...v.overdue, ...v.today, ...v.upcoming, ...v.no_date, ...v.done][0];
-      if (first) await this.openTask(first);
+      if (first && !force) return void (await this.openTask(first));
+      const q = this.store.get().query.trim();
+      if (!q || (!force && (!v || this.tasksFailed))) return; // unknown view: a matching task may be hidden
+      try {
+        await this.openTitle(q, "enter", checklist); // the note list is stale in this mode: the backend finds an exact title
+      } catch (e) {
+        this.setErr(errText(e));
+      }
       return;
     }
     if (this.store.get().paneMode === "timeline") {
@@ -1418,6 +1425,7 @@ export class Controller {
   }
 
   protected tasksLoading: Promise<void> = Promise.resolve(); // latest task load, awaited by Enter in Tasks mode
+  protected tasksFailed = false; // the latest task load failed: taskView is stale, so Enter must not create a note from it
   protected badgeStale = false; // a full load did not land: the next one recomputes the badge even when only the filter changed
   protected async doLoadTasks(filterOnly: boolean) {
     this.tasksDay = localToday();
@@ -1425,6 +1433,7 @@ export class Controller {
     const fresh = this.newTasksReq();
     try {
       const v = await this.api.tasks(query, selectedTags, showDone);
+      if (fresh()) this.tasksFailed = false;
       // the badge must not change while typing a search: count from an unfiltered view, and only when notes changed (not per keystroke)
       const filtered = !!query.trim() || selectedTags.length > 0;
       if (!filterOnly) this.badgeStale = true;
@@ -1435,6 +1444,7 @@ export class Controller {
       this.store.set({ taskView: v, dueCount: due });
       await this.api.setBadge(due);
     } catch (e) {
+      if (fresh()) this.tasksFailed = true;
       if (e !== "indexing") console.error("tasks refresh failed", e);
     }
   }

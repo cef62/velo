@@ -54,7 +54,7 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 
 Right-click a note in the list (or press the Menu key / Shift+F10 on the highlighted row; Shift+F10 can be changed in Settings → Keyboard shortcuts as "Open context menu") for a menu: open, rename, lock/unlock, copy `[[link]]`, show in Finder/Explorer, move to Trash. It opens the note first, so no menu appears if the switch is refused.
 
-Fixed: Enter (in search) opens the highlighted note, or creates a note titled with the query when nothing matches; Shift+Enter creates a note titled exactly as typed (or opens that exact title if it exists); Alt+Enter (⌥↩) does the same and starts the new note with an empty `- [ ]` task; ↑ / ↓ move the selection; Esc (in editor) returns to search.
+Fixed: Enter (in search) opens the highlighted note, or creates a note titled with the query when nothing matches; Shift+Enter creates a note titled exactly as typed (or opens that exact title if it exists); Alt+Enter (⌥↩) does the same and starts the new note with an empty `- [ ]` task; in Tasks, Enter opens the first task shown, or (when no task matches) opens or creates the note titled with the query, and Shift+Enter / ⌥↩ work as above; ↑ / ↓ move the selection; Esc (in editor) returns to search.
 
 ## Tags
 
