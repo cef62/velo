@@ -87,7 +87,7 @@ export const recipes: Recipe[] = [
     shot: 'recipe-tasks',
     clip: 'clip-tasks',
     steps: [
-      { keys: 'toggle_tasks', result: 'The left pane switches to Tasks: open tasks grouped Overdue, Today, Upcoming and No date, each with its note.' },
+      { keys: 'toggle_tasks', result: 'The left pane switches to Tasks: open tasks grouped Overdue, Today, Upcoming and No date, then under one heading per note.' },
       { keys: 'focus_search', text: 'lantern', result: 'Tasks follow the search box: only tasks whose text or note matches stay.' },
       { keys: ENTER, result: 'In the search box, Enter opens the first task shown: its note opens with the cursor on that line.' },
       { keys: ['Space', 'Space'], act: 'on a focused task row (click a row first: the editor now has focus and Tab indents there; in the list ↑/↓ move), or click its checkbox', result: 'The task is ticked, with its <code>@done</code> date, and “Ticked · Undo” shows under the list. Enter on a focused row opens its note.' },

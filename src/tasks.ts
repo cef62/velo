@@ -62,3 +62,14 @@ export const dueInputRule = EditorView.inputHandler.of((view, from, to, text) =>
   view.dispatch({ changes: { from: from - 4, to, insert: r.insert }, selection: { anchor: from - 4 + r.insert.length }, userEvent: "input.type" });
   return true;
 });
+
+/** Tasks grouped by note, in the order each note's first task appears (keeps the backend's sort). */
+export function byNote<T extends { path: string; title: string }>(items: T[]): { path: string; title: string; items: T[] }[] {
+  const groups = new Map<string, { path: string; title: string; items: T[] }>();
+  for (const t of items) {
+    const g = groups.get(t.path) ?? { path: t.path, title: t.title, items: [] };
+    g.items.push(t);
+    groups.set(t.path, g);
+  }
+  return [...groups.values()];
+}

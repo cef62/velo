@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { TASK_ITEM } from "./preview";
 import { Text } from "@codemirror/state";
-import { dueRule, localToday, toggleTaskAt, toggleTaskLine } from "./tasks";
+import { byNote, dueRule, localToday, toggleTaskAt, toggleTaskLine } from "./tasks";
 import fixture from "../tests/fixtures/task-toggle.json";
 
 test("task items the preview can toggle", () => {
@@ -33,4 +33,11 @@ test("toggleTaskAt: the whole-line change for the line holding pos (rich checkbo
   expect(toggleTaskAt(doc, l2.from + 3, "2026-10-27")).toEqual({ from: l2.from, to: l2.to, insert: "- [x] buy milk @done(2026-10-27)" });
   expect(toggleTaskAt(doc, l3.from + 3, "2026-10-27")).toEqual({ from: l3.from, to: l3.to, insert: "- [ ] done" });
   expect(toggleTaskAt(doc, doc.line(4).from, "2026-10-27")).toBeNull();
+});
+
+test("byNote groups by path in first-appearance order", () => {
+  const t = (path: string, text: string) => ({ path, title: path.toUpperCase(), text });
+  const g = byNote([t("b", "1"), t("a", "2"), t("b", "3")]);
+  expect(g.map((x) => [x.title, x.items.map((i) => i.text)])).toEqual([["B", ["1", "3"]], ["A", ["2"]]]);
+  expect(byNote([])).toEqual([]);
 });
