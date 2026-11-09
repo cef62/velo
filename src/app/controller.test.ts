@@ -1137,27 +1137,44 @@ test("unticking a done task offers 'Unticked' undo", async () => {
   expect(store.get().tickUndo?.unticked).toBe(true);
 });
 
-test("Enter in Tasks mode opens the first visible task, never creates a note", async () => {
+test("Enter in Tasks mode opens the first visible task; Shift/Alt+Enter create the note as typed", async () => {
   const { c, api, store, editor } = setup({ A: "x\n- [ ] a", B: "- [ ] b" });
   api.tasks.mockResolvedValue({ ...view(1), today: [task("B", 0, "- [ ] b")], no_date: [task("A", 1, "- [ ] a")] });
   c.setPaneMode("tasks");
-  c.setQuery("zzz");
+  c.setQuery("groceries");
   await settle();
   await c.enter();
-  await c.enter(true, true);
   expect(api.openOrCreate).not.toHaveBeenCalled();
   expect(store.get().openPath).toBe(P("B"));
-  expect(editor.revealed).toEqual([0, 0]);
+  expect(editor.revealed).toEqual([0]);
+  await c.enter(true, true);
+  expect(api.openOrCreate).toHaveBeenCalledWith("groceries");
+  expect(store.get().openPath).toBe(P("groceries"));
+  expect(editor.appended).toEqual(["- [ ] "]);
 });
 
-test("Enter in Tasks mode with no tasks does nothing", async () => {
-  const { c, api, editor } = setup();
+test("Enter in Tasks mode with no matching task creates the note, or opens the exact title", async () => {
+  const { c, api, store, editor } = setup({ B: "b" });
   c.setPaneMode("tasks");
-  c.setQuery("zzz");
+  c.setQuery("  New one ");
   await settle();
+  await c.enter();
+  expect(api.openOrCreate).toHaveBeenLastCalledWith("New one");
+  expect(store.get().openPath).toBe(P("New one"));
+  c.setQuery("B");
+  await settle();
+  await c.enter();
+  expect(store.get().openPath).toBe(P("B"));
+  expect(editor.revealed).toEqual([]);
+});
+
+test("Enter in Tasks mode with an empty search does nothing", async () => {
+  const { c, api } = setup();
+  c.setPaneMode("tasks");
+  await settle();
+  await c.enter();
   await c.enter(true);
   expect(api.openOrCreate).not.toHaveBeenCalled();
-  expect(editor.revealed).toEqual([]);
 });
 
 test("refreshIfNewDay reloads tasks only after the day changed", async () => {

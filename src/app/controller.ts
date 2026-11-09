@@ -771,11 +771,18 @@ export class Controller {
 
   async enter(force = false, checklist = false) {
     if (this.store.get().paneMode === "tasks") {
-      // the field filters tasks here: Enter opens the first one shown, never creates a note
+      // the field filters tasks here: Enter opens the first one shown; with none shown, or with Shift/Alt, it opens or creates the note as typed
       await settled(() => this.tasksLoading);
       const v = this.store.get().taskView;
       const first = v && [...v.overdue, ...v.today, ...v.upcoming, ...v.no_date, ...v.done][0];
-      if (first) await this.openTask(first);
+      if (first && !force) return void (await this.openTask(first));
+      const q = this.store.get().query.trim();
+      if (!q) return;
+      try {
+        await this.openTitle(q, "enter", checklist); // the note list is stale in this mode: the backend finds an exact title
+      } catch (e) {
+        this.setErr(errText(e));
+      }
       return;
     }
     if (this.store.get().paneMode === "timeline") {
