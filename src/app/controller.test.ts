@@ -1168,6 +1168,18 @@ test("Enter in Tasks mode with no matching task creates the note, or opens the e
   expect(editor.revealed).toEqual([]);
 });
 
+test("Enter in Tasks mode never creates a note from a view whose reload failed", async () => {
+  const { c, api } = setup();
+  c.setPaneMode("tasks");
+  c.setQuery("groceriesX");
+  await settle();
+  api.tasks.mockRejectedValueOnce("disk error");
+  c.setQuery("groceries");
+  await settle();
+  await c.enter();
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+});
+
 test("Enter in Tasks mode with an empty search does nothing", async () => {
   const { c, api } = setup();
   c.setPaneMode("tasks");
