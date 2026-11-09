@@ -44,11 +44,13 @@ pub struct Settings {
     /// where velo shows itself: "dock" (Dock/taskbar) | "tray" (menu bar/system tray) | "none" (global hotkey only);
     /// anything else reads as "dock"
     pub app_icon: String,
+    /// Tasks pane: group each date section's tasks under one heading per note
+    pub tasks_by_note: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into(), agent_access: false, saved_searches: vec![], timeline_sort: "updated".into(), palette: "clear".into(), app_icon: "dock".into() }
+        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into(), agent_access: false, saved_searches: vec![], timeline_sort: "updated".into(), palette: "clear".into(), app_icon: "dock".into(), tasks_by_note: true }
     }
 }
 
@@ -204,11 +206,12 @@ mod tests {
     #[test] fn settings_defaults_and_roundtrip() {
         let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");
         let s = load(&p); assert_eq!(s.toggle_window_binding(), "Mod+Shift+Space"); assert_eq!(s.layout, "vertical");
-        assert!(s.write_front_matter && !s.show_front_matter && !s.info_panel && s.auto_update_check);
+        assert!(s.write_front_matter && !s.show_front_matter && !s.info_panel && s.auto_update_check && s.tasks_by_note);
+        std::fs::write(&p, r#"{"font_size":16}"#).unwrap(); assert!(load(&p).tasks_by_note, "files from before the setting group by note");
         std::fs::write(&p, "{not json").unwrap(); assert_eq!(load(&p).font_size, 14);
-        let mut s2 = s.clone(); s2.font_size = 18; s2.write_front_matter = false; s2.info_panel = true; s2.sort = "title".into(); s2.shortcuts.insert("rename".into(), "Mod+KeyR".into());
+        let mut s2 = s.clone(); s2.font_size = 18; s2.write_front_matter = false; s2.info_panel = true; s2.tasks_by_note = false; s2.sort = "title".into(); s2.shortcuts.insert("rename".into(), "Mod+KeyR".into());
         save(&p, &s2).unwrap();
-        let back = load(&p); assert_eq!((back.font_size, back.sort.as_str()), (18, "title")); assert_eq!(back.shortcuts, s2.shortcuts); assert!(!back.write_front_matter && back.info_panel);
+        let back = load(&p); assert_eq!((back.font_size, back.sort.as_str()), (18, "title")); assert_eq!(back.shortcuts, s2.shortcuts); assert!(!back.write_front_matter && back.info_panel && !back.tasks_by_note);
     }
     #[test] fn palette_defaults_and_validates() {
         let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");

@@ -89,7 +89,7 @@ export function resetDemo(pin?: Date) {
   settings = {
     notes_dir: DIR, layout: "horizontal", font_size: 14, sort: "modified", editor_style: "rich", theme: urlTheme(), shortcuts: {},
     write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: false, capture_target: "inbox",
-    inbox_title: "Inbox", agent_access: false, timeline_sort: "updated", palette: urlPalette(), app_icon: "dock", // ?palette=<slug>
+    inbox_title: "Inbox", agent_access: false, timeline_sort: "updated", palette: urlPalette(), app_icon: "dock", tasks_by_note: true, // ?palette=<slug>
     saved_searches: [
       { name: "Work", query: "", tags: ["work"], no_links: false },
       { name: "Travel plans", query: "", tags: ["travel"], no_links: false },
@@ -344,7 +344,7 @@ export const tasks = async (query: string, tags: string[], showDone: boolean): P
       const done_on = /@done\((\d{4}-\d{2}-\d{2})\)/.exec(l)?.[1] ?? null;
       const text = l.slice(m[0].length).replace(/\s*📅 \d{4}-\d{2}-\d{2}/g, "").replace(/\s*@done\(\d{4}-\d{2}-\d{2}\)/g, "").trim();
       const item = { path: n.path, title: titleOf(n.path), line: skip + i, text, due, done: m[2] !== " ", done_on, line_text: l };
-      if (terms.every((t) => fold(`${item.title}\n${text}`).includes(t))) all.push(item);
+      if (text && terms.every((t) => fold(`${item.title}\n${text}`).includes(t))) all.push(item); // an empty box is not listed, as in Rust group_tasks
     });
   }
   const open = all.filter((t) => !t.done);

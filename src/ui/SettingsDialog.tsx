@@ -56,6 +56,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
     appIcon: (cur.app_icon ?? "dock") as string,
     fontSize: String(cur.font_size),
     writeFrontMatter: cur.write_front_matter !== false,
+    tasksByNote: cur.tasks_by_note !== false,
     autoUpdateCheck: cur.auto_update_check !== false,
     agentAccess: cur.agent_access === true,
     captureTarget: cur.capture_target === "daily" ? "daily" : "inbox",
@@ -167,6 +168,14 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
             <Checkbox.Root checked={d.writeFrontMatter} onCheckedChange={(x) => set({ writeFrontMatter: x.checked === true })} size="sm">
               <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
               <Checkbox.Label>Add created/modified dates to notes (front matter)</Checkbox.Label>
+              <Checkbox.HiddenInput />
+            </Checkbox.Root>
+          </div>
+          <div className={frow}>
+            <span className={flab}>Tasks</span>
+            <Checkbox.Root checked={d.tasksByNote} onCheckedChange={(x) => set({ tasksByNote: x.checked === true })} size="sm">
+              <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+              <Checkbox.Label>Group tasks by note</Checkbox.Label>
               <Checkbox.HiddenInput />
             </Checkbox.Root>
           </div>

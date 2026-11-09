@@ -120,7 +120,8 @@ pub fn group_tasks(rows: Vec<TaskRow>, query: &str, show_done: bool, today: &str
     let q = fold(query);
     let q = q.trim();
     let cutoff = chrono::NaiveDate::parse_from_str(today, "%Y-%m-%d").ok().map(|d| (d - chrono::Days::new(7)).to_string());
-    let mut rows: Vec<TaskRow> = rows.into_iter().filter(|r| q.is_empty() || fold(&r.text).contains(q) || fold(&r.title).contains(q)).collect();
+    // an empty `- [ ]` is a box not yet written: nothing to list
+    let mut rows: Vec<TaskRow> = rows.into_iter().filter(|r| !r.text.is_empty()).filter(|r| q.is_empty() || fold(&r.text).contains(q) || fold(&r.title).contains(q)).collect();
     // Undated after dated; ties: newest note, then position.
     rows.sort_by(|a, b| (a.due.is_none(), &a.due, std::cmp::Reverse(a.modified), &a.path, a.line).cmp(&(b.due.is_none(), &b.due, std::cmp::Reverse(b.modified), &b.path, b.line)));
     let mut v = TaskView::default();
@@ -197,6 +198,14 @@ mod tests {
         let rows = || vec![done("recent", "2026-10-21"), done("old", "2026-10-19"), done("edge", "2026-10-20"), TaskRow { done: true, ..row("n", "undated", None, 1) }];
         assert_eq!(texts(&group_tasks(rows(), "", true, "2026-10-27").done), ["recent"]);
         assert!(group_tasks(rows(), "", false, "2026-10-27").done.is_empty());
+    }
+
+    #[test]
+    fn empty_tasks_are_not_listed() {
+        let v = group_tasks(vec![row("n", "", None, 1), row("n", "", Some("2026-10-20"), 2), row("n", "a", None, 3)], "", false, "2026-10-27");
+        assert_eq!(texts(&v.no_date), ["a"]);
+        assert!(v.overdue.is_empty());
+        assert_eq!(v.due_count, 0);
     }
 
     #[test]
