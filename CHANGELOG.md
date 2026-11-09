@@ -1,5 +1,15 @@
 # velo
 
+## 0.15.0
+
+### Minor Changes
+
+- a06ba5c: Grouped tasks by note under each date section, with foldable note headings and task counts; long tasks now wrap to two lines and empty `- [ ]` boxes are no longer listed. Turn the grouping off in Settings › General › Tasks.
+
+### Patch Changes
+
+- 994f374: Pressing Enter in the search box with Tasks open now creates a note titled with the query (or opens that note) when no task matches, and Shift+Enter / ⌥↩ create notes there as they do in Notes.
+
 ## 0.14.0
 
 ### Minor Changes
