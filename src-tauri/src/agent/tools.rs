@@ -67,7 +67,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "list_tasks",
-        description: "The Tasks view: open tasks from all notes grouped as overdue, today, upcoming, no_date (and done = ticked in the last 7 days when `show_done`), plus due_count (overdue + today). `query` filters task or note text, `tags` keeps notes having every tag. Each task has title (note), text, due, line, line_text (pass line and line_text to set_task_done).",
+        description: "The Tasks view: open tasks from all notes (empty `- [ ]` boxes are not listed) grouped as overdue, today, upcoming, no_date (and done = ticked in the last 7 days when `show_done`), plus due_count (overdue + today). `query` filters task or note text, `tags` keeps notes having every tag. Each task has title (note), text, due, line, line_text (pass line and line_text to set_task_done).",
         input_schema: r#"{"type":"object","properties":{"query":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"show_done":{"type":"boolean"}}}"#,
     },
     ToolSpec {
