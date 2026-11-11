@@ -995,6 +995,11 @@ mod window_tests {
         assert_eq!(reset_placement(&area(0, 0, 3840, 2080), 2.0, (1000.0, 700.0), (600.0, 400.0), (16, 78), 2.0), (456.0, 150.5, 1000.0, 700.0));
     }
 
+    #[test] fn reset_divides_the_work_area_by_the_monitor_scale_and_the_frame_by_the_window_scale() {
+        // monitor at 200%, window still at 100% (mixed DPI): work area 1920x1080 logical, frame 16 x 60 logical
+        assert_eq!(reset_placement(&area(0, 0, 3840, 2160), 2.0, (1000.0, 700.0), (600.0, 400.0), (16, 60), 1.0), (452.0, 160.0, 1000.0, 700.0));
+    }
+
     #[test] fn reset_shrinks_to_a_small_work_area_but_not_below_the_minimum() {
         assert_eq!(reset_placement(&area(0, 0, 800, 600), 1.0, (1000.0, 700.0), (600.0, 400.0), (0, 30), 1.0), (0.0, 0.0, 800.0, 570.0));
         // smaller than the minimum: the minimum wins and the top-left stays on screen
