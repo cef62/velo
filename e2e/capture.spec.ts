@@ -98,6 +98,13 @@ test("screenshots", async ({ browser }) => {
   await step("search", {}, (p) => search(p, "lantern"));
   await step("tags", {}, async (p) => (await keys(p, "Meta+Shift+KeyT"), await chip(p, "#recipes")));
   await step("saved-searches", {}, async (p) => (await keys(p, "Meta+Shift+KeyT"), await chip(p, "Travel plans")));
+  await step("tasks", {}, (p) => keys(p, "Meta+Shift+KeyX"));
+  // a non-default palette, picked live in Settings › Appearance (Cancel would put the saved look back)
+  await step("appearance", {}, async (p) => {
+    await keys(p, "Meta+Comma");
+    await p.getByRole("tab", { name: "Appearance" }).click();
+    await p.getByRole("radio", { name: /^Paper:/ }).click();
+  });
   await step("timeline", {}, (p) => keys(p, "Meta+Shift+KeyL"));
   await step("export", {}, async (p) => (await keys(p, "Meta+Shift+KeyL"), await p.getByRole("button", { name: "Export…" }).click()));
   await step("related", {}, async (p) => (await openNote(p, "Learning Rust"), await keys(p, "Meta+Shift+KeyC")));
