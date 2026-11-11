@@ -170,19 +170,10 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
         downloaded.store(true, Ordering::Relaxed);
         log::line("update download done; verifying and installing");
         app.emit("update-installing", ()).ok();
+        // Windows: the install step that follows ends the process (std::process::exit), so RunEvent::Exit and the
+        // plugin's save never run. Saved after the download, so moves made during it count; waits for the main thread.
+        crate::commands::save_window(app).recv().ok();
     };
-    // Windows: the installer ends the process inside download_and_install (std::process::exit), so RunEvent::Exit and
-    // the window-state save never run. Saved on the main thread: off it, the save would hold the plugin's lock while
-    // waiting for the main thread to read the window, and a Moved event there waits for that lock.
-    let (tx, rx) = std::sync::mpsc::channel();
-    let h = app.clone();
-    if app.run_on_main_thread(move || {
-        use tauri_plugin_window_state::AppHandleExt;
-        h.save_window_state(crate::commands::WINDOW_STATE).ok();
-        tx.send(()).ok();
-    }).is_ok() {
-        rx.recv().ok();
-    }
     let result = update.download_and_install(on_chunk, on_finish).await;
     let mut st = state(app);
     st.busy = false;

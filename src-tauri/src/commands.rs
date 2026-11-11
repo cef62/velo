@@ -176,10 +176,27 @@ fn notify_changed(app: &AppHandle, changed: Vec<String>) {
     }
 }
 
+/// Every window-state save in velo goes through here (the plugin's own save on RunEvent::Exit runs on the main thread).
+/// Always on the main thread: off it, save_window_state holds the plugin's lock while it waits for the main thread to
+/// read the window, and the plugin's Moved/Resized handlers there wait for that lock. Linux X11 runs hotkey handlers on
+/// their own thread. Inline when already on the main thread, else queued. The receiver yields once the save ran, or
+/// errs if it never will; a failed save is ignored.
+pub fn save_window(app: &AppHandle) -> std::sync::mpsc::Receiver<()> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let h = app.clone();
+    app.run_on_main_thread(move || {
+        h.save_window_state(WINDOW_STATE).ok();
+        tx.send(()).ok();
+    })
+    .ok();
+    rx
+}
+
 fn hide_main(app: &AppHandle) {
     // The plugin writes only on RunEvent::Exit, which a Linux session end never sends; in tray and hotkey-only modes
-    // velo is rarely quit. Saved before hiding, while the window is on screen: the save reads its live geometry.
-    app.save_window_state(WINDOW_STATE).ok();
+    // velo is rarely quit. Saved before hiding, while the window is on screen: the save reads its live geometry. Off
+    // the main thread the save is queued, and the hide below is queued after it on the same FIFO event-loop channel.
+    save_window(app);
     let mode = app.try_state::<AppState>().map(|s| s.icon_mode.lock().unwrap().clone());
     if let Some(w) = app.get_webview_window("main").filter(|_| orders_out(mode.as_deref().unwrap_or("dock"))) {
         w.hide().ok();
@@ -258,66 +275,32 @@ pub fn reset_window(app: &AppHandle) {
     }
 }
 
-/// The reset placement without showing the window (setup uses it too). The position is computed rather than
-/// `center()`ed: on macOS and Linux set_size and unmaximize are queued, so `center()` would use the old frame. The
-/// queues are FIFO, so the move lands after the resize. Logical units throughout: the work area is converted with its
-/// monitor's scale, which is the window's own scale on its current monitor.
+/// The reset placement, for a shown window. The position is computed rather than `center()`ed: on macOS and Linux
+/// set_size and unmaximize are queued, so `center()` would use the old frame. The queues are FIFO, so the move lands
+/// after the resize.
 fn place_default(app: &AppHandle, w: &tauri::WebviewWindow) {
     let Some(c) = app.config().app.windows.iter().find(|c| c.label == "main") else { return };
     let Some(m) = w.current_monitor().ok().flatten().or_else(|| w.primary_monitor().ok().flatten()) else { return };
-    let (s, wa) = (m.scale_factor(), m.work_area());
-    let work = (wa.position.x as f64 / s, wa.position.y as f64 / s, wa.size.width as f64 / s, wa.size.height as f64 / s);
-    // title bar and borders (0 on macOS, whose title bar overlays the content)
-    let ws = w.scale_factor().unwrap_or(s);
     let (outer, inner) = (w.outer_size().unwrap_or_default(), w.inner_size().unwrap_or_default());
-    let frame = (outer.width.saturating_sub(inner.width) as f64 / ws, outer.height.saturating_sub(inner.height) as f64 / ws);
-    let (x, y, width, height) = reset_placement(work, (c.width, c.height), (c.min_width.unwrap_or(0.0), c.min_height.unwrap_or(0.0)), frame);
+    let frame = (outer.width.saturating_sub(inner.width), outer.height.saturating_sub(inner.height));
+    let (s, min) = (m.scale_factor(), (c.min_width.unwrap_or(0.0), c.min_height.unwrap_or(0.0)));
+    let (x, y, width, height) = reset_placement(m.work_area(), s, (c.width, c.height), min, frame, w.scale_factor().unwrap_or(s));
     w.unmaximize().ok();
     w.set_size(tauri::LogicalSize::new(width, height)).ok();
     w.set_position(tauri::LogicalPosition::new(x, y)).ok();
 }
 
-/// Reset placement in a work area `(x, y, width, height)`, all logical: the configured inner `size` shrunk until the
-/// outer frame fits (never below `min`), the outer frame centred, its top-left kept on screen. Returns the outer
-/// top-left and the inner size, as `set_position` and `set_size` take them.
-fn reset_placement(work: (f64, f64, f64, f64), size: (f64, f64), min: (f64, f64), frame: (f64, f64)) -> (f64, f64, f64, f64) {
+/// Reset placement in a monitor's physical work area `wa`, converted with that monitor's scale `s` (the window's own
+/// scale on its current monitor): the configured logical inner `size` shrunk until the outer frame fits (never below
+/// `min`), the outer frame centred, its top-left kept on screen. `frame` is the physical outer minus inner size (title
+/// bar and borders; 0 on macOS, whose title bar overlays the content) at the window's scale `ws`. Returns the logical
+/// outer top-left and inner size, as `set_position` and `set_size` take them.
+fn reset_placement(wa: &tauri::PhysicalRect<i32, u32>, s: f64, size: (f64, f64), min: (f64, f64), frame: (u32, u32), ws: f64) -> (f64, f64, f64, f64) {
+    let work = (wa.position.x as f64 / s, wa.position.y as f64 / s, wa.size.width as f64 / s, wa.size.height as f64 / s);
+    let frame = (frame.0 as f64 / ws, frame.1 as f64 / ws);
     let w = size.0.min(work.2 - frame.0).max(min.0);
     let h = size.1.min(work.3 - frame.1).max(min.1);
     ((work.0 + (work.2 - w - frame.0) / 2.0).max(work.0), (work.1 + (work.3 - h - frame.1) / 2.0).max(work.1), w, h)
-}
-
-/// Whether a saved window (physical outer top-left, physical inner size, as the window-state file keeps them) can
-/// open as saved: its top-left (title bar, macOS traffic lights) is in some monitor's work area and it is no larger
-/// than that work area. `SLACK` covers Windows' invisible resize borders, which put a snapped window's outer edge
-/// a few pixels off screen. A window spanning two monitors still fits if its top-left is on one of them.
-fn fits_on_screen(pos: (i32, i32), size: (u32, u32), work_areas: &[tauri::PhysicalRect<i32, u32>]) -> bool {
-    const SLACK: i64 = 16;
-    work_areas.iter().any(|a| {
-        let (ax, ay, aw, ah) = (a.position.x as i64, a.position.y as i64, a.size.width as i64, a.size.height as i64);
-        let (x, y) = (pos.0 as i64, pos.1 as i64);
-        x >= ax - SLACK && x < ax + aw && y >= ay - SLACK && y < ay + ah
-            && size.0 as i64 <= aw + SLACK && size.1 as i64 <= ah + SLACK
-    })
-}
-
-/// End of setup: the plugin has restored the saved size and position, but nothing clamps them. A size saved on a
-/// larger or denser display, or a spot on a display that is gone, could leave the title bar off screen. Checks the
-/// saved file rather than the window, whose frame on macOS and Linux still has the restore queued; if the saved
-/// window does not fit, queues the reset placement after the restore.
-pub fn clamp_restored_window(app: &AppHandle) {
-    #[derive(serde::Deserialize)]
-    struct Saved { x: i32, y: i32, width: u32, height: u32 }
-    let Some(w) = app.get_webview_window("main") else { return };
-    let Ok(dir) = app.path().app_config_dir() else { return };
-    let saved = std::fs::read(dir.join(app.filename())).ok()
-        .and_then(|b| serde_json::from_slice::<std::collections::HashMap<String, Saved>>(&b).ok())
-        .and_then(|mut m| m.remove("main"))
-        .filter(|s| s.width > 0 && s.height > 0); // the plugin restores nothing for an all-zero entry
-    let Some(s) = saved else { return };
-    let areas: Vec<_> = w.available_monitors().unwrap_or_default().iter().map(|m| *m.work_area()).collect();
-    if !fits_on_screen((s.x, s.y), (s.width, s.height), &areas) {
-        place_default(app, &w);
-    }
 }
 
 #[tauri::command]
@@ -1002,28 +985,20 @@ mod window_tests {
 
     #[test] fn reset_centres_the_outer_frame_in_the_work_area() {
         // macOS: no frame, menu bar 25 pt above the work area
-        assert_eq!(reset_placement((0.0, 25.0, 1512.0, 957.0), (1000.0, 700.0), (600.0, 400.0), (0.0, 0.0)), (256.0, 153.5, 1000.0, 700.0));
+        assert_eq!(reset_placement(&area(0, 25, 1512, 957), 1.0, (1000.0, 700.0), (600.0, 400.0), (0, 0), 1.0), (256.0, 153.5, 1000.0, 700.0));
         // a 30 pt title bar shifts the inner box down, the outer frame stays centred; a second monitor's origin counts
-        assert_eq!(reset_placement((1920.0, 0.0, 1920.0, 1040.0), (1000.0, 700.0), (600.0, 400.0), (0.0, 30.0)), (2380.0, 155.0, 1000.0, 700.0));
+        assert_eq!(reset_placement(&area(1920, 0, 1920, 1040), 1.0, (1000.0, 700.0), (600.0, 400.0), (0, 30), 1.0), (2380.0, 155.0, 1000.0, 700.0));
+    }
+
+    #[test] fn reset_converts_a_2x_work_area_and_frame_to_logical_and_centres_with_side_borders() {
+        // Windows at 200%: 3840x2080 physical work area, 8 px borders each side and a 31 px title bar (16 x 78 physical)
+        assert_eq!(reset_placement(&area(0, 0, 3840, 2080), 2.0, (1000.0, 700.0), (600.0, 400.0), (16, 78), 2.0), (456.0, 150.5, 1000.0, 700.0));
     }
 
     #[test] fn reset_shrinks_to_a_small_work_area_but_not_below_the_minimum() {
-        assert_eq!(reset_placement((0.0, 0.0, 800.0, 600.0), (1000.0, 700.0), (600.0, 400.0), (0.0, 30.0)), (0.0, 0.0, 800.0, 570.0));
+        assert_eq!(reset_placement(&area(0, 0, 800, 600), 1.0, (1000.0, 700.0), (600.0, 400.0), (0, 30), 1.0), (0.0, 0.0, 800.0, 570.0));
         // smaller than the minimum: the minimum wins and the top-left stays on screen
-        assert_eq!(reset_placement((0.0, 0.0, 500.0, 300.0), (1000.0, 700.0), (600.0, 400.0), (0.0, 0.0)), (0.0, 0.0, 600.0, 400.0));
-    }
-
-    #[test] fn a_saved_window_fits_only_if_its_top_left_and_size_are_on_one_monitor() {
-        let laptop = [area(0, 50, 3024, 1914)]; // 2x MacBook, physical
-        assert!(fits_on_screen((400, 200), (2000, 1400), &laptop));
-        assert!(fits_on_screen((-7, 50), (1500, 1800), &laptop), "a Windows snapped window's invisible border");
-        assert!(!fits_on_screen((3100, 200), (2000, 1400), &laptop), "on an unplugged display to the right");
-        assert!(!fits_on_screen((0, 50), (4800, 2800), &laptop), "a size saved on a larger external display");
-        assert!(!fits_on_screen((400, -900), (2000, 1400), &laptop), "title bar above the screen");
-        let two = [area(0, 0, 1920, 1040), area(1920, 0, 1920, 1040)];
-        assert!(fits_on_screen((1500, 100), (1000, 700), &two), "spanning two monitors, title bar on the first");
-        assert!(!fits_on_screen((0, 0), (2000, 1400), &[area(0, 0, 1920, 1040)]), "2x size on a 1x 1080p screen");
-        assert!(!fits_on_screen((0, 0), (100, 100), &[]), "no monitor reported");
+        assert_eq!(reset_placement(&area(0, 0, 500, 300), 1.0, (1000.0, 700.0), (600.0, 400.0), (0, 0), 1.0), (0.0, 0.0, 600.0, 400.0));
     }
 }
 

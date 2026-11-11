@@ -155,7 +155,6 @@ pub fn run() {
             }
             app.manage(Mutex::new(update::UpdateState::default()));
             update::spawn_checker(h.clone());
-            commands::clamp_restored_window(&h); // the window-state restore ran while tauri built the window, before setup
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
