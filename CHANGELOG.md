@@ -1,5 +1,17 @@
 # velo
 
+## 0.16.0
+
+### Minor Changes
+
+- d1a1abb: The editor now lets you scroll the last line up to the top of the window.
+- 285f2fa: Reopened notes at the cursor and scroll position where you left them.
+- b886c75: Remembered the window size, position and maximized state across relaunches, and added Reset window position and size to the tray menu, the macOS menu bar and the command palette.
+
+### Patch Changes
+
+- 285f2fa: Fixed unsaved edits being lost when an agent's rename of another note failed.
+
 ## 0.15.0
 
 ### Minor Changes
