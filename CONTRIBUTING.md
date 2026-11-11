@@ -30,7 +30,7 @@ Run before every commit that finishes a task and before opening a PR. Report the
 
 Every PR gets an adversarial review before merge, on top of CI. The reviewer's job is to break the change, not to approve it.
 
-- **Reviewer:** a fresh agent on the most capable model (or a human), read-only, given the diff, the PR body and an **attack list** written for this change: the inputs, races, failure paths, platforms and upgrade paths most likely to break it. It reads the code the diff touches, not only the diff.
+- **Reviewer:** a fresh agent (or a human), read-only, on Opus for a complex PR (data integrity, security or encryption, concurrency, or many files) and Sonnet for a simple one (docs, copy, small isolated fixes), given the diff, the PR body and an **attack list** written for this change: the inputs, races, failure paths, platforms and upgrade paths most likely to break it. It reads the code the diff touches, not only the diff.
 - **Findings** need a concrete reproduction (input or sequence → wrong result), proven by a test, a script or exact steps. No reproduction, no finding. Severity: **Critical** (data loss, security, broken release), **Major** (wrong behaviour a user will hit), **Minor** (edge case or polish).
 - **Verdict:** FAIL if any Critical or Major finding is open, else PASS. The report goes on the PR as a comment.
 - **FAIL:** fix each finding with a regression test, then a scoped re-review of the fixes plus another adversarial round. Add an extra round whenever a fix goes beyond its finding.
