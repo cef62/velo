@@ -1730,6 +1730,31 @@ test("agent rename racing a notes-folder change: the header never names a note t
   expect(c.busy).toBe(false);
 });
 
+test("agent rename failing to reopen after another note was opened keeps that note's unsaved edits", async () => {
+  const { c, api, editor, notes } = setup({ A: "a", C: "c" });
+  await c.show(P("A"));
+  const claim = deferred<boolean>();
+  api.agentWriteClaim.mockImplementationOnce(() => claim.promise);
+  const rename = c.onAgentWrite({ id: 5, path: P("A"), kind: "rename", summary: "s" });
+  await vi.waitFor(() => expect(api.agentWriteClaim).toHaveBeenCalled());
+  const open = deferred<any>();
+  api.openNote.mockImplementationOnce(() => open.promise);
+  const showing = c.show(P("C")); // busy is still false: passes the guard
+  claim.resolve(true);
+  await rename; // "ready": A suspended, busy
+  open.resolve({ path: P("C"), text: "c", hash: "h:c", locked: false });
+  await showing;
+  expect(editor.currentPath()).toBe(P("C"));
+  editor.replaceText("typed in C"); // the user edits C
+  notes.B = notes.A;
+  delete notes.A;
+  api.openNote.mockRejectedValueOnce(new Error("io"));
+  await c.onAgentWrite({ id: 6, path: P("A"), kind: "renamed", to: P("B") });
+  expect(editor.currentPath()).toBe(P("C"));
+  expect(editor.text).toBe("typed in C");
+  expect(c.busy).toBe(false);
+});
+
 test("agent rename that failed unfreezes the note where it was", async () => {
   const { c, editor } = setup({ A: "a" });
   await c.show(P("A"));

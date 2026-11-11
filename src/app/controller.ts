@@ -2052,8 +2052,12 @@ export class Controller {
           this.loadedDoc(doc);
         }
       } catch (e) {
-        this.editor.discard(); // never resume on the old path: a save would recreate it
-        this.closedDoc();
+        // never resume on the old path: a save would recreate it. Only if the editor still holds `from`: a note
+        // opened since `ready` is not ours to discard.
+        if (this.editor.currentPath() === from) {
+          this.editor.discard();
+          this.closedDoc();
+        }
         this.setErr(errText(e));
       }
     } finally {
