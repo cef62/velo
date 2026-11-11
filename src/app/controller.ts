@@ -1997,7 +1997,7 @@ export class Controller {
       this.editor.discard(); // clean (flushed): nothing is dropped; autosave can't bring the file back
       this.closedDoc();
       this.history.remove(req.path);
-      dropPos(req.path);
+      // no dropPos: the backend trashes after this reply and may fail; the stored position ages out of the LRU
       void this.runSearch(false);
       void this.refreshTitles();
       return "closed";
@@ -2044,8 +2044,9 @@ export class Controller {
       try {
         this.history.rename(from, to);
         const doc = await this.api.openNote(to);
-        // Clean and frozen since `ready`. Refused only if the editor no longer holds `from` (the notes folder
-        // changed meanwhile): then the header must not name `to`, and the editor stays as unload left it.
+        // Clean and frozen since `ready`. Refused only if the editor no longer holds `from`: the notes folder
+        // changed meanwhile, or a `show` of another note landed after `ready`. Then the header must not name `to`,
+        // and the editor stays as it is.
         if (this.editor.rebind(from, doc)) {
           this.editor.resume(); // rebind keeps the freeze
           this.loadedDoc(doc);

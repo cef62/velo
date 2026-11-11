@@ -1678,6 +1678,16 @@ test("agent trash of the open note saves and closes it first", async () => {
   expect(api.agentWriteDone).toHaveBeenCalledWith(3, "closed");
 });
 
+test("agent trash keeps the note's stored position when the backend then fails to trash it", async () => {
+  const { c, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  setPos(P("A"), { h: 1, t: 0, m: 0 });
+  await c.onAgentWrite({ id: 3, path: P("A"), kind: "trash", summary: "s" });
+  expect(editor.currentPath()).toBe(null);
+  await c.onAgentWrite({ id: 4, path: P("A"), kind: "trash-failed", title: "A", error: "Trash unavailable" });
+  expect(getPos(P("A"))).toBeDefined();
+});
+
 test("agent trash refused when the open note can't be saved", async () => {
   const { c, api, editor } = setup({ A: "a" });
   await c.show(P("A"));
@@ -2406,6 +2416,22 @@ test("merge of the open source ends on the target", async () => {
   expect(historyOf(c)).not.toContain(P("S"));
   expect(store.get().merge).toBeNull();
   expect(c.busy).toBe(false);
+});
+
+test("merge keeps both stored positions on failure; success drops only the source's", async () => {
+  const { c, api } = await mergeSetup();
+  setPos(P("S"), { h: 1, t: 0, m: 0 });
+  setPos(P("T"), { h: 2, t: 0, m: 0 });
+  await c.startMerge();
+  await c.chooseMergeTarget(T_ROW);
+  api.mergeNotes.mockRejectedValueOnce("conflict");
+  await c.commitMerge();
+  expect(getPos(P("S"))).toBeDefined();
+  expect(getPos(P("T"))).toBeDefined();
+  api.mergeNotes.mockResolvedValueOnce({ path: P("T"), rewritten: 1, trash_error: null });
+  await c.commitMerge();
+  expect(getPos(P("S"))).toBeUndefined();
+  expect(getPos(P("T"))).toBeDefined();
 });
 
 test("merge with the target open reloads it", async () => {
