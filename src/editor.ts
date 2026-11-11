@@ -1,4 +1,4 @@
-import { Annotation, Compartment, Transaction } from "@codemirror/state";
+import { Annotation, Compartment, EditorSelection, Transaction } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { completionStatus } from "@codemirror/autocomplete";
 import { writingCompletions, type CompleteSource } from "./complete";
@@ -8,6 +8,7 @@ import { dueInputRule, localToday, toggleTaskAt } from "./tasks";
 import { SaveController } from "./saver";
 import { frontMatterHide, ISOLATED, replaceAll, stampSelection, undoHistory } from "./fmhide";
 import { stampChange } from "./frontmatter";
+import { dropPos, clampPos, getPos, renamePos, setPos, type Pos } from "./positions";
 import { openNote, saveNote, type NoteDoc, type NoteMeta } from "./api";
 
 export interface Editor {
@@ -137,14 +138,45 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
   const apply = () => view.dispatch({ effects: editable.reconfigure(EditorView.editable.of(wantEditable && !readOnly)) });
   const setEditable = (on: boolean) => { wantEditable = on; apply(); };
 
+  // Cursor and scroll of the open note. The scroll anchor is the top-visible line and its pixel offset
+  // (what scrollSnapshot() holds, without casting its private value).
+  const snap = (): Pos => {
+    const { anchor: a, head: h } = view.state.selection.main, top = view.scrollDOM.scrollTop - view.documentPadding.top, b = view.lineBlockAtHeight(top);
+    return { a, h, t: b.from, m: Math.round(b.top - top) }; // top: document coordinates, so the editor's own padding drops out
+  };
+  const same = (x: Pos, y: Pos) => x.a === y.a && x.h === y.h && x.t === y.t && x.m === y.m;
+  let base: Pos | null = null; // state right after the last restore: unchanged means nothing worth storing; null while the restored scroll is not applied yet
+  const remember = () => {
+    const path = ctrl.currentPath();
+    if (!path || !base || !view.dom.offsetParent) return; // hidden (preview): the stored scroll is the truth
+    const p = snap();
+    if (!same(p, base)) setPos(path, p);
+  };
+  const restore = (path: string) => {
+    const stored = getPos(path);
+    if (stored) {
+      const p = clampPos(stored, view.state.doc.length);
+      view.dispatch({ selection: EditorSelection.single(p.a, p.h), effects: EditorView.scrollIntoView(p.t, { y: "start", yMargin: p.m }) });
+      base = null;
+      // after CodeMirror's own scheduled measure has applied the scroll
+      requestAnimationFrame(() => { if (ctrl.currentPath() === path) base = snap(); });
+    } else base = snap();
+  };
+
   const ed: Editor = {
     load(doc) {
+      remember(); // the old note is still current here
       if (!ctrl.load(doc)) return false;
       setEditable(true);
+      restore(doc.path);
       return true;
     },
     rebind(fromPath, doc) {
+      remember();
+      const dirty = ctrl.isDirty(); // dirty: the text is kept as it is, so is the caret
       if (!ctrl.rebind(fromPath, doc)) return false;
+      renamePos(fromPath, doc.path);
+      if (!dirty) restore(doc.path);
       return true;
     },
     suspend() {
@@ -160,6 +192,8 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       apply();
     },
     discard() {
+      const path = ctrl.currentPath();
+      if (path) dropPos(path);
       ctrl.discard();
       setEditable(false);
     },
@@ -171,7 +205,10 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     isDirty: ctrl.isDirty,
     currentPath: ctrl.currentPath,
     onExternalChange: (p) => ctrl.external(p),
-    flush: () => ctrl.flush(),
+    flush() {
+      remember();
+      return ctrl.flush();
+    },
     focus: () => view.focus(),
     getText: () => view.state.doc.toString(),
     setRich: (on) => view.dispatch({ effects: rich.reconfigure(on && opts.rich ? richMarkdown(opts.rich) : []) }),

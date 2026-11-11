@@ -1041,7 +1041,7 @@ export class Controller {
       const r = await this.api.renameNote(path, title, rewrite);
       this.history.rename(path, r.path);
       const doc = await this.api.openNote(r.path);
-      if (!this.editor.load(doc)) return;
+      if (!this.editor.rebind(path, doc)) return; // clean after the flush: the stored position follows the rename
       this.loadedDoc(doc);
       this.store.set({ title });
       this.setErr("");
@@ -2040,7 +2040,8 @@ export class Controller {
       try {
         this.history.rename(from, to);
         const doc = await this.api.openNote(to);
-        this.editor.load(doc); // clean and frozen since `ready`: never refused
+        this.editor.rebind(from, doc); // clean and frozen since `ready`: never refused
+        this.editor.resume(); // rebind keeps the freeze
         this.loadedDoc(doc);
       } catch (e) {
         this.editor.discard(); // never resume on the old path: a save would recreate it
