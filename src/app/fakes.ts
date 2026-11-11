@@ -65,6 +65,7 @@ export function fakeApi(notes: Record<string, string> = {}) {
     captureDone: vi.fn(async (_hide: boolean) => {}),
     closeRequested: vi.fn(async () => true),
     quitApp: vi.fn(async () => {}),
+    resetWindow: vi.fn(async () => {}),
     setBadge: vi.fn(async (_c: number) => {}),
     renameNote: vi.fn(async (_p: string, _t: string, _r: boolean): Promise<RenameResult> => { throw "unset"; }),
     mergeNotes: vi.fn(async (_s: string, _t: string): Promise<MergeResult> => { throw "unset"; }),

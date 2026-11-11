@@ -170,6 +170,9 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
         downloaded.store(true, Ordering::Relaxed);
         log::line("update download done; verifying and installing");
         app.emit("update-installing", ()).ok();
+        // Windows: the install step that follows ends the process (std::process::exit), so RunEvent::Exit and the
+        // plugin's save never run. Saved after the download, so moves made during it count; waits for the main thread.
+        crate::commands::save_window(app).recv().ok();
     };
     let result = update.download_and_install(on_chunk, on_finish).await;
     let mut st = state(app);

@@ -27,9 +27,10 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
     use tauri::menu::{MenuItem, PredefinedMenuItem as P, Submenu};
     let quit = MenuItem::with_id(app, "quit", "Quit velo", true, Some("CmdOrCtrl+Q"))?;
     let check = MenuItem::with_id(app, "check-updates", "Check for Updates…", true, None::<&str>)?;
+    let reset = MenuItem::with_id(app, "reset-window", "Reset Window Position and Size", true, None::<&str>)?;
     tauri::menu::Menu::with_items(app, &[
         &Submenu::with_items(app, "velo", true, &[
-            &crate::commands::about_item(app)?, &check, &P::separator(app)?, &P::hide(app, None)?, &P::hide_others(app, None)?,
+            &crate::commands::about_item(app)?, &check, &reset, &P::separator(app)?, &P::hide(app, None)?, &P::hide_others(app, None)?,
             &P::show_all(app, None)?, &P::separator(app)?, &quit,
         ])?,
         &Submenu::with_items(app, "Edit", true, &[
@@ -54,6 +55,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_window_state::Builder::new().with_state_flags(commands::WINDOW_STATE).build())
         .setup(|app| {
             // First thing in setup: the log dir needs the app handle. A panic before this point keeps only the default hook.
             if let Ok(dir) = app.path().app_log_dir() {
@@ -67,6 +69,9 @@ pub fn run() {
                 app.on_menu_event(|app, ev| {
                     if ev.id() == "quit" {
                         commands::quit(app);
+                    }
+                    if ev.id() == "reset-window" {
+                        commands::reset_window(app);
                     }
                     if ev.id() == "check-updates" {
                         use tauri::Emitter;
@@ -197,6 +202,7 @@ pub fn run() {
             commands::identity_file_exists,
             commands::close_requested,
             commands::quit_app,
+            commands::reset_window_cmd,
             update::check_update,
             update::install_update,
         ])

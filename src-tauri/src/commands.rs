@@ -13,6 +13,11 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+
+/// What velo remembers of its window. Not VISIBLE: the plugin would then show or hide the window itself, against
+/// the tray/hotkey logic that owns that.
+pub const WINDOW_STATE: StateFlags = StateFlags::SIZE.union(StateFlags::POSITION).union(StateFlags::MAXIMIZED);
 
 pub struct AppState {
     pub settings: Mutex<Settings>,
@@ -171,7 +176,27 @@ fn notify_changed(app: &AppHandle, changed: Vec<String>) {
     }
 }
 
+/// Every window-state save in velo goes through here (the plugin's own save on RunEvent::Exit runs on the main thread).
+/// Always on the main thread: off it, save_window_state holds the plugin's lock while it waits for the main thread to
+/// read the window, and the plugin's Moved/Resized handlers there wait for that lock. Linux X11 runs hotkey handlers on
+/// their own thread. Inline when already on the main thread, else queued. The receiver yields once the save ran, or
+/// errs if it never will; a failed save is ignored.
+pub fn save_window(app: &AppHandle) -> std::sync::mpsc::Receiver<()> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let h = app.clone();
+    app.run_on_main_thread(move || {
+        h.save_window_state(WINDOW_STATE).ok();
+        tx.send(()).ok();
+    })
+    .ok();
+    rx
+}
+
 fn hide_main(app: &AppHandle) {
+    // The plugin writes only on RunEvent::Exit, which a Linux session end never sends; in tray and hotkey-only modes
+    // velo is rarely quit. Saved before hiding, while the window is on screen: the save reads its live geometry. Off
+    // the main thread the save is queued, and the hide below is queued after it on the same FIFO event-loop channel.
+    save_window(app);
     let mode = app.try_state::<AppState>().map(|s| s.icon_mode.lock().unwrap().clone());
     if let Some(w) = app.get_webview_window("main").filter(|_| orders_out(mode.as_deref().unwrap_or("dock"))) {
         w.hide().ok();
@@ -241,6 +266,48 @@ pub fn quit_app(app: AppHandle) {
     quit(&app);
 }
 
+/// Back to the configured size, centred on the window's current monitor. Shown first: a minimized window cannot be
+/// resized or placed reliably (and the plugin skips saving one), so show_main unminimizes. Not saved here: on macOS
+/// and Linux the resize and move are still queued; the save on hide and on quit reads the window once they landed.
+pub fn reset_window(app: &AppHandle) {
+    if let Some(w) = show_main(app) {
+        place_default(app, &w);
+    }
+}
+
+/// The reset placement, for a shown window. The position is computed rather than `center()`ed: on macOS and Linux
+/// set_size and unmaximize are queued, so `center()` would use the old frame. The queues are FIFO, so the move lands
+/// after the resize.
+fn place_default(app: &AppHandle, w: &tauri::WebviewWindow) {
+    let Some(c) = app.config().app.windows.iter().find(|c| c.label == "main") else { return };
+    let Some(m) = w.current_monitor().ok().flatten().or_else(|| w.primary_monitor().ok().flatten()) else { return };
+    let (outer, inner) = (w.outer_size().unwrap_or_default(), w.inner_size().unwrap_or_default());
+    let frame = (outer.width.saturating_sub(inner.width), outer.height.saturating_sub(inner.height));
+    let (s, min) = (m.scale_factor(), (c.min_width.unwrap_or(0.0), c.min_height.unwrap_or(0.0)));
+    let (x, y, width, height) = reset_placement(m.work_area(), s, (c.width, c.height), min, frame, w.scale_factor().unwrap_or(s));
+    w.unmaximize().ok();
+    w.set_size(tauri::LogicalSize::new(width, height)).ok();
+    w.set_position(tauri::LogicalPosition::new(x, y)).ok();
+}
+
+/// Reset placement in a monitor's physical work area `wa`, converted with that monitor's scale `s` (the window's own
+/// scale on its current monitor): the configured logical inner `size` shrunk until the outer frame fits (never below
+/// `min`), the outer frame centred, its top-left kept on screen. `frame` is the physical outer minus inner size (title
+/// bar and borders; 0 on macOS, whose title bar overlays the content) at the window's scale `ws`. Returns the logical
+/// outer top-left and inner size, as `set_position` and `set_size` take them.
+fn reset_placement(wa: &tauri::PhysicalRect<i32, u32>, s: f64, size: (f64, f64), min: (f64, f64), frame: (u32, u32), ws: f64) -> (f64, f64, f64, f64) {
+    let work = (wa.position.x as f64 / s, wa.position.y as f64 / s, wa.size.width as f64 / s, wa.size.height as f64 / s);
+    let frame = (frame.0 as f64 / ws, frame.1 as f64 / ws);
+    let w = size.0.min(work.2 - frame.0).max(min.0);
+    let h = size.1.min(work.3 - frame.1).max(min.1);
+    ((work.0 + (work.2 - w - frame.0) / 2.0).max(work.0), (work.1 + (work.3 - h - frame.1) / 2.0).max(work.1), w, h)
+}
+
+#[tauri::command]
+pub fn reset_window_cmd(app: AppHandle) {
+    reset_window(&app);
+}
+
 /// The UI's close-requested handler asks first. true = go on closing (velo quits, after the unsaved-edits check);
 /// false = velo only hid, because it lives in the tray or on its hotkey and has no Dock/taskbar icon to come back from.
 #[tauri::command]
@@ -291,6 +358,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         &item("tray-daily", "Today's daily note")?,
         &PredefinedMenuItem::separator(app)?,
         &item("tray-settings", "Settings…")?,
+        &item("tray-reset", "Reset window position and size")?,
         &item("tray-updates", "Check for Updates…")?,
         &about_item(app)?,
         &PredefinedMenuItem::separator(app)?,
@@ -315,6 +383,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 }
                 .ok();
             }
+            "tray-reset" => reset_window(app),
             "tray-quit" => quit(app),
             _ => {}
         })
@@ -903,6 +972,38 @@ mod tests {
         assert_eq!(got, id); assert_eq!(crypto::unwrap_identity(&bytes.unwrap(), "pw2").unwrap(), id);
         let (fresh, bytes) = resolve_identity(None, None, "pw3").unwrap();
         assert_eq!(crypto::unwrap_identity(&bytes.unwrap(), "pw3").unwrap(), fresh);
+    }
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::*;
+    use tauri::{PhysicalPosition, PhysicalRect, PhysicalSize};
+    fn area(x: i32, y: i32, w: u32, h: u32) -> PhysicalRect<i32, u32> {
+        PhysicalRect { position: PhysicalPosition::new(x, y), size: PhysicalSize::new(w, h) }
+    }
+
+    #[test] fn reset_centres_the_outer_frame_in_the_work_area() {
+        // macOS: no frame, menu bar 25 pt above the work area
+        assert_eq!(reset_placement(&area(0, 25, 1512, 957), 1.0, (1000.0, 700.0), (600.0, 400.0), (0, 0), 1.0), (256.0, 153.5, 1000.0, 700.0));
+        // a 30 pt title bar shifts the inner box down, the outer frame stays centred; a second monitor's origin counts
+        assert_eq!(reset_placement(&area(1920, 0, 1920, 1040), 1.0, (1000.0, 700.0), (600.0, 400.0), (0, 30), 1.0), (2380.0, 155.0, 1000.0, 700.0));
+    }
+
+    #[test] fn reset_converts_a_2x_work_area_and_frame_to_logical_and_centres_with_side_borders() {
+        // Windows at 200%: 3840x2080 physical work area, 8 px borders each side and a 31 px title bar (16 x 78 physical)
+        assert_eq!(reset_placement(&area(0, 0, 3840, 2080), 2.0, (1000.0, 700.0), (600.0, 400.0), (16, 78), 2.0), (456.0, 150.5, 1000.0, 700.0));
+    }
+
+    #[test] fn reset_divides_the_work_area_by_the_monitor_scale_and_the_frame_by_the_window_scale() {
+        // monitor at 200%, window still at 100% (mixed DPI): work area 1920x1080 logical, frame 16 x 60 logical
+        assert_eq!(reset_placement(&area(0, 0, 3840, 2160), 2.0, (1000.0, 700.0), (600.0, 400.0), (16, 60), 1.0), (452.0, 160.0, 1000.0, 700.0));
+    }
+
+    #[test] fn reset_shrinks_to_a_small_work_area_but_not_below_the_minimum() {
+        assert_eq!(reset_placement(&area(0, 0, 800, 600), 1.0, (1000.0, 700.0), (600.0, 400.0), (0, 30), 1.0), (0.0, 0.0, 800.0, 570.0));
+        // smaller than the minimum: the minimum wins and the top-left stays on screen
+        assert_eq!(reset_placement(&area(0, 0, 500, 300), 1.0, (1000.0, 700.0), (600.0, 400.0), (0, 0), 1.0), (0.0, 0.0, 600.0, 400.0));
     }
 }
 

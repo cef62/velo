@@ -1901,6 +1901,7 @@ export class Controller {
     export: () => void this.startExport(),
     save_search: () => this.startSaveSearch(),
     quit: () => void this.api.quitApp(),
+    reset_window: () => void this.api.resetWindow(),
   };
 
   /**
