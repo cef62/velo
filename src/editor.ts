@@ -8,7 +8,7 @@ import { dueInputRule, localToday, toggleTaskAt } from "./tasks";
 import { SaveController } from "./saver";
 import { frontMatterHide, ISOLATED, replaceAll, stampSelection, undoHistory } from "./fmhide";
 import { stampChange } from "./frontmatter";
-import { dropPos, clampPos, getPos, renamePos, setPos, type Pos } from "./positions";
+import { clampPos, getPos, renamePos, setPos, type Pos } from "./positions";
 import { openNote, saveNote, type NoteDoc, type NoteMeta } from "./api";
 
 export interface Editor {
@@ -141,10 +141,10 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
   // Cursor and scroll of the open note. The scroll anchor is the top-visible line and its pixel offset
   // (what scrollSnapshot() holds, without casting its private value).
   const snap = (): Pos => {
-    const { anchor: a, head: h } = view.state.selection.main, top = view.scrollDOM.scrollTop - view.documentPadding.top, b = view.lineBlockAtHeight(top);
-    return { a, h, t: b.from, m: Math.round(b.top - top) }; // top: document coordinates, so the editor's own padding drops out
+    const { head: h } = view.state.selection.main, top = view.scrollDOM.scrollTop - view.documentPadding.top, b = view.lineBlockAtHeight(top);
+    return { h, t: b.from, m: Math.round(b.top - top) }; // top: document coordinates, so the editor's own padding drops out
   };
-  const same = (x: Pos, y: Pos) => x.a === y.a && x.h === y.h && x.t === y.t && x.m === y.m;
+  const same = (x: Pos, y: Pos) => x.h === y.h && x.t === y.t && x.m === y.m;
   let base: Pos | null = null; // state right after the last restore: unchanged means nothing worth storing; null while the restored scroll is not applied yet
   const remember = () => {
     const path = ctrl.currentPath();
@@ -156,7 +156,7 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     const stored = getPos(path);
     if (stored) {
       const p = clampPos(stored, view.state.doc.length);
-      view.dispatch({ selection: EditorSelection.single(p.a, p.h), effects: EditorView.scrollIntoView(p.t, { y: "start", yMargin: p.m }) });
+      view.dispatch({ selection: EditorSelection.cursor(p.h), effects: EditorView.scrollIntoView(p.t, { y: "start", yMargin: p.m }) });
       base = null;
       // after CodeMirror's own scheduled measure has applied the scroll
       requestAnimationFrame(() => { if (ctrl.currentPath() === path) base = snap(); });
@@ -192,8 +192,6 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       apply();
     },
     discard() {
-      const path = ctrl.currentPath();
-      if (path) dropPos(path);
       ctrl.discard();
       setEditable(false);
     },

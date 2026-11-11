@@ -5,6 +5,10 @@ import { chipsFor } from "../searchChips";
 import { emptyConnections, FakeEditor, FakePreview, deferred, fakeApi, fakeUi, hit, noMeta, settle } from "./fakes";
 import { createStore, initialState } from "./store";
 import { localToday, toggleTaskLine } from "../tasks";
+import { getPos, setPos } from "../positions";
+
+const lsStore = new Map<string, string>();
+(globalThis as any).localStorage = { getItem: (k: string) => lsStore.get(k) ?? null, setItem: (k: string, v: string) => void lsStore.set(k, v) };
 
 function setup(notes: Record<string, string> = { A: "a", B: "b", C: "c" }) {
   const { api } = fakeApi(notes);
@@ -188,6 +192,18 @@ test("delete highlights neighbour without opening", async () => {
   expect(store.get()).toMatchObject({ openPath: null, title: "", sel: 1 });
   await settle();
   expect(api.openNote).not.toHaveBeenCalled();
+});
+
+test("delete keeps the note's stored position until the backend confirms", async () => {
+  const { c, api } = setup();
+  await c.runSearch(true);
+  await settle(); // A open
+  setPos(P("A"), { h: 1, t: 0, m: 0 });
+  api.deleteNote.mockRejectedValueOnce(new Error("io"));
+  await c.deleteNote();
+  expect(getPos(P("A"))).toBeDefined();
+  await c.deleteNote();
+  expect(getPos(P("A"))).toBeUndefined();
 });
 
 test("delete flush failure aborts", async () => {
@@ -670,6 +686,21 @@ test("rename commits through flush, backlinks confirm and reload", async () => {
   c.startRename();
   await c.commitRename(null);
   expect(api.renameNote).toHaveBeenCalledTimes(1);
+});
+
+test("title rename while the note has unsaved edits keeps the edits and follows the note", async () => {
+  const { c, api, store, editor } = setup();
+  await c.runSearch(true);
+  await settle();
+  editor.dirty = true; // typed during the rename's awaits
+  editor.text = "typed";
+  api.renameNote.mockResolvedValueOnce({ path: P("Z"), rewritten: 0 });
+  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta });
+  c.startRename();
+  await c.commitRename("Z");
+  expect(editor.currentPath()).toBe(P("Z"));
+  expect(editor.text).toBe("typed");
+  expect(store.get()).toMatchObject({ title: "Z", openPath: P("Z") });
 });
 
 test("context menu: one popup per open (menuBusy), previous menu closed on the next open", async () => {
@@ -1670,8 +1701,23 @@ test("agent rename freezes the open note, then follows it to the new path", asyn
   expect(editor.currentPath()).toBe(P("B"));
   expect(store.get().openPath).toBe(P("B"));
   expect(store.get().title).toBe("B");
+  expect(editor.suspended).toBe(false); // rebind alone keeps the freeze: resume() must end it
   expect(c.busy).toBe(false);
   expect(api.agentWriteDone).toHaveBeenCalledWith(6, "ok");
+});
+
+test("agent rename racing a notes-folder change: the header never names a note the editor does not hold", async () => {
+  const { c, api, store, editor, notes } = setup({ A: "a" });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 5, path: P("A"), kind: "rename", summary: "s" });
+  await c.saveSettings({ ...(await api.getSettings()), notes_dir: "/other" }); // ignores busy: unloads the editor
+  notes.B = notes.A;
+  delete notes.A;
+  await c.onAgentWrite({ id: 6, path: P("A"), kind: "renamed", to: P("B") });
+  expect(editor.currentPath()).toBeNull();
+  expect(store.get().openPath).toBeNull();
+  expect(store.get().title).toBe("");
+  expect(c.busy).toBe(false);
 });
 
 test("agent rename that failed unfreezes the note where it was", async () => {

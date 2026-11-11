@@ -1,8 +1,8 @@
 // Cursor and scroll position per note, so a note reopens where it was left. One localStorage entry, a
 // per-machine convenience in LRU order: losing it only means notes open at the top.
 
-/** Selection anchor and head, top-visible document offset, and that line's pixel offset from the top edge. */
-export type Pos = { a: number; h: number; t: number; m: number };
+/** Caret offset, top-visible document offset, and that line's pixel offset from the top edge. */
+export type Pos = { h: number; t: number; m: number };
 
 const KEY = "velo.positions";
 export const MAX = 50;
@@ -10,7 +10,7 @@ export const MAX = 50;
 const read = (): [string, Pos][] => {
   try {
     const v: unknown = JSON.parse(localStorage.getItem(KEY) ?? "[]");
-    const ok = (p: any) => p && ["a", "h", "t", "m"].every((k) => Number.isFinite(p[k]));
+    const ok = (p: any) => p && ["h", "t", "m"].every((k) => Number.isFinite(p[k]));
     return Array.isArray(v) ? v.filter((e) => Array.isArray(e) && typeof e[0] === "string" && ok(e[1])) : [];
   } catch { return []; }
 };
@@ -25,4 +25,4 @@ export const renamePos = (from: string, to: string) => {
 };
 const c = (n: number, len: number) => Math.max(0, Math.min(n, len));
 /** Offsets capped to a document of `len` characters (the note changed since the position was stored). */
-export const clampPos = (p: Pos, len: number): Pos => ({ ...p, a: c(p.a, len), h: c(p.h, len), t: c(p.t, len) });
+export const clampPos = (p: Pos, len: number): Pos => ({ ...p, h: c(p.h, len), t: c(p.t, len) });

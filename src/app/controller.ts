@@ -24,6 +24,7 @@ import { extractTitle } from "../writing";
 import { appliedSearch, cleanName, defaultName, removeFrom, renameIn, sameFilters, upsert, type Filters } from "../saved";
 import { chipsFor, type Chip } from "../searchChips";
 import { pushRecent } from "../palette";
+import { dropPos } from "../positions";
 import type { MenuSpec, UiPort } from "./ports";
 import { noInfo, type AppState, type Store } from "./store";
 
@@ -349,6 +350,7 @@ export class Controller {
       r = await this.api.mergeNotes(m.source, target.path);
       reopen = null;
       this.history.remove(m.source);
+      dropPos(m.source);
     } catch (e) {
       fail(e === "locked" ? "Can't merge a locked note" : e === "same-note" ? "Pick another note" : errText(e));
     } finally {
@@ -961,6 +963,7 @@ export class Controller {
       await this.api.deleteNote(path);
       reopen = false;
       this.history.remove(path);
+      dropPos(path);
       this.clearErr();
     } catch (e) {
       this.setErr(errText(e));
@@ -1994,6 +1997,7 @@ export class Controller {
       this.editor.discard(); // clean (flushed): nothing is dropped; autosave can't bring the file back
       this.closedDoc();
       this.history.remove(req.path);
+      dropPos(req.path);
       void this.runSearch(false);
       void this.refreshTitles();
       return "closed";
@@ -2040,9 +2044,12 @@ export class Controller {
       try {
         this.history.rename(from, to);
         const doc = await this.api.openNote(to);
-        this.editor.rebind(from, doc); // clean and frozen since `ready`: never refused
-        this.editor.resume(); // rebind keeps the freeze
-        this.loadedDoc(doc);
+        // Clean and frozen since `ready`. Refused only if the editor no longer holds `from` (the notes folder
+        // changed meanwhile): then the header must not name `to`, and the editor stays as unload left it.
+        if (this.editor.rebind(from, doc)) {
+          this.editor.resume(); // rebind keeps the freeze
+          this.loadedDoc(doc);
+        }
       } catch (e) {
         this.editor.discard(); // never resume on the old path: a save would recreate it
         this.closedDoc();

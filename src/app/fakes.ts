@@ -108,11 +108,13 @@ export class FakeEditor implements Editor {
     if (this.dirty) return false;
     this.path = doc.path;
     this.text = doc.text;
+    this.suspended = false; // like the real load: an explicit switch ends a suspension
     return true;
   }
   rebind(fromPath: string, doc: NoteDoc) {
     if (this.path !== fromPath) return false;
     this.path = doc.path;
+    if (!this.dirty) this.text = doc.text; // like the real rebind: clean reloads, dirty keeps its text; editability (suspended) is untouched
     return true;
   }
   suspend() { this.suspended = true; }

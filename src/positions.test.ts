@@ -5,7 +5,7 @@ const store = new Map<string, string>();
 (globalThis as any).localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) };
 beforeEach(() => store.clear());
 
-const pos = (n: number) => ({ a: n, h: n, t: n, m: 0 });
+const pos = (n: number) => ({ h: n, t: n, m: 0 });
 
 test("the 51st note evicts the least recently used", () => {
   for (let i = 0; i <= MAX; i++) setPos(`n${i}.md`, pos(i));
@@ -27,7 +27,12 @@ test("rename moves an entry, drop removes it", () => {
 });
 
 test("clampPos caps offsets at the document length", () => {
-  expect(clampPos({ a: 90, h: 100, t: 50, m: -7 }, 60)).toEqual({ a: 60, h: 60, t: 50, m: -7 });
+  expect(clampPos({ h: 100, t: 50, m: -7 }, 60)).toEqual({ h: 60, t: 50, m: -7 });
+});
+
+test("an old entry with a selection anchor still reads", () => {
+  store.set("velo.positions", '[["a.md",{"a":1,"h":2,"t":3,"m":4}]]');
+  expect(getPos("a.md")?.h).toBe(2);
 });
 
 test("malformed stored data reads as empty", () => {
