@@ -13,6 +13,11 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+
+/// What velo remembers of its window. Not VISIBLE: the plugin would then show or hide the window itself, against
+/// the tray/hotkey logic that owns that.
+pub const WINDOW_STATE: StateFlags = StateFlags::SIZE.union(StateFlags::POSITION).union(StateFlags::MAXIMIZED);
 
 pub struct AppState {
     pub settings: Mutex<Settings>,
@@ -241,6 +246,23 @@ pub fn quit_app(app: AppHandle) {
     quit(&app);
 }
 
+/// Back to the configured size, centred on the window's current monitor, and remembered at once. Shown first: a
+/// minimized window cannot be resized or centred reliably (and the plugin skips saving one), so show_main unminimizes.
+pub fn reset_window(app: &AppHandle) {
+    let Some(w) = show_main(app) else { return };
+    w.unmaximize().ok();
+    if let Some(c) = app.config().app.windows.iter().find(|c| c.label == "main") {
+        w.set_size(tauri::LogicalSize::new(c.width, c.height)).ok();
+    }
+    w.center().ok();
+    app.save_window_state(WINDOW_STATE).ok();
+}
+
+#[tauri::command]
+pub fn reset_window_cmd(app: AppHandle) {
+    reset_window(&app);
+}
+
 /// The UI's close-requested handler asks first. true = go on closing (velo quits, after the unsaved-edits check);
 /// false = velo only hid, because it lives in the tray or on its hotkey and has no Dock/taskbar icon to come back from.
 #[tauri::command]
@@ -291,6 +313,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         &item("tray-daily", "Today's daily note")?,
         &PredefinedMenuItem::separator(app)?,
         &item("tray-settings", "Settings…")?,
+        &item("tray-reset", "Reset window position and size")?,
         &item("tray-updates", "Check for Updates…")?,
         &about_item(app)?,
         &PredefinedMenuItem::separator(app)?,
@@ -315,6 +338,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 }
                 .ok();
             }
+            "tray-reset" => reset_window(app),
             "tray-quit" => quit(app),
             _ => {}
         })

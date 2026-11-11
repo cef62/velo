@@ -43,3 +43,7 @@ test("pushRecent: most recent first, no repeats, five long", () => {
   expect(pushRecent(["a", "b"] as never, "b" as never)).toEqual(["b", "a"]);
   expect(pushRecent(["1", "2", "3", "4", "5"] as never, "6" as never)).toEqual(["6", "1", "2", "3", "4"]);
 });
+
+test("reset window is a palette command", () => {
+  expect(paletteSearch("reset window", base)[0]).toMatchObject({ action: "reset_window", label: "Reset window position and size" });
+});

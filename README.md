@@ -17,7 +17,8 @@ Inspired by nvALT and Notational Velocity; not affiliated with or endorsed by th
 - Per-note encryption with [age](https://age-encryption.org); locked notes are never written to disk or to the index as plaintext.
 - Live reload of external edits; a concurrent edit produces a `(conflict ...)` copy instead of overwriting anything.
 - Global hotkey (default ⌘⇧Space / Ctrl+Shift+Space) to bring velo up; remappable in Settings. Any shortcut can be cleared with ⌫ in Settings, and conflicting shortcuts are shown instead of refused.
-- Settings › General › Show velo in: **Dock** / **Taskbar** (default), **Menu bar** / **System tray** (an icon there instead: click it to show or hide velo, right-click for Show velo, Quick capture, Today's daily note, Settings…, Check for Updates…, About velo and Quit velo), or **Hotkey only** (no icon anywhere; needs the Show / hide hotkey set). Outside Dock mode the close button hides velo instead of quitting; quit from the tray menu, ⌘Q, or "Quit velo" in the command palette. Hotkey only saves only while the Show / hide hotkey is registered (not taken by another app); if it cannot register at launch, velo falls back to the tray (the taskbar on Linux) for that session. Launching velo again shows the running window instead of starting a second one.
+- Settings › General › Show velo in: **Dock** / **Taskbar** (default), **Menu bar** / **System tray** (an icon there instead: click it to show or hide velo, right-click for Show velo, Quick capture, Today's daily note, Settings…, Reset window position and size, Check for Updates…, About velo and Quit velo), or **Hotkey only** (no icon anywhere; needs the Show / hide hotkey set). Outside Dock mode the close button hides velo instead of quitting; quit from the tray menu, ⌘Q, or "Quit velo" in the command palette. Hotkey only saves only while the Show / hide hotkey is registered (not taken by another app); if it cannot register at launch, velo falls back to the tray (the taskbar on Linux) for that session. Launching velo again shows the running window instead of starting a second one.
+- velo remembers its window size and position (and whether it was maximized) across quit and relaunch; if the saved spot is on a monitor that is no longer connected, the window opens at the default spot. **Reset window position and size** puts it back to the default size, centred on its current monitor: it is in the tray menu, the macOS menu bar (velo menu) and the command palette. A Dock icon menu entry is not available yet (Tauri has no Dock menu API), so in Dock mode use the menu bar or the command palette.
 
 ## Keyboard shortcuts
 
@@ -128,7 +129,7 @@ velo can act as an MCP server, so Claude Code can search, read, create and edit 
 
 ## How it's built
 
-Rust backend in `src-tauri` (Tauri 2); UI in `src` with React 19, Park UI v1 (Ark UI) and Panda CSS 1.12. Panda generates `styled-system/` (git-ignored) from `panda.config.ts`: `pnpm test` and `pnpm build` run `panda codegen` first; `pnpm install` runs it too (`pnpm codegen` to rerun).
+Rust backend in `src-tauri` (Tauri 2; `tauri-plugin-window-state` keeps the window's size and position in `.window-state.json` in the app config dir); UI in `src` with React 19, Park UI v1 (Ark UI) and Panda CSS 1.12. Panda generates `styled-system/` (git-ignored) from `panda.config.ts`: `pnpm test` and `pnpm build` run `panda codegen` first; `pnpm install` runs it too (`pnpm codegen` to rerun).
 
 ## Storage
 

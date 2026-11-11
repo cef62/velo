@@ -48,6 +48,7 @@ export const captureTargetTitle = () => invoke<{ title: string; path: string | n
 /** Ends the capture session; `hide`: hide velo again if the capture shortcut showed it. */
 export const closeRequested = () => invoke<boolean>("close_requested");
 export const quitApp = () => invoke<void>("quit_app");
+export const resetWindow = () => invoke<void>("reset_window_cmd");
 export const captureDone = (hide: boolean) => invoke<void>("capture_done", { hide });
 export const setBadge = (count: number) => invoke<void>("set_badge", { count });
 export const renameNote = (path: string, newTitle: string, rewriteLinks: boolean) => invoke<RenameResult>("rename_note", { path, newTitle, rewriteLinks });

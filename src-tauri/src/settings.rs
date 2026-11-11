@@ -63,10 +63,10 @@ pub const PALETTES: [&str; 6] = ["clear", "mist", "paper", "electric", "reef", "
 const DEFAULT_TOGGLE: &str = "Mod+Shift+Space";
 const DEFAULT_CAPTURE: &str = "Mod+Alt+Shift+KeyN"; // canonical modifier order, as the UI's DEFAULTS
 /// Every action id in the UI's `DEFAULTS` (src/shortcuts.ts); a saved id outside it (e.g. the old `next_note`) is ignored there.
-pub const ACTIONS: [&str; 28] = [
+pub const ACTIONS: [&str; 29] = [
     "focus_search", "toggle_preview", "rename", "toggle_lock", "lock_all", "settings", "toggle_sort", "back", "forward", "delete_note",
     "toggle_tags", "toggle_rich", "toggle_layout", "toggle_window", "toggle_info", "toggle_front_matter", "toggle_tasks", "toggle_connections", "capture", "daily_note", "extract_note",
-    "merge_note", "toggle_timeline", "export", "save_search", "context_menu", "command_palette", "quit",
+    "merge_note", "toggle_timeline", "export", "save_search", "context_menu", "command_palette", "quit", "reset_window",
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

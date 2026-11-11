@@ -381,6 +381,7 @@ export const captureTargetTitle = async (): Promise<{ title: string; path: strin
 export const captureDone = async (_hide: boolean): Promise<void> => {};
 export const closeRequested = async (): Promise<boolean> => true;
 export const quitApp = async (): Promise<void> => {}; // the demo is a web page: nothing to quit
+export const resetWindow = async (): Promise<void> => {}; // nor a window to reset
 export const setBadge = async (_count: number): Promise<void> => {};
 
 export const renameNote = async (path: string, newTitle: string, rewrite: boolean): Promise<RenameResult> => {
