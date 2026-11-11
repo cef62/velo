@@ -1,5 +1,5 @@
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
-import { EditorView, ViewPlugin, drawSelection, dropCursor, highlightSpecialChars, keymap } from "@codemirror/view";
+import { EditorView, ViewPlugin, drawSelection, dropCursor, highlightSpecialChars, keymap, scrollPastEnd } from "@codemirror/view";
 import { defaultKeymap, historyKeymap } from "@codemirror/commands";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
@@ -71,6 +71,7 @@ export function writingSetup(): Extension[] {
     syntaxHighlighting(writingHighlight),
     writingTheme,
     EditorView.lineWrapping,
+    scrollPastEnd(), // last line can scroll to the top, like VS Code
     dark.of(EditorView.darkTheme.of(isDark())),
     followScheme,
   ];
