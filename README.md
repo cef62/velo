@@ -7,7 +7,7 @@ Inspired by nvALT and Notational Velocity; not affiliated with or endorsed by th
 ## Features
 
 - Search-or-create box; results update on every keystroke (backend under 50 ms p95 at 10k notes, release build), with matches highlighted in the list.
-- Plain files you own: a flat folder of `.md` / `.txt` notes, edited in a CodeMirror editor with autosave.
+- Plain files you own: a flat folder of `.md` / `.txt` notes, edited in a CodeMirror editor with autosave (the last line can scroll up to the top of the window).
 - `[[wikilinks]]`: following a link to a missing note creates it; renaming a note rewrites links to it.
 - Markdown preview with clickable wikilinks and external links.
 - Note counts next to every tag; active filters show as chips inside the search field and the Filters button in the header shows how many there are; a Retry button when a save fails.
