@@ -343,9 +343,12 @@ export class Controller {
     try {
       if (open === m.source || open === target.path) {
         if (!(await this.editor.flush())) return fail("Can't merge: unsaved changes couldn't be saved");
-        this.editor.discard();
-        this.closedDoc();
-        reopen = open;
+        // a note opened during the flush is not ours to discard
+        if (this.editor.currentPath() === open) {
+          this.editor.discard();
+          this.closedDoc();
+          reopen = open;
+        }
       }
       r = await this.api.mergeNotes(m.source, target.path);
       reopen = null;
@@ -956,9 +959,12 @@ export class Controller {
           this.setErr("Can't delete: unsaved changes couldn't be saved");
           return;
         }
-        this.editor.discard();
-        this.closedDoc();
-        reopen = true;
+        // a note opened during the flush is not ours to discard
+        if (this.editor.currentPath() === path) {
+          this.editor.discard();
+          this.closedDoc();
+          reopen = true;
+        }
       }
       await this.api.deleteNote(path);
       reopen = false;

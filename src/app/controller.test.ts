@@ -206,6 +206,46 @@ test("delete keeps the note's stored position until the backend confirms", async
   expect(getPos(P("A"))).toBeUndefined();
 });
 
+test("delete: a note opened during the flush keeps its unsaved edits", async () => {
+  const { c, editor, notes, store } = setup();
+  await c.runSearch(true);
+  await settle(); // A open
+  const flush = deferred<boolean>();
+  editor.flush.mockImplementationOnce(() => flush.promise);
+  const del = c.deleteNote();
+  await vi.waitFor(() => expect(editor.flush).toHaveBeenCalled());
+  const doc = { path: P("C"), title: "C", text: notes.C, hash: "h", encrypted: false, meta: noMeta };
+  editor.load(doc);
+  (c as any).loadedDoc(doc); // what an in-flight show does when it lands
+  editor.replaceText("typed in C");
+  flush.resolve(true);
+  await del;
+  expect(editor.currentPath()).toBe(P("C"));
+  expect(editor.text).toBe("typed in C");
+  expect(editor.dirty).toBe(true);
+  expect(getPos(P("A"))).toBeUndefined();
+  expect(store.get()).toMatchObject({ openPath: P("C"), title: "C" });
+});
+
+test("delete: a failing backend call while another note is open leaves that note alone", async () => {
+  const { c, api, editor, notes, store } = setup();
+  await c.runSearch(true);
+  await settle(); // A open
+  const flush = deferred<boolean>();
+  editor.flush.mockImplementationOnce(() => flush.promise);
+  api.deleteNote.mockRejectedValueOnce(new Error("io"));
+  const del = c.deleteNote();
+  await vi.waitFor(() => expect(editor.flush).toHaveBeenCalled());
+  const doc = { path: P("C"), title: "C", text: notes.C, hash: "h", encrypted: false, meta: noMeta };
+  editor.load(doc);
+  (c as any).loadedDoc(doc); // what an in-flight show does when it lands
+  flush.resolve(true); // C stays clean: a dirty C would hide a wrong reopen of A, whose load refuses over unsaved edits
+  await del;
+  expect(editor.currentPath()).toBe(P("C"));
+  expect(store.get()).toMatchObject({ openPath: P("C"), title: "C", err: "Error: io" });
+  expect(c.busy).toBe(false);
+});
+
 test("delete flush failure aborts", async () => {
   const { c, api, store, editor } = setup();
   await c.runSearch(true);
@@ -2441,6 +2481,49 @@ test("merge of the open source ends on the target", async () => {
   expect(historyOf(c)).not.toContain(P("S"));
   expect(store.get().merge).toBeNull();
   expect(c.busy).toBe(false);
+});
+
+test("merge: a note opened during the flush keeps its unsaved edits", async () => {
+  const { c, api, editor, store } = await mergeSetup();
+  setPos(P("S"), { h: 1, t: 0, m: 0 });
+  await c.startMerge();
+  await c.chooseMergeTarget(T_ROW);
+  const flush = deferred<boolean>();
+  editor.flush.mockImplementationOnce(() => flush.promise);
+  api.mergeNotes.mockResolvedValueOnce({ path: P("T"), rewritten: 1, trash_error: null });
+  const merge = c.commitMerge();
+  await vi.waitFor(() => expect(editor.flush).toHaveBeenCalled());
+  const doc = { path: P("U"), title: "U", text: "u", hash: "h", encrypted: false, meta: noMeta };
+  editor.load(doc);
+  (c as any).loadedDoc(doc); // what an in-flight show does when it lands
+  editor.replaceText("typed in U");
+  flush.resolve(true);
+  await merge;
+  expect(api.mergeNotes).toHaveBeenCalled();
+  expect(editor.currentPath()).toBe(P("U"));
+  expect(editor.text).toBe("typed in U");
+  expect(getPos(P("S"))).toBeUndefined();
+  expect(store.get()).toMatchObject({ openPath: P("U"), title: "U" });
+});
+
+test("merge: a failing backend call while another note is open leaves that note alone", async () => {
+  const { c, api, editor, store } = await mergeSetup();
+  await c.startMerge();
+  await c.chooseMergeTarget(T_ROW);
+  const flush = deferred<boolean>();
+  editor.flush.mockImplementationOnce(() => flush.promise);
+  api.mergeNotes.mockRejectedValueOnce("conflict");
+  const merge = c.commitMerge();
+  await vi.waitFor(() => expect(editor.flush).toHaveBeenCalled());
+  const doc = { path: P("U"), title: "U", text: "u", hash: "h", encrypted: false, meta: noMeta };
+  editor.load(doc);
+  (c as any).loadedDoc(doc); // what an in-flight show does when it lands
+  flush.resolve(true); // U stays clean, see the delete twin
+  await merge;
+  expect(editor.currentPath()).toBe(P("U"));
+  expect(store.get()).toMatchObject({ openPath: P("U"), title: "U" });
+  expect(c.busy).toBe(false);
+  expect(store.get().merge).toMatchObject({ err: "conflict", pending: false });
 });
 
 test("merge keeps both stored positions on failure; success drops only the source's", async () => {
