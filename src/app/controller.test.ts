@@ -206,6 +206,24 @@ test("delete keeps the note's stored position until the backend confirms", async
   expect(getPos(P("A"))).toBeUndefined();
 });
 
+test("delete: a note opened during the flush keeps its unsaved edits", async () => {
+  const { c, editor, notes } = setup();
+  await c.runSearch(true);
+  await settle(); // A open
+  const flush = deferred<boolean>();
+  editor.flush.mockImplementationOnce(() => flush.promise);
+  const del = c.deleteNote();
+  await vi.waitFor(() => expect(editor.flush).toHaveBeenCalled());
+  editor.load({ path: P("C"), title: "C", text: notes.C, hash: "h", encrypted: false, meta: noMeta }); // a load that was in flight lands
+  editor.replaceText("typed in C");
+  flush.resolve(true);
+  await del;
+  expect(editor.currentPath()).toBe(P("C"));
+  expect(editor.text).toBe("typed in C");
+  expect(editor.dirty).toBe(true);
+  expect(getPos(P("A"))).toBeUndefined();
+});
+
 test("delete flush failure aborts", async () => {
   const { c, api, store, editor } = setup();
   await c.runSearch(true);
@@ -1742,7 +1760,7 @@ test("agent rename failing to reopen after another note was opened keeps that no
   const showing = c.show(P("C")); // busy is still false: passes the guard
   claim.resolve(true);
   await rename; // "ready": A suspended, busy
-  open.resolve({ path: P("C"), text: "c", hash: "h:c", locked: false });
+  open.resolve({ path: P("C"), text: "c", hash: "h:c" });
   await showing;
   expect(editor.currentPath()).toBe(P("C"));
   editor.replaceText("typed in C"); // the user edits C
@@ -2441,6 +2459,26 @@ test("merge of the open source ends on the target", async () => {
   expect(historyOf(c)).not.toContain(P("S"));
   expect(store.get().merge).toBeNull();
   expect(c.busy).toBe(false);
+});
+
+test("merge: a note opened during the flush keeps its unsaved edits", async () => {
+  const { c, api, editor } = await mergeSetup();
+  setPos(P("S"), { h: 1, t: 0, m: 0 });
+  await c.startMerge();
+  await c.chooseMergeTarget(T_ROW);
+  const flush = deferred<boolean>();
+  editor.flush.mockImplementationOnce(() => flush.promise);
+  api.mergeNotes.mockResolvedValueOnce({ path: P("T"), rewritten: 1, trash_error: null });
+  const merge = c.commitMerge();
+  await vi.waitFor(() => expect(editor.flush).toHaveBeenCalled());
+  editor.load({ path: P("U"), title: "U", text: "u", hash: "h", encrypted: false, meta: noMeta });
+  editor.replaceText("typed in U");
+  flush.resolve(true);
+  await merge;
+  expect(api.mergeNotes).toHaveBeenCalled();
+  expect(editor.currentPath()).toBe(P("U"));
+  expect(editor.text).toBe("typed in U");
+  expect(getPos(P("S"))).toBeUndefined();
 });
 
 test("merge keeps both stored positions on failure; success drops only the source's", async () => {
