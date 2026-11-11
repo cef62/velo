@@ -2,4 +2,4 @@
 "velo": minor
 ---
 
-velo now remembers its window size and position, and Reset window position and size is in the tray menu, the macOS menu bar and the command palette.
+Remembered the window size, position and maximized state across relaunches, and added Reset window position and size to the tray menu, the macOS menu bar and the command palette.

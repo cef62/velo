@@ -243,6 +243,15 @@
     "group": "App"
   },
   {
+    "action": "reset_window",
+    "label": "Reset window position and size",
+    "keys": "none",
+    "mac": null,
+    "other": null,
+    "global": false,
+    "group": "App"
+  },
+  {
     "action": "quit",
     "label": "Quit velo",
     "keys": "none",
