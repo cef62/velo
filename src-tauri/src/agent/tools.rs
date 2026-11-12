@@ -22,17 +22,17 @@ Always read_note before editing a note. `summary` is a one-line description of t
 pub const TOOL_SPECS: &[ToolSpec] = &[
     ToolSpec {
         name: "search_notes",
-        description: "Search velo notes like the velo search field (titles, aliases, then text). Empty query lists all notes. `tags` keeps notes having every tag. `no_links` true keeps only notes with no [[links]] in or out (orphans; alias links count). At most 50 results per call; page with `offset`. Returns title, snippet, modified, tags.",
-        input_schema: r#"{"type":"object","properties":{"query":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"no_links":{"type":"boolean"},"limit":{"type":"integer","minimum":1,"maximum":50},"offset":{"type":"integer","minimum":0}}}"#,
+        description: "Search velo notes like the velo search field (titles, aliases, then text). Empty query lists all notes. `tags` keeps notes having every tag. `no_links` true keeps only notes with no [[links]] in or out (orphans; alias links count). At most 50 results per call; page with `offset`. Returns title, snippet, modified, tags. Archived notes are left out unless `include_archived` is true; then each note says `archived`.",
+        input_schema: r#"{"type":"object","properties":{"query":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"no_links":{"type":"boolean"},"limit":{"type":"integer","minimum":1,"maximum":50},"offset":{"type":"integer","minimum":0},"include_archived":{"type":"boolean"}}}"#,
     },
     ToolSpec {
         name: "list_tags",
-        description: "All tags in velo notes (front-matter `tags:` and inline #tag words) with the number of notes carrying each.",
-        input_schema: r#"{"type":"object","properties":{}}"#,
+        description: "All tags in velo notes (front-matter `tags:` and inline #tag words) with the number of notes carrying each. Archived notes are left out unless `include_archived` is true; then each note says `archived`.",
+        input_schema: r#"{"type":"object","properties":{"include_archived":{"type":"boolean"}}}"#,
     },
     ToolSpec {
         name: "read_note",
-        description: "Read a note by title (or alias). Returns the full text (front matter included), `hash` (pass it to replace_note), created, modified, tags, aliases, outgoing [[links]] and backlinks (titles of notes linking here).",
+        description: "Read a note by title (or alias). Returns the full text (front matter included), `hash` (pass it to replace_note), created, modified, tags, aliases, outgoing [[links]] and backlinks (titles of notes linking here). Backlinks leave out archived notes; get_connections with include_archived lists them.",
         input_schema: r#"{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}"#,
     },
     ToolSpec {
@@ -67,8 +67,8 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "list_tasks",
-        description: "The Tasks view: open tasks from all notes (empty `- [ ]` boxes are not listed) grouped as overdue, today, upcoming, no_date (and done = ticked in the last 7 days when `show_done`), plus due_count (overdue + today). `query` filters task or note text, `tags` keeps notes having every tag. Each task has title (note), text, due, line, line_text (pass line and line_text to set_task_done).",
-        input_schema: r#"{"type":"object","properties":{"query":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"show_done":{"type":"boolean"}}}"#,
+        description: "The Tasks view: open tasks from all notes (empty `- [ ]` boxes are not listed) grouped as overdue, today, upcoming, no_date (and done = ticked in the last 7 days when `show_done`), plus due_count (overdue + today). `query` filters task or note text, `tags` keeps notes having every tag. Each task has title (note), text, due, line, line_text (pass line and line_text to set_task_done). Archived notes are left out unless `include_archived` is true; then each note says `archived`.",
+        input_schema: r#"{"type":"object","properties":{"query":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"show_done":{"type":"boolean"},"include_archived":{"type":"boolean"}}}"#,
     },
     ToolSpec {
         name: "add_task",
@@ -97,8 +97,8 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "get_connections",
-        description: "Notes one hop around a note: outgoing [[links]], backlinks (alias links included), notes sharing each tag (tags on more than 15 notes give only the count), and unlinked mentions (titles or aliases in this note's text without [[ ]]). To link a mention, read_note then edit_note wrapping the words in [[ ]].",
-        input_schema: r#"{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}"#,
+        description: "Notes one hop around a note: outgoing [[links]], backlinks (alias links included), notes sharing each tag (tags on more than 15 notes give only the count), and unlinked mentions (titles or aliases in this note's text without [[ ]]). To link a mention, read_note then edit_note wrapping the words in [[ ]]. Archived notes are left out unless `include_archived` is true; then each note says `archived`.",
+        input_schema: r#"{"type":"object","properties":{"title":{"type":"string"},"include_archived":{"type":"boolean"}},"required":["title"]}"#,
     },
     ToolSpec {
         name: "daily_note",
@@ -172,15 +172,20 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
     } else {
         ""
     };
+    let arch = a.get("include_archived").and_then(Value::as_bool).unwrap_or(false);
     match name {
         "search_notes" => {
             let limit = uint(&a, "limit", PAGE).clamp(1, PAGE);
-            let p = ops.search(a.get("query").and_then(Value::as_str).unwrap_or(""), &strings(&a, "tags"), uint(&a, "offset", 0), a.get("no_links").and_then(Value::as_bool).unwrap_or(false)).map_err(err)?;
+            let p = ops.search(a.get("query").and_then(Value::as_str).unwrap_or(""), &strings(&a, "tags"), uint(&a, "offset", 0), a.get("no_links").and_then(Value::as_bool).unwrap_or(false), arch).map_err(err)?;
             let has_more = p.has_more || p.hits.len() > limit;
-            let notes = p.hits.iter().take(limit).map(|h| Ok(json!({"title": h.title, "snippet": h.snippet, "modified": iso(h.mtime), "tags": ops.note_tags(&h.path)?}))).collect::<anyhow::Result<Vec<_>>>().map_err(err)?;
+            let notes = p.hits.iter().take(limit).map(|h| {
+                let mut n = json!({"title": h.title, "snippet": h.snippet, "modified": iso(h.mtime), "tags": ops.note_tags(&h.path)?});
+                if arch { n["archived"] = h.archived.into() }
+                Ok(n)
+            }).collect::<anyhow::Result<Vec<_>>>().map_err(err)?;
             Ok(json!({"notes": notes, "has_more": has_more}))
         }
-        "list_tags" => Ok(json!({"tags": ops.tags().map_err(err)?})),
+        "list_tags" => Ok(json!({"tags": ops.tags(arch).map_err(err)?})),
         "read_note" => {
             let doc = ops.read(&path_of(ops, &a)?).map_err(err)?;
             let links = crate::text::extract_links(crate::frontmatter::body(&doc.text));
@@ -189,14 +194,27 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
             Ok(json!({"title": doc.title, "text": doc.text, "hash": doc.hash, "created": iso(m.created), "modified": iso(m.modified), "tags": m.tags, "aliases": m.aliases, "links": links, "backlinks": backlinks}))
         }
         "get_connections" => {
-            let c = ops.connections(&path_of(ops, &a)?).map_err(err)?;
-            let note = |n: &crate::connections::Node| json!({"title": n.title, "created": iso(n.created), "modified": iso(n.modified)});
+            let c = ops.connections(&path_of(ops, &a)?, arch).map_err(err)?;
+            let note = |n: &crate::connections::Node| {
+                let mut v = json!({"title": n.title, "created": iso(n.created), "modified": iso(n.modified)});
+                if arch { v["archived"] = n.archived.into() }
+                v
+            };
+            let group = |g: &crate::connections::TagGroup| {
+                let mut v = json!({"tag": g.tag, "count": g.count, "titles": g.notes.iter().map(|n| &n.title).collect::<Vec<_>>()});
+                if arch { v["archived_titles"] = json!(g.notes.iter().filter(|n| n.archived).map(|n| &n.title).collect::<Vec<_>>()) }
+                v
+            };
             Ok(json!({
                 "title": c.centre.title, "created": iso(c.centre.created), "modified": iso(c.centre.modified),
                 "links_out": c.links_out.iter().map(note).collect::<Vec<_>>(),
                 "links_in": c.links_in.iter().map(note).collect::<Vec<_>>(),
-                "tags": c.tags.iter().map(|g| json!({"tag": g.tag, "count": g.count, "titles": g.notes.iter().map(|n| &n.title).collect::<Vec<_>>()})).collect::<Vec<_>>(),
-                "mentions": c.mentions.iter().map(|m| json!({"title": m.node.title, "name": m.name, "count": m.count})).collect::<Vec<_>>(),
+                "tags": c.tags.iter().map(group).collect::<Vec<_>>(),
+                "mentions": c.mentions.iter().map(|m| {
+                    let mut v = json!({"title": m.node.title, "name": m.name, "count": m.count});
+                    if arch { v["archived"] = m.node.archived.into() }
+                    v
+                }).collect::<Vec<_>>(),
             }))
         }
         "create_note" => {
@@ -237,12 +255,13 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
             Ok(json!({"title": doc.title, "hash": hash}))
         }
         "list_tasks" => {
-            let v = ops.tasks(a.get("query").and_then(Value::as_str).unwrap_or(""), &strings(&a, "tags"), a.get("show_done").and_then(Value::as_bool).unwrap_or(false)).map_err(err)?;
+            let v = ops.tasks(a.get("query").and_then(Value::as_str).unwrap_or(""), &strings(&a, "tags"), a.get("show_done").and_then(Value::as_bool).unwrap_or(false), arch).map_err(err)?;
             let mut v = serde_json::to_value(v).map_err(|e| e.to_string())?;
             // tools speak titles: drop each task's file path
             for g in ["overdue", "today", "upcoming", "no_date", "done"] {
                 for t in v[g].as_array_mut().into_iter().flatten().filter_map(Value::as_object_mut) {
                     t.remove("path");
+                    if !arch { t.remove("archived"); }
                 }
             }
             Ok(v)
@@ -432,6 +451,57 @@ mod tests {
         v["notes"].as_array().unwrap().iter().map(|n| n["title"].as_str().unwrap().to_string()).collect()
     }
 
+    #[test] fn mcp_hides_archived_by_default_and_marks_with_flag() {
+        let (mut ops, dir) = vault(&[("a.md", "#t [[b]]\n- [ ] x"), ("b.md", "#t")]);
+        ops.vault.set_archived(&dir.join("a.md").to_string_lossy(), true).unwrap();
+        assert_eq!(titles(&call(&mut ops, "search_notes", json!({})).unwrap()), ["b"]);
+        assert!(call(&mut ops, "search_notes", json!({})).unwrap()["notes"][0].get("archived").is_none());
+        let all = call(&mut ops, "search_notes", json!({"include_archived": true})).unwrap();
+        assert!(all["notes"].as_array().unwrap().iter().any(|n| n["title"] == "a" && n["archived"] == true));
+        assert_eq!(call(&mut ops, "list_tags", json!({})).unwrap()["tags"], json!([{"tag": "t", "count": 1}]));
+        assert!(call(&mut ops, "list_tasks", json!({})).unwrap()["no_date"].as_array().unwrap().is_empty());
+        assert_eq!(call(&mut ops, "list_tasks", json!({"include_archived": true})).unwrap()["no_date"][0]["archived"], true);
+        assert!(call(&mut ops, "get_connections", json!({"title": "b"})).unwrap()["links_in"].as_array().unwrap().is_empty());
+        let plain = call(&mut ops, "get_connections", json!({"title": "b"})).unwrap();
+        assert!(plain["tags"][0].get("archived_titles").is_none());
+        let c = call(&mut ops, "get_connections", json!({"title": "b", "include_archived": true})).unwrap();
+        assert_eq!((c["links_in"][0]["title"].clone(), c["links_in"][0]["archived"].clone()), (json!("a"), json!(true)));
+        assert_eq!(c["tags"][0]["archived_titles"], json!(["a"]));
+        assert_eq!(c["tags"][0]["titles"], json!(["a"]));
+        assert_eq!(call(&mut ops, "list_tags", json!({"include_archived": true})).unwrap()["tags"], json!([{"tag": "t", "count": 2}]));
+        assert_eq!(call(&mut ops, "read_note", json!({"title": "a"})).unwrap()["title"], "a"); // by title: always
+        assert_eq!(call(&mut ops, "read_note", json!({"title": "b"})).unwrap()["backlinks"], json!([])); // a is archived
+    }
+    #[test] fn get_connections_of_an_archived_centre_counts_right() {
+        let (mut ops, dir) = vault(&[("c.md", "#t"), ("a.md", "#t")]);
+        ops.vault.set_archived(&dir.join("c.md").to_string_lossy(), true).unwrap();
+        for flag in [false, true] {
+            let r = call(&mut ops, "get_connections", json!({"title": "c", "include_archived": flag})).unwrap();
+            assert_eq!(r["title"], "c");
+            assert_eq!(r["tags"][0]["count"], 1);
+            assert_eq!(r["tags"][0]["titles"], json!(["a"]));
+        }
+        ops.vault.set_archived(&dir.join("a.md").to_string_lossy(), true).unwrap();
+        assert_eq!(call(&mut ops, "get_connections", json!({"title": "c"})).unwrap()["tags"], json!([{"tag": "t", "count": 0, "titles": []}])); // the centre's own tag stays listed
+        let r = call(&mut ops, "get_connections", json!({"title": "c", "include_archived": true})).unwrap();
+        assert_eq!((r["tags"][0]["count"].clone(), r["tags"][0]["archived_titles"].clone()), (json!(1), json!(["a"])));
+    }
+    #[test] fn app_archive_is_seen_by_next_mcp_query_and_mcp_rename_by_the_app() {
+        let (mut ops, dir) = vault(&[("a.md", ""), ("b.md", "")]);
+        let data = tempfile::tempdir().unwrap().keep();
+        let mut app = crate::vault::Vault::open_with_progress(dir.clone(), &data.join("app.sqlite"), None, &mut |_, _| {}).unwrap();
+        app.set_archived(&dir.join("a.md").to_string_lossy(), true).unwrap();
+        assert_eq!(titles(&call(&mut ops, "search_notes", json!({})).unwrap()), ["b"]);
+        call(&mut ops, "rename_note", json!({"title": "a", "new_title": "c", "rewrite_links": false, "summary": "s"})).unwrap();
+        app.rescan(None); // the app's watcher
+        let p = app.search_where("", crate::index::Sort::Title, 0, &[], false, true).unwrap();
+        assert!(p.hits.iter().any(|h| h.title == "c" && h.archived));
+    }
+    #[test] fn list_tags_does_not_double_subtract_an_archived_twin() {
+        let (mut ops, dir) = vault(&[("x.md", "#t"), ("x.md.age", "cipher"), ("y.md", "#t")]);
+        ops.vault.set_archived(&dir.join("x.md").to_string_lossy(), true).unwrap();
+        assert_eq!(call(&mut ops, "list_tags", json!({})).unwrap()["tags"], json!([{"tag": "t", "count": 1}]));
+    }
     #[test] fn search_notes_no_links_lists_orphans() {
         let (mut ops, _) = vault(&[("a.md", "[[B]]"), ("B.md", ""), ("c.md", ""), ("s.md.age", "x")]);
         assert_eq!(titles(&call(&mut ops, "search_notes", json!({"no_links": true})).unwrap()), vec!["c"]);

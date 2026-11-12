@@ -214,16 +214,16 @@ impl NoteOps for AppOps<'_> {
         r
     }
 
-    fn search(&self, query: &str, tags: &[String], offset: usize, no_links: bool) -> anyhow::Result<Page> {
-        self.with(|o| o.search(query, tags, offset, no_links))
+    fn search(&self, query: &str, tags: &[String], offset: usize, no_links: bool, include_archived: bool) -> anyhow::Result<Page> {
+        self.with(|o| o.search(query, tags, offset, no_links, include_archived))
     }
 
-    fn tags(&self) -> anyhow::Result<Vec<TagCount>> {
-        self.with(|o| o.tags())
+    fn tags(&self, include_archived: bool) -> anyhow::Result<Vec<TagCount>> {
+        self.with(|o| o.tags(include_archived))
     }
 
-    fn tasks(&self, query: &str, tags: &[String], show_done: bool) -> anyhow::Result<TaskView> {
-        self.with(|o| o.tasks(query, tags, show_done))
+    fn tasks(&self, query: &str, tags: &[String], show_done: bool, include_archived: bool) -> anyhow::Result<TaskView> {
+        self.with(|o| o.tasks(query, tags, show_done, include_archived))
     }
 
     /// The open note is saved and frozen in the editor first, so autosave can't recreate it under its old name; the
@@ -361,8 +361,8 @@ impl NoteOps for AppOps<'_> {
         self.with(|o| o.backlinks(path))
     }
 
-    fn connections(&self, path: &str) -> anyhow::Result<crate::connections::Connections> {
-        self.with(|o| o.connections(path))
+    fn connections(&self, path: &str, include_archived: bool) -> anyhow::Result<crate::connections::Connections> {
+        self.with(|o| o.connections(path, include_archived))
     }
 }
 
@@ -413,16 +413,29 @@ mod tests {
         panic!("no editor round trip expected")
     }
 
+    #[test] fn agent_rename_in_app_mode_keeps_archived() {
+        let (st, dir) = state();
+        let p = dir.join("P.md").to_string_lossy().into_owned();
+        st.vault.lock().unwrap().as_mut().unwrap().set_archived(&p, true).unwrap();
+        let route = |_: Value| -> anyhow::Result<Value> { Ok(json!("not-open")) }; // the note is not open in the editor
+        let to = AppOps::new(&st, &route).rename(&p, "Q", false, "s").unwrap();
+        let g = st.vault.lock().unwrap();
+        let v = g.as_ref().unwrap();
+        assert!(v.search_where("", Sort::Title, 0, &[], false, false).unwrap().hits.iter().all(|h| h.path != to));
+        assert!(v.search_where("", Sort::Title, 0, &[], false, true).unwrap().hits.iter().any(|h| h.path == to && h.archived));
+        assert_eq!(std::fs::read_to_string(dir.join(".velo/archived")).unwrap(), "Q\n");
+    }
+
     #[test] fn app_ops_filters_unlocked_locked_notes() {
         let (st, dir) = state();
         let ops = AppOps::new(&st, &never);
         let mut ops = ops;
         let locked = dir.join("L.md.age").to_string_lossy().into_owned();
-        assert_eq!(ops.search("zebra", &[], 0, false).unwrap().hits.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(), ["P"]);
-        let tasks = ops.tasks("", &[], true).unwrap();
+        assert_eq!(ops.search("zebra", &[], 0, false, false).unwrap().hits.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(), ["P"]);
+        let tasks = ops.tasks("", &[], true, false).unwrap();
         assert!([&tasks.overdue, &tasks.today, &tasks.upcoming, &tasks.no_date, &tasks.done].iter().all(|g| g.iter().all(|t| !t.path.ends_with(".age"))));
         assert_eq!(tasks.no_date.len(), 1);
-        assert!(ops.tags().unwrap().iter().all(|t| t.tag != "hidden"));
+        assert!(ops.tags(false).unwrap().iter().all(|t| t.tag != "hidden"));
         assert_eq!(ops.find("L").unwrap(), None);
         assert_eq!(ops.read(&locked).err().unwrap().to_string(), "not found");
         assert!(ops.note_tags(&locked).is_err());
@@ -692,9 +705,9 @@ mod tests {
         let mut ops = AppOps::new(&st, &never);
         assert_eq!(ops.find("L").unwrap(), None);
         assert_eq!(ops.read(&dir.join("L.md").to_string_lossy()).err().unwrap().to_string(), "not found");
-        assert_eq!(ops.search("zebra", &[], 0, false).unwrap().hits.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(), ["P"]);
-        assert!(ops.tags().unwrap().iter().all(|t| t.tag != "twin"));
-        assert_eq!(ops.tasks("", &[], true).unwrap().no_date.len(), 1);
+        assert_eq!(ops.search("zebra", &[], 0, false, false).unwrap().hits.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(), ["P"]);
+        assert!(ops.tags(false).unwrap().iter().all(|t| t.tag != "twin"));
+        assert_eq!(ops.tasks("", &[], true, false).unwrap().no_date.len(), 1);
         assert_eq!(crate::agent::tools::call(&mut ops, "move_to_trash", json!({"title": "L", "summary": "s"})), Err("not found".to_string()));
     }
 
