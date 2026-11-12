@@ -361,10 +361,11 @@ impl Vault {
         }
     }
 
-    /// The loaded list has an entry for `title`: only then is there anything to keep or drop.
+    /// The list on disk has an entry for `title` (an unreadable list counts as listed): only then is there anything to
+    /// keep or drop. Read fresh: another process may have archived it since this vault last loaded the list.
     fn listed(&self, title: &str) -> bool {
         let f = fold(title);
-        self.archive_loaded.borrow().iter().any(|t| fold(t) == f)
+        crate::archive::read(&self.store.dir).map_or(true, |l| l.iter().any(|t| fold(t) == f))
     }
 
     /// Some file in the vault still has a title folding to `title` (a twin: `Foo.md` beside `Foo.txt`).
@@ -2476,6 +2477,16 @@ mod tests {
         let to = v.rename_note(&s(&dir.join("A.md")), "B", false).unwrap().path;
         v.delete_note_with(&to, rm).unwrap();
         assert!(!dir.join(".velo/archived").exists());
+    }
+    #[test] fn rename_keeps_a_twins_entry_another_process_just_added() {
+        let (dir, db) = setup(); for n in ["Foo.md", "Foo.txt"] { std::fs::write(dir.join(n), "").unwrap(); }
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        v.search_where("", Sort::Title, 0, &[], false, false).unwrap(); // loads the (empty) list
+        std::fs::create_dir_all(dir.join(".velo")).unwrap();
+        std::fs::write(dir.join(".velo/archived"), "Foo\n").unwrap(); // another process archives Foo
+        v.rename_note(&s(&dir.join("Foo.md")), "Bar", false).unwrap();
+        assert_eq!(crate::archive::read(&dir).unwrap(), ["Foo", "Bar"]);
+        assert!(v.search_where("", Sort::Title, 0, &[], false, false).unwrap().hits.is_empty());
     }
     #[test] fn title_on_disk_keeps_the_entry_when_the_listing_fails() {
         let (dir, db) = setup();
