@@ -15,7 +15,7 @@ const c = titleBar();
 const num = (n: number) => n.toLocaleString("en-US");
 const rename = css({
   flex: "1",
-  minW: "0",
+  minW: "160px", // neighbours (hint, actions) never shrink: without a floor the input collapsed to a sliver
   h: "control",
   ml: "-2",
   px: "2",
@@ -100,9 +100,11 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
             }}
             onBlur={() => void controller.commitRename(null)}
           />
-          <span className={hint}>
-            <Kbd>↩</Kbd> Rename <Kbd>Esc</Kbd> Cancel
-          </span>
+          {mode.renameHint && (
+            <span className={hint}>
+              <Kbd>↩</Kbd> Rename <Kbd>Esc</Kbd> Cancel
+            </span>
+          )}
         </>
       ) : (
         <h2 className={bar.title} data-note-title="" title={s.title} onDoubleClick={() => controller.startRename()}>

@@ -6,12 +6,13 @@ const W = {
   paneSortIconOnly: 240, // left pane < this: Sort / Timeline menu buttons go icon-only
   noteViewMenu: 560, // note < this: the Rich · Plain · Preview switch becomes a menu button
   noteLockInMenu: 420, // note < this: Lock moves into the ⋯ note menu
+  noteRenameHint: 800, // note < this: the ↩ Rename / Esc Cancel hint goes, the title input needs the room
   noteMinWithPanel: 480, // docking the side panel would leave the note below this: overlay instead
   headerHideHint: 720, // window < this: hide the ⌘L hint in the search field
 } as const
 
 export type PaneBarMode = { labels: 'all' | 'active'; menusIconOnly: boolean }
-export type TitleBarMode = { viewSwitch: 'segments' | 'menu'; lockInMenu: boolean }
+export type TitleBarMode = { viewSwitch: 'segments' | 'menu'; lockInMenu: boolean; renameHint: boolean }
 
 /** Left pane bar: every tab labelled when there is room, else only the selected one. */
 export const paneBarMode = (paneWidth: number): PaneBarMode => ({
@@ -23,6 +24,7 @@ export const paneBarMode = (paneWidth: number): PaneBarMode => ({
 export const titleBarMode = (noteWidth: number): TitleBarMode => ({
   viewSwitch: noteWidth >= W.noteViewMenu ? 'segments' : 'menu',
   lockInMenu: noteWidth < W.noteLockInMenu,
+  renameHint: noteWidth >= W.noteRenameHint,
 })
 
 /** Side panel docks beside the note unless that would squeeze the note under 480 px; then it overlays. */
