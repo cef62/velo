@@ -44,7 +44,7 @@ export interface CompleteSource {
   links(): Ranked<LinkTarget>[];
   tags(): Ranked<TagCount>[];
   onCreate(title: string): void;
-  /** Whether a note with this title exists, archived or not; defaults to the suggestions. */
+  /** Whether a note with this title exists, archived or not; an exact suggestion also counts. */
   exists?: (title: string) => boolean;
 }
 
@@ -75,7 +75,7 @@ export const linkSource =
       apply: insert(t.name),
     }));
     const title = c.query.trim();
-    if (title && !(src.exists?.(title) ?? src.links().some((r) => r.f === fold(title))))
+    if (title && !(src.exists?.(title) || src.links().some((r) => r.f === fold(title))))
       options.push({
         label: `Create "${title}"`,
         apply: (view, _c, from, to) => {

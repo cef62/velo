@@ -205,7 +205,7 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
                 if arch { v["archived_titles"] = json!(g.notes.iter().filter(|n| n.archived).map(|n| &n.title).collect::<Vec<_>>()) }
                 v
             };
-            Ok(json!({
+            let mut out = json!({
                 "title": c.centre.title, "created": iso(c.centre.created), "modified": iso(c.centre.modified),
                 "links_out": c.links_out.iter().map(note).collect::<Vec<_>>(),
                 "links_in": c.links_in.iter().map(note).collect::<Vec<_>>(),
@@ -215,7 +215,9 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
                     if arch { v["archived"] = m.node.archived.into() }
                     v
                 }).collect::<Vec<_>>(),
-            }))
+            });
+            if arch { out["archived"] = c.centre.archived.into() }
+            Ok(out)
         }
         "create_note" => {
             let doc = ops.create(title_arg(&a, "title")?, arg(&a, "text")?, summary).map_err(err)?;
@@ -463,9 +465,10 @@ mod tests {
         assert_eq!(call(&mut ops, "list_tasks", json!({"include_archived": true})).unwrap()["no_date"][0]["archived"], true);
         assert!(call(&mut ops, "get_connections", json!({"title": "b"})).unwrap()["links_in"].as_array().unwrap().is_empty());
         let plain = call(&mut ops, "get_connections", json!({"title": "b"})).unwrap();
-        assert!(plain["tags"][0].get("archived_titles").is_none());
+        assert!(plain["tags"][0].get("archived_titles").is_none() && plain.get("archived").is_none());
         let c = call(&mut ops, "get_connections", json!({"title": "b", "include_archived": true})).unwrap();
         assert_eq!((c["links_in"][0]["title"].clone(), c["links_in"][0]["archived"].clone()), (json!("a"), json!(true)));
+        assert_eq!(c["archived"], false);
         assert_eq!(c["tags"][0]["archived_titles"], json!(["a"]));
         assert_eq!(c["tags"][0]["titles"], json!(["a"]));
         assert_eq!(call(&mut ops, "list_tags", json!({"include_archived": true})).unwrap()["tags"], json!([{"tag": "t", "count": 2}]));
@@ -478,6 +481,7 @@ mod tests {
         for flag in [false, true] {
             let r = call(&mut ops, "get_connections", json!({"title": "c", "include_archived": flag})).unwrap();
             assert_eq!(r["title"], "c");
+            assert_eq!(r.get("archived"), flag.then_some(&json!(true))); // the centre's own flag, only with the flag
             assert_eq!(r["tags"][0]["count"], 1);
             assert_eq!(r["tags"][0]["titles"], json!(["a"]));
         }
