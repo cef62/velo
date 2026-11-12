@@ -609,7 +609,8 @@ impl Vault {
         }
         // the same names the Related panel offered: archived ones only when it showed them
         self.sync_archive();
-        let hidden = if include_archived { HashSet::new() } else { self.index.archived_paths()? };
+        let mut hidden = if include_archived { HashSet::new() } else { self.index.archived_paths()? };
+        hidden.remove(path); // the centre keeps its own names, as in `connections::build`
         let names: HashSet<String> = self.index.names()?.into_iter().filter(|(_, p)| !hidden.contains(p)).map(|(n, _)| n).collect();
         let rewrite = |text: &str| link_mention_text(text, target, &names, expected).map_err(|e| anyhow!(e));
         if let Some(text) = editor_text {
@@ -1149,6 +1150,26 @@ mod tests {
         assert_eq!(v.link_mention(&c, "Foo", 1, None, false, true).unwrap_err().to_string(), "mention-moved");
         assert_eq!(v.link_mention(&c, "Foo", 1, None, false, false).unwrap(), None);
         assert_eq!(std::fs::read_to_string(dir.join("C.md")).unwrap(), "see [[Foo]] Bar");
+    }
+    #[test] fn link_mention_keeps_an_archived_centres_own_names() { // the panel does, so a mention of `Foo` inside `Foo Bar` stays hidden
+        let (dir, db) = setup();
+        for (n, b) in [("Foo", ""), ("Foo Bar", "see Foo Bar")] { std::fs::write(dir.join(format!("{n}.md")), b).unwrap(); }
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let c = s(&dir.join("Foo Bar.md"));
+        v.set_archived(&c, true).unwrap();
+        assert!(v.connections(&c, &|_| false, false).unwrap().mentions.is_empty());
+        assert_eq!(v.link_mention(&c, "Foo", 1, None, false, false).unwrap_err().to_string(), "mention-moved");
+        assert_eq!(std::fs::read_to_string(&c).unwrap(), "see Foo Bar");
+    }
+    #[test] fn open_or_create_keeps_the_entry_of_a_file_it_did_not_create() {
+        let (dir, db) = setup();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        std::fs::write(dir.join("Late.md"), "").unwrap(); // after open, no rescan: not indexed
+        std::fs::create_dir_all(dir.join(".velo")).unwrap();
+        std::fs::write(dir.join(".velo/archived"), "Late\n").unwrap();
+        let (_, created) = v.open_or_create_new("Late", None, false).unwrap();
+        assert!(!created);
+        assert_eq!(std::fs::read_to_string(dir.join(".velo/archived")).unwrap(), "Late\n");
     }
     #[test] fn link_mention_with_editor_text_writes_nothing() {
         let (dir, db) = setup();
