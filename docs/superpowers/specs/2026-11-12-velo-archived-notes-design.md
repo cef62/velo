@@ -61,7 +61,8 @@ Tasks inside an archived note stay as written in the file. They leave the Tasks 
 - "Archive note" in the command palette and in the note's `⋯` menu. On an archived note the same entry reads "Unarchive note".
 - The note that was just archived stays open in the editor while it leaves the list.
 - Archiving does not change the note's dates, so with "show archived" on it keeps its place in Recent and in the timeline.
-- Locked notes can be archived like any other, without unlocking.
+- Archive always acts on the note open in the editor: in the palette, the shortcut and the `⋯` menu alike. With no note open the command is disabled.
+- Locked notes can be archived like any other. Archiving never decrypts or rewrites the file. Because the command acts on the open note, a locked note must be opened (passphrase entered) before it can be archived.
 - Editing an archived note keeps it archived.
 
 ### Links
@@ -97,7 +98,7 @@ These are the designer's calls. The owner has not ruled on them one by one; each
 - Reading is forgiving: a leading byte-order mark and `\r\n` line ends are accepted, empty lines are skipped, invalid bytes do not make the read fail. Titles are not trimmed.
 - The same title twice in the file (a hand edit, a sync tool's merge) counts once.
 - A title that contains a line break cannot be archived; velo reports an error.
-- If the file exists but cannot be read, velo keeps the list it last read. At start-up, with nothing read yet, it treats the list as empty and reports the error once. Accepted limit: until the file is readable again, archived notes show.
+- If the file exists but cannot be read, velo keeps the list it last read. At start-up, with nothing read yet, it treats the list as empty and writes one line to the log. Accepted limit: until the file is readable again, archived notes show.
 - A failed write is never silent. Archive and unarchive report the error. Rename, delete, merge and create still succeed and report that the list could not be updated.
 - Writes are atomic (write a temporary file, then rename), like `settings.json`.
 - Two processes use the file: the app, and the headless MCP server (`velo --mcp`), which renames, deletes and merges notes for agents. Neither may trust a copy read earlier:
