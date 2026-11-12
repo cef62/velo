@@ -37,7 +37,8 @@ const app = css({
   color: "velo.fg",
   "[data-layout=horizontal] &": {
     display: "grid",
-    gridTemplateColumns: "minmax(200px, var(--list-w, 260px)) auto minmax(320px, 1fr)",
+    // Panda reads literals only: 216 = MIN_LIST_W (src/divider.ts), pinned by divider.test.ts
+    gridTemplateColumns: "minmax(216px, var(--list-w, 260px)) auto minmax(320px, 1fr)",
     gridTemplateRows: "auto minmax(0, 1fr)",
   },
 });

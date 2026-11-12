@@ -45,13 +45,20 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
   const c = paneBar({ labels: mode.labels });
   const kbd = (a: Action) => (keys[a] === NONE ? null : <Kbd marginLeft="auto">{formatBinding(keys[a], isMac)}</Kbd>);
   const tip = (a: Action | null, text: string) => (!a || keys[a] === NONE ? text : `${text} (${formatBinding(keys[a], isMac)})`);
-  const menuBtn = (text: string, aria: string, glyph: ReactNode, extra: Record<string, unknown> = {}) => (
-    <button type="button" className={menuButton({ iconOnly: mode.menusIconOnly })} aria-label={aria} {...extra}>
-      {glyph}
-      <span data-label>{text}</span>
-      <ChevronDown data-chevron aria-hidden />
-    </button>
-  );
+  // The menu trigger; icon-only, a tooltip carries the label the button would show (it names the current value too).
+  const menuBtn = (text: string, aria: string, glyph: ReactNode) => {
+    const trigger = (
+      <Menu.Trigger asChild>
+        <button type="button" className={menuButton({ iconOnly: mode.menusIconOnly })} aria-label={aria}>
+          {glyph}
+          <span data-label>{text}</span>
+          <ChevronDown data-chevron aria-hidden />
+        </button>
+      </Menu.Trigger>
+    );
+    // the tooltip wraps a span, not the trigger: two refs on one button would lose the menu's anchor (it opened off-screen)
+    return mode.menusIconOnly ? <Tooltip content={text} openDelay={500}><span className={css({ display: "inline-flex", flex: "none" })}>{trigger}</span></Tooltip> : trigger;
+  };
 
   const archivedToggle = (
     <Tooltip content={tip("toggle_archived", "Show archived notes")} openDelay={500}>
@@ -90,7 +97,7 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
         <>
           {total > 0 && <span className={c.meta} title={`${total.toLocaleString("en-US")} notes`}>{total.toLocaleString("en-US")}</span>}
           <Menu.Root positioning={{ placement: "bottom-end" }}>
-            <Menu.Trigger asChild>{menuBtn(sort === "title" ? "Title A→Z" : "Recent", `Sort: ${sort === "title" ? "title" : "recent"}`, sort === "title" ? <ArrowDownAZ /> : <Clock />)}</Menu.Trigger>
+            {menuBtn(sort === "title" ? "Title A→Z" : "Recent", `Sort: ${sort === "title" ? "title" : "recent"}`, sort === "title" ? <ArrowDownAZ /> : <Clock />)}
             <Menu.Positioner>
               <Menu.Content minW="200px">
                 <Menu.RadioItemGroup value={sort} onValueChange={(d) => d.value !== sort && void controller.setSort(d.value as typeof sort)}>
@@ -118,9 +125,7 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
       {cur === "timeline" && (
         <>
           <Menu.Root positioning={{ placement: "bottom-end" }}>
-            <Menu.Trigger asChild>
-              {menuBtn(`${tl.by === "created" ? "Created" : "Updated"} · ${tl.range === "all" ? "All" : `${tl.range}d`}`, `Timeline: by ${tl.by}, ${tl.range === "all" ? "all time" : `last ${tl.range} days`}`, mode.menusIconOnly ? <CalendarDays /> : null)}
-            </Menu.Trigger>
+            {menuBtn(`${tl.by === "created" ? "Created" : "Updated"} · ${tl.range === "all" ? "All" : `${tl.range}d`}`, `Timeline: by ${tl.by}, ${tl.range === "all" ? "all time" : `last ${tl.range} days`}`, mode.menusIconOnly ? <CalendarDays /> : null)}
             <Menu.Positioner>
               <Menu.Content minW="200px">
                 <Menu.RadioItemGroup value={tl.by} onValueChange={(d) => d.value !== tl.by && void controller.setTimelineBy(d.value as typeof tl.by)}>
