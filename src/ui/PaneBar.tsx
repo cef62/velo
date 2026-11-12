@@ -6,7 +6,7 @@ import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { Kbd, Menu, Tooltip } from "@/components/ui";
 import { formatBinding, NONE, type Action } from "../shortcuts";
-import { paneBarMode } from "./layout";
+import { dueText, noteCount, paneBarMode } from "./layout";
 import { PANE_TABS, stepPaneTab, type PaneTab } from "./paneTabs";
 import { useStore } from "./useStore";
 
@@ -87,7 +87,7 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
             <button type="button" role="tab" data-tab={t} aria-selected={t === cur} tabIndex={t === cur ? 0 : -1} className={c.tab} aria-label={t === "tasks" && dueCount > 0 ? `Tasks, ${dueCount} due` : TAB[t].text} onClick={() => t !== cur && controller.setPaneMode(t)}>
               {TAB[t].glyph}
               <span data-label>{TAB[t].text}</span>
-              {t === "tasks" && dueCount > 0 && <span className={countBadge({ tone: "danger" })} aria-hidden="true">{dueCount}</span>}
+              {t === "tasks" && dueCount > 0 && <span className={countBadge({ tone: "danger" })} aria-hidden="true">{dueText(dueCount)}</span>}
             </button>
           </Tooltip>
         ))}
@@ -95,7 +95,7 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
       <span className={c.spacer} />
       {cur === "notes" && (
         <>
-          {total > 0 && <span className={c.meta} title={`${total.toLocaleString("en-US")} notes`}>{total.toLocaleString("en-US")}</span>}
+          {total > 0 && mode.labels !== "none" && <span className={c.meta} title={`${total.toLocaleString("en-US")} notes`}>{noteCount(total)}</span>}
           <Menu.Root positioning={{ placement: "bottom-end" }}>
             {menuBtn(sort === "title" ? "Title A→Z" : "Recent", `Sort: ${sort === "title" ? "title" : "recent"}`, sort === "title" ? <ArrowDownAZ /> : <Clock />)}
             <Menu.Positioner>

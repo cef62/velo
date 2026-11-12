@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { paneBarMode, showSearchHint, sidePanelMode, titleBarMode } from './layout'
+import { dueText, noteCount, paneBarMode, showSearchHint, sidePanelMode, titleBarMode } from './layout'
 
 // The sizes the v2 mocks are drawn at (design/park-ui/v2/reference/V2Small, V2Wide, V2Main*).
 describe('v2 layout rules', () => {
@@ -30,25 +30,25 @@ describe('v2 layout rules', () => {
     expect(showSearchHint(600)).toBe(false)
   })
   it('pane bar labels: in full or icon-only, per mode, on both sides of each boundary', () => {
-    expect(paneBarMode(330, 'notes').menusIconOnly).toBe(true)
-    expect(paneBarMode(331, 'notes').menusIconOnly).toBe(false)
-    expect(paneBarMode(379, 'notes').menusIconOnly).toBe(false)
-    expect(paneBarMode(380, 'notes').menusIconOnly).toBe(true) // tabs gain labels and take the room
-    expect(paneBarMode(432, 'notes').menusIconOnly).toBe(true)
-    expect(paneBarMode(433, 'notes').menusIconOnly).toBe(false)
-    expect(paneBarMode(262, 'notes').labels).toBe('none')
-    expect(paneBarMode(263, 'notes').labels).toBe('active')
-    expect(paneBarMode(226, 'tasks').labels).toBe('none')
-    expect(paneBarMode(227, 'tasks').labels).toBe('active')
-    expect(paneBarMode(263, 'timeline').labels).toBe('none')
-    expect(paneBarMode(264, 'timeline').labels).toBe('active')
-    expect(paneBarMode(300, 'tasks').menusIconOnly).toBe(true)
-    expect(paneBarMode(301, 'tasks').menusIconOnly).toBe(false)
-    expect(paneBarMode(403, 'tasks').menusIconOnly).toBe(true)
-    expect(paneBarMode(404, 'tasks').menusIconOnly).toBe(false)
-    expect(paneBarMode(359, 'timeline').menusIconOnly).toBe(true)
-    expect(paneBarMode(360, 'timeline').menusIconOnly).toBe(false)
-    expect(paneBarMode(446, 'timeline').menusIconOnly).toBe(true)
-    expect(paneBarMode(447, 'timeline').menusIconOnly).toBe(false)
+    // [mode, first width with labels, tabs active] / [first width with labelled controls] / [... with all tabs labelled]
+    const edges = { notes: [269, 341, 443], tasks: [227, 308, 410], timeline: [271, 360, 447] } as const
+    for (const [tab, [tabs, controls, controlsAll]] of Object.entries(edges) as [keyof typeof edges, readonly number[]][]) {
+      expect(paneBarMode(tabs - 1, tab).labels).toBe('none')
+      expect(paneBarMode(tabs, tab).labels).toBe('active')
+      expect(paneBarMode(controls - 1, tab).menusIconOnly).toBe(true)
+      expect(paneBarMode(controls, tab).menusIconOnly).toBe(false)
+      expect(paneBarMode(379, tab).menusIconOnly).toBe(controls > 379) // still 'active' labels below 380
+      expect(paneBarMode(380, tab).menusIconOnly).toBe(true) // tabs gain labels and take the room
+      expect(paneBarMode(controlsAll - 1, tab).menusIconOnly).toBe(true)
+      expect(paneBarMode(controlsAll, tab).menusIconOnly).toBe(false)
+    }
+  })
+  it('counts beside the tabs have a fixed worst case the thresholds were measured with', () => {
+    expect(noteCount(9999)).toBe('9,999')
+    expect(noteCount(10004)).toBe('10K')
+    expect(noteCount(99999)).toBe('100K')
+    expect(dueText(99)).toBe('99')
+    expect(dueText(100)).toBe('99+')
+    expect(dueText(999)).toBe('99+')
   })
 })
