@@ -361,6 +361,12 @@ impl Vault {
         }
     }
 
+    /// The loaded list has an entry for `title`: only then is there anything to keep or drop.
+    fn listed(&self, title: &str) -> bool {
+        let f = fold(title);
+        self.archive_loaded.borrow().iter().any(|t| fold(t) == f)
+    }
+
     /// Some file in the vault still has a title folding to `title` (a twin: `Foo.md` beside `Foo.txt`).
     fn title_on_disk(&self, title: &str) -> bool {
         let f = fold(title);
@@ -370,7 +376,7 @@ impl Vault {
     /// A title moved from `old` to `new`. A stale entry for `new` is always cleared; only an archived note carries its
     /// entry over, and a twin still on disk keeps `old`'s.
     fn archive_retitle(&mut self, old: &str, new: &str) {
-        let twin = fold(old) != fold(new) && self.title_on_disk(old);
+        let twin = fold(old) != fold(new) && self.listed(old) && self.title_on_disk(old);
         self.archive_follow(|e| {
             let was = e.iter().any(|t| fold(t) == fold(old));
             if was && !twin {
@@ -812,7 +818,7 @@ impl Vault {
         remove(p)?;
         self.remove_note(path)?;
         self.unlocked.remove(path);
-        if !self.title_on_disk(&title) {
+        if self.listed(&title) && !self.title_on_disk(&title) {
             self.archive_follow(|e| e.retain(|t| fold(t) != fold(&title)));
         }
         Ok(())
@@ -2463,6 +2469,13 @@ mod tests {
         v.index.set_archived(&[]).unwrap(); // marker: a reload would put "a" back
         v.archive_edit(|_| {}).unwrap();
         assert!(v.index.archived_titles().unwrap().is_empty());
+    }
+    #[test] fn rename_and_delete_without_a_list_leave_no_list_file() { // behaviour only: the skipped folder listing is not observable
+        let (dir, db) = setup(); std::fs::write(dir.join("A.md"), "").unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let to = v.rename_note(&s(&dir.join("A.md")), "B", false).unwrap().path;
+        v.delete_note_with(&to, rm).unwrap();
+        assert!(!dir.join(".velo/archived").exists());
     }
     #[test] fn title_on_disk_keeps_the_entry_when_the_listing_fails() {
         let (dir, db) = setup();

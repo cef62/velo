@@ -27,7 +27,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "list_tags",
-        description: "All tags in velo notes (front-matter `tags:` and inline #tag words) with the number of notes carrying each. Archived notes are left out unless `include_archived` is true; then each note says `archived`.",
+        description: "All tags in velo notes (front-matter `tags:` and inline #tag words) with the number of notes carrying each. Archived notes are left out of the counts unless `include_archived` is true; then the counts include them.",
         input_schema: r#"{"type":"object","properties":{"include_archived":{"type":"boolean"}}}"#,
     },
     ToolSpec {

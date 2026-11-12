@@ -6,9 +6,9 @@ use std::path::Path;
 pub const FILE: &str = ".velo/archived";
 
 pub fn parse(text: &str) -> Vec<String> {
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     text.split('\n')
         .map(|l| l.strip_suffix('\r').unwrap_or(l))
+        .map(|l| l.strip_prefix('\u{feff}').unwrap_or(l)) // also mid-file: two BOM files joined by a sync tool
         .filter(|l| !l.is_empty())
         .map(String::from)
         .collect()
@@ -80,6 +80,13 @@ mod tests {
         update(d.path(), |e| e.push("Bar".into())).unwrap(); // an unrelated archive
         update(d.path(), |e| { e.retain(|t| t != "Bar"); e.push("Baz".into()) }).unwrap(); // a rename
         assert_eq!(read(d.path()).unwrap(), ["Foo", "Baz"]);
+    }
+    #[test] fn a_bom_on_any_line_is_stripped() {
+        assert_eq!(parse("\u{feff}A\n\u{feff}B\n"), ["A", "B"]);
+        let d = tempfile::tempdir().unwrap(); std::fs::create_dir(d.path().join(".velo")).unwrap();
+        std::fs::write(d.path().join(FILE), "\u{feff}A\n\u{feff}B\n").unwrap();
+        assert_eq!(update(d.path(), |e| e.retain(|t| t != "A")).unwrap(), ["B"]);
+        assert_eq!(read(d.path()).unwrap(), ["B"]);
     }
     #[test] fn update_refuses_titles_with_line_breaks() {
         let d = tempfile::tempdir().unwrap();
