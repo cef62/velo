@@ -1504,14 +1504,14 @@ test("a capture while the target note is loading waits and appends through the e
 test("opening a note waits for a backend write to it in flight", async () => {
   const { c, api } = setup({ A: "- [ ] x", B: "b" });
   await c.show(P("B"));
-  const w = deferred<{ line: number; line_text: string, archived: false }>();
+  const w = deferred<{ line: number; line_text: string }>();
   api.toggleTask.mockImplementationOnce(() => w.promise);
   const ticked = c.tickTask(taskOf(P("A"), "- [ ] x"));
   await settle();
   const shown = c.show(P("A"));
   await settle();
   expect(api.openNote).not.toHaveBeenCalledWith(P("A")); // its reply would hold pre-write text and hash
-  w.resolve({ line: 0, line_text: "- [x] x", archived: false });
+  w.resolve({ line: 0, line_text: "- [x] x" });
   await ticked;
   await shown;
   expect(api.openNote).toHaveBeenCalledWith(P("A"));
@@ -3139,4 +3139,26 @@ test("link mention and the Related panel read the same switch", async () => {
   await c.linkMention(mention("Bee"));
   expect(api.connections).toHaveBeenLastCalledWith(P("A"), true);
   expect(api.linkMention).toHaveBeenCalledWith(P("A"), "Bee", 1, "see Bee here", true);
+});
+
+test("exactTitleMatch follows the title cache: a renamed-away title offers Create again", async () => {
+  const { c, api, store, notes } = setup({ A: "a", B: "b" });
+  await c.start(); await settle();
+  c.setQuery("A"); await settle();
+  expect(store.get().exactTitleMatch).toBe(true);
+  delete notes.A; notes.Z = "a";
+  await c.runSearch(false); await c.refreshTitles(); await settle();
+  expect(api.listTitles).toHaveBeenCalled();
+  expect(store.get().exactTitleMatch).toBe(false);
+});
+
+test("exactTitleMatch: a hidden note renamed to the query counts once the title cache loads", async () => {
+  const { c, api, store, notes } = setup({ A: "a", B: "b" });
+  await c.start(); await settle();
+  c.setQuery("Q"); await settle();
+  expect(store.get().exactTitleMatch).toBe(false);
+  await api.setArchived("/n/B.md", true);
+  delete notes.B; notes.Q = "b"; await api.setArchived("/n/Q.md", true); // renamed to Q, still archived: not in the list
+  await c.runSearch(false); await c.refreshTitles(); await settle();
+  expect(store.get().exactTitleMatch).toBe(true);
 });

@@ -152,16 +152,21 @@ export class Controller {
   }
 
   /** Rows changed (reset/refresh/page loaded): publish them so the list re-renders. */
+  /** The Create hint: a loaded row or any note (archived too, via the title cache) carries the query as its title. */
+  protected exactMatch() {
+    const q = fold(this.store.get().query.trim()); // trimmed like enterAction, so the hint matches what Enter does
+    return q !== "" && (this.results.loaded.some((h) => fold(h.title) === q) || this.titles.has(q));
+  }
+
   protected listChanged(reset = false) {
     const r = this.results;
-    const q = fold(this.store.get().query.trim()); // trimmed like enterAction, so the Create hint matches what Enter does
     this.store.set((s) => ({
       listVersion: s.listVersion + 1,
       listReset: s.listReset + (reset ? 1 : 0),
       count: r.count,
       hasMore: r.hasMore,
       total: r.total,
-      exactTitleMatch: q !== "" && (r.loaded.some((h) => fold(h.title) === q) || this.titles.has(q)),
+      exactTitleMatch: this.exactMatch(),
     }));
   }
 
@@ -220,6 +225,7 @@ export class Controller {
     void this.loadLinkTargets();
     try {
       this.titles = new Set((await this.api.listTitles()).map(fold));
+      this.store.set({ exactTitleMatch: this.exactMatch() }); // the list loaded before the cache did
       this.preview?.refresh();
       this.editor?.refreshLinks();
     } catch (e) {

@@ -463,8 +463,8 @@ export const lockNote = async (path: string): Promise<string> => move(path, `${p
 export const unlockNote = async (path: string): Promise<string> => move(path, path.replace(/\.age$/, ""));
 export const lockAll = async (): Promise<void> => void (unlocked = false);
 export const deleteNote = async (path: string): Promise<void> => {
-  archived.delete(fold(titleOf(path)));
   notes.delete(get(path).path);
+  archived.delete(fold(titleOf(path)));
 };
 export const setArchived = async (path: string, on: boolean): Promise<void> => void archived[on ? "add" : "delete"](fold(titleOf(get(path).path)));
 export const mergeNotes = async (source: string, target: string): Promise<MergeResult> => {
