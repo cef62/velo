@@ -480,7 +480,7 @@ impl Vault {
             lossy(&bytes)
         };
         let meta = self.note_meta(path, &text, &stat(p)?);
-        let archived = self.index.archived_titles()?.contains(&fold(&nf.title));
+        let archived = self.index.node(path)?.is_some_and(|n| n.archived);
         Ok(NoteDoc { path: path.into(), title: nf.title, text, archived, hash: hash(&bytes), encrypted: nf.encrypted, meta })
     }
 

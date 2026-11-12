@@ -512,18 +512,18 @@ impl Index {
         // Empty query orders straight off the notes_mtime / notes_title indexes.
         let page_sql = format!("SELECT * FROM ({union}) ORDER BY grp, {order} LIMIT {} OFFSET {offset}", limit + 1);
         let mut st = self.db.prepare(&page_sql)?;
-        let rows: Vec<(Hit, i64, i64)> = st
-            .query_map(params_from_iter(args.iter()), |r| Ok((hit(r)?, r.get(6)?, r.get(7)?)))?
+        let rows: Vec<(Hit, String, i64, i64)> = st
+            .query_map(params_from_iter(args.iter()), |r| Ok((hit(r)?, r.get(5)?, r.get(6)?, r.get(7)?)))?
             .collect::<Result<_, _>>()?;
         let mut body_of = self.db.prepare("SELECT body FROM notes_fts WHERE rowid = ?")?;
         let mut hits = Vec::with_capacity(rows.len().min(limit));
-        for (mut h, rowid, grp) in rows.into_iter() {
+        for (mut h, tf, rowid, grp) in rows.into_iter() {
             // No FTS snippet(): it re-runs the MATCH per row. Read the body by rowid and cut the window in Rust.
             if grp == 1 && hits.len() < limit {
                 let body: String = body_of.query_row([rowid], |r| r.get(0))?;
                 h.snippet = snippet(&body, &terms[long[0]], std::mem::take(&mut h.snippet));
             }
-            h.archived = archived.contains(&fold(&h.title));
+            h.archived = archived.contains(&tf);
             hits.push(h);
         }
         if hits.len() > limit {

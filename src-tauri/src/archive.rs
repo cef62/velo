@@ -35,7 +35,7 @@ pub fn update(dir: &Path, change: impl FnOnce(&mut Vec<String>)) -> Result<Vec<S
     let before = read(dir)?;
     let mut now = before.clone();
     change(&mut now);
-    if let Some(bad) = now.iter().find(|t| !before.contains(t) && (t.contains('\n') || t.ends_with('\r') || t.starts_with('\u{feff}'))) {
+    if let Some(bad) = now.iter().find(|t| !before.contains(t) && (t.is_empty() || t.contains('\n') || t.ends_with('\r') || t.starts_with('\u{feff}'))) {
         return Err(Error::new(ErrorKind::InvalidInput, format!("title cannot be archived: {bad:?}")));
     }
     dedupe(&mut now);
@@ -45,8 +45,11 @@ pub fn update(dir: &Path, change: impl FnOnce(&mut Vec<String>)) -> Result<Vec<S
     let path = dir.join(FILE);
     std::fs::create_dir_all(path.parent().expect("FILE has a parent"))?;
     let tmp = dir.join(format!("{FILE}.{}.tmp", std::process::id()));
-    std::fs::write(&tmp, now.iter().map(|t| format!("{t}\n")).collect::<String>())?;
-    std::fs::rename(tmp, path)?;
+    let put = std::fs::write(&tmp, now.iter().map(|t| format!("{t}\n")).collect::<String>()).and_then(|()| std::fs::rename(&tmp, path));
+    if let Err(e) = put {
+        std::fs::remove_file(&tmp).ok(); // no stray temp file after a failed write or rename
+        return Err(e);
+    }
     Ok(now)
 }
 
@@ -76,11 +79,11 @@ mod tests {
         std::fs::write(d.path().join(FILE), "Foo\r\r\n").unwrap(); // parsed as "Foo\r", normalised on the next write
         update(d.path(), |e| e.push("Bar".into())).unwrap(); // an unrelated archive
         update(d.path(), |e| { e.retain(|t| t != "Bar"); e.push("Baz".into()) }).unwrap(); // a rename
-        assert!(read(d.path()).unwrap().contains(&"Baz".to_string()));
+        assert_eq!(read(d.path()).unwrap(), ["Foo", "Baz"]);
     }
     #[test] fn update_refuses_titles_with_line_breaks() {
         let d = tempfile::tempdir().unwrap();
-        for bad in ["A\nB", "A\r", "\u{feff}A"] {
+        for bad in ["", "A\nB", "A\r", "\u{feff}A"] {
             let e = update(d.path(), |e| e.push(bad.into())).unwrap_err();
             assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput);
         }

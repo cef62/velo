@@ -81,11 +81,14 @@ fn with_vault<T>(st: &AppState, f: impl FnOnce(&mut Vault, Option<&str>) -> anyh
 /// `with_vault` for a note operation that may write `.velo/archived`: a failed list write is emitted as
 /// `archive-error` (taken, so it never lands on a later operation).
 fn with_vault_emit<T>(app: &AppHandle, st: &AppState, f: impl FnOnce(&mut Vault, Option<&str>) -> anyhow::Result<T>) -> Res<T> {
-    with_vault(st, |v, id| {
-        let r = f(v, id);
-        emit_archive_error(v, |e, p| { app.emit(e, p).ok(); });
-        r
-    })
+    with_vault(st, |v, id| run_reporting(v, id, f, |e, p| { app.emit(e, p).ok(); }))
+}
+
+/// Runs `f`, then reports a kept archive error whatever `f` returned (a failed note operation can still have written the list).
+fn run_reporting<T>(v: &mut Vault, id: Option<&str>, f: impl FnOnce(&mut Vault, Option<&str>) -> anyhow::Result<T>, emit: impl FnOnce(&str, serde_json::Value)) -> anyhow::Result<T> {
+    let r = f(v, id);
+    emit_archive_error(v, emit);
+    r
 }
 
 /// Reports (once) a failed `.velo/archived` write that a note operation kept in `v.archive_error`.
@@ -964,6 +967,22 @@ mod tests {
         emit_archive_error(&v, |e, p| got.push((e.to_string(), p)));
         emit_archive_error(&v, |e, p| got.push((e.to_string(), p)));
         assert_eq!(got, [("archive-error".to_string(), serde_json::json!({"message": "denied"}))]);
+    }
+    #[cfg(unix)] #[test] fn note_operations_report_a_failed_list_write_once() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap().keep(); let db = tempfile::tempdir().unwrap().keep().join("i.sqlite");
+        std::fs::write(dir.join("Old.md"), "").unwrap();
+        let mut v = Vault::open_with_progress(dir.clone(), &db, None, &mut |_, _| {}).unwrap();
+        let p = dir.join("Old.md").to_string_lossy().into_owned();
+        v.set_archived(&p, true).unwrap();
+        let lock = |m| std::fs::set_permissions(dir.join(".velo"), std::fs::Permissions::from_mode(m)).unwrap();
+        let run = |v: &mut Vault, f: &dyn Fn(&mut Vault) -> anyhow::Result<()>| { let mut n = 0; let r = run_reporting(v, None, |v, _| f(v), |_, _| n += 1); (r.is_ok(), n) };
+        lock(0o555);
+        assert_eq!(run(&mut v, &|v| v.rename_note(&p, "New", false).map(|_| ())), (true, 1)); // the list write fails, the rename succeeds
+        lock(0o755);
+        assert_eq!(run(&mut v, &|_| Ok(())).1, 0); // a clean operation emits nothing
+        v.archive_error.set(Some("kept".into()));
+        assert_eq!(run(&mut v, &|_| Err(anyhow::anyhow!("boom"))), (false, 1)); // the error path still emits
     }
     #[test] fn with_vault_refuses_while_indexing() {
         assert_eq!(check_gate(&Mutex::new(Some((1, 2)))), Err("indexing"));

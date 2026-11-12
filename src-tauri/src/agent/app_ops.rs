@@ -426,6 +426,52 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dir.join(".velo/archived")).unwrap(), "Q\n");
     }
 
+    #[test] fn include_archived_is_forwarded_not_hard_coded() {
+        let (st, dir) = state();
+        std::fs::write(dir.join("A.md"), "see [[P]]\n").unwrap();
+        let (p, a) = (dir.join("P.md").to_string_lossy().into_owned(), dir.join("A.md").to_string_lossy().into_owned());
+        {
+            let mut g = st.vault.lock().unwrap(); let v = g.as_mut().unwrap();
+            v.rescan(None);
+            v.set_archived(&p, true).unwrap();
+        }
+        let ops = AppOps::new(&st, &never);
+        let titles = |p: Page| p.hits.into_iter().map(|h| h.title).collect::<Vec<_>>();
+        assert!(!titles(ops.search("zebra", &[], 0, false, false).unwrap()).contains(&"P".into()));
+        assert!(titles(ops.search("zebra", &[], 0, false, true).unwrap()).contains(&"P".into()));
+        assert!(ops.tags(false).unwrap().iter().all(|t| t.tag != "shared") && ops.tags(true).unwrap().iter().any(|t| t.tag == "shared"));
+        assert_eq!(ops.tasks("", &[], true, false).unwrap().no_date.len(), 0);
+        assert_eq!(ops.tasks("", &[], true, true).unwrap().no_date.len(), 1);
+        assert!(ops.connections(&a, false).unwrap().links_out.is_empty());
+        assert_eq!(ops.connections(&a, true).unwrap().links_out.len(), 1);
+    }
+
+    #[cfg(unix)] #[test] fn run_call_reports_a_failed_list_write_once() {
+        use std::os::unix::fs::PermissionsExt;
+        let (st, dir) = state();
+        let p = dir.join("P.md").to_string_lossy().into_owned();
+        st.vault.lock().unwrap().as_mut().unwrap().set_archived(&p, true).unwrap();
+        let editors = Editors::default();
+        let events = Mutex::new(Vec::<String>::new());
+        let emit = |e: &str, v: Value| {
+            if e == "agent-write" { editors.done(v["id"].as_u64().unwrap(), json!("not-open")); }
+            events.lock().unwrap().push(e.to_string());
+        };
+        let count = || events.lock().unwrap().iter().filter(|e| *e == "archive-error").count();
+        let lock = |m| std::fs::set_permissions(dir.join(".velo"), std::fs::Permissions::from_mode(m)).unwrap();
+        let call = |name: &str, args: Value| crate::agent::listener::run_call(&st, &editors, &emit, name, args);
+        lock(0o555);
+        let r = call("rename_note", json!({"title": "P", "new_title": "Q", "rewrite_links": false, "summary": "s"}));
+        lock(0o755);
+        assert!(r.is_ok());
+        assert_eq!(count(), 1); // the rename worked, the list write failed
+        call("list_tags", json!({})).unwrap();
+        assert_eq!(count(), 1); // a clean call emits nothing
+        st.vault.lock().unwrap().as_ref().unwrap().archive_error.set(Some("kept".into()));
+        assert!(call("rename_note", json!({"title": "Nope", "new_title": "X", "rewrite_links": false, "summary": "s"})).is_err());
+        assert_eq!(count(), 2); // the error path still emits
+    }
+
     #[test] fn app_ops_filters_unlocked_locked_notes() {
         let (st, dir) = state();
         let ops = AppOps::new(&st, &never);

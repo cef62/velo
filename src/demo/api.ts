@@ -434,6 +434,7 @@ export const connections = async (path: string, includeArchived: boolean): Promi
   mentions.sort((x, y) => y.node.modified - x.node.modified);
   return { centre: node(c), links_out: out.map((n) => node(n)), links_in, tags, mentions, missing: targets.filter((t) => !resolve(t)) };
 };
+// shortcut: ignores includeArchived (the demo has no longest-match rule), upgrade if the demo ever archives notes that mentions could match
 export const linkMention = async (path: string, targetTitle: string, expectedCount: number, editorText: string | null, _includeArchived: boolean): Promise<string | null> => {
   const n = getReadable(path);
   const text = editorText ?? n.text;

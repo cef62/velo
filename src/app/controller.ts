@@ -151,13 +151,13 @@ export class Controller {
     this.notice = "";
   }
 
-  /** Rows changed (reset/refresh/page loaded): publish them so the list re-renders. */
   /** The Create hint: a loaded row or any note (archived too, via the title cache) carries the query as its title. */
   protected exactMatch() {
     const q = fold(this.store.get().query.trim()); // trimmed like enterAction, so the hint matches what Enter does
     return q !== "" && (this.results.loaded.some((h) => fold(h.title) === q) || this.titles.has(q));
   }
 
+  /** Rows changed (reset/refresh/page loaded): publish them so the list re-renders. */
   protected listChanged(reset = false) {
     const r = this.results;
     this.store.set((s) => ({
