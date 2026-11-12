@@ -1561,19 +1561,24 @@ export class Controller {
   /** inPlace: when a filter is active, also reload the list so it reflects the new tag state. */
   async refreshTags(inPlace = false) {
     const fresh = this.newTagsReq();
-    let tags: TagCount[];
+    let tags: TagCount[], all: TagCount[] = [];
     try {
-      tags = await this.api.listTags(this.store.get().showArchived);
+      const incl = this.store.get().showArchived;
+      tags = await this.api.listTags(incl);
+      // A tag an archived note still carries exists: the filter stays (its list is empty, the hidden line says why).
+      if (!incl && this.store.get().selectedTags.length) all = await this.api.listTags(true);
     } catch (e) {
       if (e !== "indexing") console.error("tag refresh failed", e);
       return;
     }
     if (!fresh()) return; // a newer refresh superseded this response
     const selected = this.store.get().selectedTags;
-    const kept = pruneSelection(selected, tags);
+    const kept = pruneSelection(selected, [...tags, ...all]);
     const pruned = kept.length !== selected.length;
     this.tagIndex = prepare(tags, (t) => t.tag);
-    this.store.set({ tags, selectedTags: kept });
+    // A kept tag with no visible note stays in the panel, selected, count 0: the user can see and clear it.
+    const zero = kept.filter((k) => !tags.some((t) => fold(t.tag) === fold(k))).map((k) => ({ tag: all.find((t) => fold(t.tag) === fold(k))!.tag, count: 0 }));
+    this.store.set({ tags: [...tags, ...zero], selectedTags: kept });
     if (pruned) {
       this.filterChanged("highlight");
       if (this.store.get().paneMode === "notes") void this.loadTasks(); // a load started with the pruned tag must not stay

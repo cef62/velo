@@ -130,7 +130,14 @@ export function NoteList({ controller, store }: { controller: Controller; store:
 
   const hidden = hiddenText(hiddenArchived, showArchived, query.trim() !== "" || selectedTags.length > 0 || noLinks);
   const hiddenLine = hidden && (
-    <Button variant="plain" size="sm" onClick={() => void controller.setShowArchived(true)}>
+    <Button
+      variant="plain"
+      size="sm"
+      onClick={() => {
+        void controller.setShowArchived(true);
+        document.querySelector<HTMLElement>('button[aria-label="Show archived notes"]')?.focus(); // this button unmounts; the pressed toggle takes the focus
+      }}
+    >
       {hidden}
     </Button>
   );

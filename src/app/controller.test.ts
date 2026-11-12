@@ -3334,3 +3334,76 @@ test("two archive presses before the first resolves send one request", async () 
   d.resolve(undefined); await Promise.all([a, b]);
   expect(api.setArchived).toHaveBeenCalledTimes(1);
 });
+
+// "solo" is carried only by B. listTags and search follow the switch and B's archived flag, as the backend does.
+function soloSetup() {
+  const s = setup({ A: "a", B: "b #solo" });
+  let bArchived = false;
+  const realSet = s.api.setArchived.getMockImplementation()!;
+  s.api.setArchived.mockImplementation(async (path: string, on: boolean) => { if (path === P("B")) bArchived = on; return realSet(path, on); });
+  s.api.listTags.mockImplementation(async (incl: boolean) => (incl || !bArchived ? [{ tag: "solo", count: 1 }] : []));
+  const real = s.api.search.getMockImplementation()!;
+  s.api.search.mockImplementation(async (q, sort, off, tags, nl, incl) => {
+    if (!tags.length) return real(q, sort, off, tags, nl, incl);
+    const show = incl || !bArchived;
+    return { hits: show ? [{ ...hit("B"), archived: bArchived }] : [], has_more: false, total: show ? 1 : 0, hidden: show ? 0 : 1 };
+  });
+  return { ...s, archiveB: (on: boolean) => void (bArchived = on) };
+}
+
+test("archiving the only note with the selected tag keeps the filter and shows the hidden line", async () => {
+  const { c, store } = soloSetup();
+  await c.start(); await settle();
+  await c.select(1); await settle(); // B
+  c.toggleTagFilter("solo"); await settle();
+  await c.toggleArchive(); await settle();
+  expect(store.get().selectedTags).toEqual(["solo"]);
+  expect(store.get()).toMatchObject({ total: 0, hiddenArchived: 1 });
+  expect(store.get().tags).toEqual([{ tag: "solo", count: 0 }]); // stays in the panel, selected, so it can be cleared
+});
+
+test("switching show archived off keeps a selected tag only archived notes carry", async () => {
+  const { c, api, store, archiveB } = soloSetup();
+  archiveB(true);
+  api.getSettings.mockResolvedValue({ ...(await api.getSettings()), show_archived: true });
+  await c.start(); await settle();
+  c.toggleTagFilter("solo"); await settle();
+  expect(store.get().total).toBe(1);
+  await c.setShowArchived(false); await settle();
+  expect(store.get().selectedTags).toEqual(["solo"]);
+  expect(store.get()).toMatchObject({ total: 0, hiddenArchived: 1 });
+  expect(store.get().tags).toEqual([{ tag: "solo", count: 0 }]);
+});
+
+test("a saved search with a tag only archived notes carry keeps it", async () => {
+  const { c, api, store, archiveB } = soloSetup();
+  archiveB(true);
+  api.getSettings.mockResolvedValue({ ...(await api.getSettings()), saved_searches: [{ name: "Solo", query: "", tags: ["solo"], no_links: false }] });
+  await c.start(); await settle();
+  c.applySaved("Solo"); await settle();
+  c.showTags(true); await settle();
+  expect(store.get().selectedTags).toEqual(["solo"]);
+  expect(store.get()).toMatchObject({ total: 0, hiddenArchived: 1 });
+  expect(store.get().tags).toEqual([{ tag: "solo", count: 0 }]);
+});
+
+test("a selected tag that no note carries any more is still dropped", async () => {
+  const { c, api, store } = soloSetup();
+  await c.start(); await settle();
+  c.toggleTagFilter("solo"); await settle();
+  api.listTags.mockImplementation(async () => []);
+  await c.refreshTags(); await settle();
+  expect(store.get().selectedTags).toEqual([]);
+});
+
+test("archive toggle in Tasks mode marks the Notes list stale instead of refreshing it", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  c.setPaneMode("tasks"); await settle();
+  const searches = api.search.mock.calls.length;
+  await c.toggleArchive(); await settle();
+  expect(api.search.mock.calls.length).toBe(searches); // the hidden list is not reloaded now
+  c.setPaneMode("notes"); await settle();
+  expect(api.search.mock.calls.length).toBeGreaterThan(searches); // it reloads when shown
+  expect(store.get().hiddenArchived).toBe(1);
+});
