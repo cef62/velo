@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 import { TASK_ITEM } from "./preview";
 import { Text } from "@codemirror/state";
-import { byNote, dueRule, localToday, toggleTaskAt, toggleTaskLine } from "./tasks";
+import type { TaskItem } from "./api";
+import { byNote, dueRule, localToday, sameTask, toggleTaskAt, toggleTaskLine } from "./tasks";
 import fixture from "../tests/fixtures/task-toggle.json";
 
 test("task items the preview can toggle", () => {
@@ -40,4 +41,10 @@ test("byNote groups by path in first-appearance order", () => {
   const g = byNote([t("b", "1"), t("a", "2"), t("b", "3")]);
   expect(g.map((x) => [x.title, x.items.map((i) => i.text)])).toEqual([["B", ["1", "3"]], ["A", ["2"]]]);
   expect(byNote([])).toEqual([]);
+});
+
+test("a task row re-renders when only archived changes", () => {
+  const t: TaskItem = { path: "/n/A.md", title: "A", line: 1, text: "x", due: null, done: false, done_on: null, line_text: "- [ ] x", archived: false };
+  expect(sameTask(t, { ...t })).toBe(true);
+  expect(sameTask(t, { ...t, archived: true })).toBe(false);
 });

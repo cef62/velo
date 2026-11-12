@@ -21,6 +21,8 @@ export const listRow = defineSlotRecipe({
       userSelect: 'none', // a text selection over the selected row would hide its white title (light: 1.4:1)
       // keyboard cursor when the list itself has focus (roving tabindex)
       _focusVisible: { outline: '2px solid', outlineColor: 'velo.accent', outlineOffset: '-2px' },
+      // archived: a quieter title, not opacity (that drops muted text below 4.5:1); a selected row keeps its selection colours
+      '&[data-archived]:not([data-selected])': { color: 'velo.fgMuted' },
     },
     title: { fontWeight: '500', truncate: true, flex: '0 1 auto' },
     snippet: { color: 'velo.fgMuted', truncate: true, flex: '1 1 0', minWidth: '0', fontSize: 'var(--velo-snippet-fs)' },

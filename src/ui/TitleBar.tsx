@@ -1,10 +1,10 @@
-import { ChevronDown, Code, Ellipsis, Eye, Lock, LockOpen, PanelRight, TriangleAlert, Type } from "lucide-react";
+import { Archive, ArchiveRestore, ChevronDown, Code, Ellipsis, Eye, Lock, LockOpen, PanelRight, TriangleAlert, Type } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { css } from "styled-system/css";
 import { menuButton, titleBar } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
-import { Button, IconButton, Kbd, Menu, SegmentGroup, Spinner, Tooltip } from "@/components/ui";
+import { Badge, Button, IconButton, Kbd, Menu, SegmentGroup, Spinner, Tooltip } from "@/components/ui";
 import { formatBinding, NONE, type Action } from "../shortcuts";
 import { titleBarMode } from "./layout";
 import { useStore } from "./useStore";
@@ -111,6 +111,7 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
           {s.title}
         </h2>
       )}
+      {s.archived && !s.renaming && <Badge size="sm" variant="subtle" flex="none">archived</Badge>}
       {s.err ? (
         <>
           <span className={bar.status} data-tone="error" role="alert">
@@ -205,6 +206,9 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
                   <span className={row}><Menu.ItemIndicator /><Menu.ItemText>Show front matter</Menu.ItemText>{kbd("toggle_front_matter")}</span>
                 </Menu.CheckboxItem>
                 {mode.lockInMenu && lockItem}
+                <Menu.Item value="archive" disabled={noNote} onSelect={() => void controller.toggleArchive()}>
+                  <span className={row}>{s.archived ? <ArchiveRestore /> : <Archive />}{s.archived ? "Unarchive note" : "Archive note"}{kbd("archive_note")}</span>
+                </Menu.Item>
                 <Menu.Separator />
                 <Menu.Item value="trash" onSelect={() => void controller.deleteNote()}>
                   <span className={row}>Move to Trash{kbd("delete_note")}</span>

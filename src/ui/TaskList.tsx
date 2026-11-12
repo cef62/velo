@@ -8,7 +8,8 @@ import type { AppState, Store } from "../app/store";
 import { Badge, Button, Checkbox } from "@/components/ui";
 import { renderInline } from "../preview";
 import { highlightRanges, markHtml } from "../highlight";
-import { byNote } from "../tasks";
+import { archivedLabel } from "../list";
+import { byNote, sameTask } from "../tasks";
 import { HighlightedText } from "./HighlightedText";
 import { useStore } from "./useStore";
 
@@ -30,6 +31,7 @@ const row = css({
   minW: "0",
   _hover: { bg: "velo.subtle" },
   _focusVisible: { outline: "2px solid", outlineColor: "velo.accent", outlineOffset: "-2px" },
+  "&[data-archived]": { color: "velo.fgMuted" }, // not opacity: it would drop muted text below 4.5:1
 });
 const text = css({
   lineClamp: 2, // long tasks wrap once, then "…"
@@ -43,7 +45,7 @@ const body = css({ flex: "1 1 0", minW: "0", display: "flex", flexDirection: "co
 const note = css({ color: "velo.fgMuted", truncate: true, minW: "0", fontSize: "var(--velo-snippet-fs)" });
 // "Ticked · Undo": one status line under the list (v2 §3 #16), only while there is something to undo
 const status = css({ display: "flex", alignItems: "center", gap: "1", h: "8", px: "2.5", borderTop: "1px solid", borderColor: "velo.muted", fontSize: "uiSm", color: "velo.fgMuted", flex: "none" });
-const noteHead = css({ textTransform: "none", letterSpacing: "0", fontSize: "uiSm", color: "velo.fg", cursor: "default", userSelect: "none", minW: "0", _hover: { bg: "velo.subtle" }, "& [data-title]": { truncate: true, minW: "0" }, "& [data-count]": { ml: "auto", flex: "none" } });
+const noteHead = css({ textTransform: "none", letterSpacing: "0", fontSize: "uiSm", color: "velo.fg", cursor: "default", userSelect: "none", minW: "0", _hover: { bg: "velo.subtle" }, "& [data-title]": { truncate: true, minW: "0" }, "& [data-count]": { ml: "auto", flex: "none" }, "&[data-archived]": { color: "velo.fgMuted" } });
 const indent = css({ pl: "3" });
 const empty = css({ p: "4", textAlign: "center", color: "velo.fgMuted", fontSize: "uiSm" });
 
@@ -73,7 +75,7 @@ const marks = (t: TaskItem, q: string) => JSON.stringify([highlightRanges(t.text
 // shortcut: marks are compared on the raw markdown, so a match only in rendered text (an entity like &copy;) can show late; compare rendered HTML if that matters.
 const sameRow = (a: RowProps, b: RowProps) =>
   a.overdue === b.overdue && a.showNote === b.showNote && a.controller === b.controller && a.stop === b.stop && a.onStop === b.onStop &&
-  (["path", "line", "line_text", "text", "title", "due", "done"] as const).every((k) => a.t[k] === b.t[k]) &&
+  sameTask(a.t, b.t) &&
   (a.query === b.query || marks(a.t, a.query) === marks(b.t, b.query));
 
 const TaskRow = memo(function TaskRow({ t, overdue, query, controller, stop, onStop, showNote }: RowProps) {
@@ -87,6 +89,7 @@ const TaskRow = memo(function TaskRow({ t, overdue, query, controller, stop, onS
       onFocus={() => onStop(`${t.path}:${t.line}`)}
       className={row}
       data-done={t.done || undefined}
+      data-archived={t.archived || undefined}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest("a")) e.preventDefault(); // links, wikilinks and tags in a row don't navigate: the row opens the task
         void controller.openTask(t);
@@ -104,12 +107,13 @@ const TaskRow = memo(function TaskRow({ t, overdue, query, controller, stop, onS
         <Checkbox.Control>
           <Checkbox.Indicator />
         </Checkbox.Control>
-        <Checkbox.HiddenInput aria-label={t.text} tabIndex={-1} />
+        <Checkbox.HiddenInput aria-label={archivedLabel(t.text, t.archived)} tabIndex={-1} />
       </Checkbox.Root>
       <div className={body}>
         <span className={text} aria-hidden="true" dangerouslySetInnerHTML={{ __html: html }} />
         {showNote && <span className={note}><HighlightedText text={t.title} query={query} /></span>}
       </div>
+      {t.archived && showNote && <Badge size="sm" variant="subtle" flex="none">archived</Badge>}
       {t.due && (
         <Badge size="sm" variant="subtle" colorPalette={overdue ? "red" : "gray"} flex="none" marginLeft="auto">
           {t.due}
@@ -168,12 +172,13 @@ export function TaskList({ controller, store }: { controller: Controller; store:
                   const open = !folded.has(n.path);
                   const hk = headKey(k, n.path);
                   return (
-                    <div key={n.path} role="group" aria-label={n.title}>
+                    <div key={n.path} role="group" aria-label={archivedLabel(n.title, n.items[0].archived)}>
                       <div
                         role="button"
                         data-note-head=""
                         aria-expanded={open}
-                        aria-label={`${n.title}, ${n.items.length} task${n.items.length === 1 ? "" : "s"}`}
+                        aria-label={archivedLabel(`${n.title}, ${n.items.length} task${n.items.length === 1 ? "" : "s"}`, n.items[0].archived)}
+                        data-archived={n.items[0].archived || undefined}
                         tabIndex={hk === stopKey ? 0 : -1}
                         className={cx(sectionHeader(), noteHead)}
                         onFocus={() => setCur(hk)}
@@ -190,6 +195,7 @@ export function TaskList({ controller, store }: { controller: Controller; store:
                       >
                         <ChevronDown aria-hidden />
                         <span data-title=""><HighlightedText text={n.title} query={query} /></span>
+                        {n.items[0].archived && <Badge size="sm" variant="subtle" flex="none">archived</Badge>}
                         <span data-count="" className={countBadge()}>{n.items.length}</span>
                       </div>
                       {open && <div className={indent}>{n.items.map((t) => row(t, k, false))}</div>}

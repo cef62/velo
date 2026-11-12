@@ -1,6 +1,6 @@
-import { ArrowDownAZ, CalendarDays, Check, ChevronDown, Clock, Download, FileText, ListChecks } from "lucide-react";
+import { Archive, ArrowDownAZ, CalendarDays, Check, ChevronDown, Clock, Download, FileText, ListChecks } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { css } from "styled-system/css";
+import { css, cx } from "styled-system/css";
 import { countBadge, menuButton, paneBar } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
@@ -29,6 +29,7 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
   const total = useStore(store, (s) => s.total);
   const sort = useStore(store, (s) => s.sort);
   const showDone = useStore(store, (s) => s.showDone);
+  const showArchived = useStore(store, (s) => s.showArchived);
   const tl = useStore(store, (s) => s.timeline);
   const root = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(1000);
@@ -50,6 +51,14 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
       <span data-label>{text}</span>
       <ChevronDown data-chevron aria-hidden />
     </button>
+  );
+
+  const archivedToggle = (
+    <Tooltip content={tip("toggle_archived", "Show archived notes")} openDelay={500}>
+      <button type="button" className={cx(menuButton({ iconOnly: true }), css({ flex: "none" }))} aria-pressed={showArchived} aria-label="Show archived notes" onClick={() => void controller.toggleShowArchived()}>
+        <Archive aria-hidden />
+      </button>
+    </Tooltip>
   );
 
   return (
@@ -92,13 +101,17 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
               </Menu.Content>
             </Menu.Positioner>
           </Menu.Root>
+          {archivedToggle}
         </>
       )}
       {cur === "tasks" && (
-        <button type="button" className={menuButton({ iconOnly: mode.menusIconOnly })} aria-pressed={showDone} aria-label="Show done" onClick={() => void controller.toggleShowDone()}>
-          <Check aria-hidden />
-          <span data-label>Show done</span>
-        </button>
+        <>
+          <button type="button" className={menuButton({ iconOnly: mode.menusIconOnly })} aria-pressed={showDone} aria-label="Show done" onClick={() => void controller.toggleShowDone()}>
+            <Check aria-hidden />
+            <span data-label>Show done</span>
+          </button>
+          {archivedToggle}
+        </>
       )}
       {cur === "timeline" && (
         <>
@@ -124,10 +137,11 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
             </Menu.Positioner>
           </Menu.Root>
           <Tooltip content={tip("export", "Export…")} openDelay={500}>
-            <button type="button" className={menuButton({ iconOnly: true })} aria-label="Export…" onClick={() => void controller.startExport()}>
+            <button type="button" className={cx(menuButton({ iconOnly: true }), css({ flex: "none" }))} aria-label="Export…" onClick={() => void controller.startExport()}>
               <Download />
             </button>
           </Tooltip>
+          {archivedToggle}
         </>
       )}
     </div>

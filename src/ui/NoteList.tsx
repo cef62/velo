@@ -2,11 +2,11 @@ import { Lock } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { css } from "styled-system/css";
 import { listRow } from "styled-system/recipes";
-import { Kbd, Spinner } from "@/components/ui";
+import { Badge, Button, Kbd, Spinner } from "@/components/ui";
 import { rowHeight } from "../app/fontscale";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
-import { ago, visibleRange } from "../list";
+import { ago, hiddenText, visibleRange } from "../list";
 import { HighlightedText } from "./HighlightedText";
 import { useStore } from "./useStore";
 
@@ -28,6 +28,11 @@ export function NoteList({ controller, store }: { controller: Controller; store:
   const fontSize = useStore(store, (s) => s.fontSize);
   const query = useStore(store, (s) => s.query);
   const isMac = useStore(store, (s) => s.isMac);
+  const exactTitleMatch = useStore(store, (s) => s.exactTitleMatch);
+  const hiddenArchived = useStore(store, (s) => s.hiddenArchived);
+  const showArchived = useStore(store, (s) => s.showArchived);
+  const selectedTags = useStore(store, (s) => s.selectedTags);
+  const noLinks = useStore(store, (s) => s.noLinks);
   const rowH = rowHeight(fontSize, layout);
   const el = useRef<HTMLDivElement>(null);
   // Rendered window; state only changes when the first/last row changes, not on every scroll pixel.
@@ -87,6 +92,7 @@ export function NoteList({ controller, store }: { controller: Controller; store:
       <>
         {h.encrypted && <span className={c.lock}><Lock aria-hidden="true" /></span>}
         <span className={c.title}><HighlightedText text={h.title} query={query} /></span>
+        {h.archived && <Badge size="sm" variant="subtle" flex="none">archived</Badge>}
       </>
     );
     const date = <span className={c.date}>{ago(h.mtime)}</span>;
@@ -101,6 +107,7 @@ export function NoteList({ controller, store }: { controller: Controller; store:
         tabIndex={on ? 0 : -1}
         data-row={i}
         data-selected={on || undefined}
+        data-archived={h.archived || undefined}
         className={c.root}
         style={{ position: "absolute", left: 0, right: 0, top: i * rowH }}
         onClick={() => void controller.select(i)}
@@ -121,13 +128,21 @@ export function NoteList({ controller, store }: { controller: Controller; store:
     );
   }
 
+  const hidden = hiddenText(hiddenArchived, showArchived, query.trim() !== "" || selectedTags.length > 0 || noLinks);
+  const hiddenLine = hidden && (
+    <Button variant="plain" size="sm" onClick={() => void controller.setShowArchived(true)}>
+      {hidden}
+    </Button>
+  );
+
   return (
     <div ref={el} className={scroller} data-active={listActive || undefined} onScroll={measure}>
       {count === 0 && query ? (
         <div className={empty}>
           <strong>No notes match “{query}”</strong>
-          <span>Press <Kbd>{isMac ? "⇧↩" : "Shift+Enter"}</Kbd> to create a note with that title, <Kbd>{isMac ? "⌥↩" : "Alt+Enter"}</Kbd> for a task list</span>
-          <span>or <Kbd>Esc</Kbd> to clear the search</span>
+          {!exactTitleMatch && <span>Press <Kbd>{isMac ? "⇧↩" : "Shift+Enter"}</Kbd> to create a note with that title, <Kbd>{isMac ? "⌥↩" : "Alt+Enter"}</Kbd> for a task list</span>}
+          <span>{exactTitleMatch ? "Press" : "or"} <Kbd>Esc</Kbd> to clear the search</span>
+          {hiddenLine}
         </div>
       ) : (
         <div style={{ padding: PAD }}>
@@ -139,6 +154,7 @@ export function NoteList({ controller, store }: { controller: Controller; store:
             </div>
           )}
         </div>
+        {hiddenLine && <div className={css({ display: "flex", justifyContent: "center", pt: "1" })}>{hiddenLine}</div>}
         </div>
       )}
     </div>
