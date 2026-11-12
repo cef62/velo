@@ -2,10 +2,11 @@
 // Remembered per layout in localStorage: a per-machine convenience, so losing it only resets the default size.
 
 export const MIN_LIST = 116; // px: list never collapses (36px pane bar + a couple of rows)
+export const MIN_LIST_W = 216; // px: horizontal layout, the pane bar fits icon-only tabs and controls in every mode (see PANE_FULL in ui/layout.ts)
 export const MIN_NOTE = 160; // px: note pane never collapses
 
 /** Size clamped so both the list and the note keep a usable minimum within `total` px. */
-export const clampSize = (size: number, total: number): number => Math.round(Math.max(MIN_LIST, Math.min(size, total - MIN_NOTE)));
+export const clampSize = (size: number, total: number, min = MIN_LIST): number => Math.round(Math.max(min, Math.min(size, total - MIN_NOTE)));
 
 /** Arrow keys move one row (Shift: ten); null for any other key. */
 export const nudge = (size: number, key: string, shift: boolean, rowH: number): number | null => {
@@ -23,7 +24,7 @@ export function mountDivider(divider: HTMLElement, app: HTMLElement, titlebar?: 
   const list = () => divider.previousElementSibling as HTMLElement;
   const total = () => (horizontal() ? app.clientWidth : app.clientHeight - list().getBoundingClientRect().top + app.getBoundingClientRect().top);
   const set = (size: number, save: boolean) => {
-    const h = horizontal(), v = clampSize(size, total());
+    const h = horizontal(), v = clampSize(size, total(), h ? MIN_LIST_W : MIN_LIST);
     app.style.setProperty(cssVar(h), `${v}px`);
     divider.setAttribute("aria-valuenow", String(v));
     if (save) try { localStorage.setItem(key(h), String(v)); } catch { /* storage blocked: size just isn't remembered */ }

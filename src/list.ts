@@ -12,6 +12,7 @@ export class Results {
   private rows: Hit[] = [];
   private more = false;
   private tot = 0; // match count, from the first page only
+  private hid = 0; // archived matches left out, from the first page only
   private gen = 0;
   private pending: Promise<void> | null = null;
   constructor(private fetch: (offset: number) => Promise<Page>) {}
@@ -20,6 +21,8 @@ export class Results {
   get hasMore() { return this.more; }
   /** Total matches, as reported by the latest first page. */
   get total() { return this.tot; }
+  /** Archived notes the latest first page left out. */
+  get hidden() { return this.hid; }
   /** The rows loaded so far (do not mutate). */
   get loaded(): Hit[] { return this.rows; }
   get(i: number): Hit | undefined { return this.rows[i]; }
@@ -33,6 +36,7 @@ export class Results {
     this.rows = p.hits;
     this.more = p.has_more;
     this.tot = p.total;
+    this.hid = p.hidden;
   }
 
   /** Load pages until row `index` exists or the server has no more. */
@@ -58,16 +62,18 @@ export class Results {
     let rows: Hit[] = [];
     let more = true;
     let tot = this.tot;
+    let hid = this.hid;
     do {
       const p = await this.fetch(rows.length);
       if (gen !== this.gen) return;
-      if (!rows.length) tot = p.total;
+      if (!rows.length) [tot, hid] = [p.total, p.hidden];
       rows = rows.concat(p.hits);
       more = p.has_more && p.hits.length > 0;
     } while (more && rows.length < want);
     this.rows = rows;
     this.more = more;
     this.tot = tot;
+    this.hid = hid;
   }
 }
 
@@ -79,3 +85,11 @@ export function ago(ms: number): string {
   if (m < 43200) return `${Math.floor(m / 1440)}d`;
   return `${Math.floor(m / 43200)}mo`;
 }
+
+/** The line under a filtered list when archived matches are left out; null when there is nothing to say. */
+export function hiddenText(hidden: number, showArchived: boolean, filtering: boolean): string | null {
+  if (showArchived || !filtering || hidden <= 0) return null;
+  return hidden === 1 ? "1 archived note hidden" : `${hidden} archived notes hidden`;
+}
+
+export const archivedLabel = (name: string, archived: boolean): string => (archived ? `${name}, archived` : name);

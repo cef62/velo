@@ -1,5 +1,6 @@
 import type { Text } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
+import type { TaskItem } from "./api";
 import { TASK_ITEM } from "./preview";
 
 /** Same rule as Rust `iso`: a real date, not followed by another letter or digit (`2026-10-271` is no date). */
@@ -72,4 +73,9 @@ export function byNote<T extends { path: string; title: string }>(items: T[]): {
     groups.set(t.path, g);
   }
   return [...groups.values()];
+}
+
+/** What a task row shows: a reload brings new objects, so rows compare these fields to know whether to re-render. */
+export function sameTask(a: TaskItem, b: TaskItem): boolean {
+  return (["path", "line", "line_text", "text", "title", "due", "done", "archived"] as const).every((k) => a[k] === b[k]);
 }

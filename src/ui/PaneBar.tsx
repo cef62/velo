@@ -1,12 +1,12 @@
-import { ArrowDownAZ, CalendarDays, Check, ChevronDown, Clock, Download, FileText, ListChecks } from "lucide-react";
+import { Archive, ArrowDownAZ, CalendarDays, Check, ChevronDown, Clock, Download, FileText, ListChecks } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { css } from "styled-system/css";
+import { css, cx } from "styled-system/css";
 import { countBadge, menuButton, paneBar } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { Kbd, Menu, Tooltip } from "@/components/ui";
 import { formatBinding, NONE, type Action } from "../shortcuts";
-import { paneBarMode } from "./layout";
+import { dueExtra, dueText, noteCount, notesExtra, notesText, paneBarMode } from "./layout";
 import { PANE_TABS, stepPaneTab, type PaneTab } from "./paneTabs";
 import { useStore } from "./useStore";
 
@@ -29,6 +29,7 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
   const total = useStore(store, (s) => s.total);
   const sort = useStore(store, (s) => s.sort);
   const showDone = useStore(store, (s) => s.showDone);
+  const showArchived = useStore(store, (s) => s.showArchived);
   const tl = useStore(store, (s) => s.timeline);
   const root = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(1000);
@@ -39,17 +40,36 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
     setW(e.offsetWidth);
     return () => ro.disconnect();
   }, []);
-  const mode = paneBarMode(w);
-  const c = paneBar({ labels: mode.labels });
   const cur: PaneTab = paneMode;
+  const mode = paneBarMode(w, cur);
+  const c = paneBar({ labels: mode.labels });
   const kbd = (a: Action) => (keys[a] === NONE ? null : <Kbd marginLeft="auto">{formatBinding(keys[a], isMac)}</Kbd>);
   const tip = (a: Action | null, text: string) => (!a || keys[a] === NONE ? text : `${text} (${formatBinding(keys[a], isMac)})`);
-  const menuBtn = (text: string, aria: string, glyph: ReactNode, extra: Record<string, unknown> = {}) => (
-    <button type="button" className={menuButton({ iconOnly: mode.menusIconOnly })} aria-label={aria} {...extra}>
-      {glyph}
-      <span data-label>{text}</span>
-      <ChevronDown data-chevron aria-hidden />
-    </button>
+  const countShown = mode.labels !== "none"; // the note count beside the tabs
+  // exact counts the bar hides or caps ride on the tab tooltips (hover and keyboard focus) and, for the Notes tab, its accessible name
+  const tabExtra = (t: PaneTab) => (t === "notes" ? notesExtra(total, countShown) : t === "tasks" ? dueExtra(dueCount) : "");
+  const tabTip = (t: PaneTab) => [tip(TAB[t].action, TAB[t].text), tabExtra(t)].filter(Boolean).join(" · ");
+  // The menu trigger; icon-only, a tooltip carries the label the button would show (it names the current value too).
+  const menuBtn = (text: string, aria: string, glyph: ReactNode) => {
+    const trigger = (
+      <Menu.Trigger asChild>
+        <button type="button" className={menuButton({ iconOnly: mode.menusIconOnly })} aria-label={aria}>
+          {glyph}
+          <span data-label>{text}</span>
+          <ChevronDown data-chevron aria-hidden />
+        </button>
+      </Menu.Trigger>
+    );
+    // the tooltip wraps a span, not the trigger: two refs on one button would lose the menu's anchor (it opened off-screen)
+    return mode.menusIconOnly ? <Tooltip content={text} openDelay={500}><span className={css({ display: "inline-flex", flex: "none" })}>{trigger}</span></Tooltip> : trigger;
+  };
+
+  const archivedToggle = (
+    <Tooltip content={tip("toggle_archived", "Show archived notes")} openDelay={500}>
+      <button type="button" className={cx(menuButton({ iconOnly: true }), css({ flex: "none" }))} aria-pressed={showArchived} aria-label="Show archived notes" onClick={() => void controller.toggleShowArchived()}>
+        <Archive aria-hidden />
+      </button>
+    </Tooltip>
   );
 
   return (
@@ -67,11 +87,11 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
         }}
       >
         {PANE_TABS.map((t) => (
-          <Tooltip key={t} content={tip(TAB[t].action, TAB[t].text)} openDelay={500}>
-            <button type="button" role="tab" data-tab={t} aria-selected={t === cur} tabIndex={t === cur ? 0 : -1} className={c.tab} aria-label={t === "tasks" && dueCount > 0 ? `Tasks, ${dueCount} due` : TAB[t].text} onClick={() => t !== cur && controller.setPaneMode(t)}>
+          <Tooltip key={t} content={tabTip(t)} openDelay={500}>
+            <button type="button" role="tab" data-tab={t} aria-selected={t === cur} tabIndex={t === cur ? 0 : -1} className={c.tab} aria-label={t === "tasks" && dueCount > 0 ? `Tasks, ${dueCount} due` : t === "notes" && !countShown && total > 0 ? `Notes, ${notesText(total)}` : TAB[t].text} onClick={() => t !== cur && controller.setPaneMode(t)}>
               {TAB[t].glyph}
               <span data-label>{TAB[t].text}</span>
-              {t === "tasks" && dueCount > 0 && <span className={countBadge({ tone: "danger" })} aria-hidden="true">{dueCount}</span>}
+              {t === "tasks" && dueCount > 0 && <span className={countBadge({ tone: "danger" })} aria-hidden="true">{dueText(dueCount)}</span>}
             </button>
           </Tooltip>
         ))}
@@ -79,9 +99,13 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
       <span className={c.spacer} />
       {cur === "notes" && (
         <>
-          {total > 0 && <span className={c.meta} title={`${total.toLocaleString("en-US")} notes`}>{total.toLocaleString("en-US")}</span>}
+          {total > 0 && countShown && (
+            <Tooltip content={notesText(total)} openDelay={500}>
+              <span className={c.meta}>{noteCount(total)}</span>
+            </Tooltip>
+          )}
           <Menu.Root positioning={{ placement: "bottom-end" }}>
-            <Menu.Trigger asChild>{menuBtn(sort === "title" ? "Title A→Z" : "Recent", `Sort: ${sort === "title" ? "title" : "recent"}`, sort === "title" ? <ArrowDownAZ /> : <Clock />)}</Menu.Trigger>
+            {menuBtn(sort === "title" ? "Title A→Z" : "Recent", `Sort: ${sort === "title" ? "title" : "recent"}`, sort === "title" ? <ArrowDownAZ /> : <Clock />)}
             <Menu.Positioner>
               <Menu.Content minW="200px">
                 <Menu.RadioItemGroup value={sort} onValueChange={(d) => d.value !== sort && void controller.setSort(d.value as typeof sort)}>
@@ -92,20 +116,24 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
               </Menu.Content>
             </Menu.Positioner>
           </Menu.Root>
+          {archivedToggle}
         </>
       )}
       {cur === "tasks" && (
-        <button type="button" className={menuButton({ iconOnly: mode.menusIconOnly })} aria-pressed={showDone} aria-label="Show done" onClick={() => void controller.toggleShowDone()}>
-          <Check aria-hidden />
-          <span data-label>Show done</span>
-        </button>
+        <>
+          <Tooltip content="Show done" openDelay={500} disabled={!mode.menusIconOnly}>
+            <button type="button" className={menuButton({ iconOnly: mode.menusIconOnly })} aria-pressed={showDone} aria-label="Show done" onClick={() => void controller.toggleShowDone()}>
+              <Check aria-hidden />
+              <span data-label>Show done</span>
+            </button>
+          </Tooltip>
+          {archivedToggle}
+        </>
       )}
       {cur === "timeline" && (
         <>
           <Menu.Root positioning={{ placement: "bottom-end" }}>
-            <Menu.Trigger asChild>
-              {menuBtn(`${tl.by === "created" ? "Created" : "Updated"} · ${tl.range === "all" ? "All" : `${tl.range}d`}`, `Timeline: by ${tl.by}, ${tl.range === "all" ? "all time" : `last ${tl.range} days`}`, null)}
-            </Menu.Trigger>
+            {menuBtn(`${tl.by === "created" ? "Created" : "Updated"} · ${tl.range === "all" ? "All" : `${tl.range}d`}`, `Timeline: by ${tl.by}, ${tl.range === "all" ? "all time" : `last ${tl.range} days`}`, mode.menusIconOnly ? <CalendarDays /> : null)}
             <Menu.Positioner>
               <Menu.Content minW="200px">
                 <Menu.RadioItemGroup value={tl.by} onValueChange={(d) => d.value !== tl.by && void controller.setTimelineBy(d.value as typeof tl.by)}>
@@ -124,10 +152,11 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
             </Menu.Positioner>
           </Menu.Root>
           <Tooltip content={tip("export", "Export…")} openDelay={500}>
-            <button type="button" className={menuButton({ iconOnly: true })} aria-label="Export…" onClick={() => void controller.startExport()}>
+            <button type="button" className={cx(menuButton({ iconOnly: true }), css({ flex: "none" }))} aria-label="Export…" onClick={() => void controller.startExport()}>
               <Download />
             </button>
           </Tooltip>
+          {archivedToggle}
         </>
       )}
     </div>

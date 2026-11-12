@@ -3162,3 +3162,248 @@ test("exactTitleMatch: a hidden note renamed to the query counts once the title 
   await c.runSearch(false); await c.refreshTitles(); await settle();
   expect(store.get().exactTitleMatch).toBe(true);
 });
+
+test("archiving the open note with the switch off keeps it open and clears the selection", async () => {
+  const { c, api, store, editor } = setup();
+  await c.start(); await settle();
+  const path = store.get().openPath!;
+  await c.toggleArchive();
+  expect(api.setArchived).toHaveBeenCalledWith(path, true);
+  expect(store.get()).toMatchObject({ openPath: path, archived: true, sel: -1 });
+  expect(editor.currentPath()).toBe(path);
+  expect(c.row(0)?.path).not.toBe(path);
+  await c.toggleArchive(); // unarchive: one step away
+  expect(api.setArchived).toHaveBeenLastCalledWith(path, false);
+  expect(store.get().archived).toBe(false);
+});
+
+test("no open note: archive says why", async () => {
+  const { c, store, api } = setup({});
+  await c.start(); await settle();
+  await c.toggleArchive();
+  expect(store.get().err).toBe("Open a note to archive");
+  expect(api.setArchived).not.toHaveBeenCalled();
+});
+
+test("a failed archive shows the error and leaves the flag", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  api.setArchived.mockRejectedValueOnce("permission denied");
+  await c.toggleArchive();
+  expect(store.get()).toMatchObject({ err: "permission denied", archived: false });
+});
+
+test("the archive result applies to the note it was for, not the one open afterwards", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  const a = store.get().openPath!;
+  const d = deferred<undefined>(); api.setArchived.mockImplementationOnce(() => d.promise);
+  const done = c.toggleArchive();
+  await c.select(1); await settle();
+  const b = store.get().openPath!;
+  store.set({ infoOpen: true, sideTab: "related" });
+  const related = api.connections.mock.calls.length;
+  d.resolve(undefined); await done; await settle();
+  expect(api.setArchived).toHaveBeenCalledWith(a, true);
+  expect(store.get()).toMatchObject({ openPath: b, archived: false });
+  expect(api.connections.mock.calls.length).toBeGreaterThan(related); // b's Related reloads without a
+});
+
+for (const act of ["toggleArchive", "setShowArchived"] as const)
+  test(`${act} never opens row 0 while a fresh first page is pending`, async () => {
+    const { c, api, store, editor } = setup();
+    await c.start(); await settle();
+    await c.select(1); await settle(); // the open note is not row 0
+    const open = store.get().openPath!;
+    const d = deferred<Page>(); const real = api.search.getMockImplementation()!;
+    api.search.mockImplementationOnce(() => d.promise);
+    c.setQuery("x"); // fresh first page in flight (pendingFirst = false: would open row 0)
+    await (act === "toggleArchive" ? c.toggleArchive() : c.setShowArchived(true));
+    d.resolve(await real("x", "modified", 0, [], false, false)); await settle();
+    expect(editor.currentPath()).toBe(open);
+  });
+
+test("the hidden-matches line turns the switch on and persists it", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  await c.toggleArchive(); c.setQuery("a"); await settle();
+  expect(store.get().hiddenArchived).toBe(1);
+  await c.setShowArchived(true); await settle();
+  expect(api.setSettings).toHaveBeenLastCalledWith(expect.objectContaining({ show_archived: true }));
+  expect(store.get().showArchived).toBe(true);
+  expect(api.search.mock.lastCall?.[5]).toBe(true);
+});
+
+test("switching show archived off keeps an open archived note open", async () => {
+  const { c, api, store, editor } = setup();
+  api.getSettings.mockResolvedValue({ ...(await api.getSettings()), show_archived: true });
+  await c.start(); await settle();
+  const path = store.get().openPath!;
+  await c.toggleArchive(); await settle(); // archived, still listed (switch on)
+  const opens = api.openNote.mock.calls.length;
+  await c.setShowArchived(false); await settle();
+  expect(editor.currentPath()).toBe(path);
+  expect(store.get()).toMatchObject({ openPath: path, archived: true, sel: -1 });
+  expect(api.openNote.mock.calls.length).toBe(opens); // row 0 was not opened in its place
+});
+
+test("two fast toggles of the switch end where they started", async () => {
+  const { c, api, store } = setup();
+  let cur = { ...(await api.getSettings()) };
+  api.getSettings.mockImplementation(async () => ({ ...cur }));
+  const gate = deferred<void>(); let first = true;
+  api.setSettings.mockImplementation(async (s) => { if (first) { first = false; await gate.promise; } cur = s; });
+  await c.start(); await settle();
+  const a = c.toggleShowArchived(), b = c.toggleShowArchived();
+  gate.resolve(); await Promise.all([a, b]); await settle();
+  expect(cur.show_archived).toBe(false);
+  expect(store.get().showArchived).toBe(false);
+});
+
+test("changing the switch reloads every listing", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  store.set({ paneMode: "timeline", infoOpen: true, sideTab: "related" });
+  const n = { tags: api.listTags.mock.calls.length, tasks: api.tasks.mock.calls.length, targets: api.listLinkTargets.mock.calls.length, tl: api.timeline.mock.calls.length, rel: api.connections.mock.calls.length };
+  await c.setShowArchived(true); await settle();
+  expect(api.listTags.mock.calls.length).toBeGreaterThan(n.tags);
+  expect(api.listTags.mock.lastCall).toEqual([true]);
+  expect(api.tasks.mock.calls.length).toBeGreaterThan(n.tasks);
+  expect(api.tasks.mock.lastCall?.[3]).toBe(true);
+  expect(api.listLinkTargets.mock.lastCall).toEqual([true]);
+  expect(api.timeline.mock.calls.length).toBeGreaterThan(n.tl);
+  expect(api.connections.mock.calls.length).toBeGreaterThan(n.rel);
+  const searches = api.search.mock.calls.length;
+  c.setPaneMode("notes"); await settle(); // the hidden Notes list was marked stale
+  expect(api.search.mock.calls.length).toBeGreaterThan(searches);
+  expect(api.search.mock.lastCall?.[5]).toBe(true);
+});
+
+test("a list-write failure that lands after the operation is shown once", async () => {
+  const { c, store } = setup();
+  await c.start(); await settle();
+  c.onArchiveError("permission denied");
+  expect(store.get().err).toBe("The archived-notes list could not be updated: permission denied");
+  await c.select(1); await settle(); // clears the error
+  expect(store.get().err).toBe("");
+});
+
+test("the archive action flips the store flag the palette label reads", async () => {
+  const { c, store } = setup();
+  await c.start(); await settle();
+  await c.toggleArchive();
+  expect(store.get().archived).toBe(true);
+  c.runAction("archive_note"); await settle();
+  expect(store.get().archived).toBe(false);
+});
+
+test("a list-write failure during openTitle is shown once", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  const d = deferred<any>(); const real = api.openOrCreate.getMockImplementation()!;
+  api.openOrCreate.mockImplementationOnce(() => d.promise);
+  const done = c.openTitle("A", "enter");
+  c.onArchiveError("permission denied");
+  d.resolve(await real("A")); await done; await settle();
+  expect(store.get().err).toBe("The archived-notes list could not be updated: permission denied");
+  await c.select(1); await settle();
+  expect(store.get().err).toBe("");
+});
+
+test("a list-write failure during a merge is shown once", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  const d = deferred<any>();
+  api.mergeNotes.mockImplementationOnce(() => d.promise);
+  await c.startMerge();
+  store.set((s) => ({ merge: { ...s.merge!, target: { path: P("B"), title: "B", count: 0 } } }));
+  const done = c.commitMerge();
+  await settle();
+  c.onArchiveError("permission denied");
+  d.resolve({ path: P("B"), trash_error: null }); await done; await settle();
+  expect(store.get().err).toBe("The archived-notes list could not be updated: permission denied");
+  await c.select(1); await settle();
+  expect(store.get().err).toBe("");
+});
+
+test("two archive presses before the first resolves send one request", async () => {
+  const { c, api } = setup();
+  await c.start(); await settle();
+  const d = deferred<undefined>(); api.setArchived.mockImplementationOnce(() => d.promise);
+  const a = c.toggleArchive(), b = c.toggleArchive();
+  d.resolve(undefined); await Promise.all([a, b]);
+  expect(api.setArchived).toHaveBeenCalledTimes(1);
+});
+
+// "solo" is carried only by B. listTags and search follow the switch and B's archived flag, as the backend does.
+function soloSetup() {
+  const s = setup({ A: "a", B: "b #solo" });
+  let bArchived = false;
+  const realSet = s.api.setArchived.getMockImplementation()!;
+  s.api.setArchived.mockImplementation(async (path: string, on: boolean) => { if (path === P("B")) bArchived = on; return realSet(path, on); });
+  s.api.listTags.mockImplementation(async (incl: boolean) => (incl || !bArchived ? [{ tag: "solo", count: 1 }] : []));
+  const real = s.api.search.getMockImplementation()!;
+  s.api.search.mockImplementation(async (q, sort, off, tags, nl, incl) => {
+    if (!tags.length) return real(q, sort, off, tags, nl, incl);
+    const show = incl || !bArchived;
+    return { hits: show ? [{ ...hit("B"), archived: bArchived }] : [], has_more: false, total: show ? 1 : 0, hidden: show ? 0 : 1 };
+  });
+  return { ...s, archiveB: (on: boolean) => void (bArchived = on) };
+}
+
+test("archiving the only note with the selected tag keeps the filter and shows the hidden line", async () => {
+  const { c, store } = soloSetup();
+  await c.start(); await settle();
+  await c.select(1); await settle(); // B
+  c.toggleTagFilter("solo"); await settle();
+  await c.toggleArchive(); await settle();
+  expect(store.get().selectedTags).toEqual(["solo"]);
+  expect(store.get()).toMatchObject({ total: 0, hiddenArchived: 1 });
+  expect(store.get().tags).toEqual([{ tag: "solo", count: 0 }]); // stays in the panel, selected, so it can be cleared
+});
+
+test("switching show archived off keeps a selected tag only archived notes carry", async () => {
+  const { c, api, store, archiveB } = soloSetup();
+  archiveB(true);
+  api.getSettings.mockResolvedValue({ ...(await api.getSettings()), show_archived: true });
+  await c.start(); await settle();
+  c.toggleTagFilter("solo"); await settle();
+  expect(store.get().total).toBe(1);
+  await c.setShowArchived(false); await settle();
+  expect(store.get().selectedTags).toEqual(["solo"]);
+  expect(store.get()).toMatchObject({ total: 0, hiddenArchived: 1 });
+  expect(store.get().tags).toEqual([{ tag: "solo", count: 0 }]);
+});
+
+test("a saved search with a tag only archived notes carry keeps it", async () => {
+  const { c, api, store, archiveB } = soloSetup();
+  archiveB(true);
+  api.getSettings.mockResolvedValue({ ...(await api.getSettings()), saved_searches: [{ name: "Solo", query: "", tags: ["solo"], no_links: false }] });
+  await c.start(); await settle();
+  c.applySaved("Solo"); await settle();
+  c.showTags(true); await settle();
+  expect(store.get().selectedTags).toEqual(["solo"]);
+  expect(store.get()).toMatchObject({ total: 0, hiddenArchived: 1 });
+  expect(store.get().tags).toEqual([{ tag: "solo", count: 0 }]);
+});
+
+test("a selected tag that no note carries any more is still dropped", async () => {
+  const { c, api, store } = soloSetup();
+  await c.start(); await settle();
+  c.toggleTagFilter("solo"); await settle();
+  api.listTags.mockImplementation(async () => []);
+  await c.refreshTags(); await settle();
+  expect(store.get().selectedTags).toEqual([]);
+});
+
+test("archive toggle in Tasks mode marks the Notes list stale instead of refreshing it", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  c.setPaneMode("tasks"); await settle();
+  const searches = api.search.mock.calls.length;
+  await c.toggleArchive(); await settle();
+  expect(api.search.mock.calls.length).toBe(searches); // the hidden list is not reloaded now
+  c.setPaneMode("notes"); await settle();
+  expect(api.search.mock.calls.length).toBeGreaterThan(searches); // it reloads when shown
+  expect(store.get().hiddenArchived).toBe(1);
+});

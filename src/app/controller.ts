@@ -166,6 +166,7 @@ export class Controller {
       count: r.count,
       hasMore: r.hasMore,
       total: r.total,
+      hiddenArchived: r.hidden,
       exactTitleMatch: this.exactMatch(),
     }));
   }
@@ -340,6 +341,15 @@ export class Controller {
 
   /** Same detach order as deleteNote: save, then drop the editor's hold on source/target so autosave can't overwrite the merge. */
   async commitMerge() {
+    this.archiveOps++; // ends after the final show(), whose clearErr() must not drop a list-write failure
+    try {
+      await this.doCommitMerge();
+    } finally {
+      this.endArchiveOp();
+    }
+  }
+
+  protected async doCommitMerge() {
     const m = this.store.get().merge;
     if (!m?.target || this.busy) return;
     const target = m.target;
@@ -546,7 +556,7 @@ export class Controller {
 
   /** The note is now in the editor: title, path and lock state follow it; the conflict banner belongs to the previous note. */
   protected loadedDoc(doc: NoteDoc) {
-    this.store.set({ title: doc.title, openPath: doc.path, encrypted: doc.encrypted, conflict: null, info: { ...noInfo, meta: doc.meta } });
+    this.store.set({ title: doc.title, openPath: doc.path, encrypted: doc.encrypted, archived: doc.archived, conflict: null, info: { ...noInfo, meta: doc.meta } });
     this.textInfo();
     void this.loadInfo();
   }
@@ -609,7 +619,7 @@ export class Controller {
 
   /** The editor holds no note any more (deleted, or locked away by Lock all). */
   protected closedDoc() {
-    this.store.set({ title: "", openPath: null, encrypted: false, conflict: null, info: noInfo });
+    this.store.set({ title: "", openPath: null, encrypted: false, archived: false, conflict: null, info: noInfo });
   }
 
   /**
@@ -829,6 +839,7 @@ export class Controller {
       return false;
     }
     const current = this.newShow(); // a pending auto-show must not replace this note when its reply lands later
+    this.archiveOps++;
     try {
       const doc = await this.loading(() => this.api.openOrCreate(title));
       if (!doc) return false;
@@ -849,6 +860,8 @@ export class Controller {
     } catch (e) {
       this.setErr(errText(e));
       return false;
+    } finally {
+      this.endArchiveOp();
     }
   }
 
@@ -898,11 +911,11 @@ export class Controller {
     if (this.busy) return this.setErr(BUSY_MSG);
     const path = this.editor.currentPath();
     if (!path) return;
-    this.busy = true;
+    this.busy = true; this.archiveOps++;
     try {
       await this.lockHandoff(path);
     } finally {
-      this.busy = false;
+      this.busy = false; this.endArchiveOp();
     }
   }
 
@@ -960,7 +973,7 @@ export class Controller {
     const title = open ? this.store.get().title : this.results.get(sel)?.title;
     const row = this.results.indexOf(path);
     if (!(await this.ui.confirm(`Move “${title}” to the Trash?`, { title: "Delete note", kind: "warning", okLabel: "Move to Trash" }))) return;
-    this.busy = true;
+    this.busy = true; this.archiveOps++;
     let reopen = false;
     try {
       if (this.editor.currentPath() === path) {
@@ -984,7 +997,7 @@ export class Controller {
     } catch (e) {
       this.setErr(errText(e));
     } finally {
-      this.busy = false;
+      this.busy = false; this.endArchiveOp();
     }
     if (reopen) await this.show(path); // delete failed after detaching: put the note back
     await this.runSearch(false);
@@ -997,7 +1010,7 @@ export class Controller {
 
   async lockEverything() {
     if (this.busy) return this.setErr(BUSY_MSG);
-    this.busy = true;
+    this.busy = true; this.archiveOps++;
     try {
       const path = this.editor.currentPath();
       if (!(await this.editor.flush())) return;
@@ -1024,7 +1037,7 @@ export class Controller {
     } catch (e) {
       this.setErr(errText(e));
     } finally {
-      this.busy = false;
+      this.busy = false; this.endArchiveOp();
     }
   }
 
@@ -1051,7 +1064,7 @@ export class Controller {
       this.setErr(BUSY_MSG);
       return this.editor.focus();
     }
-    this.busy = true; // its editor.load would end an update install's suspension
+    this.busy = true; this.archiveOps++; // its editor.load would end an update install's suspension
     let renamed = false;
     try {
       if (!(await this.editor.flush())) return this.editor.focus();
@@ -1069,7 +1082,7 @@ export class Controller {
     } catch (e) {
       this.setErr(e === "already-exists" ? "A note with that title exists" : e === "invalid-title" ? INVALID_TITLE : errText(e));
     } finally {
-      this.busy = false;
+      this.busy = false; this.endArchiveOp();
     }
     if (renamed) {
       await this.runSearch(false);
@@ -1548,19 +1561,24 @@ export class Controller {
   /** inPlace: when a filter is active, also reload the list so it reflects the new tag state. */
   async refreshTags(inPlace = false) {
     const fresh = this.newTagsReq();
-    let tags: TagCount[];
+    let tags: TagCount[], all: TagCount[] = [];
     try {
-      tags = await this.api.listTags(this.store.get().showArchived);
+      const incl = this.store.get().showArchived;
+      tags = await this.api.listTags(incl);
+      // A tag an archived note still carries exists: the filter stays (its list is empty, the hidden line says why).
+      if (!incl && this.store.get().selectedTags.length) all = await this.api.listTags(true);
     } catch (e) {
       if (e !== "indexing") console.error("tag refresh failed", e);
       return;
     }
     if (!fresh()) return; // a newer refresh superseded this response
     const selected = this.store.get().selectedTags;
-    const kept = pruneSelection(selected, tags);
+    const kept = pruneSelection(selected, [...tags, ...all]);
     const pruned = kept.length !== selected.length;
     this.tagIndex = prepare(tags, (t) => t.tag);
-    this.store.set({ tags, selectedTags: kept });
+    // A kept tag with no visible note stays in the panel, selected, count 0: the user can see and clear it.
+    const zero = kept.filter((k) => !tags.some((t) => fold(t.tag) === fold(k))).map((k) => ({ tag: all.find((t) => fold(t.tag) === fold(k))!.tag, count: 0 }));
+    this.store.set({ tags: [...tags, ...zero], selectedTags: kept });
     if (pruned) {
       this.filterChanged("highlight");
       if (this.store.get().paneMode === "notes") void this.loadTasks(); // a load started with the pruned tag must not stay
@@ -1620,6 +1638,67 @@ export class Controller {
     } catch (e) {
       this.setErr(errText(e));
     }
+  }
+
+  /** The toggle flips the saved value inside the queued update, so two quick presses can't both read the old one. */
+  toggleShowArchived() {
+    return this.applyShowArchived((cur) => !cur.show_archived);
+  }
+
+  setShowArchived(on: boolean) {
+    return this.applyShowArchived(() => on);
+  }
+
+  protected async applyShowArchived(pick: (cur: Settings) => boolean) {
+    try {
+      await this.updateSettings(async (cur) => {
+        const next = pick(cur);
+        await this.api.setSettings({ ...cur, show_archived: next });
+        this.store.set({ showArchived: next });
+      });
+    } catch (e) {
+      return this.setErr(errText(e));
+    }
+    if (this.store.get().paneMode === "notes") await this.refreshKeepingEditor();
+    else this.listStale = true; // the hidden Notes list reloads when shown
+    this.reloadAround();
+  }
+
+  /** Reload a first page without moving the editor: a plain refresh would inherit a pending first page's rule and could open row 0. */
+  protected refreshKeepingEditor() {
+    return this.pendingFirst !== null ? this.runSearch(true, "highlight") : this.runSearch(false);
+  }
+
+  /** Everything besides the Notes list that lists notes. */
+  protected reloadAround() {
+    void this.loadTasks();
+    this.refreshTimeline();
+    void this.refreshTags();
+    void this.loadLinkTargets();
+    void this.loadRelated();
+  }
+
+  protected archivePending = false;
+  /** Archive or unarchive the open note. It stays in the editor; only the listings change. */
+  async toggleArchive() {
+    const s = this.store.get();
+    const path = this.editor.currentPath();
+    if (!path) return this.setErr("Open a note to archive");
+    if (this.busy || s.indexing) return this.setErr(BUSY_MSG);
+    if (this.archivePending) return; // a second press would read the same flag and send the same value
+    const next = !s.archived;
+    this.archivePending = true;
+    try {
+      await this.api.setArchived(path, next);
+    } catch (e) {
+      return this.setErr(errText(e));
+    } finally {
+      this.archivePending = false;
+    }
+    if (this.editor.currentPath() === path) this.store.set({ archived: next }); // from our own call: the index may not know a new note yet
+    if (this.store.get().paneMode === "notes") await this.refreshKeepingEditor();
+    else this.listStale = true;
+    this.reloadAround();
   }
 
   /** Replace the open note with revision `id` as a user edit, after confirming and snapshotting the current text. */
@@ -1916,6 +1995,8 @@ export class Controller {
     toggle_timeline: () => this.setPaneMode(this.store.get().paneMode === "timeline" ? "notes" : "timeline"),
     export: () => void this.startExport(),
     save_search: () => this.startSaveSearch(),
+    toggle_archived: () => void this.toggleShowArchived(),
+    archive_note: () => void this.toggleArchive(),
     quit: () => void this.api.quitApp(),
     reset_window: () => void this.api.resetWindow(),
   };
@@ -2006,7 +2087,7 @@ export class Controller {
       if (!open() || this.busy || this.editor.isDirty()) return "refused";
       if (req.kind === "rename") {
         // frozen until `renamed`, so autosave can't recreate the file under its old name
-        this.busy = true;
+        this.busy = true; this.archiveOps++;
         this.editor.suspend();
         this.agentRenaming = req.path;
         return "ready";
@@ -2078,7 +2159,7 @@ export class Controller {
         this.setErr(errText(e));
       }
     } finally {
-      this.busy = false;
+      this.busy = false; this.endArchiveOp();
     }
     void this.runSearch(false);
     void this.refreshTitles();
@@ -2102,8 +2183,17 @@ export class Controller {
 
   /** A note operation succeeded but the archived-notes list could not be written. */
   onArchiveError(message: string) {
-    this.notice = `The archived-notes list could not be updated: ${message}`;
-    this.setErr(this.notice);
+    const msg = `The archived-notes list could not be updated: ${message}`;
+    // An operation still running ends with clearErr(), which must keep the message; with none running nothing is left to clear it.
+    if (this.archiveOps > 0) this.notice = this.archiveMsg = msg;
+    this.setErr(msg);
+  }
+
+  protected archiveOps = 0; // operations whose backend command may emit archive-error (rename, delete, merge, lock, open or create)
+  protected archiveMsg = "";
+  /** The last such operation is over, after its clearErr(): the message was shown once and must not come back. */
+  protected endArchiveOp() {
+    if (--this.archiveOps === 0 && this.notice === this.archiveMsg) this.notice = "";
   }
 
   onIndexError(message: string) {

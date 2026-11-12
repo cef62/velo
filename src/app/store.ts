@@ -60,6 +60,8 @@ export interface AppState {
   fontSize: number;
   writeFrontMatter: boolean;
   showArchived: boolean; // list the archived notes too
+  archived: boolean; // the open note is archived
+  hiddenArchived: number; // archived matches the latest list page left out
   tasksByNote: boolean; // Tasks pane: one heading per note inside each date section
   showFrontMatter: boolean;
   infoOpen: boolean;
@@ -104,6 +106,8 @@ export const initialState = (isMac: boolean): AppState => ({
   count: 0,
   hasMore: false,
   total: 0,
+  hiddenArchived: 0,
+  archived: false,
   sel: -1,
   listActive: false,
   openPath: null,

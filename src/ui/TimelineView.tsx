@@ -5,7 +5,7 @@ import { listRow, sectionHeader } from "styled-system/recipes";
 import type { TimelineRow } from "../api";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
-import { Spinner } from "@/components/ui";
+import { Badge, Spinner } from "@/components/ui";
 import { rowHeight } from "../app/fontscale";
 import { visibleRange } from "../list";
 import { filtersLine, groupByDay } from "../timeline";
@@ -128,6 +128,7 @@ export function TimelineView({ controller, store }: { controller: Controller; st
                     tabIndex={i === stopIdx ? 0 : -1} // roving: one tab stop for the whole list, ↑/↓ move
                     data-row={i}
                     data-selected={r.path === active || undefined}
+                    data-archived={r.archived || undefined}
                     className={c.root}
                     style={pos}
                     onFocus={() => setCur(r.path)}
@@ -137,6 +138,7 @@ export function TimelineView({ controller, store }: { controller: Controller; st
                     <div className={css({ display: "flex", alignItems: "center", gap: "2.5", minW: "0" })}>
                       {r.locked && <span className={c.lock}><Lock aria-label="Locked" /></span>}
                       <span className={c.title}>{r.title}</span>
+                      {r.archived && <Badge size="sm" variant="subtle" flex="none">archived</Badge>}
                       <span className={c.date}><span className={srOnly}>{it.label}, </span>{time.format(r.date)}</span>
                     </div>
                     <span className={c.snippet}>{r.locked ? "" : r.snippet}</span>

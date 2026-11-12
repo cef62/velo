@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { paneBarMode, showSearchHint, sidePanelMode, titleBarMode } from './layout'
+import { dueExtra, dueText, notesExtra, notesText, noteCount, paneBarMode, showSearchHint, sidePanelMode, titleBarMode } from './layout'
 
 // The sizes the v2 mocks are drawn at (design/park-ui/v2/reference/V2Small, V2Wide, V2Main*).
 describe('v2 layout rules', () => {
   it('default window 1000×700, horizontal: list 280, note ~711', () => {
-    expect(paneBarMode(280)).toEqual({ labels: 'active', menusIconOnly: false })
+    expect(paneBarMode(280)).toEqual({ labels: 'active', menusIconOnly: true }) // 331 needed for Sort in full
     expect(titleBarMode(711)).toEqual({ viewSwitch: 'segments', lockInMenu: false, renameHint: false, hideActions: false })
     expect(sidePanelMode(711)).toBe('overlay') // 711 − 300 < 480
   })
@@ -24,9 +24,46 @@ describe('v2 layout rules', () => {
   it('vertical layout: the list is full width, every tab labelled', () => {
     expect(paneBarMode(1000).labels).toBe('all')
   })
-  it('small window 600×400, horizontal: list 200, note 391', () => {
-    expect(paneBarMode(200)).toEqual({ labels: 'active', menusIconOnly: true })
-    expect(titleBarMode(391)).toEqual({ viewSwitch: 'menu', lockInMenu: true, renameHint: false, hideActions: false })
+  it('small window 600×400, horizontal: list 216 (MIN_LIST_W), note 384', () => {
+    expect(paneBarMode(216)).toEqual({ labels: 'none', menusIconOnly: true })
+    expect(titleBarMode(384)).toEqual({ viewSwitch: 'menu', lockInMenu: true, renameHint: false, hideActions: false })
     expect(showSearchHint(600)).toBe(false)
+  })
+  it('pane bar labels: in full or icon-only, per mode, on both sides of each boundary', () => {
+    // [mode, first width with labels, tabs active] / [first width with labelled controls] / [... with all tabs labelled]
+    const edges = { notes: [269, 357, 460], tasks: [235, 308, 410], timeline: [271, 368, 456] } as const
+    for (const [tab, [tabs, controls, controlsAll]] of Object.entries(edges) as [keyof typeof edges, readonly number[]][]) {
+      expect(paneBarMode(tabs - 1, tab).labels).toBe('none')
+      expect(paneBarMode(tabs, tab).labels).toBe('active')
+      expect(paneBarMode(controls - 1, tab).menusIconOnly).toBe(true)
+      expect(paneBarMode(controls, tab).menusIconOnly).toBe(false)
+      expect(paneBarMode(379, tab).menusIconOnly).toBe(controls > 379) // still 'active' labels below 380
+      expect(paneBarMode(380, tab).menusIconOnly).toBe(true) // tabs gain labels and take the room
+      expect(paneBarMode(controlsAll - 1, tab).menusIconOnly).toBe(true)
+      expect(paneBarMode(controlsAll, tab).menusIconOnly).toBe(false)
+    }
+  })
+  it('counts beside the tabs have a fixed worst case the thresholds were measured with', () => {
+    expect(noteCount(9999)).toBe('9,999')
+    expect(noteCount(10004)).toBe('10K')
+    expect(noteCount(10500)).toBe('10K') // truncates, never overstates
+    expect(noteCount(99999)).toBe('99K')
+    expect(noteCount(1000000)).toBe('1M')
+    expect(dueText(99)).toBe('99')
+    expect(dueText(100)).toBe('99+')
+    expect(dueText(999)).toBe('99+')
+  })
+  it('tooltip text for counts the bar hides or caps', () => {
+    expect(notesText(1)).toBe('1 note')
+    expect(notesText(9999)).toBe('9,999 notes')
+    expect(notesText(10004)).toBe('10,004 notes')
+    expect(notesText(99999)).toBe('99,999 notes')
+    expect(notesExtra(10004, false)).toBe('10,004 notes') // hidden (tabs icon-only)
+    expect(notesExtra(1, false)).toBe('1 note')
+    expect(notesExtra(0, false)).toBe('')
+    expect(notesExtra(9999, true)).toBe('') // shown in full: nothing to add
+    expect(notesExtra(10004, true)).toBe('10,004 notes') // shown capped as 10K
+    expect(dueExtra(99)).toBe('')
+    expect(dueExtra(150)).toBe('150 due')
   })
 })

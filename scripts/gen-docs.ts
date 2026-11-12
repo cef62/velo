@@ -5,8 +5,8 @@ import { DEFAULTS, GLOBAL_ACTIONS, LABELS, NONE, formatBinding, type Action } fr
 
 const GROUPS: Record<string, Action[]> = {
   Navigation: ["focus_search", "back", "forward", "command_palette", "daily_note"],
-  Notes: ["rename", "delete_note", "extract_note", "merge_note", "export", "capture"],
-  View: ["toggle_preview", "toggle_rich", "toggle_layout", "toggle_info", "toggle_tags", "toggle_front_matter", "toggle_connections", "toggle_sort", "context_menu"],
+  Notes: ["rename", "delete_note", "extract_note", "merge_note", "archive_note", "export", "capture"],
+  View: ["toggle_preview", "toggle_rich", "toggle_layout", "toggle_info", "toggle_tags", "toggle_front_matter", "toggle_archived", "toggle_connections", "toggle_sort", "context_menu"],
   "Search & filters": ["save_search"],
   "Tasks & timeline": ["toggle_tasks", "toggle_timeline"],
   Security: ["toggle_lock", "lock_all"],

@@ -142,3 +142,8 @@ test("command_palette defaults to Mod+KeyP and does not clash", () => {
   expect(new Set(all).size).toBe(all.length);
   expect(validateBinding(DEFAULTS, "command_palette", DEFAULTS.command_palette)).toEqual({ ok: true });
 });
+
+test("archive actions have no default key", () => {
+  expect(DEFAULTS.toggle_archived).toBe(NONE);
+  expect(DEFAULTS.archive_note).toBe(NONE);
+});

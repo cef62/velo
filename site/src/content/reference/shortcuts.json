@@ -81,6 +81,15 @@
     "group": "Notes"
   },
   {
+    "action": "archive_note",
+    "label": "Archive / unarchive note",
+    "keys": "none",
+    "mac": null,
+    "other": null,
+    "global": false,
+    "group": "Notes"
+  },
+  {
     "action": "export",
     "label": "Export…",
     "keys": "none",
@@ -146,6 +155,15 @@
   {
     "action": "toggle_front_matter",
     "label": "Show / hide front matter",
+    "keys": "none",
+    "mac": null,
+    "other": null,
+    "global": false,
+    "group": "View"
+  },
+  {
+    "action": "toggle_archived",
+    "label": "Show / hide archived notes",
     "keys": "none",
     "mac": null,
     "other": null,

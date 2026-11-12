@@ -36,12 +36,13 @@ function Body({ controller, store }: { controller: Controller; store: Store<AppS
   const title = useStore(store, (s) => s.title);
   const encrypted = useStore(store, (s) => s.encrypted);
   const recent = useStore(store, (s) => s.recentActions);
+  const archived = useStore(store, (s) => s.archived);
   const [query, setQuery] = useState("");
   const [sel, setSel] = useState(0);
   const list = useRef<HTMLDivElement>(null);
   const hasSelection = useMemo(() => controller.hasSelection(), [controller]); // read once per open
-  const state = { keys, isMac, noteOpen: openPath !== null, title, encrypted, hasSelection, recent };
-  const groups = useMemo(() => (query.trim() ? [{ title: "", items: paletteSearch(query, state) }] : paletteGroups(state)), [query, keys, isMac, openPath, title, encrypted, hasSelection, recent]); // eslint-disable-line react-hooks/exhaustive-deps
+  const state = { keys, isMac, noteOpen: openPath !== null, title, encrypted, hasSelection, archived, recent };
+  const groups = useMemo(() => (query.trim() ? [{ title: "", items: paletteSearch(query, state) }] : paletteGroups(state)), [query, keys, isMac, openPath, title, encrypted, hasSelection, archived, recent]); // eslint-disable-line react-hooks/exhaustive-deps
   const flat = groups.flatMap((g) => g.items);
   const cur = Math.min(sel, Math.max(0, flat.length - 1));
   const run = (it: PaletteItem) => {

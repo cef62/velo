@@ -9,6 +9,7 @@ Inspired by nvALT and Notational Velocity; not affiliated with or endorsed by th
 - Search-or-create box; results update on every keystroke (backend under 50 ms p95 at 10k notes, release build), with matches highlighted in the list.
 - Plain files you own: a flat folder of `.md` / `.txt` notes, edited in a CodeMirror editor with autosave (the last line can scroll up to the top of the window).
 - `[[wikilinks]]`: following a link to a missing note creates it; renaming a note rewrites links to it.
+- The bar above the list shows its controls as icons with tooltips when the list is narrow and with full labels when it is wide. In the side-by-side layout the list cannot be dragged narrower than 216px.
 - Markdown preview with clickable wikilinks and external links.
 - Note counts next to every tag; active filters show as chips inside the search field and the Filters button in the header shows how many there are; a Retry button when a save fails.
 - Appearance (Settings › Appearance): Theme is System (follows the OS), Light or Dark; Palette is one of six color palettes — Clear (default), Mist, Paper, Electric, Reef and High contrast. Both restyle the window as you pick, and Cancel puts the saved look back.
@@ -50,6 +51,8 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | — | — | Merge the open note into another (set in Settings) |
 | — | — | Export… the timeline (set in Settings) |
 | — | — | Save search… (set in Settings) |
+| — | — | Show / hide archived notes (set in Settings) |
+| — | — | Archive / unarchive the current note (set in Settings) |
 | — | — | Quit velo (set in Settings; also in the command palette) |
 | ⌥⇧⌘N | Ctrl+Alt+Shift+N | Quick capture (system-wide) |
 | ⇧F10 / Menu key | Shift+F10 / Menu key | Open the context menu of the highlighted row or chip (Shift+F10 can be changed in Settings; the Menu key always works) |
@@ -65,6 +68,22 @@ Write `#tag` anywhere in a note (at the start of a line, after a space, or after
 ## Saved searches
 
 Keep a search you use often. With a search text, tags or the No links chip active, choose "Save search…" in the Filters panel (⌘⇧T) and give it a name of 1 to 60 characters; a name already in use asks to replace the old one. Saved searches sit as a dashed row of chips above the tags in the Filters panel; the applied one shows as a single chip in the search field. Click one to apply its search text, tags and No links, replacing the current filters; click the active one to clear them. Right-click a chip, or press Shift+F10 / the Menu key on it, for Rename… and Delete (which asks first). They are stored per machine in the settings. The list, Tasks, the timeline and export all follow the filters.
+
+## Archived notes
+
+Archive a note to take it out of your way without deleting it. Open the note, then choose Archive note in its `⋯` menu or in the command palette (or press a shortcut you bind in Settings). The same entry reads Unarchive note on an archived note. A locked note must be opened (passphrase) first; archiving never decrypts or rewrites it.
+
+Archived notes are hidden from the list, search, the timeline, Tasks, the tags panel and its counts (a selected tag that only archived notes carry stays there with count 0), and from agents (see Agents (MCP)). An existing link to an archived note still opens it. `[[` suggests archived titles only while the Show archived notes button is on, and typing the exact title of an archived note never offers to create it (Shift+Enter opens that note). A task added to an archived note stays hidden with it.
+
+The Show archived notes button sits in the bar above the list, in the Notes, Tasks and Timeline views. It stays on until you switch it off, including across a relaunch. While it is on, archived rows are dimmed and carry an "archived" badge. While it is off, a line under the Notes list says how many archived notes the current search or filter hides ("1 archived note hidden", "3 archived notes hidden").
+
+Renaming or locking an archived note keeps it archived. The list is stored in `.velo/archived` inside your notes folder, one title per line.
+
+Known limits:
+
+- A rename done in Finder (or any tool other than velo) un-archives the note, because the list goes by title.
+- A hand edit of `.velo/archived` takes effect at the next search; the open note's badge and palette entry update when you reopen it.
+- If `.velo/archived` cannot be read at start-up, archived notes show until it can be.
 
 ## Timeline
 
@@ -137,6 +156,7 @@ Rust backend in `src-tauri` (Tauri 2; `tauri-plugin-window-state` keeps the wind
 - Your notes folder is flat: only `*.md`, `*.txt` and `*.md.age` files directly inside it are notes. Subfolders and dotfiles are ignored. New notes are `Title.md`.
 - Files are the source of truth. Locked notes are `Title.md.age`.
 - `.velo/identity.age` (inside the notes folder) holds your encryption identity, wrapped with your passphrase.
+- `.velo/archived` (inside the notes folder) lists the titles of archived notes, one per line. Delete a line to unarchive by hand.
 - The search index is a SQLite file (`index-<hash>.sqlite`) in the app's data directory (Tauri app data dir for `dev.velo.app`, e.g. `~/Library/Application Support/dev.velo.app` on macOS), never in the notes folder. It is rebuildable: delete it and velo reindexes on next launch without losing anything. Settings live in the app config dir.
 
 ## Encryption
