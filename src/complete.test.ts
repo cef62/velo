@@ -104,3 +104,15 @@ test("no rows means no popup, so Esc is not swallowed", () => {
   expect(tagSource(source([]))(at("see #123"))).toBeNull();
   expect(options(source([]), "[[New").map((o) => o.label)).toEqual(['Create "New"']); // create row still offered
 });
+
+test("no Create row when exists says the title is taken, even if it is not suggested", () => {
+  const src = { ...source([]), exists: (t: string) => t === "Hidden" };
+  const r = linkSource(src)(new CompletionContext(st("[[Hidden"), 8, false)); // null: no row at all, so no popup
+  expect(r?.options.map((o) => o.label) ?? []).not.toContain('Create "Hidden"');
+});
+
+test("no Create row when an exact suggestion matches, even if exists says false", () => {
+  const src = { ...source([target("Nick", "Nicholas")]), exists: () => false };
+  const r = linkSource(src)(new CompletionContext(st("[[Nick"), 6, false));
+  expect(r?.options.map((o) => o.label)).toEqual(["Nick"]);
+});

@@ -1,8 +1,11 @@
 [
   {
-    "description": "Search velo notes like the velo search field (titles, aliases, then text). Empty query lists all notes. `tags` keeps notes having every tag. `no_links` true keeps only notes with no [[links]] in or out (orphans; alias links count). At most 50 results per call; page with `offset`. Returns title, snippet, modified, tags.",
+    "description": "Search velo notes like the velo search field (titles, aliases, then text). Empty query lists all notes. `tags` keeps notes having every tag. `no_links` true keeps only notes with no [[links]] in or out (orphans; alias links count). At most 50 results per call; page with `offset`. Returns title, snippet, modified, tags. Archived notes are left out unless `include_archived` is true; then each note says `archived`.",
     "input_schema": {
       "properties": {
+        "include_archived": {
+          "type": "boolean"
+        },
         "limit": {
           "maximum": 50,
           "minimum": 1,
@@ -30,15 +33,19 @@
     "name": "search_notes"
   },
   {
-    "description": "All tags in velo notes (front-matter `tags:` and inline #tag words) with the number of notes carrying each.",
+    "description": "All tags in velo notes (front-matter `tags:` and inline #tag words) with the number of notes carrying each. Archived notes are left out of the counts unless `include_archived` is true; then the counts include them.",
     "input_schema": {
-      "properties": {},
+      "properties": {
+        "include_archived": {
+          "type": "boolean"
+        }
+      },
       "type": "object"
     },
     "name": "list_tags"
   },
   {
-    "description": "Read a note by title (or alias). Returns the full text (front matter included), `hash` (pass it to replace_note), created, modified, tags, aliases, outgoing [[links]] and backlinks (titles of notes linking here).",
+    "description": "Read a note by title (or alias). Returns the full text (front matter included), `hash` (pass it to replace_note), created, modified, tags, aliases, outgoing [[links]] and backlinks (titles of notes linking here). Backlinks leave out archived notes; get_connections with include_archived lists them.",
     "input_schema": {
       "properties": {
         "title": {
@@ -215,9 +222,12 @@
     "name": "remove_tags"
   },
   {
-    "description": "The Tasks view: open tasks from all notes (empty `- [ ]` boxes are not listed) grouped as overdue, today, upcoming, no_date (and done = ticked in the last 7 days when `show_done`), plus due_count (overdue + today). `query` filters task or note text, `tags` keeps notes having every tag. Each task has title (note), text, due, line, line_text (pass line and line_text to set_task_done).",
+    "description": "The Tasks view: open tasks from all notes (empty `- [ ]` boxes are not listed) grouped as overdue, today, upcoming, no_date (and done = ticked in the last 7 days when `show_done`), plus due_count (overdue + today). `query` filters task or note text, `tags` keeps notes having every tag. Each task has title (note), text, due, line, line_text (pass line and line_text to set_task_done). Archived notes are left out unless `include_archived` is true; then each note says `archived`.",
     "input_schema": {
       "properties": {
+        "include_archived": {
+          "type": "boolean"
+        },
         "query": {
           "type": "string"
         },
@@ -363,9 +373,12 @@
     "name": "merge_notes"
   },
   {
-    "description": "Notes one hop around a note: outgoing [[links]], backlinks (alias links included), notes sharing each tag (tags on more than 15 notes give only the count), and unlinked mentions (titles or aliases in this note's text without [[ ]]). To link a mention, read_note then edit_note wrapping the words in [[ ]].",
+    "description": "Notes one hop around a note: outgoing [[links]], backlinks (alias links included), notes sharing each tag (tags on more than 15 notes give only the count), and unlinked mentions (titles or aliases in this note's text without [[ ]]). To link a mention, read_note then edit_note wrapping the words in [[ ]]. Archived notes are left out unless `include_archived` is true; then each note says `archived`.",
     "input_schema": {
       "properties": {
+        "include_archived": {
+          "type": "boolean"
+        },
         "title": {
           "type": "string"
         }

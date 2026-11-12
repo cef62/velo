@@ -97,7 +97,7 @@ velo can act as an MCP server, so Claude Code can search, read, create and edit 
 
 **Open or closed.** Claude Code starts `velo --mcp` itself, with no window. If velo is running, the request is forwarded to the app; otherwise velo reads and writes the notes folder directly. The switch is checked on every call.
 
-**Tools (17).**
+**Tools (17).** `search_notes`, `list_tasks`, `list_tags` and `get_connections` hide archived notes unless `include_archived` is true; then `search_notes`, `list_tasks` and `get_connections` mark them `archived` and `list_tags` counts them. `read_note` backlinks never list archived notes, and every tool still reads and writes an archived note by title.
 
 - `search_notes`: search like the search field, with tag filters, `no_links` to list orphans, and paging (50 per page).
 - `get_connections`: one hop around a note by title: links, backlinks, shared tags and unlinked mentions. Read-only, titles only, never locked notes. To link a mention, use `edit_note`.

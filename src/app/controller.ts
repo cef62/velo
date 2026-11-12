@@ -90,7 +90,7 @@ export class Controller {
   ) {
     this.results = new Results((offset) => {
       const s = store.get();
-      return api.search(s.query, s.sort, offset, s.selectedTags, s.noLinks);
+      return api.search(s.query, s.sort, offset, s.selectedTags, s.noLinks, s.showArchived);
     });
   }
 
@@ -110,7 +110,7 @@ export class Controller {
         this.textInfo();
         void this.loadInfo();
       },
-      complete: { links: () => this.linkIndex, tags: () => this.tagIndex, onCreate: (t) => void this.createLinked(t) },
+      complete: { links: () => this.linkIndex, tags: () => this.tagIndex, onCreate: (t) => void this.createLinked(t), exists: (t) => this.titles.has(fold(t)) },
     };
   }
 
@@ -151,17 +151,22 @@ export class Controller {
     this.notice = "";
   }
 
+  /** The Create hint: a loaded row or any note (archived too, via the title cache) carries the query as its title. */
+  protected exactMatch() {
+    const q = fold(this.store.get().query.trim()); // trimmed like enterAction, so the hint matches what Enter does
+    return q !== "" && (this.results.loaded.some((h) => fold(h.title) === q) || this.titles.has(q));
+  }
+
   /** Rows changed (reset/refresh/page loaded): publish them so the list re-renders. */
   protected listChanged(reset = false) {
     const r = this.results;
-    const q = fold(this.store.get().query.trim()); // trimmed like enterAction, so the Create hint matches what Enter does
     this.store.set((s) => ({
       listVersion: s.listVersion + 1,
       listReset: s.listReset + (reset ? 1 : 0),
       count: r.count,
       hasMore: r.hasMore,
       total: r.total,
-      exactTitleMatch: q !== "" && r.loaded.some((h) => fold(h.title) === q),
+      exactTitleMatch: this.exactMatch(),
     }));
   }
 
@@ -194,6 +199,7 @@ export class Controller {
       sort: s.sort ?? "modified", // before the first search, which pages with it
       editorStyle: s.editor_style === "plain" ? "plain" : "rich",
       writeFrontMatter: s.write_front_matter !== false,
+      showArchived: s.show_archived === true,
       tasksByNote: s.tasks_by_note !== false,
       showFrontMatter: s.show_front_matter === true,
       infoOpen: s.info_panel === true,
@@ -219,6 +225,7 @@ export class Controller {
     void this.loadLinkTargets();
     try {
       this.titles = new Set((await this.api.listTitles()).map(fold));
+      this.store.set({ exactTitleMatch: this.exactMatch() }); // the list loaded before the cache did
       this.preview?.refresh();
       this.editor?.refreshLinks();
     } catch (e) {
@@ -226,9 +233,12 @@ export class Controller {
     }
   }
 
+  protected readonly newLinkTargetsReq = latest();
   async loadLinkTargets() {
+    const fresh = this.newLinkTargetsReq();
     try {
-      this.linkIndex = prepare(await this.api.listLinkTargets(), (t) => t.name);
+      const targets = await this.api.listLinkTargets(this.store.get().showArchived);
+      if (fresh()) this.linkIndex = prepare(targets, (t) => t.name);
     } catch (e) {
       console.error("link target refresh failed", e);
     }
@@ -826,7 +836,7 @@ export class Controller {
       if (!current()) return true;
       if (!this.editor.load(doc)) return false;
       this.loadedDoc(doc);
-      this.setErr("");
+      this.clearErr();
       this.history.loaded(doc.path, "explicit");
       if (created) {
         if (!this.store.get().capture && !this.keptCapture) this.store.set({ query: doc.title }); // list the new note, selected (resort keeps the open note selected); typed capture text is never replaced
@@ -1053,7 +1063,7 @@ export class Controller {
       if (!this.editor.rebind(path, doc)) return; // clean after the flush: the stored position follows the rename
       this.loadedDoc(doc);
       this.store.set({ title });
-      this.setErr("");
+      this.clearErr();
       this.history.loaded(r.path, "explicit");
       renamed = true;
     } catch (e) {
@@ -1226,7 +1236,7 @@ export class Controller {
     const { query, selectedTags, noLinks, timeline } = this.store.get();
     const fresh = this.newTimelineReq();
     try {
-      const rows = await this.api.timeline(query, selectedTags, noLinks, timeline.by, sinceMs(timeline.range, new Date()));
+      const rows = await this.api.timeline(query, selectedTags, noLinks, timeline.by, sinceMs(timeline.range, new Date()), this.store.get().showArchived);
       if (fresh()) this.store.set((s) => ({ timeline: { ...s.timeline, rows, err: "" } }));
     } catch (e) {
       // while indexing: no error, the index-done refreshTitles reloads it
@@ -1279,7 +1289,7 @@ export class Controller {
     const f = this.filters();
     const named = appliedSearch(s.savedSearches, s.appliedSaved, f)?.name ?? s.savedSearches.find((x) => sameFilters(x, f))?.name;
     const title = named ?? ([...f.tags.map((t) => `#${t}`), f.query.trim()].filter(Boolean).join(" ") || "All notes");
-    return { query: s.query, tags: s.selectedTags, no_links: s.noLinks, by: s.timeline.by, since_ms: sinceMs(s.timeline.range, new Date()), tasks_only: tasksOnly, title };
+    return { query: s.query, tags: s.selectedTags, no_links: s.noLinks, by: s.timeline.by, since_ms: sinceMs(s.timeline.range, new Date()), tasks_only: tasksOnly, title, include_archived: s.showArchived };
   }
 
   /** Export…: always what the timeline shows, so other panes switch to it first. */
@@ -1360,7 +1370,7 @@ export class Controller {
     if (!infoOpen || sideTab !== "related" || !openPath) return;
     const fresh = this.newRelatedReq();
     try {
-      const data = await this.api.connections(openPath);
+      const data = await this.api.connections(openPath, this.store.get().showArchived);
       if (fresh()) this.store.set({ related: { centre: openPath, data, err: "" } });
     } catch (e) {
       if (fresh()) this.store.set({ related: { centre: openPath, data: null, err: e === "locked" ? "Note is locked" : errText(e) } });
@@ -1407,12 +1417,12 @@ export class Controller {
     try {
       if (this.editor.currentPath() === path) {
         const text = this.editor.getText();
-        const next = this.busy ? null : await this.api.linkMention(path, m.name, m.count, text);
+        const next = this.busy ? null : await this.api.linkMention(path, m.name, m.count, text, this.store.get().showArchived);
         if (next === null) return fail("The note can't be edited right now");
         // typing during the call moved the offsets: the mention is gone or the text changed, so just refresh
         const same = this.editor.currentPath() === path && this.editor.getText() === text;
         if (same && !this.editor.applyChange(changedSpan(text, next), true)) return fail("The note can't be edited right now");
-      } else await this.api.linkMention(path, m.name, m.count, null);
+      } else await this.api.linkMention(path, m.name, m.count, null, this.store.get().showArchived);
     } catch (e) {
       if (e !== "mention-moved") return fail(e);
     }
@@ -1438,15 +1448,15 @@ export class Controller {
   protected badgeStale = false; // a full load did not land: the next one recomputes the badge even when only the filter changed
   protected async doLoadTasks(filterOnly: boolean) {
     this.tasksDay = localToday();
-    const { query, selectedTags, showDone } = this.store.get();
+    const { query, selectedTags, showDone, showArchived } = this.store.get();
     const fresh = this.newTasksReq();
     try {
-      const v = await this.api.tasks(query, selectedTags, showDone);
+      const v = await this.api.tasks(query, selectedTags, showDone, showArchived);
       if (fresh()) this.tasksFailed = false;
       // the badge must not change while typing a search: count from an unfiltered view, and only when notes changed (not per keystroke)
       const filtered = !!query.trim() || selectedTags.length > 0;
       if (!filterOnly) this.badgeStale = true;
-      const due = !filtered ? v.due_count : filterOnly && !this.badgeStale ? null : (await this.api.tasks("", [], false)).due_count;
+      const due = !filtered ? v.due_count : filterOnly && !this.badgeStale ? null : (await this.api.tasks("", [], false, showArchived)).due_count;
       if (!fresh()) return;
       if (due === null) return void this.store.set({ taskView: v });
       this.badgeStale = false;
@@ -1540,7 +1550,7 @@ export class Controller {
     const fresh = this.newTagsReq();
     let tags: TagCount[];
     try {
-      tags = await this.api.listTags();
+      tags = await this.api.listTags(this.store.get().showArchived);
     } catch (e) {
       if (e !== "indexing") console.error("tag refresh failed", e);
       return;
@@ -1697,7 +1707,7 @@ export class Controller {
       return err === "not-found" ? "Folder not found" : String(err);
     }
     this.applyLook(next);
-    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, writeFrontMatter: next.write_front_matter, tasksByNote: next.tasks_by_note !== false, showFrontMatter: next.show_front_matter, infoOpen: next.info_panel, savedSearches: next.saved_searches ?? [], settings: null });
+    this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, writeFrontMatter: next.write_front_matter, showArchived: next.show_archived === true, tasksByNote: next.tasks_by_note !== false, showFrontMatter: next.show_front_matter, infoOpen: next.info_panel, savedSearches: next.saved_searches ?? [], settings: null });
     this.preview?.refresh(); // watermark shows the binding
     this.syncStyle();
     if (next.notes_dir !== cur.notes_dir) {
@@ -2088,6 +2098,12 @@ export class Controller {
     void this.refreshTitles();
     void this.refreshTags();
     void this.loadTasks();
+  }
+
+  /** A note operation succeeded but the archived-notes list could not be written. */
+  onArchiveError(message: string) {
+    this.notice = `The archived-notes list could not be updated: ${message}`;
+    this.setErr(this.notice);
   }
 
   onIndexError(message: string) {

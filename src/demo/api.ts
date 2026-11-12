@@ -27,6 +27,7 @@ let notes = new Map<string, Note>();
 let unlocked = false;
 let hashSeq = 0;
 let settings: Settings;
+let archived = new Set<string>(); // folded titles
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const isoDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -74,6 +75,7 @@ export function resetDemo(pin?: Date) {
   const now = new Date(nowMs());
   notes = new Map();
   unlocked = false;
+  archived = new Set();
   for (const [file, raw] of Object.entries(seed)) {
     const name = file.slice("./vault/".length, -".md".length);
     const path = name.endsWith(".locked") ? `${DIR}/${name.slice(0, -".locked".length)}.md.age` : `${DIR}/${name}.md`;
@@ -89,7 +91,7 @@ export function resetDemo(pin?: Date) {
   settings = {
     notes_dir: DIR, layout: "horizontal", font_size: 14, sort: "modified", editor_style: "rich", theme: urlTheme(), shortcuts: {},
     write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: false, capture_target: "inbox",
-    inbox_title: "Inbox", agent_access: false, timeline_sort: "updated", palette: urlPalette(), app_icon: "dock", tasks_by_note: true, // ?palette=<slug>
+    inbox_title: "Inbox", agent_access: false, timeline_sort: "updated", palette: urlPalette(), app_icon: "dock", tasks_by_note: true, show_archived: false, // ?palette=<slug>
     saved_searches: [
       { name: "Work", query: "", tags: ["work"], no_links: false },
       { name: "Travel plans", query: "", tags: ["travel"], no_links: false },
@@ -205,11 +207,12 @@ function contextLine(body: string, a: number, b: number, max = CONTEXT_CHARS): s
 const inTitle = (n: Note, terms: string[]) => terms.every((t) => [titleOf(n.path), ...(readable(n) ? aliasesOf(n) : [])].some((x) => fold(x).includes(t)));
 
 /** Notes passing the shared search filters: terms under 3 chars match titles/aliases only, longer ones the body too; every tag; orphans only. */
-function filtered(query: string, tags: string[], noLinks: boolean): Note[] {
+function filtered(query: string, tags: string[], noLinks: boolean, includeArchived: boolean): Note[] {
   const terms = termsOf(query);
   const short = terms.filter((t) => t.length < 3);
   const long = terms.filter((t) => t.length >= 3);
   return [...notes.values()].filter((n) => {
+    if (!includeArchived && isArchived(n)) return false;
     if (!inTitle(n, short)) return false;
     const hay = fold(readable(n) ? `${titleOf(n.path)}\n${bodyOf(n)}` : titleOf(n.path)); // a locked note's text is searched only once unlocked
     if (!inTitle(n, long) && !long.every((t) => hay.includes(t))) return false;
@@ -219,8 +222,9 @@ function filtered(query: string, tags: string[], noLinks: boolean): Note[] {
 }
 
 const meta = (n: Note): NoteMeta => ({ created: n.created, created_src: "frontmatter", modified: n.modified, modified_src: "frontmatter", tags: readable(n) ? tagsOf(n) : [], aliases: readable(n) ? aliasesOf(n) : [] });
-const doc = (n: Note): NoteDoc => ({ path: n.path, title: titleOf(n.path), text: n.text, hash: n.hash, encrypted: isLocked(n.path), meta: meta(n) });
-const node = (n: Note, context = ""): GraphNode => ({ path: n.path, title: titleOf(n.path), created: n.created, modified: n.modified, preview: preview(n), locked: isLocked(n.path), context });
+const isArchived = (n: Note) => archived.has(fold(titleOf(n.path)));
+const doc = (n: Note): NoteDoc => ({ path: n.path, title: titleOf(n.path), text: n.text, hash: n.hash, encrypted: isLocked(n.path), meta: meta(n), archived: isArchived(n) });
+const node = (n: Note, context = ""): GraphNode => ({ path: n.path, title: titleOf(n.path), created: n.created, modified: n.modified, preview: preview(n), locked: isLocked(n.path), context, archived: isArchived(n) });
 
 function write(n: Note, text: string) {
   n.text = text;
@@ -231,6 +235,7 @@ function write(n: Note, text: string) {
 function create(title: string, text: string): Note {
   if (!title.trim() || INVALID.test(title)) throw "invalid-title";
   if (byTitle(title)) throw "already-exists";
+  archived.delete(fold(title.trim())); // a title coming into being drops a stale entry
   const path = `${DIR}/${title.trim()}.md`;
   const now = nowMs();
   const n: Note = { path, text, created: now, modified: now, hash: newHash(), revs: [] };
@@ -262,26 +267,27 @@ function mentionSpans(body: string, name: string): [number, number][] {
 export const getSettings = async (): Promise<Settings> => structuredClone(settings);
 export const setSettings = async (s: Settings): Promise<void> => void (settings = structuredClone(s));
 
-export const search = async (query: string, sort: "modified" | "title", offset: number, tags: string[], noLinks: boolean): Promise<Page> => {
+export const search = async (query: string, sort: "modified" | "title", offset: number, tags: string[], noLinks: boolean, includeArchived: boolean): Promise<Page> => {
   const terms = termsOf(query);
   const long = terms.filter((t) => t.length >= 3).sort((a, b) => b.length - a.length)[0];
   const filtering = terms.length > 0 || tags.length > 0;
   // Rust groups: title hits, then indexed body hits, then unlocked notes matched by their decrypted text or tags
   const group = (n: Note) => (terms.length && inTitle(n, terms) ? 0 : filtering && isLocked(n.path) ? 2 : 1);
-  const rows = filtered(query, tags, noLinks).sort(
+  const rows = filtered(query, tags, noLinks, includeArchived).sort(
     (a, b) => group(a) - group(b) || (sort === "title" ? fold(titleOf(a.path)).localeCompare(fold(titleOf(b.path))) : b.modified - a.modified),
   );
   const hits = rows.slice(offset, offset + PAGE).map((n): Hit => {
     const g = group(n);
     const text = g === 2 ? [...bodyOf(n)].slice(0, 120).join("") : g === 1 && long ? snippet(bodyOf(n), long, preview(n)) : preview(n);
-    return { path: n.path, title: titleOf(n.path), snippet: text, mtime: n.modified, encrypted: isLocked(n.path) };
+    return { path: n.path, title: titleOf(n.path), snippet: text, mtime: n.modified, encrypted: isLocked(n.path), archived: isArchived(n) };
   });
-  return { hits, has_more: offset + PAGE < rows.length, total: rows.length };
+  const hidden = includeArchived ? 0 : filtered(query, tags, noLinks, true).length - rows.length;
+  return { hits, has_more: offset + PAGE < rows.length, total: rows.length, hidden };
 };
 
-export const timeline = async (query: string, tags: string[], noLinks: boolean, by: "created" | "updated", sinceMs: number | null): Promise<TimelineRow[]> =>
-  filtered(query, tags, noLinks)
-    .map((n): TimelineRow => ({ path: n.path, title: titleOf(n.path), date: by === "created" ? n.created : n.modified, snippet: preview(n), locked: isLocked(n.path) }))
+export const timeline = async (query: string, tags: string[], noLinks: boolean, by: "created" | "updated", sinceMs: number | null, includeArchived: boolean): Promise<TimelineRow[]> =>
+  filtered(query, tags, noLinks, includeArchived)
+    .map((n): TimelineRow => ({ path: n.path, title: titleOf(n.path), date: by === "created" ? n.created : n.modified, snippet: preview(n), locked: isLocked(n.path), archived: isArchived(n) }))
     .filter((r) => sinceMs === null || r.date >= sinceMs)
     .sort((a, b) => b.date - a.date);
 
@@ -289,7 +295,7 @@ export const timeline = async (query: string, tags: string[], noLinks: boolean, 
 const notice = (text: string) => typeof window !== "undefined" && window.dispatchEvent(new CustomEvent("velo-demo-notice", { detail: text }));
 const taskLines = (n: Note) => bodyOf(n).split("\n").map((l) => TASK_ITEM.exec(l)).filter((m) => m !== null);
 export const exportPreview = async (r: ExportRequest): Promise<ExportCounts> => {
-  const ns = filtered(r.query, r.tags, r.no_links).filter((n) => r.since_ms === null || (r.by === "created" ? n.created : n.modified) >= r.since_ms);
+  const ns = filtered(r.query, r.tags, r.no_links, r.include_archived).filter((n) => r.since_ms === null || (r.by === "created" ? n.created : n.modified) >= r.since_ms);
   const plain = ns.filter((n) => !isLocked(n.path)); // locked notes are left out of an export
   const boxes = plain.flatMap(taskLines);
   const open = boxes.filter((m) => m[2] === " ").length;
@@ -299,10 +305,10 @@ export const exportText = async (_r: ExportRequest): Promise<string> => "";
 export const printPage = async (): Promise<void> => void notice("Demo: export skipped");
 export const exportMarkdown = async (_path: string, r: ExportRequest): Promise<ExportCounts> => (notice("Demo: export skipped"), exportPreview(r));
 
-export const listTags = async (): Promise<TagCount[]> => {
+export const listTags = async (includeArchived: boolean): Promise<TagCount[]> => {
   const counts = new Map<string, TagCount>();
   for (const n of notes.values()) {
-    if (isLocked(n.path)) continue; // locked notes are not indexed
+    if (isLocked(n.path) || (!includeArchived && isArchived(n))) continue; // locked notes are not indexed
     for (const t of tagsOf(n)) {
       const c = counts.get(fold(t)) ?? { tag: t, count: 0 };
       c.count++;
@@ -312,8 +318,8 @@ export const listTags = async (): Promise<TagCount[]> => {
   return [...counts.values()].sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
 };
 export const listTitles = async (): Promise<string[]> => [...notes.keys()].map(titleOf);
-export const listLinkTargets = async (): Promise<LinkTarget[]> =>
-  [...notes.values()].flatMap((n) =>
+export const listLinkTargets = async (includeArchived: boolean): Promise<LinkTarget[]> =>
+  [...notes.values()].filter((n) => includeArchived || !isArchived(n)).flatMap((n) =>
     [titleOf(n.path), ...(readable(n) ? aliasesOf(n) : [])].map((name) => ({ name, title: titleOf(n.path), path: n.path, modified: n.modified, locked: isLocked(n.path) })),
   );
 export const createFromSelection = async (title: string, text: string): Promise<string> => create(title, text).path;
@@ -329,11 +335,11 @@ export const saveNote = async (path: string, text: string, _baseHash: string): P
   return { kind: "saved", hash: n.hash, front_matter: null, meta: meta(n) };
 };
 
-export const tasks = async (query: string, tags: string[], showDone: boolean): Promise<TaskView> => {
+export const tasks = async (query: string, tags: string[], showDone: boolean, includeArchived: boolean): Promise<TaskView> => {
   const day = today();
   const terms = termsOf(query);
   const all: TaskItem[] = [];
-  for (const n of filtered("", tags, false)) {
+  for (const n of filtered("", tags, false, includeArchived)) {
     if (!readable(n)) continue; // a locked note's tasks come back once it is unlocked
     const first = n.text.length - bodyOf(n).length;
     const skip = n.text.slice(0, first).split("\n").length - 1;
@@ -343,7 +349,7 @@ export const tasks = async (query: string, tags: string[], showDone: boolean): P
       const due = /📅 (\d{4}-\d{2}-\d{2})/.exec(l)?.[1] ?? null;
       const done_on = /@done\((\d{4}-\d{2}-\d{2})\)/.exec(l)?.[1] ?? null;
       const text = l.slice(m[0].length).replace(/\s*📅 \d{4}-\d{2}-\d{2}/g, "").replace(/\s*@done\(\d{4}-\d{2}-\d{2}\)/g, "").trim();
-      const item = { path: n.path, title: titleOf(n.path), line: skip + i, text, due, done: m[2] !== " ", done_on, line_text: l };
+      const item = { path: n.path, title: titleOf(n.path), line: skip + i, text, due, done: m[2] !== " ", done_on, line_text: l, archived: isArchived(n) };
       if (text && terms.every((t) => fold(`${item.title}\n${text}`).includes(t))) all.push(item); // an empty box is not listed, as in Rust group_tasks
     });
   }
@@ -390,18 +396,21 @@ export const renameNote = async (path: string, newTitle: string, rewrite: boolea
   if (!newTitle.trim() || INVALID.test(newTitle)) throw "invalid-title";
   const clash = byTitle(newTitle);
   if (clash && clash !== n) throw "already-exists";
+  const wasArchived = archived.delete(fold(old));
+  archived.delete(fold(newTitle.trim()));
+  if (wasArchived) archived.add(fold(newTitle.trim()));
   notes.delete(path);
   n.path = `${DIR}/${newTitle.trim()}${isLocked(path) ? ".md.age" : ".md"}`;
   notes.set(n.path, n);
   return { path: n.path, rewritten: rewrite ? rewriteLinks(old, newTitle.trim(), n) : 0 };
 };
 
-export const connections = async (path: string): Promise<Connections> => {
+export const connections = async (path: string, includeArchived: boolean): Promise<Connections> => {
   const c = getReadable(path);
   const body = bodyOf(c);
-  const others = [...notes.values()].filter((n) => n !== c);
+  const others = [...notes.values()].filter((n) => n !== c && (includeArchived || !isArchived(n))); // the centre always shows
   const targets = linksOf(body);
-  const out = targets.map(resolve).filter((n): n is Note => !!n && n !== c);
+  const out = targets.map(resolve).filter((n): n is Note => !!n && n !== c && (includeArchived || !isArchived(n)));
   const links_in = others
     .filter((n) => readable(n) && linksTo(n, c))
     .map((n) => {
@@ -425,7 +434,8 @@ export const connections = async (path: string): Promise<Connections> => {
   mentions.sort((x, y) => y.node.modified - x.node.modified);
   return { centre: node(c), links_out: out.map((n) => node(n)), links_in, tags, mentions, missing: targets.filter((t) => !resolve(t)) };
 };
-export const linkMention = async (path: string, targetTitle: string, expectedCount: number, editorText: string | null): Promise<string | null> => {
+// shortcut: ignores includeArchived (the demo has no longest-match rule), upgrade if the demo ever archives notes that mentions could match
+export const linkMention = async (path: string, targetTitle: string, expectedCount: number, editorText: string | null, _includeArchived: boolean): Promise<string | null> => {
   const n = getReadable(path);
   const text = editorText ?? n.text;
   const start = text.length - stripFrontMatter(text).length;
@@ -453,12 +463,17 @@ function move(path: string, to: string): string {
 export const lockNote = async (path: string): Promise<string> => move(path, `${path}.age`);
 export const unlockNote = async (path: string): Promise<string> => move(path, path.replace(/\.age$/, ""));
 export const lockAll = async (): Promise<void> => void (unlocked = false);
-export const deleteNote = async (path: string): Promise<void> => void notes.delete(get(path).path);
+export const deleteNote = async (path: string): Promise<void> => {
+  notes.delete(get(path).path);
+  archived.delete(fold(titleOf(path)));
+};
+export const setArchived = async (path: string, on: boolean): Promise<void> => void archived[on ? "add" : "delete"](fold(titleOf(get(path).path)));
 export const mergeNotes = async (source: string, target: string): Promise<MergeResult> => {
   if (source === target) throw "same-note";
   const s = get(source);
   const t = get(target);
   if (isLocked(source) || isLocked(target)) throw "locked";
+  archived.delete(fold(titleOf(source)));
   write(t, mergedText(t.text, titleOf(target), s.text, titleOf(source)));
   notes.delete(source);
   return { path: target, rewritten: rewriteLinks(titleOf(source), titleOf(target)), trash_error: null };

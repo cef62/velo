@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import type { Page, TaskItem, TaskView, TimelineRow } from "../api";
+import type { LinkTarget, Page, RenameResult, TaskItem, TaskView, TimelineRow } from "../api";
 import { Controller, INVALID_TITLE, type KeyEventLike } from "./controller";
 import { chipsFor } from "../searchChips";
 import { emptyConnections, FakeEditor, FakePreview, deferred, fakeApi, fakeUi, hit, noMeta, settle } from "./fakes";
@@ -28,7 +28,7 @@ test("enter waits for the pending search", async () => {
   api.search.mockImplementationOnce(() => d.promise);
   c.setQuery("ab");
   const entered = c.enter();
-  d.resolve({ hits: [hit("ab")], has_more: false, total: 1 });
+  d.resolve({ hits: [hit("ab")], has_more: false, total: 1, hidden: 0 });
   await entered;
   expect(api.openNote).toHaveBeenCalledWith(P("ab"));
   expect(api.openOrCreate).not.toHaveBeenCalled();
@@ -114,7 +114,7 @@ test("start with a folder searches, opens row 0 and focuses search", async () =>
 test("total from first page", async () => {
   const { c, api, store } = setup();
   api.search.mockImplementation(async (_q, _s, offset) =>
-    offset === 0 ? { hits: [hit("A"), hit("B")], has_more: true, total: 7 } : { hits: [hit("C")], has_more: false, total: 0 });
+    offset === 0 ? { hits: [hit("A"), hit("B")], has_more: true, total: 7, hidden: 0 } : { hits: [hit("C")], has_more: false, total: 0, hidden: 0 });
   await c.runSearch(true);
   expect(store.get().total).toBe(7);
   await c.ensureRows(2);
@@ -159,7 +159,7 @@ test("lock hand-off busy refuses show", async () => {
   expect(editor.suspended).toBe(true);
   expect(await c.show(P("B"))).toBe(false);
   expect(store.get().err).toBe("Busy — try again in a moment");
-  api.openNote.mockResolvedValueOnce({ path: "/n/A.age", title: "A", text: "a", hash: "h", encrypted: true, meta: noMeta });
+  api.openNote.mockResolvedValueOnce({ path: "/n/A.age", title: "A", text: "a", hash: "h", encrypted: true, meta: noMeta, archived: false });
   d.resolve("/n/A.age");
   await locking;
   expect(editor.path).toBe("/n/A.age");
@@ -214,7 +214,7 @@ test("delete: a note opened during the flush keeps its unsaved edits", async () 
   editor.flush.mockImplementationOnce(() => flush.promise);
   const del = c.deleteNote();
   await vi.waitFor(() => expect(editor.flush).toHaveBeenCalled());
-  const doc = { path: P("C"), title: "C", text: notes.C, hash: "h", encrypted: false, meta: noMeta };
+  const doc = { path: P("C"), title: "C", text: notes.C, hash: "h", encrypted: false, meta: noMeta, archived: false };
   editor.load(doc);
   (c as any).loadedDoc(doc); // what an in-flight show does when it lands
   editor.replaceText("typed in C");
@@ -236,7 +236,7 @@ test("delete: a failing backend call while another note is open leaves that note
   api.deleteNote.mockRejectedValueOnce(new Error("io"));
   const del = c.deleteNote();
   await vi.waitFor(() => expect(editor.flush).toHaveBeenCalled());
-  const doc = { path: P("C"), title: "C", text: notes.C, hash: "h", encrypted: false, meta: noMeta };
+  const doc = { path: P("C"), title: "C", text: notes.C, hash: "h", encrypted: false, meta: noMeta, archived: false };
   editor.load(doc);
   (c as any).loadedDoc(doc); // what an in-flight show does when it lands
   flush.resolve(true); // C stays clean: a dirty C would hide a wrong reopen of A, whose load refuses over unsaved edits
@@ -414,7 +414,7 @@ test("a slow auto-show doesn't replace the note Enter just opened", async () => 
   api.openNote.mockImplementationOnce(() => d.promise);
   const auto = c.show(P("A"), "auto");
   await c.openTitle("B", "enter");
-  d.resolve({ path: P("A"), title: "A", text: "a", hash: "h", encrypted: false, meta: noMeta });
+  d.resolve({ path: P("A"), title: "A", text: "a", hash: "h", encrypted: false, meta: noMeta, archived: false });
   await auto;
   expect(store.get().openPath).toBe(P("B"));
 });
@@ -482,7 +482,7 @@ test("a rename in flight blocks the update install (its reload would unfreeze th
   await settle();
   const renamed = deferred<{ path: string; rewritten: number }>();
   api.renameNote.mockImplementationOnce(() => renamed.promise);
-  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta });
+  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta, archived: false });
   c.startRename();
   const rename = c.commitRename("Z");
   await settle();
@@ -568,7 +568,7 @@ test("a note reply arriving during the update install doesn't unfreeze the edito
   c.onUpdateAvailable("0.6.1");
   void c.installUpdate();
   await settle();
-  d.resolve({ path: P("A"), title: "A", text: "a", hash: "h", encrypted: false, meta: noMeta });
+  d.resolve({ path: P("A"), title: "A", text: "a", hash: "h", encrypted: false, meta: noMeta, archived: false });
   await auto;
   expect(editor.suspended).toBe(true);
   expect(store.get().openPath).toBeNull();
@@ -671,7 +671,7 @@ test("changing the notes folder closes the note from the old folder", async () =
   await c.show(P("A"));
   await c.openSettings();
   const s = store.get().settings!;
-  api.search.mockResolvedValue({ hits: [], has_more: false, total: 0 }); // the new folder is empty
+  api.search.mockResolvedValue({ hits: [], has_more: false, total: 0, hidden: 0 }); // the new folder is empty
   expect(await c.saveSettings({ ...s, notes_dir: "/other" })).toBe(null);
   expect(editor.currentPath()).toBe(null);
   expect(store.get().openPath).toBe(null);
@@ -718,7 +718,7 @@ test("rename commits through flush, backlinks confirm and reload", async () => {
   expect(store.get().renaming).toBe(true);
   api.backlinkCount.mockResolvedValueOnce(2);
   api.renameNote.mockResolvedValueOnce({ path: P("Z"), rewritten: 2 });
-  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta });
+  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta, archived: false });
   await c.commitRename("  Z ");
   expect(calls).toContainEqual(["confirm", "Update 2 links to the new title?", { title: "Rename", kind: "info" }]);
   expect(api.renameNote).toHaveBeenCalledWith(P("A"), "Z", true);
@@ -735,7 +735,7 @@ test("title rename while the note has unsaved edits keeps the edits and follows 
   editor.dirty = true; // typed during the rename's awaits
   editor.text = "typed";
   api.renameNote.mockResolvedValueOnce({ path: P("Z"), rewritten: 0 });
-  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta });
+  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta, archived: false });
   c.startRename();
   await c.commitRename("Z");
   expect(editor.currentPath()).toBe(P("Z"));
@@ -871,7 +871,7 @@ test("restore asks for confirmation and does nothing when declined", async () =>
   expect(editor.text).toBe("now");
 });
 
-const task = (title: string, line: number, line_text: string): TaskItem => ({ path: P(title), title, line, text: line_text.replace(/^- \[.\] /, ""), due: null, done: false, done_on: null, line_text });
+const task = (title: string, line: number, line_text: string): TaskItem => ({ path: P(title), title, line, text: line_text.replace(/^- \[.\] /, ""), due: null, done: false, done_on: null, line_text, archived: false });
 const view = (due_count: number) => ({ overdue: [], today: [], upcoming: [], no_date: [], done: [], due_count });
 
 test("tick on the open note goes through the editor", async () => {
@@ -949,12 +949,12 @@ test("search and tags are shared between modes", async () => {
   c.setPaneMode("tasks");
   c.setQuery("x");
   await settle();
-  expect(api.tasks).toHaveBeenCalledWith("x", [], false);
+  expect(api.tasks).toHaveBeenCalledWith("x", [], false, false);
   c.setTags(["work"]);
   await settle();
-  expect(api.tasks).toHaveBeenCalledWith("x", ["work"], false);
+  expect(api.tasks).toHaveBeenCalledWith("x", ["work"], false, false);
   await c.toggleShowDone();
-  expect(api.tasks).toHaveBeenCalledWith("x", ["work"], true);
+  expect(api.tasks).toHaveBeenCalledWith("x", ["work"], true, false);
 });
 
 test("undo toast expires", async () => {
@@ -1004,7 +1004,7 @@ test("⌘⇧C opens the side panel on Related for the open note; again, it close
   c.onKeyDown(KEY_C);
   await settle();
   expect(store.get()).toMatchObject({ infoOpen: true, sideTab: "related", paneMode: "notes", focusRelated: 1 });
-  expect(api.connections).toHaveBeenCalledWith(P("A"));
+  expect(api.connections).toHaveBeenCalledWith(P("A"), false);
   expect(store.get().related).toMatchObject({ centre: P("A"), err: "" });
   expect(store.get().related?.data?.centre.path).toBe(P("A"));
   expect(api.setSettings).toHaveBeenLastCalledWith(expect.objectContaining({ info_panel: true }));
@@ -1022,12 +1022,12 @@ test("the Related tab follows the open note, reloads when notes change, and is i
   api.connections.mockClear();
   await c.show(P("B"));
   await settle();
-  expect(api.connections).toHaveBeenLastCalledWith(P("B"));
+  expect(api.connections).toHaveBeenLastCalledWith(P("B"), false);
   expect(store.get().related?.centre).toBe(P("B"));
   api.connections.mockClear();
   await c.onNotesChanged([]);
   await settle();
-  expect(api.connections).toHaveBeenCalledWith(P("B"));
+  expect(api.connections).toHaveBeenCalledWith(P("B"), false);
   c.setSideTab("info");
   api.connections.mockClear();
   await c.show(P("A"));
@@ -1035,7 +1035,7 @@ test("the Related tab follows the open note, reloads when notes change, and is i
   expect(api.connections).not.toHaveBeenCalled();
   c.setSideTab("related");
   await settle();
-  expect(api.connections).toHaveBeenCalledWith(P("A"));
+  expect(api.connections).toHaveBeenCalledWith(P("A"), false);
 });
 
 test("⌘⇧C without an open note shows the panel's empty state and loads nothing", async () => {
@@ -1323,7 +1323,7 @@ test("creating a note from a wikilink after a capture blur keeps the kept text",
 
 test("Lock all reloads the tasks: decrypted rows, the due count and the badge go", async () => {
   const { c, api, store } = setup({ A: "a" });
-  const secret: TaskItem = { path: "/n/S.md.age", title: "S", line: 0, text: "secret", due: localToday(), done: false, done_on: null, line_text: "- [ ] secret" };
+  const secret: TaskItem = { path: "/n/S.md.age", title: "S", line: 0, text: "secret", due: localToday(), done: false, done_on: null, line_text: "- [ ] secret", archived: false };
   api.tasks.mockResolvedValue({ overdue: [], today: [secret], upcoming: [], no_date: [], done: [], due_count: 1 });
   c.setPaneMode("tasks");
   await settle();
@@ -1351,7 +1351,7 @@ test("Lock all reloads the Related tab and the link targets", async () => {
   expect(api.listLinkTargets).toHaveBeenCalled();
   c.setSideTab("related");
   await settle();
-  expect(api.connections).toHaveBeenCalledWith(P("A"));
+  expect(api.connections).toHaveBeenCalledWith(P("A"), false);
 });
 
 test("typing a filter in Tasks mode never opens a note; back in Notes the list follows without opening", async () => {
@@ -1363,7 +1363,7 @@ test("typing a filter in Tasks mode never opens a note; back in Notes the list f
   await settle();
   expect(store.get().openPath).toBe(null);
   expect(api.openNote).not.toHaveBeenCalled();
-  expect(api.tasks).toHaveBeenCalledWith("milk", ["home"], false);
+  expect(api.tasks).toHaveBeenCalledWith("milk", ["home"], false, false);
   const n = api.search.mock.calls.length;
   c.setPaneMode("notes");
   await settle();
@@ -1394,7 +1394,7 @@ test("clicking into the open note during capture keeps that note open; the kept 
   const { c, api, store } = setup({ Groceries: "buy milk", X: "x" });
   await c.show(P("X"));
   await c.startCapture();
-  api.search.mockImplementation(async () => ({ hits: [hit("Groceries")], has_more: false, total: 1 })); // the query matches Groceries only
+  api.search.mockImplementation(async () => ({ hits: [hit("Groceries")], has_more: false, total: 1, hidden: 0 })); // the query matches Groceries only
   c.setQuery("milk");
   const n = api.search.mock.calls.length;
   c.blurCapture();
@@ -1409,7 +1409,7 @@ test("back to Notes after a Tasks filter never changes the open note", async () 
   await c.show(P("X"));
   c.setPaneMode("tasks");
   await settle();
-  api.search.mockImplementation(async () => ({ hits: [hit("Groceries")], has_more: false, total: 1 })); // the query matches Groceries only
+  api.search.mockImplementation(async () => ({ hits: [hit("Groceries")], has_more: false, total: 1, hidden: 0 })); // the query matches Groceries only
   c.setQuery("groc");
   await settle();
   c.setPaneMode("notes");
@@ -1430,7 +1430,7 @@ test("back to Notes, Enter opens the listed match (never creates a stray note), 
   api.search.mockImplementationOnce(() => d.promise);
   c.setPaneMode("notes");
   const entered = c.enter(); // the refresh is still in flight
-  d.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
+  d.resolve({ hits: [hit("Groceries")], has_more: false, total: 1, hidden: 0 });
   await entered;
   await settle();
   expect(api.openOrCreate).not.toHaveBeenCalled();
@@ -1446,7 +1446,7 @@ test("a pruned tag filter never changes the open note, in Notes or Tasks mode", 
     c.setTags(["work"]);
     await c.refreshTags();
     await settle();
-    api.search.mockImplementation(async () => ({ hits: [hit("Groceries")], has_more: false, total: 1 }));
+    api.search.mockImplementation(async () => ({ hits: [hit("Groceries")], has_more: false, total: 1, hidden: 0 }));
     api.listTags.mockResolvedValue([]); // the last #work went away
     await c.refreshTags(true);
     await settle();
@@ -1466,7 +1466,7 @@ function holdOpen(api: ReturnType<typeof setup>["api"]) {
   });
   return gate;
 }
-const taskOf = (path: string, line_text: string, line = 0): TaskItem => ({ path, title: "", line, text: line_text.slice(6), due: null, done: false, done_on: null, line_text });
+const taskOf = (path: string, line_text: string, line = 0): TaskItem => ({ path, title: "", line, text: line_text.slice(6), due: null, done: false, done_on: null, line_text, archived: false });
 
 test("a tick while its note is loading waits for the load and goes through the editor", async () => {
   const { c, api, editor } = setup({ A: "- [ ] x", B: "b" });
@@ -1551,7 +1551,7 @@ test("Lock all drops the undo payload and a tasks reply that was in flight", asy
   await settle();
   expect(store.get().tickUndo).toBeNull();
   expect(store.get().taskView?.no_date ?? []).toEqual([]);
-  search.resolve({ hits: [hit("A"), hit("B")], has_more: false, total: 2 });
+  search.resolve({ hits: [hit("A"), hit("B")], has_more: false, total: 2, hidden: 0 });
   await locked;
   await settle();
   expect(store.get().taskView?.no_date).toEqual([]);
@@ -1606,7 +1606,7 @@ test("an agent write waits for a note load in flight before saying not-open", as
   const shown = c.show(P("B"));
   await settle();
   const write = c.onAgentWrite({ id: 5, path: P("B"), kind: "append", insert: "- [ ] x", summary: "s" });
-  d.resolve({ path: P("B"), title: "B", text: "b", hash: "h", encrypted: false, meta: noMeta });
+  d.resolve({ path: P("B"), title: "B", text: "b", hash: "h", encrypted: false, meta: noMeta, archived: false });
   await shown;
   await write;
   expect(api.agentWriteDone).toHaveBeenCalledWith(5, { hash: "h" }); // applied in the editor, not written behind it
@@ -1668,7 +1668,7 @@ test("agent write conflicts when the user typed during the round trip", async ()
   api.openNote.mockImplementationOnce(async (path: string) => {
     editor.text = "a typed";
     editor.dirty = true;
-    return { path, title: "A", text: "a", hash: "h", encrypted: false, meta: noMeta };
+    return { path, title: "A", text: "a", hash: "h", encrypted: false, meta: noMeta, archived: false };
   });
   await c.onAgentWrite({ id: 6, path: P("A"), kind: "replace", insert: "b", base: "h", summary: "s" });
   expect(editor.text).toBe("a typed"); // the keystroke survives
@@ -1698,7 +1698,7 @@ test("agent write conflicts when an autosave left the editor newer than its read
 test("two interleaved agent writes: the second, based on the old text, conflicts", async () => {
   const { c, api, editor, notes } = setup({ A: "hello world" });
   await c.show(P("A"));
-  api.openNote.mockImplementation(async (path: string) => ({ path, title: "A", text: notes.A, hash: `h:${notes.A}`, encrypted: false, meta: noMeta }));
+  api.openNote.mockImplementation(async (path: string) => ({ path, title: "A", text: notes.A, hash: `h:${notes.A}`, encrypted: false, meta: noMeta, archived: false }));
   editor.flush.mockImplementation(async () => ((notes.A = editor.text), (editor.dirty = false), true));
   const one = c.onAgentWrite({ id: 1, path: P("A"), kind: "replace", insert: "hello there world", base: "h:hello world", summary: "s" });
   const two = c.onAgentWrite({ id: 2, path: P("A"), kind: "replace", insert: "hello world!", base: "h:hello world", summary: "s" });
@@ -1870,7 +1870,7 @@ test("a background refresh keeps the row-0 highlight, so Enter opens the listed 
   await c.show(P("X"));
   c.setPaneMode("tasks");
   await settle();
-  api.search.mockImplementation(async () => ({ hits: [hit("Groceries")], has_more: false, total: 1 }));
+  api.search.mockImplementation(async () => ({ hits: [hit("Groceries")], has_more: false, total: 1, hidden: 0 }));
   c.setQuery("groc");
   await settle();
   c.setPaneMode("notes");
@@ -1967,11 +1967,11 @@ test("a tick shows on the task row at once, before the reload (#8)", async () =>
 test("own edit removes the filtered tag: the list highlights nothing, never another note (#15 F1)", async () => {
   const { c, api, store } = setup({ A: "a #work", B: "b #work", C: "c #work" });
   api.listTags.mockResolvedValue([{ tag: "work", count: 3 }]);
-  api.search.mockImplementation(async () => ({ hits: [hit("A"), hit("B"), hit("C")], has_more: false, total: 3 }));
+  api.search.mockImplementation(async () => ({ hits: [hit("A"), hit("B"), hit("C")], has_more: false, total: 3, hidden: 0 }));
   c.setTags(["work"]);
   await settle();
   await settle(); // A open, sel 0
-  api.search.mockImplementation(async () => ({ hits: [hit("B"), hit("C")], has_more: false, total: 2 }));
+  api.search.mockImplementation(async () => ({ hits: [hit("B"), hit("C")], has_more: false, total: 2, hidden: 0 }));
   c.editorOpts().onSaved(); // the user deleted #work from A; autosave landed
   await new Promise((r) => setTimeout(r, 350));
   await settle();
@@ -1983,7 +1983,7 @@ test("a watcher refresh that drops the open note: arrows and Enter never act on 
     const { c, api, store } = setup();
     await c.runSearch(true);
     await settle(); // A open, sel 0
-    api.search.mockImplementation(async () => ({ hits: [hit("B"), hit("C")], has_more: false, total: 2 }));
+    api.search.mockImplementation(async () => ({ hits: [hit("B"), hit("C")], has_more: false, total: 2, hidden: 0 }));
     await c.onNotesChanged([P("A")]);
     expect(store.get().sel, act).toBe(-1);
     if (act === "step") {
@@ -1999,17 +1999,17 @@ test("a watcher refresh that drops the open note: arrows and Enter never act on 
 test("a highlight follows its note through a refresh or a re-sort (#15 F1)", async () => {
   const { c, api, store } = setup({ Groceries: "a", X: "x", Y: "y" });
   await c.show(P("X"));
-  api.search.mockImplementation(async () => ({ hits: [hit("Groceries"), hit("Y")], has_more: false, total: 2 }));
+  api.search.mockImplementation(async () => ({ hits: [hit("Groceries"), hit("Y")], has_more: false, total: 2, hidden: 0 }));
   c.setPaneMode("tasks");
   c.setQuery("g");
   await settle();
   c.setPaneMode("notes");
   await settle();
   expect(store.get().sel).toBe(0); // Groceries highlighted, X open and not listed
-  api.search.mockImplementation(async () => ({ hits: [hit("Y"), hit("Groceries")], has_more: false, total: 2 }));
+  api.search.mockImplementation(async () => ({ hits: [hit("Y"), hit("Groceries")], has_more: false, total: 2, hidden: 0 }));
   await c.onNotesChanged([]);
   expect(store.get().sel).toBe(1);
-  api.search.mockImplementation(async () => ({ hits: [hit("Groceries"), hit("Y")], has_more: false, total: 2 }));
+  api.search.mockImplementation(async () => ({ hits: [hit("Groceries"), hit("Y")], has_more: false, total: 2, hidden: 0 }));
   await c.toggleSort();
   expect(store.get().sel).toBe(0);
   await c.enter();
@@ -2052,8 +2052,8 @@ test("a refresh landing while a typed query's search is in flight keeps its firs
     if (how === "typed") c.setQuery("gro");
     else c.setPaneMode("notes"); // a "highlight" reset
     const w = c.onNotesChanged([]); // the watcher refresh overtakes it
-    d1.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
-    d2.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
+    d1.resolve({ hits: [hit("Groceries")], has_more: false, total: 1, hidden: 0 });
+    d2.resolve({ hits: [hit("Groceries")], has_more: false, total: 1, hidden: 0 });
     await w;
     await settle();
     await c.enter();
@@ -2074,9 +2074,9 @@ test("Notes-mode Enter waits for the refresh that overtook the typed search (#15
   c.setQuery("gro");
   const entered = c.enter();
   void c.onNotesChanged([]);
-  d1.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
+  d1.resolve({ hits: [hit("Groceries")], has_more: false, total: 1, hidden: 0 });
   await settle();
-  d2.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
+  d2.resolve({ hits: [hit("Groceries")], has_more: false, total: 1, hidden: 0 });
   await entered;
   await settle();
   expect(api.openOrCreate).not.toHaveBeenCalled();
@@ -2094,8 +2094,8 @@ test("a sort toggle overtaking a typed search keeps its first match (#15 M2)", a
   c.setQuery("gro");
   const sorted = c.toggleSort();
   await settle();
-  d1.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
-  d2.resolve({ hits: [hit("Groceries")], has_more: false, total: 1 });
+  d1.resolve({ hits: [hit("Groceries")], has_more: false, total: 1, hidden: 0 });
+  d2.resolve({ hits: [hit("Groceries")], has_more: false, total: 1, hidden: 0 });
   await sorted;
   await settle();
   await c.enter();
@@ -2208,7 +2208,7 @@ test("link it on the open note goes through the editor", async () => {
   api.linkMention.mockImplementationOnce(async (_p, _t, _n, text) => text!.replace("Bee", "[[Bee]]"));
   api.connections.mockClear();
   await c.linkMention(mention("Bee"));
-  expect(api.linkMention).toHaveBeenCalledWith(P("A"), "Bee", 1, "typed see Bee here");
+  expect(api.linkMention).toHaveBeenCalledWith(P("A"), "Bee", 1, "typed see Bee here", false);
   expect(editor.changes).toHaveLength(1);
   expect(editor.getText()).toBe("typed see [[Bee]] here"); // the typed text is kept
   expect(api.saveNote).not.toHaveBeenCalled();
@@ -2246,13 +2246,13 @@ test("no links chip filters the list", async () => {
   const { c, api, store } = setup();
   c.setNoLinks(true);
   await settle();
-  expect(api.search).toHaveBeenLastCalledWith("", "modified", 0, [], true);
+  expect(api.search).toHaveBeenLastCalledWith("", "modified", 0, [], true, false);
   c.setTags(["x"]);
   c.clearFilters();
   await settle();
   expect(store.get().noLinks).toBe(false);
   expect(store.get().selectedTags).toEqual([]);
-  expect(api.search).toHaveBeenLastCalledWith("", "modified", 0, [], false);
+  expect(api.search).toHaveBeenLastCalledWith("", "modified", 0, [], false, false);
 });
 
 test("link it flushes the editor before Related reloads", async () => {
@@ -2312,7 +2312,7 @@ test("every path that changes titles refreshes link targets", async () => {
     await c.select(1);
     c.startRename();
     api.renameNote.mockResolvedValueOnce({ path: P("Z"), rewritten: 0 });
-    api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "b", hash: "h", encrypted: false, meta: noMeta });
+    api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "b", hash: "h", encrypted: false, meta: noMeta, archived: false });
     await c.commitRename("Z");
   });
 });
@@ -2343,7 +2343,7 @@ test("rename refreshes titles", async () => {
   api.listTitles.mockClear();
   api.listLinkTargets.mockClear();
   api.renameNote.mockResolvedValueOnce({ path: P("Z"), rewritten: 0 });
-  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta });
+  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta, archived: false });
   c.startRename();
   await c.commitRename("Z");
   await settle();
@@ -2493,7 +2493,7 @@ test("merge: a note opened during the flush keeps its unsaved edits", async () =
   api.mergeNotes.mockResolvedValueOnce({ path: P("T"), rewritten: 1, trash_error: null });
   const merge = c.commitMerge();
   await vi.waitFor(() => expect(editor.flush).toHaveBeenCalled());
-  const doc = { path: P("U"), title: "U", text: "u", hash: "h", encrypted: false, meta: noMeta };
+  const doc = { path: P("U"), title: "U", text: "u", hash: "h", encrypted: false, meta: noMeta, archived: false };
   editor.load(doc);
   (c as any).loadedDoc(doc); // what an in-flight show does when it lands
   editor.replaceText("typed in U");
@@ -2515,7 +2515,7 @@ test("merge: a failing backend call while another note is open leaves that note 
   api.mergeNotes.mockRejectedValueOnce("conflict");
   const merge = c.commitMerge();
   await vi.waitFor(() => expect(editor.flush).toHaveBeenCalled());
-  const doc = { path: P("U"), title: "U", text: "u", hash: "h", encrypted: false, meta: noMeta };
+  const doc = { path: P("U"), title: "U", text: "u", hash: "h", encrypted: false, meta: noMeta, archived: false };
   editor.load(doc);
   (c as any).loadedDoc(doc); // what an in-flight show does when it lands
   flush.resolve(true); // U stays clean, see the delete twin
@@ -2660,7 +2660,7 @@ test("a saved search applies query, tags and No links", async () => {
   c.applySaved("w");
   await settle();
   expect(store.get()).toMatchObject({ query: "velo", selectedTags: ["proj"], noLinks: true });
-  expect(api.search).toHaveBeenLastCalledWith("velo", "modified", 0, ["proj"], true);
+  expect(api.search).toHaveBeenLastCalledWith("velo", "modified", 0, ["proj"], true, false);
 });
 
 test("saving over an existing name asks first", async () => {
@@ -2723,7 +2723,7 @@ test("saved search menu renames and deletes", async () => {
   expect(store.get().savedSearches).toEqual([]);
 });
 
-const trow = (title: string): TimelineRow => ({ path: P(title), title, date: 0, snippet: "", locked: false });
+const trow = (title: string): TimelineRow => ({ path: P(title), title, date: 0, snippet: "", locked: false, archived: false });
 
 test("the timeline loads with the filters, the saved sort and no range", async () => {
   const { c, api, store } = setup();
@@ -2735,7 +2735,7 @@ test("the timeline loads with the filters, the saved sort and no range", async (
   api.timeline.mockResolvedValue([trow("A")]);
   c.setPaneMode("timeline");
   await settle();
-  expect(api.timeline).toHaveBeenLastCalledWith("a", ["t"], true, "created", null);
+  expect(api.timeline).toHaveBeenLastCalledWith("a", ["t"], true, "created", null, false);
   expect(store.get()).toMatchObject({ paneMode: "timeline", timeline: { rows: [trow("A")], by: "created", range: "all", err: "" } });
   c.setTimelineRange("7");
   await settle();
@@ -2749,7 +2749,7 @@ test("a filter change in timeline mode reloads the timeline, not the list", asyn
   api.search.mockClear();
   c.setQuery("b");
   await settle();
-  expect(api.timeline).toHaveBeenLastCalledWith("b", [], false, "updated", null);
+  expect(api.timeline).toHaveBeenLastCalledWith("b", [], false, "updated", null, false);
   expect(api.search).not.toHaveBeenCalled();
   api.timeline.mockResolvedValue([trow("B")]);
   c.setQuery("bb");
@@ -2780,7 +2780,7 @@ test("the timeline sort is saved and reloads", async () => {
   await settle();
   expect(api.setSettings).toHaveBeenCalledWith(expect.objectContaining({ timeline_sort: "created" }));
   expect(store.get().timeline.by).toBe("created");
-  expect(api.timeline).toHaveBeenLastCalledWith("", [], false, "created", null);
+  expect(api.timeline).toHaveBeenLastCalledWith("", [], false, "created", null, false);
 });
 
 test("a note saved, renamed or deleted reloads the timeline", async () => {
@@ -2794,7 +2794,7 @@ test("a note saved, renamed or deleted reloads the timeline", async () => {
   await new Promise((r) => setTimeout(r, 350));
   expect(api.timeline).toHaveBeenCalledTimes(1);
   api.renameNote.mockResolvedValueOnce({ path: P("Z"), rewritten: 0 });
-  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta });
+  api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta, archived: false });
   c.startRename();
   await c.commitRename("Z");
   expect(api.timeline).toHaveBeenCalledTimes(2);
@@ -3083,4 +3083,82 @@ test("a filter, date or range change in timeline mode clears the selection: Ente
     expect(store.get().timeline.sel).toBeNull();
   }
   await settle();
+});
+
+test("listings pass show_archived from the settings", async () => {
+  const { c, api } = setup();
+  api.getSettings.mockResolvedValue({ ...(await api.getSettings()), show_archived: true });
+  await c.start(); await settle();
+  expect(api.search.mock.calls[api.search.mock.calls.length - 1]?.[5]).toBe(true);
+  expect(api.tasks.mock.calls.length).toBeGreaterThan(0);
+  expect(api.tasks.mock.calls.every((a) => a[3] === true)).toBe(true);
+  expect(api.listTags).toHaveBeenLastCalledWith(true);
+  expect(api.listLinkTargets).toHaveBeenLastCalledWith(true);
+});
+
+test("merge picker follows the switch; an archived title still exists for Create", async () => {
+  const { c, api, store } = setup({ A: "a", B: "b" });
+  await c.start(); await settle();
+  await api.setArchived("/n/B.md", true); await c.refreshTitles(); await settle();
+  expect(c.mergeCandidates("").map((t) => t.title)).not.toContain("B");
+  expect(c.editorOpts().complete.exists!("b")).toBe(true);
+  c.setQuery("B"); await settle();
+  expect(store.get().exactTitleMatch).toBe(true); // no ⇧↩ Create for a hidden archived title
+  store.set({ showArchived: true }); await c.loadLinkTargets();
+  expect(c.mergeCandidates("").map((t) => t.title)).toContain("B");
+});
+
+test("a list-write failure is shown, even when it lands before the rename resolves", async () => {
+  const { c, api, store, notes } = setup();
+  await c.start(); await settle();
+  notes.Z = "a"; // what the fake opens after the rename
+  const d = deferred<RenameResult>(); api.renameNote.mockImplementationOnce(() => d.promise);
+  c.startRename(); const done = c.commitRename("Z");
+  c.onArchiveError("permission denied");
+  d.resolve({ path: "/n/Z.md", rewritten: 0 }); await done; await settle();
+  expect(store.get().err).toBe("The archived-notes list could not be updated: permission denied");
+});
+
+test("a stale link-target response is dropped", async () => {
+  const { c, api } = setup({ A: "a", B: "b" });
+  const first = deferred<LinkTarget[]>(), second = deferred<LinkTarget[]>();
+  api.listLinkTargets.mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise);
+  const p1 = c.loadLinkTargets(), p2 = c.loadLinkTargets();
+  second.resolve([{ name: "B", title: "B", path: "/n/B.md", modified: 0, locked: false }]); await p2;
+  first.resolve([{ name: "A", title: "A", path: "/n/A.md", modified: 0, locked: false }]); await p1;
+  expect(c.mergeCandidates("").map((t) => t.title)).toEqual(["B"]);
+});
+
+test("link mention and the Related panel read the same switch", async () => {
+  const { c, api, store, editor } = setup({ A: "see Bee here" });
+  store.set({ showArchived: true });
+  await c.show(P("A"));
+  await c.toggleRelated();
+  editor.replaceText("see Bee here");
+  api.linkMention.mockImplementationOnce(async (_p, _t, _n, text) => text!.replace("Bee", "[[Bee]]"));
+  await c.linkMention(mention("Bee"));
+  expect(api.connections).toHaveBeenLastCalledWith(P("A"), true);
+  expect(api.linkMention).toHaveBeenCalledWith(P("A"), "Bee", 1, "see Bee here", true);
+});
+
+test("exactTitleMatch follows the title cache: a renamed-away title offers Create again", async () => {
+  const { c, api, store, notes } = setup({ A: "a", B: "b" });
+  await c.start(); await settle();
+  c.setQuery("A"); await settle();
+  expect(store.get().exactTitleMatch).toBe(true);
+  delete notes.A; notes.Z = "a";
+  await c.runSearch(false); await c.refreshTitles(); await settle();
+  expect(api.listTitles).toHaveBeenCalled();
+  expect(store.get().exactTitleMatch).toBe(false);
+});
+
+test("exactTitleMatch: a hidden note renamed to the query counts once the title cache loads", async () => {
+  const { c, api, store, notes } = setup({ A: "a", B: "b" });
+  await c.start(); await settle();
+  c.setQuery("Q"); await settle();
+  expect(store.get().exactTitleMatch).toBe(false);
+  await api.setArchived("/n/B.md", true);
+  delete notes.B; notes.Q = "b"; await api.setArchived("/n/Q.md", true); // renamed to Q, still archived: not in the list
+  await c.runSearch(false); await c.refreshTitles(); await settle();
+  expect(store.get().exactTitleMatch).toBe(true);
 });

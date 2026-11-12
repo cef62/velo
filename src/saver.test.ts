@@ -4,11 +4,11 @@ import { latest } from "./latest";
 import { noMeta } from "./app/fakes";
 import { stampChange } from "./frontmatter";
 
-const doc = { path: "a.md", title: "a", text: "base", hash: "h0", encrypted: false, meta: noMeta };
+const doc = { path: "a.md", title: "a", text: "base", hash: "h0", encrypted: false, meta: noMeta, archived: false };
 let text = "";
 const mk = (over: Partial<ConstructorParameters<typeof SaveController>[0]> = {}) => {
   const d = {
-    saveNote: vi.fn(async () => ({ kind: "saved" as const, hash: "h1", front_matter: null, meta: noMeta })),
+    saveNote: vi.fn(async () => ({ kind: "saved" as const, hash: "h1", front_matter: null, meta: noMeta, archived: false })),
     openNote: vi.fn(async () => ({ ...doc, text: "disk", hash: "hd" })),
     getText: () => text,
     setText: (t: string) => void (text = t),
@@ -62,7 +62,7 @@ test("conflict without late edit loads disk version", async () => {
 });
 
 test("save rejection: stays dirty, error surfaced, retries", async () => {
-  const saveNote = vi.fn().mockRejectedValueOnce("locked").mockResolvedValue({ kind: "saved", hash: "h1", front_matter: null, meta: noMeta });
+  const saveNote = vi.fn().mockRejectedValueOnce("locked").mockResolvedValue({ kind: "saved", hash: "h1", front_matter: null, meta: noMeta, archived: false });
   const { c, d } = mk({ saveNote });
   type(c, "x");
   await vi.advanceTimersByTimeAsync(500);
@@ -235,7 +235,7 @@ test("onSaving true during save, false after (also on rejection)", async () => {
   const seen: boolean[] = [];
   let fail!: (e: unknown) => void;
   const saveNote = vi.fn()
-    .mockImplementationOnce(async () => { expect(seen).toEqual([true]); return { kind: "saved" as const, hash: "h1", front_matter: null, meta: noMeta }; })
+    .mockImplementationOnce(async () => { expect(seen).toEqual([true]); return { kind: "saved" as const, hash: "h1", front_matter: null, meta: noMeta, archived: false }; })
     .mockImplementationOnce(() => new Promise((_, rej) => (fail = rej)));
   const { c } = mk({ saveNote, onSaving: (on: boolean) => void seen.push(on) });
   type(c, "x");
@@ -261,8 +261,8 @@ test("stamp applies only to an unchanged block, late body edits kept", async () 
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));
   const saveNote = vi.fn()
-    .mockImplementationOnce(async () => { await gate; return { kind: "saved" as const, hash: "h1", front_matter: FM, meta: noMeta }; })
-    .mockImplementation(async () => ({ kind: "saved" as const, hash: "h2", front_matter: null, meta: noMeta }));
+    .mockImplementationOnce(async () => { await gate; return { kind: "saved" as const, hash: "h1", front_matter: FM, meta: noMeta, archived: false }; })
+    .mockImplementation(async () => ({ kind: "saved" as const, hash: "h2", front_matter: null, meta: noMeta, archived: false }));
   const onMeta = vi.fn();
   const { c } = mk({ saveNote, applyFrontMatter: applyFm, onMeta });
   type(c, "body");
@@ -279,7 +279,7 @@ test("stamp applies only to an unchanged block, late body edits kept", async () 
   // block edited during the save: the stamp is skipped, the edit stays dirty
   let release2!: () => void;
   const gate2 = new Promise<void>((r) => (release2 = r));
-  saveNote.mockImplementationOnce(async () => { await gate2; return { kind: "saved" as const, hash: "h3", front_matter: FM.replace("2", "3"), meta: noMeta }; });
+  saveNote.mockImplementationOnce(async () => { await gate2; return { kind: "saved" as const, hash: "h3", front_matter: FM.replace("2", "3"), meta: noMeta, archived: false }; });
   type(c, FM + "more");
   const p2 = c.flush();
   type(c, FM.replace("created: 1", "created: 0") + "more");
@@ -290,7 +290,7 @@ test("stamp applies only to an unchanged block, late body edits kept", async () 
 });
 
 test("stamp application doesn't mark dirty or trigger another save", async () => {
-  const saveNote = vi.fn(async () => ({ kind: "saved" as const, hash: "h1", front_matter: FM, meta: noMeta }));
+  const saveNote = vi.fn(async () => ({ kind: "saved" as const, hash: "h1", front_matter: FM, meta: noMeta, archived: false }));
   const { c } = mk({ saveNote, applyFrontMatter: applyFm });
   type(c, "x");
   await vi.advanceTimersByTimeAsync(500);

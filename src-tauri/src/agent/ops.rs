@@ -24,9 +24,9 @@ pub trait NoteOps {
     fn write(&mut self, path: &str, new_text: &str, base_hash: &str, summary: &str) -> anyhow::Result<String>;
     fn create(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<NoteDoc>;
     /// Up to `PAGE` plain hits starting at plain hit `offset`.
-    fn search(&self, query: &str, tags: &[String], offset: usize, no_links: bool) -> anyhow::Result<Page>;
-    fn tags(&self) -> anyhow::Result<Vec<TagCount>>;
-    fn tasks(&self, query: &str, tags: &[String], show_done: bool) -> anyhow::Result<TaskView>;
+    fn search(&self, query: &str, tags: &[String], offset: usize, no_links: bool, include_archived: bool) -> anyhow::Result<Page>;
+    fn tags(&self, include_archived: bool) -> anyhow::Result<Vec<TagCount>>;
+    fn tasks(&self, query: &str, tags: &[String], show_done: bool, include_archived: bool) -> anyhow::Result<TaskView>;
     /// Returns the new path.
     fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<String>;
     fn trash(&mut self, path: &str, summary: &str) -> anyhow::Result<()>;
@@ -43,10 +43,10 @@ pub trait NoteOps {
     fn settings(&self) -> Settings;
     /// Tags of one plain note (for search results).
     fn note_tags(&self, path: &str) -> anyhow::Result<Vec<String>>;
-    /// Titles of plain notes linking to the note at `path`, by title or alias.
+    /// Titles of plain, unarchived notes linking to the note at `path`, by title or alias.
     fn backlinks(&self, path: &str) -> anyhow::Result<Vec<String>>;
     /// The one-hop graph around the plain note at `path`, without locked notes.
-    fn connections(&self, path: &str) -> anyhow::Result<Connections>;
+    fn connections(&self, path: &str, include_archived: bool) -> anyhow::Result<Connections>;
 }
 
 /// An encrypted note, or the plain twin of one (`X.md` or `X.txt` beside `X.md.age`, see `plain_twin_of_locked`).
@@ -175,12 +175,12 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
         r.map_err(|_| anyhow!(NO_ANSWER))
     }
 
-    fn search(&self, query: &str, tags: &[String], offset: usize, no_links: bool) -> anyhow::Result<Page> {
+    fn search(&self, query: &str, tags: &[String], offset: usize, no_links: bool, include_archived: bool) -> anyhow::Result<Page> {
         let sort = if self.settings().sort == "title" { Sort::Title } else { Sort::Modified };
         let (mut hits, mut skip, mut at) = (Vec::new(), offset, 0);
         // `offset` counts plain hits, so walk the vault's pages from the start, dropping locked ones
         loop {
-            let p = self.vault.search_where(query, sort, at, tags, no_links)?;
+            let p = self.vault.search_where(query, sort, at, tags, no_links, include_archived)?;
             let (more, n) = (p.has_more, p.hits.len());
             at += n;
             for h in p.hits.into_iter().filter(|h| !locked(&h.path)) {
@@ -192,14 +192,19 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
         }
         let has_more = hits.len() > PAGE;
         hits.truncate(PAGE);
-        Ok(Page { hits, has_more, total: 0 })
+        Ok(Page { hits, has_more, total: 0, hidden: 0 })
     }
 
-    fn tags(&self) -> anyhow::Result<Vec<TagCount>> {
+    fn tags(&self, include_archived: bool) -> anyhow::Result<Vec<TagCount>> {
         // locked notes' bodies (and so their tags) never reach the index; a plain twin's do, so take them out
-        let mut tags = self.vault.tags()?;
+        let mut tags = self.vault.tags(include_archived)?;
+        let archived = self.vault.index.archived_titles()?; // `vault.tags` just synced the list
         for e in std::fs::read_dir(self.dir())?.flatten() {
             let Some(title) = parse_note_file(&e.path()).filter(|n| n.encrypted).map(|n| n.title) else { continue };
+            // an archived twin was left out of the counts, so there is nothing to take out
+            if !include_archived && archived.contains(&fold(&title)) {
+                continue;
+            }
             // the twin is `X.md` or `X.txt` (locking `X.txt` writes `X.md.age`), as in `plain_twin_of_locked`
             for twin in ["md", "txt"].map(|ext| e.path().with_file_name(format!("{title}.{ext}"))) {
                 let mut seen = std::collections::HashSet::new();
@@ -214,8 +219,8 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
         Ok(tags)
     }
 
-    fn tasks(&self, query: &str, tags: &[String], show_done: bool) -> anyhow::Result<TaskView> {
-        let mut v = self.vault.tasks(query, tags, show_done)?;
+    fn tasks(&self, query: &str, tags: &[String], show_done: bool, include_archived: bool) -> anyhow::Result<TaskView> {
+        let mut v = self.vault.tasks(query, tags, show_done, include_archived)?;
         for g in [&mut v.overdue, &mut v.today, &mut v.upcoming, &mut v.no_date, &mut v.done] {
             g.retain(|t| !locked(&t.path));
         }
@@ -321,11 +326,13 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
     }
 
     fn backlinks(&self, path: &str) -> anyhow::Result<Vec<String>> {
-        Ok(self.vault.index.linked_from(plain(path)?)?.iter().filter(|p| !locked(p)).map(|p| title_of(p)).collect())
+        self.vault.sync_archive();
+        let archived = self.vault.index.archived_paths()?;
+        Ok(self.vault.index.linked_from(plain(path)?)?.iter().filter(|p| !locked(p) && !archived.contains(*p)).map(|p| title_of(p)).collect())
     }
 
-    fn connections(&self, path: &str) -> anyhow::Result<Connections> {
-        let mut c = self.vault.connections(plain(path)?, &|p| locked(p))?;
+    fn connections(&self, path: &str, include_archived: bool) -> anyhow::Result<Connections> {
+        let mut c = self.vault.connections(plain(path)?, &|p| locked(p), include_archived)?;
         c.links_out.retain(|n| !locked(&n.path));
         c.links_in.retain(|n| !locked(&n.path));
         c.mentions.retain(|m| !locked(&m.node.path));
@@ -337,7 +344,7 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
             g.count = if collapsed { g.count - g.unlocked } else { g.notes.len() };
             // a group only unlocked notes pushed over the cap would betray them by its empty list: list the rest
             if collapsed && g.count <= TAG_MAX {
-                let (_, paths) = self.vault.index.tag_notes(&fold(&g.tag), TAG_MAX + 1)?;
+                let (_, paths) = self.vault.index.tag_notes(&fold(&g.tag), TAG_MAX + 1, include_archived)?;
                 g.notes = connections::nodes(&self.vault.index, paths.into_iter().filter(|p| p != path && !locked(p)))?;
                 g.count = g.notes.len();
             }
@@ -458,8 +465,8 @@ mod tests {
         assert!(locked(&txt));
         assert_eq!(o.find("Foo").unwrap(), None);
         assert_eq!(o.read(&txt).err().unwrap().to_string(), "not found");
-        assert!(o.search("secret", &[], 0, false).unwrap().hits.is_empty());
-        assert!(o.tags().unwrap().iter().all(|t| t.tag != "leak"));
+        assert!(o.search("secret", &[], 0, false, false).unwrap().hits.is_empty());
+        assert!(o.tags(false).unwrap().iter().all(|t| t.tag != "leak"));
         let h = hash(b"secret #leak");
         assert_eq!(o.vault.save_note(&txt, "x", &h, None, false).err().unwrap().to_string(), "locked-sibling");
         assert!(!o.vault.rewritable(Path::new(&txt)));

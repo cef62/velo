@@ -82,7 +82,7 @@ fn search_p95_under_50ms() {
     let mut times = Vec::new();
     for _ in 0..30 {
         let t = Instant::now();
-        let v = group_tasks(idx.task_rows(&[]).unwrap(), "", true, "2026-10-27");
+        let v = group_tasks(idx.task_rows(&[], true).unwrap(), "", true, "2026-10-27");
         times.push(t.elapsed().as_secs_f64() * 1000.0);
         assert!(v.no_date.len() + v.upcoming.len() + v.today.len() + v.overdue.len() > 0);
     }
@@ -258,7 +258,7 @@ fn connections_under_50ms() {
         seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
         let p = &paths[(seed >> 33) as usize % paths.len()];
         let t = Instant::now();
-        v.connections(p, &|_| false).unwrap();
+        v.connections(p, &|_| false, false).unwrap();
         times.push(t.elapsed().as_secs_f64() * 1000.0);
     }
     times.sort_by(|a, b| a.partial_cmp(b).unwrap());

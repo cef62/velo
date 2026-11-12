@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import type { Connections, GraphNode } from "./api";
 import { defaultClosed, relatedCount, relatedRows, stem, stepRelated } from "./related";
 
-const n = (title: string, modified = 0, context = ""): GraphNode => ({ path: `/n/${title}.md`, title, created: 0, modified, preview: `${title} preview`, locked: false, context });
+const n = (title: string, modified = 0, context = ""): GraphNode => ({ path: `/n/${title}.md`, title, created: 0, modified, preview: `${title} preview`, locked: false, context, archived: false });
 const c: Connections = {
   centre: n("C"),
   links_in: [n("A", 2, "See [[C]] here"), n("B", 1)],

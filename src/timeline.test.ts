@@ -3,7 +3,7 @@ import type { TimelineRow } from "./api";
 import { filtersLine, groupByDay, sinceMs } from "./timeline";
 
 const now = new Date(2026, 9, 30, 12, 0);
-const row = (title: string, d: Date): TimelineRow => ({ path: `/n/${title}.md`, title, date: d.getTime(), snippet: "", locked: false });
+const row = (title: string, d: Date): TimelineRow => ({ path: `/n/${title}.md`, title, date: d.getTime(), snippet: "", locked: false, archived: false });
 
 test("rows group by local day with relative labels", () => {
   const rows = [

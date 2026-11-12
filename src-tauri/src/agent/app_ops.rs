@@ -214,16 +214,16 @@ impl NoteOps for AppOps<'_> {
         r
     }
 
-    fn search(&self, query: &str, tags: &[String], offset: usize, no_links: bool) -> anyhow::Result<Page> {
-        self.with(|o| o.search(query, tags, offset, no_links))
+    fn search(&self, query: &str, tags: &[String], offset: usize, no_links: bool, include_archived: bool) -> anyhow::Result<Page> {
+        self.with(|o| o.search(query, tags, offset, no_links, include_archived))
     }
 
-    fn tags(&self) -> anyhow::Result<Vec<TagCount>> {
-        self.with(|o| o.tags())
+    fn tags(&self, include_archived: bool) -> anyhow::Result<Vec<TagCount>> {
+        self.with(|o| o.tags(include_archived))
     }
 
-    fn tasks(&self, query: &str, tags: &[String], show_done: bool) -> anyhow::Result<TaskView> {
-        self.with(|o| o.tasks(query, tags, show_done))
+    fn tasks(&self, query: &str, tags: &[String], show_done: bool, include_archived: bool) -> anyhow::Result<TaskView> {
+        self.with(|o| o.tasks(query, tags, show_done, include_archived))
     }
 
     /// The open note is saved and frozen in the editor first, so autosave can't recreate it under its old name; the
@@ -361,8 +361,8 @@ impl NoteOps for AppOps<'_> {
         self.with(|o| o.backlinks(path))
     }
 
-    fn connections(&self, path: &str) -> anyhow::Result<crate::connections::Connections> {
-        self.with(|o| o.connections(path))
+    fn connections(&self, path: &str, include_archived: bool) -> anyhow::Result<crate::connections::Connections> {
+        self.with(|o| o.connections(path, include_archived))
     }
 }
 
@@ -413,16 +413,75 @@ mod tests {
         panic!("no editor round trip expected")
     }
 
+    #[test] fn agent_rename_in_app_mode_keeps_archived() {
+        let (st, dir) = state();
+        let p = dir.join("P.md").to_string_lossy().into_owned();
+        st.vault.lock().unwrap().as_mut().unwrap().set_archived(&p, true).unwrap();
+        let route = |_: Value| -> anyhow::Result<Value> { Ok(json!("not-open")) }; // the note is not open in the editor
+        let to = AppOps::new(&st, &route).rename(&p, "Q", false, "s").unwrap();
+        let g = st.vault.lock().unwrap();
+        let v = g.as_ref().unwrap();
+        assert!(v.search_where("", Sort::Title, 0, &[], false, false).unwrap().hits.iter().all(|h| h.path != to));
+        assert!(v.search_where("", Sort::Title, 0, &[], false, true).unwrap().hits.iter().any(|h| h.path == to && h.archived));
+        assert_eq!(std::fs::read_to_string(dir.join(".velo/archived")).unwrap(), "Q\n");
+    }
+
+    #[test] fn include_archived_is_forwarded_not_hard_coded() {
+        let (st, dir) = state();
+        std::fs::write(dir.join("A.md"), "see [[P]]\n").unwrap();
+        let (p, a) = (dir.join("P.md").to_string_lossy().into_owned(), dir.join("A.md").to_string_lossy().into_owned());
+        {
+            let mut g = st.vault.lock().unwrap(); let v = g.as_mut().unwrap();
+            v.rescan(None);
+            v.set_archived(&p, true).unwrap();
+        }
+        let ops = AppOps::new(&st, &never);
+        let titles = |p: Page| p.hits.into_iter().map(|h| h.title).collect::<Vec<_>>();
+        assert!(!titles(ops.search("zebra", &[], 0, false, false).unwrap()).contains(&"P".into()));
+        assert!(titles(ops.search("zebra", &[], 0, false, true).unwrap()).contains(&"P".into()));
+        assert!(ops.tags(false).unwrap().iter().all(|t| t.tag != "shared") && ops.tags(true).unwrap().iter().any(|t| t.tag == "shared"));
+        assert_eq!(ops.tasks("", &[], true, false).unwrap().no_date.len(), 0);
+        assert_eq!(ops.tasks("", &[], true, true).unwrap().no_date.len(), 1);
+        assert!(ops.connections(&a, false).unwrap().links_out.is_empty());
+        assert_eq!(ops.connections(&a, true).unwrap().links_out.len(), 1);
+    }
+
+    #[cfg(unix)] #[test] fn run_call_reports_a_failed_list_write_once() {
+        use std::os::unix::fs::PermissionsExt;
+        let (st, dir) = state();
+        let p = dir.join("P.md").to_string_lossy().into_owned();
+        st.vault.lock().unwrap().as_mut().unwrap().set_archived(&p, true).unwrap();
+        let editors = Editors::default();
+        let events = Mutex::new(Vec::<String>::new());
+        let emit = |e: &str, v: Value| {
+            if e == "agent-write" { editors.done(v["id"].as_u64().unwrap(), json!("not-open")); }
+            events.lock().unwrap().push(e.to_string());
+        };
+        let count = || events.lock().unwrap().iter().filter(|e| *e == "archive-error").count();
+        let lock = |m| std::fs::set_permissions(dir.join(".velo"), std::fs::Permissions::from_mode(m)).unwrap();
+        let call = |name: &str, args: Value| crate::agent::listener::run_call(&st, &editors, &emit, name, args);
+        lock(0o555);
+        let r = call("rename_note", json!({"title": "P", "new_title": "Q", "rewrite_links": false, "summary": "s"}));
+        lock(0o755);
+        assert!(r.is_ok());
+        assert_eq!(count(), 1); // the rename worked, the list write failed
+        call("list_tags", json!({})).unwrap();
+        assert_eq!(count(), 1); // a clean call emits nothing
+        st.vault.lock().unwrap().as_ref().unwrap().archive_error.set(Some("kept".into()));
+        assert!(call("rename_note", json!({"title": "Nope", "new_title": "X", "rewrite_links": false, "summary": "s"})).is_err());
+        assert_eq!(count(), 2); // the error path still emits
+    }
+
     #[test] fn app_ops_filters_unlocked_locked_notes() {
         let (st, dir) = state();
         let ops = AppOps::new(&st, &never);
         let mut ops = ops;
         let locked = dir.join("L.md.age").to_string_lossy().into_owned();
-        assert_eq!(ops.search("zebra", &[], 0, false).unwrap().hits.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(), ["P"]);
-        let tasks = ops.tasks("", &[], true).unwrap();
+        assert_eq!(ops.search("zebra", &[], 0, false, false).unwrap().hits.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(), ["P"]);
+        let tasks = ops.tasks("", &[], true, false).unwrap();
         assert!([&tasks.overdue, &tasks.today, &tasks.upcoming, &tasks.no_date, &tasks.done].iter().all(|g| g.iter().all(|t| !t.path.ends_with(".age"))));
         assert_eq!(tasks.no_date.len(), 1);
-        assert!(ops.tags().unwrap().iter().all(|t| t.tag != "hidden"));
+        assert!(ops.tags(false).unwrap().iter().all(|t| t.tag != "hidden"));
         assert_eq!(ops.find("L").unwrap(), None);
         assert_eq!(ops.read(&locked).err().unwrap().to_string(), "not found");
         assert!(ops.note_tags(&locked).is_err());
@@ -692,9 +751,9 @@ mod tests {
         let mut ops = AppOps::new(&st, &never);
         assert_eq!(ops.find("L").unwrap(), None);
         assert_eq!(ops.read(&dir.join("L.md").to_string_lossy()).err().unwrap().to_string(), "not found");
-        assert_eq!(ops.search("zebra", &[], 0, false).unwrap().hits.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(), ["P"]);
-        assert!(ops.tags().unwrap().iter().all(|t| t.tag != "twin"));
-        assert_eq!(ops.tasks("", &[], true).unwrap().no_date.len(), 1);
+        assert_eq!(ops.search("zebra", &[], 0, false, false).unwrap().hits.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(), ["P"]);
+        assert!(ops.tags(false).unwrap().iter().all(|t| t.tag != "twin"));
+        assert_eq!(ops.tasks("", &[], true, false).unwrap().no_date.len(), 1);
         assert_eq!(crate::agent::tools::call(&mut ops, "move_to_trash", json!({"title": "L", "summary": "s"})), Err("not found".to_string()));
     }
 
@@ -707,7 +766,7 @@ mod tests {
         {
             // the builder itself sees L: the filtering below is what hides it
             let g = st.vault.lock().unwrap();
-            let c = g.as_ref().unwrap().connections(&p, &|_| false).unwrap();
+            let c = g.as_ref().unwrap().connections(&p, &|_| false, false).unwrap();
             assert_eq!((c.links_out.len(), c.links_in.len()), (1, 1));
             let hidden = c.tags.iter().find(|g| g.tag == "hidden").unwrap();
             assert_eq!((hidden.count, hidden.unlocked), (1, 1));
@@ -730,7 +789,7 @@ mod tests {
         }
         st.vault.lock().unwrap().as_mut().unwrap().rescan(Some(&id));
         let p = dir.join("P.md").to_string_lossy().into_owned();
-        let raw = st.vault.lock().unwrap().as_ref().unwrap().connections(&p, &|_| false).unwrap().tags[0].count;
+        let raw = st.vault.lock().unwrap().as_ref().unwrap().connections(&p, &|_| false, false).unwrap().tags[0].count;
         assert_eq!(raw, 17, "the builder counts the unlocked L");
         let r = crate::agent::tools::call(&mut AppOps::new(&st, &never), "get_connections", json!({"title": "P"})).unwrap();
         assert_eq!(r["tags"], json!([{"tag": "big", "count": 16, "titles": []}]));
@@ -746,7 +805,7 @@ mod tests {
         }
         st.vault.lock().unwrap().as_mut().unwrap().rescan(Some(&id));
         let p = dir.join("P.md").to_string_lossy().into_owned();
-        assert!(st.vault.lock().unwrap().as_ref().unwrap().connections(&p, &|_| false).unwrap().tags[0].notes.is_empty(), "16 with L: collapsed");
+        assert!(st.vault.lock().unwrap().as_ref().unwrap().connections(&p, &|_| false, false).unwrap().tags[0].notes.is_empty(), "16 with L: collapsed");
         let r = crate::agent::tools::call(&mut AppOps::new(&st, &never), "get_connections", json!({"title": "P"})).unwrap();
         let mut titles: Vec<String> = r["tags"][0]["titles"].as_array().unwrap().iter().map(|t| t.as_str().unwrap().to_string()).collect();
         titles.sort();

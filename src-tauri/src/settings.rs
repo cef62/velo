@@ -46,11 +46,13 @@ pub struct Settings {
     pub app_icon: String,
     /// Tasks pane: group each date section's tasks under one heading per note
     pub tasks_by_note: bool,
+    /// show archived notes in every listing; only the UI reads it
+    pub show_archived: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into(), agent_access: false, saved_searches: vec![], timeline_sort: "updated".into(), palette: "clear".into(), app_icon: "dock".into(), tasks_by_note: true }
+        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into(), agent_access: false, saved_searches: vec![], timeline_sort: "updated".into(), palette: "clear".into(), app_icon: "dock".into(), tasks_by_note: true, show_archived: false }
     }
 }
 
@@ -202,6 +204,12 @@ mod tests {
     use super::*;
     impl Settings {
         fn toggle_window_binding(&self) -> String { self.shortcuts.get("toggle_window").cloned().unwrap_or_else(|| DEFAULT_TOGGLE.into()) }
+    }
+    #[test] fn show_archived_defaults_off_and_round_trips() {
+        let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");
+        assert!(!load(&p).show_archived);
+        save(&p, &Settings { show_archived: true, ..Settings::default() }).unwrap();
+        assert!(load(&p).show_archived);
     }
     #[test] fn settings_defaults_and_roundtrip() {
         let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");

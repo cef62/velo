@@ -22,7 +22,7 @@ describe("demo api", () => {
   });
 
   it("seeds a fresh vault with dates in the last 60 days", async () => {
-    const page = await demo.search("", "modified", 0, [], false);
+    const page = await demo.search("", "modified", 0, [], false, false);
     expect(page.total).toBeGreaterThanOrEqual(28);
     const oldest = Math.min(...page.hits.map((h) => h.mtime));
     expect(Date.now() - oldest).toBeLessThan(61 * 86_400_000);
@@ -31,62 +31,62 @@ describe("demo api", () => {
   });
 
   it("search: query, tags, no-links and snippets", async () => {
-    expect(await titles("lisbon", "title", 0, [], false)).toEqual(expect.arrayContaining(["Trip — Lisbon in spring", "Lisbon packing list"]));
-    const recipes = await titles("", "title", 0, ["Recipes"], false);
+    expect(await titles("lisbon", "title", 0, [], false, false)).toEqual(expect.arrayContaining(["Trip — Lisbon in spring", "Lisbon packing list"]));
+    const recipes = await titles("", "title", 0, ["Recipes"], false, false);
     expect(recipes).toContain("Recipe — Weeknight dal");
     expect(recipes).not.toContain("Inbox");
-    expect(await titles("lentils", "modified", 0, ["recipes"], false)).toEqual(["Recipe — Weeknight dal"]);
-    const orphans = await titles("", "title", 0, [], true);
+    expect(await titles("lentils", "modified", 0, ["recipes"], false, false)).toEqual(["Recipe — Weeknight dal"]);
+    const orphans = await titles("", "title", 0, [], true, false);
     expect(orphans).toContain("Gift ideas");
     expect(orphans).not.toContain("Project Lantern");
     expect(orphans).not.toContain("Private journal");
-    const hit = (await demo.search("coconut", "modified", 0, [], false)).hits[0];
+    const hit = (await demo.search("coconut", "modified", 0, [], false, false)).hits[0];
     expect(hit.snippet).toMatch(/coconut/i);
     expect(hit.snippet.startsWith("…")).toBe(true);
   });
 
   it("tags with counts", async () => {
-    const tags = await demo.listTags();
+    const tags = await demo.listTags(false);
     expect(tags.find((t) => t.tag === "recipes")?.count).toBeGreaterThanOrEqual(4);
     expect(tags.find((t) => t.tag === "personal")?.count).toBe(1); // the locked journal is not counted
   });
 
   it("connections: links in/out, missing, mentions, shared tags", async () => {
-    const c = await demo.connections(p("Project Lantern"));
+    const c = await demo.connections(p("Project Lantern"), false);
     expect(c.centre.title).toBe("Project Lantern");
     expect(c.links_out.map((n) => n.title)).toEqual(expect.arrayContaining(["Lantern — sync design", "CRDT reading notes"]));
     const fromPlan = c.links_in.find((n) => n.title === "Weekly plan");
     expect(fromPlan?.context).toContain("[[Project Lantern]]");
     expect(c.tags.find((t) => t.tag === "side-project")?.notes.map((n) => n.title)).toContain("Lantern — sync design");
-    expect((await demo.connections(p("Trip — Dolomites hut-to-hut"))).missing).toEqual(["Gear list"]);
-    const m = (await demo.connections(p("Interview loop notes"))).mentions.find((x) => x.node.title === "Project Lantern");
+    expect((await demo.connections(p("Trip — Dolomites hut-to-hut"), false)).missing).toEqual(["Gear list"]);
+    const m = (await demo.connections(p("Interview loop notes"), false)).mentions.find((x) => x.node.title === "Project Lantern");
     expect(m).toMatchObject({ name: "Project Lantern", count: 1 });
     expect(m?.context).toContain("Project Lantern in disguise");
   });
 
   it("linkMention wraps the first mention", async () => {
-    await demo.linkMention(p("Interview loop notes"), "Project Lantern", 1, null);
+    await demo.linkMention(p("Interview loop notes"), "Project Lantern", 1, null, false);
     expect((await demo.openNote(p("Interview loop notes"))).text).toContain("it is [[Project Lantern]] in disguise");
-    await expect(demo.linkMention(p("Interview loop notes"), "Project Lantern", 1, null)).rejects.toBe("mention-moved");
+    await expect(demo.linkMention(p("Interview loop notes"), "Project Lantern", 1, null, false)).rejects.toBe("mention-moved");
   });
 
   it("timeline: newest first, grouped by day, since filter", async () => {
-    const rows = await demo.timeline("", [], false, "updated", null);
+    const rows = await demo.timeline("", [], false, "updated", null, false);
     const groups = groupByDay(rows, new Date());
     expect(groups[0].label).toBe("Today");
     expect(groups.length).toBeGreaterThan(10);
-    const week = await demo.timeline("", [], false, "updated", Date.now() - 7 * 86_400_000);
+    const week = await demo.timeline("", [], false, "updated", Date.now() - 7 * 86_400_000, false);
     expect(week.length).toBeLessThan(rows.length);
-    const created = await demo.timeline("", [], false, "created", null);
+    const created = await demo.timeline("", [], false, "created", null, false);
     expect(created[created.length - 1].title).toBe("Reading list"); // the oldest note
   });
 
   it("tasks: grouped by due date, toggled in place", async () => {
-    const v = await demo.tasks("", [], false);
+    const v = await demo.tasks("", [], false, false);
     expect(v.overdue.length).toBeGreaterThan(0);
     expect(v.due_count).toBe(v.overdue.length + v.today.length);
     expect(v.done).toEqual([]);
-    expect((await demo.tasks("", [], true)).done.length).toBeGreaterThan(0);
+    expect((await demo.tasks("", [], true, false)).done.length).toBeGreaterThan(0);
     const t = v.upcoming[0];
     const r = await demo.toggleTask(t.path, t.line, t.line_text);
     expect(r.line_text).toContain(`@done(${localToday()})`);
@@ -95,24 +95,24 @@ describe("demo api", () => {
 
   it("locked note opens only after the passphrase 'demo'", async () => {
     await expect(demo.openNote(LOCKED)).rejects.toBe("locked");
-    expect(await titles("part-time", "modified", 0, [], false)).toEqual([]);
-    expect((await demo.search("journal", "modified", 0, [], false)).hits[0]).toMatchObject({ encrypted: true, snippet: "" });
+    expect(await titles("part-time", "modified", 0, [], false, false)).toEqual([]);
+    expect((await demo.search("journal", "modified", 0, [], false, false)).hits[0]).toMatchObject({ encrypted: true, snippet: "" });
     await expect(demo.setupPassphrase("nope")).rejects.toBe("wrong-passphrase");
     expect(await demo.setupPassphrase("demo")).toBeNull();
     expect(await demo.hasIdentity()).toBe(true);
     const doc = await demo.openNote(LOCKED);
     expect(doc).toMatchObject({ encrypted: true, title: "Private journal" });
-    const unlockedHit = (await demo.search("part-time", "modified", 0, [], false)).hits;
+    const unlockedHit = (await demo.search("part-time", "modified", 0, [], false, false)).hits;
     expect(unlockedHit.map((h) => h.title)).toEqual(["Private journal"]);
     expect(unlockedHit[0].snippet).toMatch(/^# Private journal/); // the first 120 body chars, as Rust's unlocked group
-    expect((await demo.search("side", "modified", 0, [], false)).hits.slice(-1)[0]?.title).toBe("Private journal"); // after the indexed hits
-    expect(await titles("", "modified", 0, ["personal"], false)).toContain("Private journal");
-    expect((await demo.tasks("", [], false)).upcoming.map((t) => t.title)).toContain("Private journal");
-    expect((await demo.timeline("", [], false, "updated", null)).find((r) => r.locked)?.snippet).toBe(""); // never a locked note's text
-    expect((await demo.connections(p("Gift ideas"))).centre.preview).not.toBe("");
+    expect((await demo.search("side", "modified", 0, [], false, false)).hits.slice(-1)[0]?.title).toBe("Private journal"); // after the indexed hits
+    expect(await titles("", "modified", 0, ["personal"], false, false)).toContain("Private journal");
+    expect((await demo.tasks("", [], false, false)).upcoming.map((t) => t.title)).toContain("Private journal");
+    expect((await demo.timeline("", [], false, "updated", null, false)).find((r) => r.locked)?.snippet).toBe(""); // never a locked note's text
+    expect((await demo.connections(p("Gift ideas"), false)).centre.preview).not.toBe("");
     await demo.lockAll();
     await expect(demo.openNote(LOCKED)).rejects.toBe("locked");
-    expect(await titles("", "modified", 0, ["personal"], false)).not.toContain("Private journal");
+    expect(await titles("", "modified", 0, ["personal"], false, false)).not.toContain("Private journal");
   });
 
   it("rename rewrites links; merge folds one note into another", async () => {
@@ -136,10 +136,10 @@ describe("demo api", () => {
   });
 
   it("short terms match titles only; export counts tasks", async () => {
-    const pa = await titles("pa", "title", 0, [], false);
+    const pa = await titles("pa", "title", 0, [], false, false);
     expect(pa).toContain("Payments migration");
     expect(pa).not.toContain("Inbox"); // "passport" is in its body only
-    const c = await demo.exportPreview({ query: "", tags: ["travel"], no_links: false, by: "updated", since_ms: null, tasks_only: false, title: "" });
+    const c = await demo.exportPreview({ query: "", tags: ["travel"], no_links: false, by: "updated", since_ms: null, tasks_only: false, title: "", include_archived: false });
     expect(c).toMatchObject({ notes: 3, locked: 0 });
     expect(c.open).toBeGreaterThan(0);
     expect(c.done).toBeGreaterThan(0);
@@ -149,16 +149,16 @@ describe("demo api", () => {
     const now = new Date(2026, 9, 30, 16, 0);
     demo.resetDemo(now);
     expect((await demo.openNote(p("Inbox"))).text).toContain("Book dentist appointment 📅 2026-11-03");
-    const rows = await demo.timeline("", [], false, "updated", null);
+    const rows = await demo.timeline("", [], false, "updated", null, false);
     expect(rows[0]).toMatchObject({ title: "Welcome to velo", date: new Date(2026, 9, 30, 8, 5).getTime() });
-    const v = await demo.tasks("", [], false);
+    const v = await demo.tasks("", [], false, false);
     expect(v.today.map((t) => t.text)).toEqual(["Meal-prep [[Recipe — Weeknight dal]] for Tuesday"]);
     const r = await demo.toggleTask(v.today[0].path, v.today[0].line, v.today[0].line_text);
     expect(r.line_text).toContain("@done(2026-10-30)");
     expect((await demo.openNote(v.today[0].path)).meta.modified).toBe(now.getTime());
     // an early-morning now: seed times later today are pulled just before it, never hidden or in the future
     demo.resetDemo(new Date(2026, 9, 30, 6, 0));
-    const early = await demo.timeline("", [], false, "updated", null);
+    const early = await demo.timeline("", [], false, "updated", null, false);
     expect(early.length).toBe(30);
     expect(Math.max(...early.map((x) => x.date))).toBeLessThan(new Date(2026, 9, 30, 6, 0).getTime());
   });
@@ -172,5 +172,17 @@ describe("demo api", () => {
     await demo.setSettings({ ...s, font_size: 18 });
     expect((await demo.getSettings()).font_size).toBe(18);
     expect(await demo.checkUpdate()).toBeNull();
+  });
+});
+
+describe("demo archive", () => {
+  it("hidden by default, listed with the flag, follows a rename", async () => {
+    demo.resetDemo();
+    const [h] = (await demo.search("", "title", 0, [], false, false)).hits;
+    await demo.setArchived(h.path, true);
+    expect((await demo.search("", "title", 0, [], false, false)).hits.map((x) => x.path)).not.toContain(h.path);
+    expect((await demo.search("", "title", 0, [], false, true)).hits.find((x) => x.path === h.path)?.archived).toBe(true);
+    const r = await demo.renameNote(h.path, "Renamed archived", false);
+    expect((await demo.openNote(r.path)).archived).toBe(true);
   });
 });

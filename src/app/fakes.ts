@@ -18,29 +18,31 @@ export const settle = () => new Promise((r) => setTimeout(r, 0));
 
 export const PAGE = 2;
 export const noMeta: NoteMeta = { created: 0, created_src: "file", modified: 0, modified_src: "file", tags: [], aliases: [] };
-export const hit = (title: string): Hit => ({ path: `/n/${title}.md`, title, snippet: "", mtime: 0, encrypted: false });
+export const hit = (title: string): Hit => ({ path: `/n/${title}.md`, title, snippet: "", mtime: 0, encrypted: false, archived: false });
 
-export const emptyConnections: Connections = { centre: { path: "", title: "", created: 0, modified: 0, preview: "", locked: false, context: "" }, links_out: [], links_in: [], tags: [], mentions: [], missing: [] };
+export const emptyConnections: Connections = { centre: { path: "", title: "", created: 0, modified: 0, preview: "", locked: false, context: "", archived: false }, links_out: [], links_in: [], tags: [], mentions: [], missing: [] };
 
 /** Backend over `notes` (title → text). search ignores the query and pages all notes in insertion order. */
 export function fakeApi(notes: Record<string, string> = {}) {
+  const archived = new Set<string>();
   const docOf = (path: string): NoteDoc => {
     const title = path.slice(3, -3);
     if (!(title in notes)) throw "not-found";
-    return { path, title, text: notes[title], hash: "h", encrypted: false, meta: noMeta };
+    return { path, title, text: notes[title], hash: "h", encrypted: false, meta: noMeta, archived: archived.has(title) };
   };
-  const settings: Settings = { notes_dir: "/n", layout: "vertical", font_size: 14, sort: "modified", editor_style: "rich", theme: "system", shortcuts: {}, write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox", inbox_title: "Inbox", agent_access: false, saved_searches: [], timeline_sort: "updated", palette: "clear", app_icon: "dock", tasks_by_note: true };
+  const settings: Settings = { notes_dir: "/n", layout: "vertical", font_size: 14, sort: "modified", editor_style: "rich", theme: "system", shortcuts: {}, write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox", inbox_title: "Inbox", agent_access: false, saved_searches: [], timeline_sort: "updated", palette: "clear", app_icon: "dock", tasks_by_note: true, show_archived: false };
   const api = {
     getSettings: vi.fn(async () => ({ ...settings })),
     setSettings: vi.fn(async (_s: Settings) => {}),
     indexStatus: vi.fn(async (): Promise<[number, number] | null> => null),
-    search: vi.fn(async (_q: string, _sort: string, offset: number, _tags: string[], _noLinks: boolean): Promise<Page> => {
-      const all = Object.keys(notes).map(hit);
-      return { hits: all.slice(offset, offset + PAGE), has_more: offset + PAGE < all.length, total: offset === 0 ? all.length : 0 };
+    search: vi.fn(async (_q: string, _sort: string, offset: number, _tags: string[], _noLinks: boolean, includeArchived: boolean): Promise<Page> => {
+      const every = Object.keys(notes);
+      const all = every.filter((t) => includeArchived || !archived.has(t)).map((t) => ({ ...hit(t), archived: archived.has(t) }));
+      return { hits: all.slice(offset, offset + PAGE), has_more: offset + PAGE < all.length, total: offset === 0 ? all.length : 0, hidden: includeArchived ? 0 : every.length - all.length };
     }),
-    listTags: vi.fn(async (): Promise<TagCount[]> => []),
+    listTags: vi.fn(async (_a: boolean): Promise<TagCount[]> => []),
     listTitles: vi.fn(async () => Object.keys(notes)),
-    listLinkTargets: vi.fn(async () => Object.keys(notes).map((title) => ({ name: title, title, path: `/n/${title}.md`, modified: 0, locked: false }))),
+    listLinkTargets: vi.fn(async (includeArchived: boolean) => Object.keys(notes).filter((t) => includeArchived || !archived.has(t)).map((title) => ({ name: title, title, path: `/n/${title}.md`, modified: 0, locked: false }))),
     createFromSelection: vi.fn(async (title: string, text: string) => {
       if (title in notes) throw "already-exists";
       notes[title] = text;
@@ -53,8 +55,8 @@ export function fakeApi(notes: Record<string, string> = {}) {
       return { ...docOf(`/n/${title}.md`), created };
     }),
     saveNote: vi.fn(),
-    tasks: vi.fn(async (_q: string, _t: string[], _d: boolean): Promise<TaskView> => ({ overdue: [], today: [], upcoming: [], no_date: [], done: [], due_count: 0 })),
-    timeline: vi.fn(async (_q: string, _t: string[], _n: boolean, _by: "created" | "updated", _since: number | null): Promise<TimelineRow[]> => []),
+    tasks: vi.fn(async (_q: string, _t: string[], _d: boolean, _a: boolean): Promise<TaskView> => ({ overdue: [], today: [], upcoming: [], no_date: [], done: [], due_count: 0 })),
+    timeline: vi.fn(async (_q: string, _t: string[], _n: boolean, _by: "created" | "updated", _since: number | null, _a: boolean): Promise<TimelineRow[]> => []),
     exportPreview: vi.fn(async (_r: ExportRequest): Promise<ExportCounts> => ({ notes: 0, open: 0, done: 0, locked: 0, over_limit: 0, no_tasks: 0, unreadable: 0 })),
     exportText: vi.fn(async (_r: ExportRequest): Promise<string> => ""),
     printPage: vi.fn(async () => {}),
@@ -70,8 +72,9 @@ export function fakeApi(notes: Record<string, string> = {}) {
     renameNote: vi.fn(async (_p: string, _t: string, _r: boolean): Promise<RenameResult> => { throw "unset"; }),
     mergeNotes: vi.fn(async (_s: string, _t: string): Promise<MergeResult> => { throw "unset"; }),
     backlinkCount: vi.fn(async () => 0),
-    connections: vi.fn(async (path: string): Promise<Connections> => ({ ...emptyConnections, centre: { ...emptyConnections.centre, path, title: path.slice(3, -3) } })),
-    linkMention: vi.fn(async (_p: string, _t: string, _n: number, _e: string | null): Promise<string | null> => null),
+    connections: vi.fn(async (path: string, _a: boolean): Promise<Connections> => ({ ...emptyConnections, centre: { ...emptyConnections.centre, path, title: path.slice(3, -3) } })),
+    linkMention: vi.fn(async (_p: string, _t: string, _n: number, _e: string | null, _a: boolean): Promise<string | null> => null),
+    setArchived: vi.fn(async (path: string, on: boolean) => void (on ? archived.add(path.slice(3, -3)) : archived.delete(path.slice(3, -3)))),
     lockNote: vi.fn(async (_p: string): Promise<string> => { throw "unset"; }),
     unlockNote: vi.fn(async (_p: string): Promise<string> => { throw "unset"; }),
     lockAll: vi.fn(async () => {}),

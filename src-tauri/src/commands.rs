@@ -78,6 +78,26 @@ fn with_vault<T>(st: &AppState, f: impl FnOnce(&mut Vault, Option<&str>) -> anyh
     f(v, id.as_deref()).map_err(err)
 }
 
+/// `with_vault` for a note operation that may write `.velo/archived`: a failed list write is emitted as
+/// `archive-error` (taken, so it never lands on a later operation).
+fn with_vault_emit<T>(app: &AppHandle, st: &AppState, f: impl FnOnce(&mut Vault, Option<&str>) -> anyhow::Result<T>) -> Res<T> {
+    with_vault(st, |v, id| run_reporting(v, id, f, |e, p| { app.emit(e, p).ok(); }))
+}
+
+/// Runs `f`, then reports a kept archive error whatever `f` returned (a failed note operation can still have written the list).
+fn run_reporting<T>(v: &mut Vault, id: Option<&str>, f: impl FnOnce(&mut Vault, Option<&str>) -> anyhow::Result<T>, emit: impl FnOnce(&str, serde_json::Value)) -> anyhow::Result<T> {
+    let r = f(v, id);
+    emit_archive_error(v, emit);
+    r
+}
+
+/// Reports (once) a failed `.velo/archived` write that a note operation kept in `v.archive_error`.
+pub fn emit_archive_error(v: &Vault, emit: impl FnOnce(&str, serde_json::Value)) {
+    if let Some(m) = v.archive_error.take() {
+        emit("archive-error", serde_json::json!({ "message": m }));
+    }
+}
+
 /// (Re)open the vault and watcher for `dir`, emitting index-progress/index-done/index-error. No lock is held
 /// while indexing. On error the previous vault/watcher stay untouched. If another open/close started
 /// meanwhile, this one is stale: it emits nothing and discards its result (the newer open wins).
@@ -572,8 +592,8 @@ pub fn index_status(st: State<'_, AppState>) -> Option<(usize, usize)> {
 }
 
 #[tauri::command(async)]
-pub fn timeline(st: State<'_, AppState>, query: String, tags: Vec<String>, no_links: bool, by: TimelineBy, since_ms: Option<i64>) -> Res<Vec<TimelineRow>> {
-    with_vault(&st, |v, _| v.timeline(&query, &tags, no_links, by, since_ms))
+pub fn timeline(st: State<'_, AppState>, query: String, tags: Vec<String>, no_links: bool, include_archived: Option<bool>, by: TimelineBy, since_ms: Option<i64>) -> Res<Vec<TimelineRow>> {
+    with_vault(&st, |v, _| v.timeline(&query, &tags, no_links, include_archived.unwrap_or(false), by, since_ms))
 }
 
 fn export_today() -> String {
@@ -607,13 +627,13 @@ pub fn export_markdown(st: State<'_, AppState>, path: String, request: ExportReq
 }
 
 #[tauri::command(async)]
-pub fn search(st: State<'_, AppState>, query: String, sort: Sort, offset: usize, tags: Vec<String>, no_links: Option<bool>) -> Res<Page> {
-    with_vault(&st, |v, _| v.search_where(&query, sort, offset, &tags, no_links.unwrap_or(false)))
+pub fn search(st: State<'_, AppState>, query: String, sort: Sort, offset: usize, tags: Vec<String>, no_links: Option<bool>, include_archived: Option<bool>) -> Res<Page> {
+    with_vault(&st, |v, _| v.search_where(&query, sort, offset, &tags, no_links.unwrap_or(false), include_archived.unwrap_or(false)))
 }
 
 #[tauri::command(async)]
-pub fn list_tags(st: State<'_, AppState>) -> Res<Vec<TagCount>> {
-    with_vault(&st, |v, _| v.tags())
+pub fn list_tags(st: State<'_, AppState>, include_archived: Option<bool>) -> Res<Vec<TagCount>> {
+    with_vault(&st, |v, _| v.tags(include_archived.unwrap_or(false)))
 }
 
 #[tauri::command(async)]
@@ -622,14 +642,14 @@ pub fn list_titles(st: State<'_, AppState>) -> Res<Vec<String>> {
 }
 
 #[tauri::command(async)]
-pub fn list_link_targets(st: State<'_, AppState>) -> Res<Vec<crate::index::LinkTarget>> {
-    with_vault(&st, |v, _| v.link_targets())
+pub fn list_link_targets(st: State<'_, AppState>, include_archived: Option<bool>) -> Res<Vec<crate::index::LinkTarget>> {
+    with_vault(&st, |v, _| v.link_targets(include_archived.unwrap_or(false)))
 }
 
 #[tauri::command(async)]
-pub fn create_from_selection(st: State<'_, AppState>, title: String, text: String) -> Res<String> {
+pub fn create_from_selection(app: AppHandle, st: State<'_, AppState>, title: String, text: String) -> Res<String> {
     let fm = st.settings.lock().unwrap().write_front_matter;
-    with_vault(&st, |v, _| v.create_from_selection(&title, &text, fm))
+    with_vault_emit(&app, &st, |v, _| v.create_from_selection(&title, &text, fm))
 }
 
 /// Longest wait for an agent's backend write to the note being opened (it is then opened as it is).
@@ -650,41 +670,41 @@ pub struct Opened {
 }
 
 #[tauri::command(async)]
-pub fn open_or_create(st: State<'_, AppState>, agent: State<'_, AgentState>, title: String) -> Res<Opened> {
+pub fn open_or_create(app: AppHandle, st: State<'_, AppState>, agent: State<'_, AgentState>, title: String) -> Res<Opened> {
     if let Ok(Some(path)) = with_vault(&st, |v, _| v.find_note(&title)) {
         agent.editors.wait_free(&path, AGENT_HOLD_MAX);
     }
     let fm = st.settings.lock().unwrap().write_front_matter;
-    with_vault(&st, |v, id| v.open_or_create_new(&title, id, fm)).map(|(doc, created)| Opened { doc, created })
+    with_vault_emit(&app, &st, |v, id| v.open_or_create_new(&title, id, fm)).map(|(doc, created)| Opened { doc, created })
 }
 
 #[tauri::command(async)]
-pub fn save_note(st: State<'_, AppState>, path: String, text: String, base_hash: String) -> Res<SaveResult> {
+pub fn save_note(app: AppHandle, st: State<'_, AppState>, path: String, text: String, base_hash: String) -> Res<SaveResult> {
     let fm = st.settings.lock().unwrap().write_front_matter;
-    with_vault(&st, |v, id| v.save_note(&path, &text, &base_hash, id, fm))
+    with_vault_emit(&app, &st, |v, id| v.save_note(&path, &text, &base_hash, id, fm))
 }
 
 #[tauri::command(async)]
-pub fn link_mention(st: State<'_, AppState>, path: String, target_title: String, expected_count: usize, editor_text: Option<String>) -> Res<Option<String>> {
+pub fn link_mention(app: AppHandle, st: State<'_, AppState>, path: String, target_title: String, expected_count: usize, editor_text: Option<String>, include_archived: Option<bool>) -> Res<Option<String>> {
     let fm = st.settings.lock().unwrap().write_front_matter;
-    with_vault(&st, |v, _| v.link_mention(&path, &target_title, expected_count, editor_text.as_deref(), fm))
+    with_vault_emit(&app, &st, |v, _| v.link_mention(&path, &target_title, expected_count, editor_text.as_deref(), fm, include_archived.unwrap_or(false)))
 }
 
 #[tauri::command(async)]
-pub fn tasks(st: State<'_, AppState>, query: String, tags: Vec<String>, show_done: bool) -> Res<TaskView> {
-    with_vault(&st, |v, _| v.tasks(&query, &tags, show_done))
+pub fn tasks(st: State<'_, AppState>, query: String, tags: Vec<String>, show_done: bool, include_archived: Option<bool>) -> Res<TaskView> {
+    with_vault(&st, |v, _| v.tasks(&query, &tags, show_done, include_archived.unwrap_or(false)))
 }
 
 #[tauri::command(async)]
-pub fn toggle_task(st: State<'_, AppState>, path: String, line: usize, expected: String) -> Res<crate::vault::Toggled> {
+pub fn toggle_task(app: AppHandle, st: State<'_, AppState>, path: String, line: usize, expected: String) -> Res<crate::vault::Toggled> {
     let fm = st.settings.lock().unwrap().write_front_matter;
-    with_vault(&st, |v, id| v.toggle_task(&path, line, &expected, id, fm))
+    with_vault_emit(&app, &st, |v, id| v.toggle_task(&path, line, &expected, id, fm))
 }
 
 #[tauri::command(async)]
-pub fn capture_task(st: State<'_, AppState>, text: String) -> Res<String> {
+pub fn capture_task(app: AppHandle, st: State<'_, AppState>, text: String) -> Res<String> {
     let (fm, title) = { let s = st.settings.lock().unwrap(); (s.write_front_matter, settings::capture_title(&s, &crate::tasks::local_today())) };
-    with_vault(&st, |v, id| v.capture_task(&title, &text, id, fm))
+    with_vault_emit(&app, &st, |v, id| v.capture_task(&title, &text, id, fm))
 }
 
 #[derive(serde::Serialize)]
@@ -723,13 +743,13 @@ pub fn set_badge(app: AppHandle, count: u32) {
 }
 
 #[tauri::command(async)]
-pub fn rename_note(st: State<'_, AppState>, path: String, new_title: String, rewrite_links: bool) -> Res<RenameResult> {
-    with_vault(&st, |v, _| v.rename_note(&path, &new_title, rewrite_links))
+pub fn rename_note(app: AppHandle, st: State<'_, AppState>, path: String, new_title: String, rewrite_links: bool) -> Res<RenameResult> {
+    with_vault_emit(&app, &st, |v, _| v.rename_note(&path, &new_title, rewrite_links))
 }
 
 #[tauri::command(async)]
-pub fn connections(st: State<'_, AppState>, path: String) -> Res<crate::connections::Connections> {
-    with_vault(&st, |v, _| v.connections(&path, &|_| false))
+pub fn connections(st: State<'_, AppState>, path: String, include_archived: Option<bool>) -> Res<crate::connections::Connections> {
+    with_vault(&st, |v, _| v.connections(&path, &|_| false, include_archived.unwrap_or(false)))
 }
 
 #[tauri::command(async)]
@@ -738,13 +758,13 @@ pub fn backlink_count(st: State<'_, AppState>, title: String) -> Res<usize> {
 }
 
 #[tauri::command(async)]
-pub fn lock_note(st: State<'_, AppState>, path: String) -> Res<String> {
-    with_vault(&st, |v, id| v.lock_note(&path, id.ok_or_else(|| anyhow::anyhow!("no-identity"))?))
+pub fn lock_note(app: AppHandle, st: State<'_, AppState>, path: String) -> Res<String> {
+    with_vault_emit(&app, &st, |v, id| v.lock_note(&path, id.ok_or_else(|| anyhow::anyhow!("no-identity"))?))
 }
 
 #[tauri::command(async)]
-pub fn unlock_note(st: State<'_, AppState>, path: String) -> Res<String> {
-    with_vault(&st, |v, id| v.unlock_note(&path, id.ok_or_else(|| anyhow::anyhow!("no-identity"))?))
+pub fn unlock_note(app: AppHandle, st: State<'_, AppState>, path: String) -> Res<String> {
+    with_vault_emit(&app, &st, |v, id| v.unlock_note(&path, id.ok_or_else(|| anyhow::anyhow!("no-identity"))?))
 }
 
 #[tauri::command(async)]
@@ -792,14 +812,20 @@ pub fn agent_write_done(agent: State<'_, AgentState>, id: u64, result: serde_jso
 }
 
 #[tauri::command(async)]
-pub fn merge_notes(st: State<'_, AppState>, source: String, target: String) -> Res<MergeResult> {
+pub fn merge_notes(app: AppHandle, st: State<'_, AppState>, source: String, target: String) -> Res<MergeResult> {
     let fm = st.settings.lock().unwrap().write_front_matter;
-    with_vault(&st, |v, _| v.merge_notes(&source, &target, fm))
+    with_vault_emit(&app, &st, |v, _| v.merge_notes(&source, &target, fm))
 }
 
 #[tauri::command(async)]
-pub fn delete_note(st: State<'_, AppState>, path: String) -> Res<()> {
-    with_vault(&st, |v, _| v.delete_note(&path))
+pub fn delete_note(app: AppHandle, st: State<'_, AppState>, path: String) -> Res<()> {
+    with_vault_emit(&app, &st, |v, _| v.delete_note(&path))
+}
+
+/// Archive or unarchive the note at `path` (a locked note needs no key). Errors are returned, not emitted.
+#[tauri::command(async)]
+pub fn set_archived(st: State<'_, AppState>, path: String, archived: bool) -> Res<()> {
+    with_vault(&st, |v, _| v.set_archived(&path, archived))
 }
 
 /// Forget the decrypted notes and the identity; locked notes need the passphrase again.
@@ -932,6 +958,31 @@ mod tests {
         assert_eq!(*gate.lock().unwrap(), None);
         assert_eq!(gated(&gate, || Ok(1)).unwrap(), 1);
         assert_eq!(*gate.lock().unwrap(), None);
+    }
+    #[test] fn emit_archive_error_sends_once_then_nothing() {
+        let dir = tempfile::tempdir().unwrap().keep(); let db = tempfile::tempdir().unwrap().keep().join("i.sqlite");
+        let v = Vault::open_with_progress(dir, &db, None, &mut |_, _| {}).unwrap();
+        v.archive_error.set(Some("denied".into()));
+        let mut got = vec![];
+        emit_archive_error(&v, |e, p| got.push((e.to_string(), p)));
+        emit_archive_error(&v, |e, p| got.push((e.to_string(), p)));
+        assert_eq!(got, [("archive-error".to_string(), serde_json::json!({"message": "denied"}))]);
+    }
+    #[cfg(unix)] #[test] fn note_operations_report_a_failed_list_write_once() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap().keep(); let db = tempfile::tempdir().unwrap().keep().join("i.sqlite");
+        std::fs::write(dir.join("Old.md"), "").unwrap();
+        let mut v = Vault::open_with_progress(dir.clone(), &db, None, &mut |_, _| {}).unwrap();
+        let p = dir.join("Old.md").to_string_lossy().into_owned();
+        v.set_archived(&p, true).unwrap();
+        let lock = |m| std::fs::set_permissions(dir.join(".velo"), std::fs::Permissions::from_mode(m)).unwrap();
+        let run = |v: &mut Vault, f: &dyn Fn(&mut Vault) -> anyhow::Result<()>| { let mut n = 0; let r = run_reporting(v, None, |v, _| f(v), |_, _| n += 1); (r.is_ok(), n) };
+        lock(0o555);
+        assert_eq!(run(&mut v, &|v| v.rename_note(&p, "New", false).map(|_| ())), (true, 1)); // the list write fails, the rename succeeds
+        lock(0o755);
+        assert_eq!(run(&mut v, &|_| Ok(())).1, 0); // a clean operation emits nothing
+        v.archive_error.set(Some("kept".into()));
+        assert_eq!(run(&mut v, &|_| Err(anyhow::anyhow!("boom"))), (false, 1)); // the error path still emits
     }
     #[test] fn with_vault_refuses_while_indexing() {
         assert_eq!(check_gate(&Mutex::new(Some((1, 2)))), Err("indexing"));
