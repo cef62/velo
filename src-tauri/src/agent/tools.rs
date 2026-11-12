@@ -729,7 +729,7 @@ mod tests {
         // an unlocked locked note lists its tasks from memory in Vault::tasks: only the tool-level filter hides them
         let p = ops.find("b").unwrap().unwrap();
         let locked_path = ops.vault.lock_note(&p, &crate::crypto::new_identity()).unwrap();
-        let raw = ops.vault.tasks("", &[], false).unwrap();
+        let raw = ops.vault.tasks("", &[], false, false).unwrap();
         assert!(raw.no_date.iter().any(|t| t.path.ends_with(".md.age")), "precondition: vault lists {locked_path:?}");
         let r = call(&mut ops, "list_tasks", json!({})).unwrap();
         assert_eq!(r["no_date"].as_array().unwrap().len(), 1);

@@ -180,7 +180,7 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
         let (mut hits, mut skip, mut at) = (Vec::new(), offset, 0);
         // `offset` counts plain hits, so walk the vault's pages from the start, dropping locked ones
         loop {
-            let p = self.vault.search_where(query, sort, at, tags, no_links)?;
+            let p = self.vault.search_where(query, sort, at, tags, no_links, false)?;
             let (more, n) = (p.has_more, p.hits.len());
             at += n;
             for h in p.hits.into_iter().filter(|h| !locked(&h.path)) {
@@ -197,7 +197,7 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
 
     fn tags(&self) -> anyhow::Result<Vec<TagCount>> {
         // locked notes' bodies (and so their tags) never reach the index; a plain twin's do, so take them out
-        let mut tags = self.vault.tags()?;
+        let mut tags = self.vault.tags(false)?;
         for e in std::fs::read_dir(self.dir())?.flatten() {
             let Some(title) = parse_note_file(&e.path()).filter(|n| n.encrypted).map(|n| n.title) else { continue };
             // the twin is `X.md` or `X.txt` (locking `X.txt` writes `X.md.age`), as in `plain_twin_of_locked`
@@ -215,7 +215,7 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
     }
 
     fn tasks(&self, query: &str, tags: &[String], show_done: bool) -> anyhow::Result<TaskView> {
-        let mut v = self.vault.tasks(query, tags, show_done)?;
+        let mut v = self.vault.tasks(query, tags, show_done, false)?;
         for g in [&mut v.overdue, &mut v.today, &mut v.upcoming, &mut v.no_date, &mut v.done] {
             g.retain(|t| !locked(&t.path));
         }

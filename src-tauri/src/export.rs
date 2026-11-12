@@ -47,7 +47,7 @@ fn range_line(since_ms: Option<i64>, now_ms: i64) -> String {
 }
 
 pub fn build(v: &Vault, r: &ExportRequest, today: &str) -> anyhow::Result<(String, ExportCounts)> {
-    let rows = v.timeline(&r.query, &r.tags, r.no_links, r.by, r.since_ms)?;
+    let rows = v.timeline(&r.query, &r.tags, r.no_links, false, r.by, r.since_ms)?;
     Ok(build_from(rows, &v.index.dates()?, r, today, chrono::Utc::now().timestamp_millis()))
 }
 
@@ -138,7 +138,7 @@ mod tests {
         let mut r = req(false);
         let now = chrono::Utc::now().timestamp_millis();
         r.since_ms = Some(chrono::DateTime::parse_from_rfc3339("2026-10-01T00:00:00+00:00").unwrap().timestamp_millis());
-        let rows = v.timeline("", &[], false, r.by, None).unwrap();
+        let rows = v.timeline("", &[], false, false, r.by, None).unwrap();
         let (t, c) = build_from(rows, &v.index.dates().unwrap(), &r, "2026-10-30", r.since_ms.unwrap() + 7 * DAY_MS);
         assert_eq!(c.done, 1);
         assert!(t.contains("Last 7 days") && t.contains("- [x] new — n @done(2026-10-29)") && !t.contains("old —") && !t.contains("undated —"));
@@ -175,7 +175,7 @@ mod tests {
         let rows: Vec<TimelineRow> = (0..=LIMIT).map(|i| {
             let p = dir.path().join(format!("n{i}.md"));
             std::fs::write(&p, "x").unwrap();
-            TimelineRow { path: p.to_string_lossy().into_owned(), title: format!("n{i}"), date: 0, snippet: String::new(), locked: false }
+            TimelineRow { path: p.to_string_lossy().into_owned(), title: format!("n{i}"), date: 0, snippet: String::new(), locked: false, archived: false }
         }).collect();
         let (t, c) = build_from(rows, &HashMap::new(), &req(false), "2026-10-30", 0);
         assert_eq!((c.notes, c.over_limit), (LIMIT, 1));
@@ -185,7 +185,7 @@ mod tests {
     }
 
     #[test] fn export_counts_unreadable_notes() {
-        let row = TimelineRow { path: "/nonexistent/velo/x.md".into(), title: "x".into(), date: 0, snippet: String::new(), locked: false };
+        let row = TimelineRow { path: "/nonexistent/velo/x.md".into(), title: "x".into(), date: 0, snippet: String::new(), locked: false, archived: false };
         let (t, c) = build_from(vec![row], &HashMap::new(), &req(false), "2026-10-30", 0);
         assert_eq!((c.notes, c.unreadable), (0, 1));
         assert!(t.ends_with("---\n1 unreadable\n"));

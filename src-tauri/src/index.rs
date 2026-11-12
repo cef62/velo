@@ -415,6 +415,7 @@ impl Index {
         Ok(st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?)
     }
 
+    /// Default view: archived notes hidden (what the app shows without "show archived"); perf.rs benches that path.
     pub fn search_page(&self, query: &str, sort: Sort, offset: usize, limit: usize, tags: &[String], unlocked: &HashMap<String, String>) -> anyhow::Result<Page> {
         self.search_page_where(query, sort, offset, limit, tags, unlocked, false, false)
     }

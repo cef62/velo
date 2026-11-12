@@ -573,7 +573,7 @@ pub fn index_status(st: State<'_, AppState>) -> Option<(usize, usize)> {
 
 #[tauri::command(async)]
 pub fn timeline(st: State<'_, AppState>, query: String, tags: Vec<String>, no_links: bool, by: TimelineBy, since_ms: Option<i64>) -> Res<Vec<TimelineRow>> {
-    with_vault(&st, |v, _| v.timeline(&query, &tags, no_links, by, since_ms))
+    with_vault(&st, |v, _| v.timeline(&query, &tags, no_links, false, by, since_ms))
 }
 
 fn export_today() -> String {
@@ -608,12 +608,12 @@ pub fn export_markdown(st: State<'_, AppState>, path: String, request: ExportReq
 
 #[tauri::command(async)]
 pub fn search(st: State<'_, AppState>, query: String, sort: Sort, offset: usize, tags: Vec<String>, no_links: Option<bool>) -> Res<Page> {
-    with_vault(&st, |v, _| v.search_where(&query, sort, offset, &tags, no_links.unwrap_or(false)))
+    with_vault(&st, |v, _| v.search_where(&query, sort, offset, &tags, no_links.unwrap_or(false), false))
 }
 
 #[tauri::command(async)]
 pub fn list_tags(st: State<'_, AppState>) -> Res<Vec<TagCount>> {
-    with_vault(&st, |v, _| v.tags())
+    with_vault(&st, |v, _| v.tags(false))
 }
 
 #[tauri::command(async)]
@@ -623,7 +623,7 @@ pub fn list_titles(st: State<'_, AppState>) -> Res<Vec<String>> {
 
 #[tauri::command(async)]
 pub fn list_link_targets(st: State<'_, AppState>) -> Res<Vec<crate::index::LinkTarget>> {
-    with_vault(&st, |v, _| v.link_targets())
+    with_vault(&st, |v, _| v.link_targets(false))
 }
 
 #[tauri::command(async)]
@@ -672,7 +672,7 @@ pub fn link_mention(st: State<'_, AppState>, path: String, target_title: String,
 
 #[tauri::command(async)]
 pub fn tasks(st: State<'_, AppState>, query: String, tags: Vec<String>, show_done: bool) -> Res<TaskView> {
-    with_vault(&st, |v, _| v.tasks(&query, &tags, show_done))
+    with_vault(&st, |v, _| v.tasks(&query, &tags, show_done, false))
 }
 
 #[tauri::command(async)]

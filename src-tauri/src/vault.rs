@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Debug)]
-pub struct TimelineRow { pub path: String, pub title: String, pub date: i64, pub snippet: String, pub locked: bool }
+pub struct TimelineRow { pub path: String, pub title: String, pub date: i64, pub snippet: String, pub locked: bool, pub archived: bool }
 
 #[derive(Deserialize, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -83,6 +83,7 @@ pub struct NoteDoc {
     /// hash of the on-disk bytes (ciphertext for encrypted notes)
     pub hash: String,
     pub encrypted: bool,
+    pub archived: bool,
     pub meta: NoteMeta,
 }
 
@@ -117,6 +118,11 @@ pub struct Vault {
     /// plaintext of unlocked encrypted notes, memory only
     unlocked: HashMap<String, String>,
     revisions: Revisions,
+    /// the entries last loaded into the index's archived table (empty = the empty table)
+    archive_loaded: std::cell::RefCell<Vec<String>>,
+    /// latest list-write failure; `take()` reads and clears it
+    pub archive_error: std::cell::Cell<Option<String>>,
+    archive_read_logged: std::cell::Cell<bool>,
 }
 
 fn s(p: &Path) -> String {
@@ -192,7 +198,7 @@ impl Vault {
     pub fn open_with_progress(dir: PathBuf, db_path: &Path, identity: Option<&str>, progress: &mut dyn FnMut(usize, usize)) -> anyhow::Result<Vault> {
         // revisions live next to the index db (the app data dir), keyed by vault dir
         let root = db_path.parent().unwrap_or(Path::new(".")).join("revisions").join(fnv64(&dir.to_string_lossy()));
-        let mut v = Vault { store: Store::new(dir), index: Index::open(db_path)?, unlocked: HashMap::new(), revisions: Revisions::new(root) };
+        let mut v = Vault { store: Store::new(dir), index: Index::open(db_path)?, unlocked: HashMap::new(), revisions: Revisions::new(root), archive_loaded: Default::default(), archive_error: Default::default(), archive_read_logged: Default::default() };
         v.revisions.maybe_prune(now_ms());
         v.store.clean_leftovers();
         let files = v.store.list()?;
@@ -296,53 +302,106 @@ impl Vault {
     }
 
     pub fn search(&self, query: &str, sort: Sort, offset: usize, tags: &[String]) -> anyhow::Result<Page> {
-        self.search_where(query, sort, offset, tags, false)
+        self.search_where(query, sort, offset, tags, false, false)
     }
 
-    pub fn search_where(&self, query: &str, sort: Sort, offset: usize, tags: &[String], no_links: bool) -> anyhow::Result<Page> {
-        self.index.search_page_where(query, sort, offset, PAGE, tags, &self.unlocked, no_links, true)
+    pub fn search_where(&self, query: &str, sort: Sort, offset: usize, tags: &[String], no_links: bool, include_archived: bool) -> anyhow::Result<Page> {
+        self.sync_archive();
+        let mut page = self.index.search_page_where(query, sort, offset, PAGE, tags, &self.unlocked, no_links, include_archived)?;
+        if !include_archived && offset == 0 {
+            page.hidden = self.index.search_page_where(query, sort, 0, 0, tags, &self.unlocked, no_links, true)?.total - page.total;
+        }
+        Ok(page)
+    }
+
+    /// Load the list file into the index when it differs from what is loaded. Compares content, not mtime: an
+    /// equal-size rewrite in one timestamp tick must not be missed. A read failure keeps the loaded set and is retried
+    /// at the next query; only the first one per vault is logged.
+    pub fn sync_archive(&self) {
+        let list = match crate::archive::read(&self.store.dir) {
+            Ok(l) => l,
+            Err(e) => {
+                if !self.archive_read_logged.replace(true) {
+                    let m = format!("cannot read {}: {e}", crate::archive::FILE);
+                    crate::log::line(&m);
+                    eprintln!("{m}");
+                }
+                return;
+            }
+        };
+        if *self.archive_loaded.borrow() != list && self.index.set_archived(&list).is_ok() {
+            *self.archive_loaded.borrow_mut() = list;
+        }
+    }
+
+    fn archive_edit(&mut self, change: impl FnOnce(&mut Vec<String>)) -> anyhow::Result<()> {
+        let entries = crate::archive::update(&self.store.dir, change)?;
+        self.index.set_archived(&entries)?;
+        *self.archive_loaded.borrow_mut() = entries;
+        Ok(())
+    }
+
+    /// Archive or unarchive the note at `path`; never reads, decrypts or rewrites the note.
+    pub fn set_archived(&mut self, path: &str, on: bool) -> anyhow::Result<()> {
+        let title = self.note(Path::new(path))?.title;
+        let f = fold(&title);
+        self.archive_edit(|e| {
+            e.retain(|t| fold(t) != f);
+            if on {
+                e.push(title);
+            }
+        })
     }
 
     /// Every note matching the search filters, newest first by `by`, dated by its indexed created/modified; `since_ms` drops older ones.
     /// Snippets are blanked for locked notes: an unlocked-in-memory one would otherwise carry its body.
-    pub fn timeline(&self, query: &str, tags: &[String], no_links: bool, by: TimelineBy, since_ms: Option<i64>) -> anyhow::Result<Vec<TimelineRow>> {
+    pub fn timeline(&self, query: &str, tags: &[String], no_links: bool, include_archived: bool, by: TimelineBy, since_ms: Option<i64>) -> anyhow::Result<Vec<TimelineRow>> {
+        self.sync_archive();
         let dates = self.index.dates()?;
-        let mut rows: Vec<TimelineRow> = self.index.search_page_where(query, Sort::Modified, 0, ALL, tags, &self.unlocked, no_links, true)?.hits.into_iter().filter_map(|h| {
+        let mut rows: Vec<TimelineRow> = self.index.search_page_where(query, Sort::Modified, 0, ALL, tags, &self.unlocked, no_links, include_archived)?.hits.into_iter().filter_map(|h| {
             let &(c, m) = dates.get(&h.path)?;
             let date = match by { TimelineBy::Created => c, TimelineBy::Updated => m };
             let snippet = if h.encrypted { String::new() } else { h.snippet };
-            Some(TimelineRow { path: h.path, title: h.title, date, snippet, locked: h.encrypted })
+            Some(TimelineRow { path: h.path, title: h.title, date, snippet, locked: h.encrypted, archived: h.archived })
         }).filter(|r| since_ms.is_none_or(|s| r.date >= s)).collect();
         rows.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.path.cmp(&b.path)));
         Ok(rows)
     }
 
     /// Open and recent tasks; unlocked notes' tasks come from memory, so they never reach SQLite.
-    pub fn tasks(&self, query: &str, tags: &[String], show_done: bool) -> anyhow::Result<TaskView> {
-        let mut rows = self.index.task_rows(tags, true)?;
+    pub fn tasks(&self, query: &str, tags: &[String], show_done: bool, include_archived: bool) -> anyhow::Result<TaskView> {
+        self.sync_archive();
+        let mut rows = self.index.task_rows(tags, include_archived)?;
+        let archived = self.index.archived_titles()?;
         let wanted: Vec<String> = tags.iter().map(|t| fold(t)).collect();
         for (path, plain) in &self.unlocked {
             let Some((title, modified)) = self.index.title_modified(path)? else { continue };
+            let arc = archived.contains(&fold(&title));
+            if arc && !include_archived {
+                continue;
+            }
             let have = all_tags(frontmatter::body(plain), frontmatter::parse(plain).as_ref());
             if !wanted.iter().all(|w| have.iter().any(|(h, _)| h == w)) {
                 continue;
             }
-            rows.extend(parse_tasks(plain).into_iter().map(|t| TaskRow { path: path.clone(), title: title.clone(), modified, line: t.line, text: t.text, done: t.done, due: t.due, done_on: t.done_on, line_text: t.line_text, archived: false }));
+            rows.extend(parse_tasks(plain).into_iter().map(|t| TaskRow { path: path.clone(), title: title.clone(), modified, line: t.line, text: t.text, done: t.done, due: t.due, done_on: t.done_on, line_text: t.line_text, archived: arc }));
         }
         Ok(group_tasks(rows, query, show_done, &local_today()))
     }
 
     /// Tags of plain notes only: unlocked notes' tags stay in memory and out of this list.
-    pub fn tags(&self) -> anyhow::Result<Vec<TagCount>> {
-        self.index.tags(true)
+    pub fn tags(&self, include_archived: bool) -> anyhow::Result<Vec<TagCount>> {
+        self.sync_archive();
+        self.index.tags(include_archived)
     }
 
     pub fn titles(&self) -> anyhow::Result<Vec<String>> {
         self.index.titles()
     }
 
-    pub fn link_targets(&self) -> anyhow::Result<Vec<LinkTarget>> {
-        self.index.link_targets(true)
+    pub fn link_targets(&self, include_archived: bool) -> anyhow::Result<Vec<LinkTarget>> {
+        self.sync_archive();
+        self.index.link_targets(include_archived)
     }
 
     /// A new plain note `title` holding `text`; refuses a title another note (locked ones too) already names. Returns its path.
@@ -365,6 +424,7 @@ impl Vault {
     }
 
     pub fn open_note(&mut self, path: &str, identity: Option<&str>) -> anyhow::Result<NoteDoc> {
+        self.sync_archive();
         let p = Path::new(path);
         let nf = self.note(p)?;
         let bytes = self.store.read(p)?;
@@ -377,7 +437,8 @@ impl Vault {
             lossy(&bytes)
         };
         let meta = self.note_meta(path, &text, &stat(p)?);
-        Ok(NoteDoc { path: path.into(), title: nf.title, text, hash: hash(&bytes), encrypted: nf.encrypted, meta })
+        let archived = self.index.archived_titles()?.contains(&fold(&nf.title));
+        Ok(NoteDoc { path: path.into(), title: nf.title, text, archived, hash: hash(&bytes), encrypted: nf.encrypted, meta })
     }
 
     /// The existing note `title` names (title or alias, case-folded): the one open_or_create and capture_task use.
@@ -893,14 +954,14 @@ mod tests {
         note("c", "2019-01-01T00:00:00+00:00", "2023-01-01T00:00:00+00:00", "other");
         let mut v = open(dir.clone(), &db, None).unwrap();
         let ms = |s: &str| chrono::DateTime::parse_from_rfc3339(s).unwrap().timestamp_millis();
-        let t = |v: &Vault, by, since| v.timeline("zebra", &[], false, by, since).unwrap();
+        let t = |v: &Vault, by, since| v.timeline("zebra", &[], false, false, by, since).unwrap();
         let r = t(&v, TimelineBy::Updated, None);
         assert_eq!(r.iter().map(|r| (r.title.as_str(), r.date)).collect::<Vec<_>>(), [("a", ms("2022-01-01T00:00:00+00:00")), ("b", ms("2021-06-01T00:00:00+00:00"))]);
         assert!(!r[0].locked && r[0].snippet.contains("zebra"));
         assert_eq!(t(&v, TimelineBy::Created, None).iter().map(|r| r.title.as_str()).collect::<Vec<_>>(), ["b", "a"]);
         assert_eq!(t(&v, TimelineBy::Updated, Some(ms("2022-01-01T00:00:00+00:00"))).len(), 1);
-        assert_eq!(v.timeline("zebra", &["x".into()], false, TimelineBy::Updated, None).unwrap().len(), 1);
-        assert_eq!(v.timeline("", &[], true, TimelineBy::Updated, None).unwrap().len(), 3);
+        assert_eq!(v.timeline("zebra", &["x".into()], false, false, TimelineBy::Updated, None).unwrap().len(), 1);
+        assert_eq!(v.timeline("", &[], true, false, TimelineBy::Updated, None).unwrap().len(), 3);
         // locked: one matches by title, one only by its in-memory body; neither may leak text
         let d = v.open_or_create("zebra lock", None, false).unwrap(); v.lock_note(&d.path, &id).unwrap();
         let d = v.open_or_create("hidden", None, false).unwrap(); let p = v.lock_note(&d.path, &id).unwrap();
@@ -976,7 +1037,7 @@ mod tests {
         let (dir, db) = setup(); let id = crypto::new_identity();
         let mut v = open(dir.clone(), &db, None).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
         let _r = v.save_note(&d.path, "- [ ] secretzebra", &d.hash, None, false).unwrap();
-        assert_eq!(v.tasks("", &[], false).unwrap().no_date.len(), 1);
+        assert_eq!(v.tasks("", &[], false, false).unwrap().no_date.len(), 1);
         v.lock_note(&d.path, &id).unwrap();
         assert!(v.index.task_rows(&[], true).unwrap().iter().all(|r| !r.text.contains("secretzebra")));
         drop(v);
@@ -984,21 +1045,21 @@ mod tests {
             if let Ok(b) = std::fs::read(format!("{}{suffix}", db.display())) { assert!(!b.windows(11).any(|w| w == b"secretzebra"), "{suffix}"); }
         }
         let mut v = open(dir, &db, Some(&id)).unwrap();
-        let t = v.tasks("", &[], false).unwrap();
+        let t = v.tasks("", &[], false, false).unwrap();
         assert_eq!(t.no_date.len(), 1); assert_eq!(t.no_date[0].text, "secretzebra");
         v.lock_all();
-        assert!(v.tasks("", &[], false).unwrap().no_date.is_empty());
+        assert!(v.tasks("", &[], false, false).unwrap().no_date.is_empty());
     }
     #[test] fn locked_note_tags_stay_out_of_sqlite() {
         let (dir, db) = setup(); let id = crypto::new_identity();
         let mut v = open(dir.clone(), &db, None).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
         let _r = v.save_note(&d.path, "#zqxjvkplmwqbyfh text", &d.hash, None, false).unwrap();
-        assert_eq!(v.tags().unwrap().len(), 1); v.lock_note(&d.path, &id).unwrap();
-        assert!(v.tags().unwrap().is_empty());
+        assert_eq!(v.tags(false).unwrap().len(), 1); v.lock_note(&d.path, &id).unwrap();
+        assert!(v.tags(false).unwrap().is_empty());
         drop(v);
         assert!(!trigram_on_disk(&db, &["zqxjvkplmwqbyfh"]), "trigram leak");
         let v = open(dir, &db, Some(&id)).unwrap();
-        assert!(v.tags().unwrap().is_empty());
+        assert!(v.tags(false).unwrap().is_empty());
         assert_eq!(v.search("", Sort::Title, 0, &["zqxjvkplmwqbyfh".to_string()]).unwrap().hits.len(), 1);
     }
     #[test] fn link_mention_saves_when_not_open() {
@@ -2091,5 +2152,79 @@ mod tests {
         assert!(std::fs::read_to_string(&dst).unwrap().ends_with("## Source\n\nbody S\n"));
         assert_eq!(std::fs::read_to_string(dir.join("C.md")).unwrap(), "[[Target]] and [[Target]]");
         assert!(Path::new(&src).exists());
+    }
+
+    fn shown(v: &Vault) -> Vec<String> { v.search_where("", Sort::Title, 0, &[], false, false).unwrap().hits.into_iter().map(|h| h.title).collect() }
+    #[test] fn archive_hides_in_search_timeline_tasks_tags_and_counts_hidden() {
+        let (dir, db) = setup();
+        for (n, b) in [("Meeting", "agenda #w\n- [ ] ask"), ("Other", "agenda #w")] { std::fs::write(dir.join(format!("{n}.md")), b).unwrap(); }
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        v.set_archived(&s(&dir.join("Meeting.md")), true).unwrap();
+        let p = v.search_where("agenda", Sort::Title, 0, &[], false, false).unwrap();
+        assert_eq!((p.hits.len(), p.total, p.hidden), (1, 1, 1));
+        let p = v.search_where("agenda", Sort::Title, 0, &[], false, true).unwrap();
+        assert_eq!((p.total, p.hidden, p.hits.iter().filter(|h| h.archived).count()), (2, 0, 1));
+        assert_eq!(v.timeline("", &[], false, false, TimelineBy::Updated, None).unwrap().len(), 1);
+        assert!(v.timeline("", &[], false, true, TimelineBy::Updated, None).unwrap().iter().any(|r| r.archived));
+        assert!(v.tasks("", &[], false, false).unwrap().no_date.is_empty());
+        assert!(v.tasks("", &[], false, true).unwrap().no_date[0].archived);
+        assert_eq!(v.tags(false).unwrap()[0].count, 1);
+        assert!(v.open_note(&s(&dir.join("Meeting.md")), None).unwrap().archived);
+    }
+    #[test] fn archiving_leaves_the_file_untouched() {
+        let (dir, db) = setup(); let f = dir.join("A.md"); std::fs::write(&f, "a").unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let before = (std::fs::read(&f).unwrap(), std::fs::metadata(&f).unwrap().modified().unwrap());
+        v.set_archived(&s(&f), true).unwrap(); v.set_archived(&s(&f), false).unwrap(); v.set_archived(&s(&f), true).unwrap();
+        assert_eq!((std::fs::read(&f).unwrap(), std::fs::metadata(&f).unwrap().modified().unwrap()), before);
+        assert_eq!(std::fs::read_to_string(dir.join(".velo/archived")).unwrap(), "A\n");
+    }
+    #[test] fn hand_edit_and_delete_of_list_seen_at_next_query() {
+        let (dir, db) = setup(); std::fs::write(dir.join("A.md"), "").unwrap(); std::fs::write(dir.join("B.md"), "").unwrap();
+        let v = open(dir.clone(), &db, None).unwrap();
+        std::fs::create_dir(dir.join(".velo")).unwrap(); std::fs::write(dir.join(".velo/archived"), "a\nb\n").unwrap();
+        assert_eq!(v.search_where("", Sort::Title, 0, &[], false, false).unwrap().total, 0);
+        std::fs::remove_file(dir.join(".velo/archived")).unwrap();
+        assert_eq!(v.search_where("", Sort::Title, 0, &[], false, false).unwrap().total, 2);
+    }
+    #[test] fn equal_length_rewrite_is_seen_at_the_next_query() { // fails under an (mtime, size) stamp
+        let (dir, db) = setup(); for n in ["Foo", "Bar"] { std::fs::write(dir.join(format!("{n}.md")), "").unwrap(); }
+        let v = open(dir.clone(), &db, None).unwrap();
+        std::fs::create_dir(dir.join(".velo")).unwrap();
+        std::fs::write(dir.join(".velo/archived"), "Foo\n").unwrap();
+        assert_eq!(shown(&v), ["Bar"]);
+        std::fs::write(dir.join(".velo/archived"), "Bar\n").unwrap(); // same size, same tick
+        assert_eq!(shown(&v), ["Foo"]);
+    }
+    #[cfg(unix)] #[test] fn unreadable_list_keeps_the_loaded_set_and_only_logs() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, db) = setup(); for n in ["A", "B"] { std::fs::write(dir.join(format!("{n}.md")), "").unwrap(); }
+        std::fs::create_dir(dir.join(".velo")).unwrap(); std::fs::write(dir.join(".velo/archived"), "A\n").unwrap();
+        let f = dir.join(".velo/archived");
+        let chmod = |m| std::fs::set_permissions(&f, std::fs::Permissions::from_mode(m)).unwrap();
+        chmod(0o000); // cold start, unreadable: nothing loaded, everything shows
+        let v = open(dir.clone(), &db, None).unwrap();
+        assert_eq!(shown(&v), ["A", "B"]);
+        assert!(v.archive_error.take().is_none()); // log only, no UI event
+        chmod(0o644); assert_eq!(shown(&v), ["B"]); // readable again: loaded
+        chmod(0o000); assert_eq!(shown(&v), ["B"]); // unreadable later: the loaded set stays
+        chmod(0o644);
+    }
+    #[test] fn unlocked_archived_note_follows_the_flag() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        std::fs::write(dir.join("S.md"), "secretword\n- [ ] hush").unwrap();
+        let mut v = open(dir.clone(), &db, Some(&id)).unwrap();
+        let p = v.lock_note(&s(&dir.join("S.md")), &id).unwrap(); // stays unlocked in memory
+        v.set_archived(&p, true).unwrap();
+        assert!(v.search_where("secretword", Sort::Title, 0, &[], false, false).unwrap().hits.is_empty());
+        assert!(v.search_where("secretword", Sort::Title, 0, &[], false, true).unwrap().hits[0].archived);
+        assert!(v.tasks("", &[], false, false).unwrap().no_date.is_empty());
+        assert!(v.tasks("", &[], false, true).unwrap().no_date[0].archived);
+    }
+    #[test] fn each_folder_has_its_own_list() { // Settings > notes folder changed: the new vault reads the new folder's list
+        let (a, db) = setup(); let (b, db2) = setup();
+        for d in [&a, &b] { std::fs::write(d.join("N.md"), "").unwrap(); }
+        open(a.clone(), &db, None).unwrap().set_archived(&s(&a.join("N.md")), true).unwrap();
+        assert_eq!(open(b, &db2, None).unwrap().search_where("", Sort::Title, 0, &[], false, false).unwrap().total, 1);
     }
 }
