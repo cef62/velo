@@ -31,7 +31,7 @@ describe('v2 layout rules', () => {
   })
   it('pane bar labels: in full or icon-only, per mode, on both sides of each boundary', () => {
     // [mode, first width with labels, tabs active] / [first width with labelled controls] / [... with all tabs labelled]
-    const edges = { notes: [269, 341, 443], tasks: [227, 308, 410], timeline: [271, 360, 447] } as const
+    const edges = { notes: [269, 357, 460], tasks: [235, 308, 410], timeline: [271, 368, 456] } as const
     for (const [tab, [tabs, controls, controlsAll]] of Object.entries(edges) as [keyof typeof edges, readonly number[]][]) {
       expect(paneBarMode(tabs - 1, tab).labels).toBe('none')
       expect(paneBarMode(tabs, tab).labels).toBe('active')
@@ -46,7 +46,9 @@ describe('v2 layout rules', () => {
   it('counts beside the tabs have a fixed worst case the thresholds were measured with', () => {
     expect(noteCount(9999)).toBe('9,999')
     expect(noteCount(10004)).toBe('10K')
-    expect(noteCount(99999)).toBe('100K')
+    expect(noteCount(10500)).toBe('10K') // truncates, never overstates
+    expect(noteCount(99999)).toBe('99K')
+    expect(noteCount(1000000)).toBe('1M')
     expect(dueText(99)).toBe('99')
     expect(dueText(100)).toBe('99+')
     expect(dueText(999)).toBe('99+')

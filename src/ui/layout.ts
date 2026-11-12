@@ -10,20 +10,23 @@ const W = {
   headerHideHint: 720, // window < this: hide the ⌘L hint in the search field
 } as const
 
-// Pane bar: a label shows in full or not at all (never truncated), and nothing clips from MIN_LIST_W (216 px) up.
+// Pane bar: a label shows in full or not at all (never truncated), and nothing clips or shrinks from MIN_LIST_W (216 px) up.
 // The thresholds are measured in the demo with the widest content the bar may hold, not with typical content:
-//  - note count: noteCount() caps it at 5 characters ("9,999", then "10K" ... "100K"); it is hidden while the tabs are icon-only;
+//  - note count: noteCount() caps it at 5 characters ("9,999" is the widest, then "10K" ... "99K"); it is hidden while the tabs are icon-only;
 //  - Tasks due badge: dueText() caps it at "99+"; it shows in every mode;
-//  - timeline label "Updated · 30d" (the widest).
+//  - widest menu labels, found by measuring every one: Sort "Title A→Z" (wider than "Recent"); timeline "Updated · 30d"
+//    (wider than "Created · 30d", "Updated · All" and every 7d label). The sort and timeline labels are the ones that were
+//    truncated in review when only "Recent" and the default timeline label were measured.
 // Per mode [tabs keep the active label from, controls labelled from (tabs 'active'), controls labelled from (tabs 'all')],
-// each the first width where a sweep of 216-600 px (3 modes, 9,999 notes, 999 due) shows no clipped or truncated item, plus 2 px:
-//   Notes    267 + 2 = 269 · 339 + 2 = 341 · 441 + 2 = 443
-//   Tasks    227       · 306 + 2 = 308 · 408 + 2 = 410
-//   Timeline 269 + 2 = 271 · 360       · 447
+// each the first width where a sweep of 216-600 px (3 modes, every sort and timeline label, 99,999 notes, 999 due) shows no
+// clipped, truncated or shrunken item, plus 2 px. Last failing width -> threshold:
+//   Notes    267 + 2 = 269 (Recent) · 354 + 2 = 357 (Title A→Z, 9,999) · 457 + 2 = 460 (Title A→Z, 9,999)
+//   Tasks    232 + 2 = 235 (icon-only Show done shrinks) · 306 + 2 = 308 · 408 + 2 = 410
+//   Timeline 268 + 2 = 271 · 365 + 2 = 368 (Updated · 30d)        · 453 + 2 = 456 (Updated · 30d)
 // Below the first number the tabs go icon-only; the narrowest pane (MIN_LIST_W) fits that for every mode.
-const PANE_FULL = { notes: [269, 341, 443], tasks: [227, 308, 410], timeline: [271, 360, 447] } as const
-/** Notes count beside the tabs: at most 5 characters whatever the vault size. */
-export const noteCount = (n: number) => (n < 10000 ? n.toLocaleString('en-US') : new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 0 }).format(n))
+const PANE_FULL = { notes: [269, 357, 460], tasks: [235, 308, 410], timeline: [271, 368, 456] } as const
+/** Notes count beside the tabs: at most 5 characters whatever the vault size; never rounds up (10,500 -> "10K"). */
+export const noteCount = (n: number) => (n < 10000 ? n.toLocaleString('en-US') : new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 0, roundingMode: 'trunc' } as Intl.NumberFormatOptions).format(n)) // roundingMode is missing from the TS lib
 /** The exact total with its unit, as the count would read uncapped. */
 export const notesText = (n: number) => `${n.toLocaleString('en-US')} ${n === 1 ? 'note' : 'notes'}`
 /** Extra text for the Notes tab (tooltip, accessible name) when the count beside the tabs is hidden or capped; else ''. */

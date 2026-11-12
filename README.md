@@ -73,7 +73,7 @@ Keep a search you use often. With a search text, tags or the No links chip activ
 
 Archive a note to take it out of your way without deleting it. Open the note, then choose Archive note in its `⋯` menu or in the command palette (or press a shortcut you bind in Settings). The same entry reads Unarchive note on an archived note. A locked note must be opened (passphrase) first; archiving never decrypts or rewrites it.
 
-Archived notes are hidden from the list, search, the timeline, Tasks, the tags panel and its counts, and from agents (see Agents (MCP)). An existing link to an archived note still opens it. `[[` suggests archived titles only while the Show archived notes button is on, and typing the exact title of an archived note never offers to create it (Shift+Enter opens that note). A task added to an archived note stays hidden with it.
+Archived notes are hidden from the list, search, the timeline, Tasks, the tags panel and its counts (a selected tag that only archived notes carry stays there with count 0), and from agents (see Agents (MCP)). An existing link to an archived note still opens it. `[[` suggests archived titles only while the Show archived notes button is on, and typing the exact title of an archived note never offers to create it (Shift+Enter opens that note). A task added to an archived note stays hidden with it.
 
 The Show archived notes button sits in the bar above the list, in the Notes, Tasks and Timeline views. It stays on until you switch it off, including across a relaunch. While it is on, archived rows are dimmed and carry an "archived" badge. While it is off, a line under the Notes list says how many archived notes the current search or filter hides ("1 archived note hidden", "3 archived notes hidden").
 
