@@ -73,16 +73,16 @@ Keep a search you use often. With a search text, tags or the No links chip activ
 
 Archive a note to take it out of your way without deleting it. Open the note, then choose Archive note in its `⋯` menu or in the command palette (or press a shortcut you bind in Settings). The same entry reads Unarchive note on an archived note. A locked note must be opened (passphrase) first; archiving never decrypts or rewrites it.
 
-Archived notes are hidden from the list, search, the timeline, Tasks, the tags panel and its counts, and from agents (see Agents (MCP)). Links to them still work and `[[` still completes their titles; you can open one by link or by title. A task added to an archived note stays hidden with it.
+Archived notes are hidden from the list, search, the timeline, Tasks, the tags panel and its counts, and from agents (see Agents (MCP)). An existing link to an archived note still opens it. `[[` suggests archived titles only while the Show archived notes button is on, and typing the exact title of an archived note never offers to create it (Shift+Enter opens that note). A task added to an archived note stays hidden with it.
 
-The Show / hide archived notes button sits in the bar above the list, in the Notes, Tasks and Timeline views. It stays on until you switch it off, including across a relaunch. While it is on, archived rows are dimmed and carry an "archived" badge. While it is off, a line under the list says how many archived notes the current search hides ("1 archived note hidden", "3 archived notes hidden").
+The Show archived notes button sits in the bar above the list, in the Notes, Tasks and Timeline views. It stays on until you switch it off, including across a relaunch. While it is on, archived rows are dimmed and carry an "archived" badge. While it is off, a line under the Notes list says how many archived notes the current search or filter hides ("1 archived note hidden", "3 archived notes hidden").
 
 Renaming or locking an archived note keeps it archived. The list is stored in `.velo/archived` inside your notes folder, one title per line.
 
 Known limits:
 
 - A rename done in Finder (or any tool other than velo) un-archives the note, because the list goes by title.
-- A hand edit of `.velo/archived` takes effect at the next search.
+- A hand edit of `.velo/archived` takes effect at the next search; the open note's badge and palette entry update when you reopen it.
 - If `.velo/archived` cannot be read at start-up, archived notes show until it can be.
 
 ## Timeline
