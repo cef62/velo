@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod archive;
 pub mod commands;
 pub mod connections;
 pub mod crypto;
