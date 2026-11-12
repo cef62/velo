@@ -308,8 +308,9 @@ impl Vault {
     pub fn search_where(&self, query: &str, sort: Sort, offset: usize, tags: &[String], no_links: bool, include_archived: bool) -> anyhow::Result<Page> {
         self.sync_archive();
         let mut page = self.index.search_page_where(query, sort, offset, PAGE, tags, &self.unlocked, no_links, include_archived)?;
-        if !include_archived && offset == 0 {
-            page.hidden = self.index.search_page_where(query, sort, 0, 0, tags, &self.unlocked, no_links, true)?.total - page.total;
+        // nothing archived: hidden is 0 by definition. saturating: another process can change the note set between the two reads
+        if !include_archived && offset == 0 && !self.archive_loaded.borrow().is_empty() {
+            page.hidden = self.index.search_page_where(query, sort, 0, 0, tags, &self.unlocked, no_links, true)?.total.saturating_sub(page.total);
         }
         Ok(page)
     }
@@ -2170,6 +2171,13 @@ mod tests {
         assert!(v.tasks("", &[], false, true).unwrap().no_date[0].archived);
         assert_eq!(v.tags(false).unwrap()[0].count, 1);
         assert!(v.open_note(&s(&dir.join("Meeting.md")), None).unwrap().archived);
+    }
+    #[test] fn search_without_a_list_file_hides_nothing() {
+        let (dir, db) = setup(); std::fs::write(dir.join("A.md"), "agenda").unwrap();
+        let v = open(dir.clone(), &db, None).unwrap();
+        assert!(!dir.join(".velo/archived").exists());
+        let p = v.search_where("agenda", Sort::Title, 0, &[], false, false).unwrap();
+        assert_eq!((p.total, p.hidden), (1, 0));
     }
     #[test] fn archiving_leaves_the_file_untouched() {
         let (dir, db) = setup(); let f = dir.join("A.md"); std::fs::write(&f, "a").unwrap();
