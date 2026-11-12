@@ -1,25 +1,25 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 
-export type Hit = { path: string; title: string; snippet: string; mtime: number; encrypted: boolean };
+export type Hit = { path: string; title: string; snippet: string; mtime: number; encrypted: boolean; archived: boolean };
 export type NoteMeta = { created: number; created_src: "frontmatter" | "file"; modified: number; modified_src: "frontmatter" | "file"; tags: string[]; aliases: string[] };
-export type NoteDoc = { path: string; title: string; text: string; hash: string; encrypted: boolean; meta: NoteMeta };
+export type NoteDoc = { path: string; title: string; text: string; hash: string; encrypted: boolean; meta: NoteMeta; archived: boolean };
 export type SaveResult = { kind: "saved"; hash: string; front_matter: string | null; meta: NoteMeta } | { kind: "conflict"; conflict_path: string; disk_hash: string };
-export type TaskItem = { path: string; title: string; line: number; text: string; due: string | null; done: boolean; done_on: string | null; line_text: string };
+export type TaskItem = { path: string; title: string; line: number; text: string; due: string | null; done: boolean; done_on: string | null; line_text: string; archived: boolean };
 export type TaskView = { overdue: TaskItem[]; today: TaskItem[]; upcoming: TaskItem[]; no_date: TaskItem[]; done: TaskItem[]; due_count: number };
 export type RenameResult = { path: string; rewritten: number };
 export type MergeResult = { path: string; rewritten: number; trash_error: string | null };
 export type SavedSearch = { name: string; query: string; tags: string[]; no_links: boolean };
-export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean; capture_target: "inbox" | "daily"; inbox_title: string; agent_access: boolean; saved_searches: SavedSearch[]; timeline_sort: "updated" | "created"; palette: string; app_icon: "dock" | "tray" | "none"; tasks_by_note: boolean };
+export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean; capture_target: "inbox" | "daily"; inbox_title: string; agent_access: boolean; saved_searches: SavedSearch[]; timeline_sort: "updated" | "created"; palette: string; app_icon: "dock" | "tray" | "none"; tasks_by_note: boolean; show_archived: boolean };
 
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<void>("set_settings", { settings });
-export type Page = { hits: Hit[]; has_more: boolean; total: number };
+export type Page = { hits: Hit[]; has_more: boolean; total: number; hidden: number };
 export type TagCount = { tag: string; count: number };
-export const search = (query: string, sort: "modified" | "title", offset: number, tags: string[], noLinks: boolean) => invoke<Page>("search", { query, sort, offset, tags, noLinks });
-export type TimelineRow = { path: string; title: string; date: number; snippet: string; locked: boolean };
-export const timeline = (query: string, tags: string[], noLinks: boolean, by: "created" | "updated", sinceMs: number | null) => invoke<TimelineRow[]>("timeline", { query, tags, noLinks, by, sinceMs });
-export type ExportRequest = { query: string; tags: string[]; no_links: boolean; by: "created" | "updated"; since_ms: number | null; tasks_only: boolean; title: string };
+export const search = (query: string, sort: "modified" | "title", offset: number, tags: string[], noLinks: boolean, includeArchived: boolean) => invoke<Page>("search", { query, sort, offset, tags, noLinks, includeArchived });
+export type TimelineRow = { path: string; title: string; date: number; snippet: string; locked: boolean; archived: boolean };
+export const timeline = (query: string, tags: string[], noLinks: boolean, by: "created" | "updated", sinceMs: number | null, includeArchived: boolean) => invoke<TimelineRow[]>("timeline", { query, tags, noLinks, by, sinceMs, includeArchived });
+export type ExportRequest = { query: string; tags: string[]; no_links: boolean; by: "created" | "updated"; since_ms: number | null; tasks_only: boolean; title: string; include_archived: boolean };
 export type ExportCounts = { notes: number; open: number; done: number; locked: number; over_limit: number; no_tasks: number; unreadable: number };
 export const exportPreview = (request: ExportRequest) => invoke<ExportCounts>("export_preview", { request });
 export const exportText = (request: ExportRequest) => invoke<string>("export_text", { request });
@@ -27,18 +27,18 @@ export const exportText = (request: ExportRequest) => invoke<string>("export_tex
 export const printPage = () => invoke<void>("print_page");
 /** Writes the export to exactly `path`. */
 export const exportMarkdown = (path: string, request: ExportRequest) => invoke<ExportCounts>("export_markdown", { path, request });
-export const listTags = () => invoke<TagCount[]>("list_tags");
+export const listTags = (includeArchived: boolean) => invoke<TagCount[]>("list_tags", { includeArchived });
 export const listTitles = () => invoke<string[]>("list_titles");
 /** `name == title` rows are titles, the others aliases. */
 export type LinkTarget = { name: string; title: string; path: string; modified: number; locked: boolean };
-export const listLinkTargets = () => invoke<LinkTarget[]>("list_link_targets");
+export const listLinkTargets = (includeArchived: boolean) => invoke<LinkTarget[]>("list_link_targets", { includeArchived });
 /** Creates the note `title` holding `text`; rejects with "already-exists" or "invalid-title". */
 export const createFromSelection = (title: string, text: string) => invoke<string>("create_from_selection", { title, text });
 export const openNote = (path: string) => invoke<NoteDoc>("open_note", { path });
 /** `created`: the file did not exist before this call. */
 export const openOrCreate = (title: string) => invoke<NoteDoc & { created: boolean }>("open_or_create", { title });
 export const saveNote = (path: string, text: string, baseHash: string) => invoke<SaveResult>("save_note", { path, text, baseHash });
-export const tasks = (query: string, tags: string[], showDone: boolean) => invoke<TaskView>("tasks", { query, tags, showDone });
+export const tasks = (query: string, tags: string[], showDone: boolean, includeArchived: boolean) => invoke<TaskView>("tasks", { query, tags, showDone, includeArchived });
 /** Resolves to the toggled task's line and raw text as saved (front-matter stamping may shift it): what undo sends. */
 export const toggleTask = (path: string, line: number, expected: string) => invoke<{ line: number; line_text: string }>("toggle_task", { path, line, expected });
 export const captureTask = (text: string) => invoke<string>("capture_task", { text });
@@ -52,13 +52,15 @@ export const resetWindow = () => invoke<void>("reset_window_cmd");
 export const captureDone = (hide: boolean) => invoke<void>("capture_done", { hide });
 export const setBadge = (count: number) => invoke<void>("set_badge", { count });
 export const renameNote = (path: string, newTitle: string, rewriteLinks: boolean) => invoke<RenameResult>("rename_note", { path, newTitle, rewriteLinks });
-export type GraphNode = { path: string; title: string; created: number; modified: number; preview: string; locked: boolean; context: string }; // context: the linking line, for links_in
+export type GraphNode = { path: string; title: string; created: number; modified: number; preview: string; locked: boolean; context: string; archived: boolean }; // context: the linking line, for links_in
 export type TagGroup = { tag: string; count: number; notes: GraphNode[] };
 export type Mention = { node: GraphNode; name: string; count: number; context: string };
 export type Connections = { centre: GraphNode; links_out: GraphNode[]; links_in: GraphNode[]; tags: TagGroup[]; mentions: Mention[]; missing: string[] };
-export const connections = (path: string) => invoke<Connections>("connections", { path });
+export const connections = (path: string, includeArchived: boolean) => invoke<Connections>("connections", { path, includeArchived });
 /** Wraps the first mention in [[…]]; with editorText: resolves to the rewritten text (the editor applies it); without: saves and resolves null. Rejects "mention-moved" | "locked" | "conflict". */
-export const linkMention = (path: string, targetTitle: string, expectedCount: number, editorText: string | null) => invoke<string | null>("link_mention", { path, targetTitle, expectedCount, editorText });
+export const linkMention = (path: string, targetTitle: string, expectedCount: number, editorText: string | null, includeArchived: boolean) => invoke<string | null>("link_mention", { path, targetTitle, expectedCount, editorText, includeArchived });
+/** Archives or unarchives the note at `path`; never touches the file. */
+export const setArchived = (path: string, archived: boolean) => invoke<void>("set_archived", { path, archived });
 export const backlinkCount = (title: string) => invoke<number>("backlink_count", { title });
 export const lockNote = (path: string) => invoke<string>("lock_note", { path });
 export const unlockNote = (path: string) => invoke<string>("unlock_note", { path });

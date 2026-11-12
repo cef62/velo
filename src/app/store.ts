@@ -59,6 +59,7 @@ export interface AppState {
   theme: "system" | "light" | "dark";
   fontSize: number;
   writeFrontMatter: boolean;
+  showArchived: boolean; // list the archived notes too
   tasksByNote: boolean; // Tasks pane: one heading per note inside each date section
   showFrontMatter: boolean;
   infoOpen: boolean;
@@ -119,6 +120,7 @@ export const initialState = (isMac: boolean): AppState => ({
   theme: "system",
   fontSize: 14,
   writeFrontMatter: true,
+  showArchived: false,
   tasksByNote: true,
   showFrontMatter: false,
   infoOpen: false,

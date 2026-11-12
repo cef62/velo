@@ -65,6 +65,7 @@ void listen("capture", () => void controller.startCapture());
 void listen<{ done: number; total: number }>("index-progress", (ev) => controller.onIndexProgress(ev.payload.done, ev.payload.total));
 void listen("index-done", () => void controller.onIndexDone());
 void listen<{ message: string }>("index-error", (ev) => controller.onIndexError(ev.payload.message));
+void listen<{ message: string }>("archive-error", (ev) => controller.onArchiveError(ev.payload.message));
 void listen<{ version: string }>("update-available", (ev) => controller.onUpdateAvailable(ev.payload.version));
 void listen<{ downloaded: number; total: number | null }>("update-progress", (ev) => controller.onUpdateProgress(ev.payload.downloaded, ev.payload.total));
 void listen("update-installing", () => controller.onUpdateInstalling());

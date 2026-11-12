@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { enterAction, fold, moveSelection } from "./search";
 
-const h = (path: string, title: string) => ({ path, title, snippet: "", mtime: 0, encrypted: false });
+const h = (path: string, title: string) => ({ path, title, snippet: "", mtime: 0, encrypted: false, archived: false });
 test("fold", () => expect(fold("Résumé CAFÉ")).toBe("resume cafe"));
 const foobar = h("Foobar.md", "Foobar");
 test("enter opens the highlighted row", () => expect(enterAction("foo", [foobar, h("FOO.md", "FOO")], foobar)).toEqual({ kind: "open", path: "Foobar.md" }));
