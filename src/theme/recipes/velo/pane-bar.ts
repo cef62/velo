@@ -44,12 +44,13 @@ export const paneBar = defineSlotRecipe({
     meta: { fontSize: 'uiSm', color: 'velo.fgMuted', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' },
   },
   variants: {
-    // labels: all tabs labelled (pane ≥ 380 px) or only the selected one
+    // labels: all tabs labelled (pane ≥ 380 px), only the selected one, or none (narrowest panes)
     labels: {
       all: {},
       active: { tab: { '&[aria-selected=false] [data-label]': { display: 'none' }, '&[aria-selected=false]': { px: '1.5' } } },
+      none: { tab: { '& [data-label]': { display: 'none' }, px: '1.5' } }, // very narrow pane: icons only, the tab keeps its aria-label
     },
   },
   defaultVariants: { labels: 'all' },
-  staticCss: [{ labels: ['all', 'active'] }],
+  staticCss: [{ labels: ['all', 'active', 'none'] }],
 })

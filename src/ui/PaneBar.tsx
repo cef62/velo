@@ -40,9 +40,9 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
     setW(e.offsetWidth);
     return () => ro.disconnect();
   }, []);
-  const mode = paneBarMode(w);
-  const c = paneBar({ labels: mode.labels });
   const cur: PaneTab = paneMode;
+  const mode = paneBarMode(w, cur);
+  const c = paneBar({ labels: mode.labels });
   const kbd = (a: Action) => (keys[a] === NONE ? null : <Kbd marginLeft="auto">{formatBinding(keys[a], isMac)}</Kbd>);
   const tip = (a: Action | null, text: string) => (!a || keys[a] === NONE ? text : `${text} (${formatBinding(keys[a], isMac)})`);
   const menuBtn = (text: string, aria: string, glyph: ReactNode, extra: Record<string, unknown> = {}) => (
@@ -106,10 +106,12 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
       )}
       {cur === "tasks" && (
         <>
-          <button type="button" className={menuButton({ iconOnly: mode.menusIconOnly })} aria-pressed={showDone} aria-label="Show done" onClick={() => void controller.toggleShowDone()}>
-            <Check aria-hidden />
-            <span data-label>Show done</span>
-          </button>
+          <Tooltip content="Show done" openDelay={500} disabled={!mode.menusIconOnly}>
+            <button type="button" className={menuButton({ iconOnly: mode.menusIconOnly })} aria-pressed={showDone} aria-label="Show done" onClick={() => void controller.toggleShowDone()}>
+              <Check aria-hidden />
+              <span data-label>Show done</span>
+            </button>
+          </Tooltip>
           {archivedToggle}
         </>
       )}
@@ -117,7 +119,7 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
         <>
           <Menu.Root positioning={{ placement: "bottom-end" }}>
             <Menu.Trigger asChild>
-              {menuBtn(`${tl.by === "created" ? "Created" : "Updated"} · ${tl.range === "all" ? "All" : `${tl.range}d`}`, `Timeline: by ${tl.by}, ${tl.range === "all" ? "all time" : `last ${tl.range} days`}`, null)}
+              {menuBtn(`${tl.by === "created" ? "Created" : "Updated"} · ${tl.range === "all" ? "All" : `${tl.range}d`}`, `Timeline: by ${tl.by}, ${tl.range === "all" ? "all time" : `last ${tl.range} days`}`, mode.menusIconOnly ? <CalendarDays /> : null)}
             </Menu.Trigger>
             <Menu.Positioner>
               <Menu.Content minW="200px">
