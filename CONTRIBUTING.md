@@ -14,9 +14,9 @@ Run before every commit that finishes a task and before opening a PR. Report the
 
 | # | Check | How |
 |---|---|---|
-| 1 | Verify | `pnpm exec tsc --noEmit`, `pnpm test`, `cd src-tauri && cargo test` all green; new logic has a test (Vitest next to the module, inline `#[cfg(test)]` in Rust) |
+| 1 | Verify | `pnpm exec tsc --noEmit`, `pnpm exec tsc -p e2e --noEmit`, `pnpm test`, `cd src-tauri && cargo test` all green; new logic has a test (Vitest next to the module, inline `#[cfg(test)]` in Rust) |
 | 2 | App build | when `src-tauri/` or `tauri.conf.json` changed: `pnpm build:app` (or at least `cargo build --release`) |
-| 3 | Docs | README reflects new behaviour, settings and shortcuts; comments explain why, not what |
+| 3 | Docs | `pnpm docs:check` green (`pnpm docs:gen` if stale); README reflects new behaviour, settings and shortcuts; comments explain why, not what |
 | 4 | Staleness | no orphaned files, no unused dependencies in `package.json` or `Cargo.toml`, no docs pointing at removed code |
 | 5 | Capabilities | `src-tauri/capabilities/default.json` grants exactly what the code uses; `opener:allow-open-url` keeps its URL scope |
 
