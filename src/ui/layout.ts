@@ -24,6 +24,12 @@ const W = {
 const PANE_FULL = { notes: [269, 341, 443], tasks: [227, 308, 410], timeline: [271, 360, 447] } as const
 /** Notes count beside the tabs: at most 5 characters whatever the vault size. */
 export const noteCount = (n: number) => (n < 10000 ? n.toLocaleString('en-US') : new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 0 }).format(n))
+/** The exact total with its unit, as the count would read uncapped. */
+export const notesText = (n: number) => `${n.toLocaleString('en-US')} ${n === 1 ? 'note' : 'notes'}`
+/** Extra text for the Notes tab (tooltip, accessible name) when the count beside the tabs is hidden or capped; else ''. */
+export const notesExtra = (total: number, shown: boolean) => (total > 0 && (!shown || total >= 10000) ? notesText(total) : '')
+/** Extra text for the Tasks tab tooltip when the badge is capped; else ''. */
+export const dueExtra = (n: number) => (n > 99 ? `${n.toLocaleString('en-US')} due` : '')
 /** Due badge text: at most 3 characters. */
 export const dueText = (n: number) => (n > 99 ? '99+' : String(n))
 export type PaneBarTab = keyof typeof PANE_FULL

@@ -6,7 +6,7 @@ import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { Kbd, Menu, Tooltip } from "@/components/ui";
 import { formatBinding, NONE, type Action } from "../shortcuts";
-import { dueText, noteCount, paneBarMode } from "./layout";
+import { dueExtra, dueText, noteCount, notesExtra, notesText, paneBarMode } from "./layout";
 import { PANE_TABS, stepPaneTab, type PaneTab } from "./paneTabs";
 import { useStore } from "./useStore";
 
@@ -45,6 +45,10 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
   const c = paneBar({ labels: mode.labels });
   const kbd = (a: Action) => (keys[a] === NONE ? null : <Kbd marginLeft="auto">{formatBinding(keys[a], isMac)}</Kbd>);
   const tip = (a: Action | null, text: string) => (!a || keys[a] === NONE ? text : `${text} (${formatBinding(keys[a], isMac)})`);
+  const countShown = mode.labels !== "none"; // the note count beside the tabs
+  // exact counts the bar hides or caps ride on the tab tooltips (hover and keyboard focus) and, for the Notes tab, its accessible name
+  const tabExtra = (t: PaneTab) => (t === "notes" ? notesExtra(total, countShown) : t === "tasks" ? dueExtra(dueCount) : "");
+  const tabTip = (t: PaneTab) => [tip(TAB[t].action, TAB[t].text), tabExtra(t)].filter(Boolean).join(" · ");
   // The menu trigger; icon-only, a tooltip carries the label the button would show (it names the current value too).
   const menuBtn = (text: string, aria: string, glyph: ReactNode) => {
     const trigger = (
@@ -83,8 +87,8 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
         }}
       >
         {PANE_TABS.map((t) => (
-          <Tooltip key={t} content={tip(TAB[t].action, TAB[t].text)} openDelay={500}>
-            <button type="button" role="tab" data-tab={t} aria-selected={t === cur} tabIndex={t === cur ? 0 : -1} className={c.tab} aria-label={t === "tasks" && dueCount > 0 ? `Tasks, ${dueCount} due` : TAB[t].text} onClick={() => t !== cur && controller.setPaneMode(t)}>
+          <Tooltip key={t} content={tabTip(t)} openDelay={500}>
+            <button type="button" role="tab" data-tab={t} aria-selected={t === cur} tabIndex={t === cur ? 0 : -1} className={c.tab} aria-label={t === "tasks" && dueCount > 0 ? `Tasks, ${dueCount} due` : t === "notes" && !countShown && total > 0 ? `Notes, ${notesText(total)}` : TAB[t].text} onClick={() => t !== cur && controller.setPaneMode(t)}>
               {TAB[t].glyph}
               <span data-label>{TAB[t].text}</span>
               {t === "tasks" && dueCount > 0 && <span className={countBadge({ tone: "danger" })} aria-hidden="true">{dueText(dueCount)}</span>}
@@ -95,7 +99,11 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
       <span className={c.spacer} />
       {cur === "notes" && (
         <>
-          {total > 0 && mode.labels !== "none" && <span className={c.meta} title={`${total.toLocaleString("en-US")} notes`}>{noteCount(total)}</span>}
+          {total > 0 && countShown && (
+            <Tooltip content={notesText(total)} openDelay={500}>
+              <span className={c.meta}>{noteCount(total)}</span>
+            </Tooltip>
+          )}
           <Menu.Root positioning={{ placement: "bottom-end" }}>
             {menuBtn(sort === "title" ? "Title A→Z" : "Recent", `Sort: ${sort === "title" ? "title" : "recent"}`, sort === "title" ? <ArrowDownAZ /> : <Clock />)}
             <Menu.Positioner>

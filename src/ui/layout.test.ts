@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dueText, noteCount, paneBarMode, showSearchHint, sidePanelMode, titleBarMode } from './layout'
+import { dueExtra, dueText, notesExtra, notesText, noteCount, paneBarMode, showSearchHint, sidePanelMode, titleBarMode } from './layout'
 
 // The sizes the v2 mocks are drawn at (design/park-ui/v2/reference/V2Small, V2Wide, V2Main*).
 describe('v2 layout rules', () => {
@@ -50,5 +50,18 @@ describe('v2 layout rules', () => {
     expect(dueText(99)).toBe('99')
     expect(dueText(100)).toBe('99+')
     expect(dueText(999)).toBe('99+')
+  })
+  it('tooltip text for counts the bar hides or caps', () => {
+    expect(notesText(1)).toBe('1 note')
+    expect(notesText(9999)).toBe('9,999 notes')
+    expect(notesText(10004)).toBe('10,004 notes')
+    expect(notesText(99999)).toBe('99,999 notes')
+    expect(notesExtra(10004, false)).toBe('10,004 notes') // hidden (tabs icon-only)
+    expect(notesExtra(1, false)).toBe('1 note')
+    expect(notesExtra(0, false)).toBe('')
+    expect(notesExtra(9999, true)).toBe('') // shown in full: nothing to add
+    expect(notesExtra(10004, true)).toBe('10,004 notes') // shown capped as 10K
+    expect(dueExtra(99)).toBe('')
+    expect(dueExtra(150)).toBe('150 due')
   })
 })
