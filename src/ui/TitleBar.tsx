@@ -63,7 +63,7 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
     setW(e.offsetWidth);
     return () => ro.disconnect();
   }, []);
-  const mode = titleBarMode(w);
+  const mode = titleBarMode(w, s.renaming);
   const [canExtract, setCanExtract] = useState(false); // read when the ⋯ menu opens
   const bar = { ...c, root: `${c.root} ${root}` };
   const view: View = s.previewOn ? "preview" : s.editorStyle;
@@ -138,7 +138,7 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
           Saving…
         </span>
       ) : null}
-      {s.openPath && (
+      {s.openPath && !mode.hideActions && (
         <div className={bar.actions}>
           {mode.viewSwitch === "segments" ? (
             <SegmentGroup.Root size="2xs" value={view} onValueChange={(d) => d.value && d.value !== view && setView(d.value as View)} aria-label="View">

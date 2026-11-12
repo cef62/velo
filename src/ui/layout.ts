@@ -12,7 +12,7 @@ const W = {
 } as const
 
 export type PaneBarMode = { labels: 'all' | 'active'; menusIconOnly: boolean }
-export type TitleBarMode = { viewSwitch: 'segments' | 'menu'; lockInMenu: boolean; renameHint: boolean }
+export type TitleBarMode = { viewSwitch: 'segments' | 'menu'; lockInMenu: boolean; renameHint: boolean; hideActions: boolean }
 
 /** Left pane bar: every tab labelled when there is room, else only the selected one. */
 export const paneBarMode = (paneWidth: number): PaneBarMode => ({
@@ -21,10 +21,12 @@ export const paneBarMode = (paneWidth: number): PaneBarMode => ({
 })
 
 /** Note title bar: Rich · Plain · Preview segments, or one "Rich ▾" menu button; Lock folds into ⋯ last. */
-export const titleBarMode = (noteWidth: number): TitleBarMode => ({
+export const titleBarMode = (noteWidth: number, renaming = false): TitleBarMode => ({
   viewSwitch: noteWidth >= W.noteViewMenu ? 'segments' : 'menu',
   lockInMenu: noteWidth < W.noteLockInMenu,
   renameHint: noteWidth >= W.noteRenameHint,
+  // any click on an action blurs the input and cancels the rename, so while renaming a narrow bar drops them for the input
+  hideActions: renaming && noteWidth < W.noteLockInMenu,
 })
 
 /** Side panel docks beside the note unless that would squeeze the note under 480 px; then it overlays. */
