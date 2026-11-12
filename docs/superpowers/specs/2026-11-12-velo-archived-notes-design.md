@@ -89,10 +89,11 @@ These are the designer's calls. The owner has not ruled on them one by one; each
 
 - Path: `<notes folder>/.velo/archived`. UTF-8, one entry per line, `\n` line ends, no header.
 - An entry is the note's title, which is its file name without the extension. Reason: lock and unlock change only the extension (`.md` to `.md.age` and back), so the entry survives them with no extra work.
-- Entries are matched the way velo already matches titles: case-folded (`title_folded` in `index.rs`).
+- Entries are matched the way velo already matches titles: case-folded with `crate::text::fold` (the function behind the index's `title_folded` column).
 - velo itself never creates two notes with the same title (`vault.rs` refuses), but two files with one title can exist on disk: a stale lock twin (`Foo.md` next to `Foo.md.age`) or a file added by hand (`Foo.txt`). An entry applies to every file with that title. Archiving must not make such twins behave differently from today in any other way.
 - A missing file means no note is archived. velo creates the file on the first archive.
-- Entries that match no note are ignored when read and dropped the next time velo writes the file.
+- Entries are removed only by velo's own events: unarchive, delete, merge (the source), and the creation of a note with that title. A rename moves the entry.
+- An entry that matches no note is kept and ignored. velo does not prune the list against the files on disk: a note that is absent for a moment (evicted by iCloud, mid-transfer in a sync tool) must not lose its archived state. Clearing the entry when a note is created with that title stops a leftover entry (after a delete or rename done in Finder) from archiving the new note.
 - Writes are atomic (write a temporary file, then rename), like `settings.json`.
 - Two processes use the file: the app, and the headless MCP server (`velo --mcp`), which renames, deletes and merges notes for agents. Neither may trust a copy read earlier:
   - before answering a query, a process re-reads the file if its modified time changed;
@@ -197,7 +198,7 @@ From a read of the code on 2026-11-12. Verify before relying on them.
 
 ## Left to the builder
 
-- How the index knows a note is archived. `search_page_where` pages in SQL, so filtering results afterwards in memory would break `has_more` and totals. The expected answer is a column in `notes` filled from the list file (a `SCHEMA_VERSION` bump and one full reindex on upgrade are accepted), but any approach that keeps paging and totals correct is fine.
+- How the index knows a note is archived. `search_page_where` pages in SQL, so filtering results afterwards in memory would break `has_more` and totals. The plan settles this with a per-connection temporary table keyed by folded title, joined in the SQL condition: no `SCHEMA_VERSION` bump and no reindex on upgrade.
 - Notes unlocked in memory bypass the SQL query (`Vault::tasks`, `unlocked_hits`); the archived rule must be applied there too.
 - Exact wording of labels, the badge and the hidden-matches line; the icon of the toggle.
 - How the hidden count is computed and carried to the front end.
@@ -206,7 +207,7 @@ From a read of the code on 2026-11-12. Verify before relying on them.
 
 ## Checks the work must leave behind
 
-- List file: read, write, missing file, unknown entries dropped, rename, delete, merge.
+- List file: read, write, missing file, rename, delete, merge; an entry with no matching note is kept and ignored, and creating a note with that title clears it.
 - Each surface in the "hidden" table: an archived note is absent with the switch off and present with it on. Paging and totals are right in both states.
 - Locked note: archive, lock, unlock, relaunch; still archived, never decrypted for it.
 - Archiving leaves the note file's bytes and modified time unchanged.
