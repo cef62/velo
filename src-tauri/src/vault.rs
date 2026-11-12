@@ -336,10 +336,44 @@ impl Vault {
     }
 
     fn archive_edit(&mut self, change: impl FnOnce(&mut Vec<String>)) -> anyhow::Result<()> {
+        debug_assert!(!self.index.in_batch());
         let entries = crate::archive::update(&self.store.dir, change)?;
         self.index.set_archived(&entries)?;
         *self.archive_loaded.borrow_mut() = entries;
         Ok(())
+    }
+
+    /// `archive_edit` for a note operation that already succeeded: a failure is logged and kept in `archive_error`,
+    /// never returned. Runs after the operation's index batch has committed.
+    fn archive_follow(&mut self, change: impl FnOnce(&mut Vec<String>)) {
+        if let Err(e) = self.archive_edit(change) {
+            let m = format!("cannot update {}: {e}", crate::archive::FILE);
+            crate::log::line(&m);
+            eprintln!("{m}");
+            self.archive_error.set(Some(m));
+        }
+    }
+
+    /// Some file in the vault still has a title folding to `title` (a twin: `Foo.md` beside `Foo.txt`).
+    fn title_on_disk(&self, title: &str) -> bool {
+        let f = fold(title);
+        self.store.list().is_ok_and(|l| l.iter().any(|(_, n, _)| fold(&n.title) == f))
+    }
+
+    /// A title moved from `old` to `new`. A stale entry for `new` is always cleared; only an archived note carries its
+    /// entry over, and a twin still on disk keeps `old`'s.
+    fn archive_retitle(&mut self, old: &str, new: &str) {
+        let twin = fold(old) != fold(new) && self.title_on_disk(old);
+        self.archive_follow(|e| {
+            let was = e.iter().any(|t| fold(t) == fold(old));
+            if was && !twin {
+                e.retain(|t| fold(t) != fold(old));
+            }
+            e.retain(|t| fold(t) != fold(new));
+            if was {
+                e.push(new.to_string());
+            }
+        });
     }
 
     /// Archive or unarchive the note at `path`; never reads, decrypts or rewrites the note.
@@ -421,6 +455,7 @@ impl Vault {
         let p = note_path(&dir, title, false);
         self.store.write_atomic(&p, content.as_bytes())?;
         self.reindex(&p, Some(&content))?;
+        self.archive_follow(|e| e.retain(|t| fold(t) != fold(title)));
         Ok(s(&p))
     }
 
@@ -465,6 +500,9 @@ impl Vault {
         }
         let body = lossy(&self.store.read(&p)?);
         self.reindex(&p, Some(&body))?;
+        if created && let Some(written) = parse_note_file(&p) {
+            self.archive_follow(|e| e.retain(|t| fold(t) != fold(&written.title)));
+        }
         Ok((self.open_note(&s(&p), identity)?, created))
     }
 
@@ -536,6 +574,9 @@ impl Vault {
             SaveResult::Conflict { conflict_path, .. } => PathBuf::from(conflict_path),
         };
         self.reindex(&target, (!encrypted).then_some(text))?;
+        if let Some(c) = parse_note_file(&target).filter(|_| target != p) {
+            self.archive_follow(|e| e.retain(|t| fold(t) != fold(&c.title)));
+        }
         // Snapshot the bytes this save replaced, as they were on disk (ciphertext when locked); a conflict replaced nothing.
         // A failed snapshot must never fail a save that already hit the disk.
         if let (SaveResult::Saved { .. }, Some(before)) = (&res, before.filter(|b| !b.is_empty())) {
@@ -592,6 +633,7 @@ impl Vault {
         self.reindex(&to, body.as_deref()).ok();
 
         let rewritten = if rewrite_links_too { self.rewrite_backlinks(&old.title, &nf.title, "") } else { 0 };
+        self.archive_retitle(&old.title, &nf.title);
         Ok(RenameResult { path: to_s, rewritten })
     }
 
@@ -620,6 +662,10 @@ impl Vault {
             // Disk full or I/O error lost the batch; the self-write hides these files from the watcher, so redo them.
             for (src, text) in &done {
                 self.reindex(Path::new(src), Some(text)).ok();
+            }
+            // a failed redo can leave a transaction open; the list update after this must not run inside one
+            if self.index.in_batch() {
+                self.index.commit().ok();
             }
         }
         rewritten
@@ -713,6 +759,9 @@ impl Vault {
         self.index.finish_bulk();
         self.index.checkpoint().ok(); // drop pre-lock WAL frames holding plaintext
         self.unlocked.insert(s(&to), lossy(&plain));
+        if let Some(n) = parse_note_file(&to).filter(|n| fold(&n.title) != fold(&nf.title)) {
+            self.archive_retitle(&nf.title, &n.title);
+        }
         Ok(s(&to))
     }
 
@@ -733,6 +782,9 @@ impl Vault {
         self.index.remove(path).ok();
         self.unlocked.remove(path);
         self.reindex(&to, Some(&lossy(&plain))).ok();
+        if let Some(n) = parse_note_file(&to).filter(|n| fold(&n.title) != fold(&nf.title)) {
+            self.archive_retitle(&nf.title, &n.title);
+        }
         Ok(s(&to))
     }
 
@@ -744,10 +796,13 @@ impl Vault {
     /// `remove` does the actual file removal (Trash in the app, plain remove in tests).
     pub fn delete_note_with(&mut self, path: &str, remove: impl FnOnce(&Path) -> std::io::Result<()>) -> anyhow::Result<()> {
         let p = Path::new(path);
-        self.note(p)?;
+        let title = self.note(p)?.title;
         remove(p)?;
         self.remove_note(path)?;
         self.unlocked.remove(path);
+        if !self.title_on_disk(&title) {
+            self.archive_follow(|e| e.retain(|t| fold(t) != fold(&title)));
+        }
         Ok(())
     }
 
@@ -2178,6 +2233,134 @@ mod tests {
         assert!(!dir.join(".velo/archived").exists());
         let p = v.search_where("agenda", Sort::Title, 0, &[], false, false).unwrap();
         assert_eq!((p.total, p.hidden), (1, 0));
+    }
+    #[test] fn rename_moves_the_entry() {
+        let (dir, db) = setup(); std::fs::write(dir.join("Old.md"), "").unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap(); let p = s(&dir.join("Old.md"));
+        v.set_archived(&p, true).unwrap(); v.rename_note(&p, "New", false).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join(".velo/archived")).unwrap(), "New\n");
+        assert!(shown(&v).is_empty());
+    }
+    #[test] fn case_only_rename_keeps_archived() {
+        let (dir, db) = setup(); std::fs::write(dir.join("meeting notes.md"), "").unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap(); let p = s(&dir.join("meeting notes.md"));
+        v.set_archived(&p, true).unwrap(); v.rename_note(&p, "Meeting Notes", false).unwrap();
+        assert!(shown(&v).is_empty());
+    }
+    #[test] fn sanitized_create_clears_the_written_title() {
+        let (dir, db) = setup(); std::fs::create_dir(dir.join(".velo")).unwrap(); std::fs::write(dir.join(".velo/archived"), "A-B\n").unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        assert!(!v.open_or_create("A:B", None, false).unwrap().archived); // writes A-B.md
+        assert_eq!(shown(&v), ["A-B"]);
+    }
+    #[test] fn lock_and_unlock_move_the_entry_when_the_title_is_sanitized() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        std::fs::write(dir.join("Foo .md"), "x").unwrap();
+        std::fs::write(dir.join("Bar .md.age"), crypto::encrypt(&id, b"y").unwrap()).unwrap();
+        let mut v = open(dir.clone(), &db, Some(&id)).unwrap();
+        for n in ["Foo .md", "Bar .md.age"] { v.set_archived(&s(&dir.join(n)), true).unwrap(); }
+        v.lock_note(&s(&dir.join("Foo .md")), &id).unwrap(); // -> Foo.md.age
+        v.unlock_note(&s(&dir.join("Bar .md.age")), &id).unwrap(); // -> Bar.md
+        assert!(shown(&v).is_empty());
+        assert_eq!(std::fs::read_to_string(dir.join(".velo/archived")).unwrap(), "Foo\nBar\n");
+    }
+    #[test] fn rename_onto_a_stale_entry_is_not_archived() {
+        let (dir, db) = setup(); std::fs::create_dir(dir.join(".velo")).unwrap(); std::fs::write(dir.join("Foo.md"), "").unwrap();
+        std::fs::write(dir.join(".velo/archived"), "Bar\n").unwrap(); // Bar archived, then deleted in Finder
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        v.rename_note(&s(&dir.join("Foo.md")), "Bar", false).unwrap();
+        assert_eq!(shown(&v), ["Bar"]);
+        assert_eq!(std::fs::read_to_string(dir.join(".velo/archived")).unwrap(), "");
+    }
+    #[test] fn conflict_copy_of_an_archived_note_is_not_archived() {
+        let (dir, db) = setup(); let f = dir.join("A.md"); std::fs::write(&f, "a").unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap(); v.set_archived(&s(&f), true).unwrap();
+        let now = chrono::Local::now(); // stale entries for the copy's possible names (this minute and the next)
+        let names: Vec<String> = [now, now + chrono::Duration::minutes(1)].iter().map(|t| format!("A (conflict {})", t.format("%Y-%m-%d %H%M"))).collect();
+        std::fs::write(dir.join(".velo/archived"), format!("A\n{}\n", names.join("\n"))).unwrap();
+        assert!(matches!(v.save_note(&s(&f), "b", "stale-hash", None, false).unwrap(), SaveResult::Conflict { .. }));
+        let t = shown(&v); assert!(t.len() == 1 && t[0].starts_with("A (conflict "), "{t:?}");
+    }
+    #[cfg(unix)] #[test] fn rename_succeeds_and_reports_when_the_list_is_unwritable() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, db) = setup(); std::fs::write(dir.join("Old.md"), "").unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap(); let p = s(&dir.join("Old.md"));
+        v.set_archived(&p, true).unwrap();
+        std::fs::set_permissions(dir.join(".velo"), std::fs::Permissions::from_mode(0o555)).unwrap();
+        let r = v.rename_note(&p, "New", false);
+        std::fs::set_permissions(dir.join(".velo"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(r.is_ok() && dir.join("New.md").exists());
+        assert!(v.archive_error.take().is_some());
+    }
+    #[cfg(unix)] #[test] fn delete_merge_and_create_succeed_and_report_when_the_list_is_unwritable() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, db) = setup(); for n in ["A", "B", "T"] { std::fs::write(dir.join(format!("{n}.md")), n).unwrap(); }
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        for n in ["A", "B"] { v.set_archived(&s(&dir.join(format!("{n}.md"))), true).unwrap(); }
+        std::fs::write(dir.join(".velo/archived"), "A\nB\nNew\n").unwrap(); // New: stale, so create must write
+        let lock = |m| std::fs::set_permissions(dir.join(".velo"), std::fs::Permissions::from_mode(m)).unwrap();
+        lock(0o555);
+        v.delete_note_with(&s(&dir.join("A.md")), rm).unwrap();
+        assert!(v.archive_error.take().is_some());
+        v.merge_notes_with(&s(&dir.join("B.md")), &s(&dir.join("T.md")), false, rm).unwrap();
+        assert!(v.archive_error.take().is_some());
+        v.create_from_selection("New", "x", false).unwrap();
+        assert!(v.archive_error.take().is_some());
+        lock(0o755);
+    }
+    #[cfg(unix)] #[test] fn titles_with_line_breaks_cannot_be_archived() { // Windows rejects the file name
+        let (dir, db) = setup(); std::fs::write(dir.join("A\nB.md"), "").unwrap(); // a valid file name on disk
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        assert!(v.set_archived(&s(&dir.join("A\nB.md")), true).is_err());
+        assert!(!dir.join(".velo/archived").exists());
+    }
+    #[test] fn rename_of_one_twin_keeps_the_other_archived() {
+        let (dir, db) = setup(); std::fs::write(dir.join("Foo.md"), "").unwrap(); std::fs::write(dir.join("Foo.txt"), "").unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        v.set_archived(&s(&dir.join("Foo.md")), true).unwrap();
+        assert!(shown(&v).is_empty()); // one entry, both files
+        v.rename_note(&s(&dir.join("Foo.txt")), "Bar", false).unwrap();
+        assert!(shown(&v).is_empty()); // Foo.md still archived, Bar archived too
+    }
+    #[test] fn delete_and_merge_drop_the_entry() {
+        let (dir, db) = setup(); for n in ["A", "B", "T"] { std::fs::write(dir.join(format!("{n}.md")), n).unwrap(); }
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        for n in ["A", "B", "T"] { v.set_archived(&s(&dir.join(format!("{n}.md"))), true).unwrap(); }
+        v.delete_note_with(&s(&dir.join("A.md")), rm).unwrap();
+        v.merge_notes_with(&s(&dir.join("B.md")), &s(&dir.join("T.md")), false, rm).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join(".velo/archived")).unwrap(), "T\n");
+        std::fs::write(dir.join("A.md"), "back from the Trash").unwrap(); v.rescan(None);
+        assert_eq!(shown(&v), ["A"]);
+    }
+    #[test] fn stale_entry_is_kept_and_ignored_and_creation_clears_it() {
+        let (dir, db) = setup(); std::fs::create_dir(dir.join(".velo")).unwrap(); std::fs::write(dir.join("O.md"), "").unwrap();
+        std::fs::write(dir.join(".velo/archived"), "Standup\nDaily\n").unwrap(); // left by a Finder delete
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        assert_eq!(shown(&v), ["O"]); // matches nothing, hides nothing
+        v.set_archived(&s(&dir.join("O.md")), true).unwrap(); v.set_archived(&s(&dir.join("O.md")), false).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join(".velo/archived")).unwrap(), "Standup\nDaily\n"); // kept: no pruning
+        v.create_from_selection("standup", "x", false).unwrap();
+        assert!(!v.open_or_create("Daily", None, false).unwrap().archived);
+        assert_eq!(shown(&v), ["Daily", "O", "standup"]);
+        assert_eq!(std::fs::read_to_string(dir.join(".velo/archived")).unwrap(), "");
+    }
+    #[test] fn archived_survives_lock_unlock_and_relaunch_without_key() {
+        let (dir, db) = setup(); let id = crypto::new_identity(); std::fs::write(dir.join("L.md"), "x").unwrap();
+        let mut v = open(dir.clone(), &db, Some(&id)).unwrap();
+        v.set_archived(&s(&dir.join("L.md")), true).unwrap();
+        let locked = v.lock_note(&s(&dir.join("L.md")), &id).unwrap(); drop(v);
+        let mut v = open(dir.clone(), &db, None).unwrap(); // relaunch, no key: nothing can be decrypted
+        assert!(shown(&v).is_empty());
+        v.set_archived(&locked, false).unwrap(); v.set_archived(&locked, true).unwrap(); // works without the key
+        drop(v); let mut v = open(dir.clone(), &db, Some(&id)).unwrap();
+        v.unlock_note(&locked, &id).unwrap();
+        assert!(shown(&v).is_empty());
+    }
+    #[test] fn save_keeps_archived() {
+        let (dir, db) = setup(); let f = dir.join("A.md"); std::fs::write(&f, "a").unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap(); v.set_archived(&s(&f), true).unwrap();
+        let d = v.open_note(&s(&f), None).unwrap(); v.save_note(&d.path, "b", &d.hash, None, true).unwrap();
+        assert!(shown(&v).is_empty());
     }
     #[test] fn archiving_leaves_the_file_untouched() {
         let (dir, db) = setup(); let f = dir.join("A.md"); std::fs::write(&f, "a").unwrap();
