@@ -92,11 +92,13 @@ These are the designer's calls. The owner has not ruled on them one by one; each
 - Entries are matched the way velo already matches titles: case-folded with `crate::text::fold` (the function behind the index's `title_folded` column).
 - velo itself never creates two notes with the same title (`vault.rs` refuses), but two files with one title can exist on disk: a stale lock twin (`Foo.md` next to `Foo.md.age`) or a file added by hand (`Foo.txt`). An entry applies to every file with that title. Archiving must not make such twins behave differently from today in any other way.
 - A missing file means no note is archived. velo creates the file on the first archive.
-- Entries are removed only by velo's own events: unarchive, delete, merge (the source), and the creation of a note with that title. A rename moves the entry.
-- An entry that matches no note is kept and ignored. velo does not prune the list against the files on disk: a note that is absent for a moment (evicted by iCloud, mid-transfer in a sync tool) must not lose its archived state. Clearing the entry when a note is created with that title stops a leftover entry (after a delete or rename done in Finder) from archiving the new note.
+- Entries are removed only by velo's own events: unarchive, delete, merge (the source), and a title coming into being, which happens when a note is created with that title or an unarchived note is renamed to it. Renaming an archived note moves its entry.
+- An entry that matches no note is kept and ignored. velo does not prune the list against the files on disk: a note that is absent for a moment (evicted by iCloud, mid-transfer in a sync tool) must not lose its archived state. Clearing the entry when a title comes into being stops a leftover entry (after a delete or rename done in Finder) from archiving the new note.
+- Reading is forgiving: a leading byte-order mark and `\r\n` line ends are accepted, empty lines are skipped, invalid bytes do not make the read fail. Titles are not trimmed.
+- A failed write is never silent. Archive and unarchive report the error. Rename, delete, merge and create still succeed and report that the list could not be updated.
 - Writes are atomic (write a temporary file, then rename), like `settings.json`.
 - Two processes use the file: the app, and the headless MCP server (`velo --mcp`), which renames, deletes and merges notes for agents. Neither may trust a copy read earlier:
-  - before answering a query, a process re-reads the file if its modified time changed;
+  - before answering a query, a process re-reads the file (it is tiny; modified times are too coarse on some volumes to rely on);
   - a write re-reads the file first, applies its one change, then writes. The remaining window (two writes in the same instant) is accepted.
 - An edit made to the file by hand is picked up the same way, at the next query.
 
@@ -104,7 +106,8 @@ These are the designer's calls. The owner has not ruled on them one by one; each
 
 | Event inside velo | Effect on the entry |
 |---|---|
-| Rename (owner or agent) | entry follows the new title |
+| Rename of an archived note (owner or agent) | entry follows the new title |
+| Rename of an unarchived note | any leftover entry for the new title is removed |
 | Lock, unlock | unchanged (title-keyed) |
 | Delete (to the OS trash) | entry removed |
 | Merge | source's entry removed; an archived target stays archived |
@@ -134,7 +137,9 @@ Not filtered, in any state:
 - Opening by path: history (back and forward), saved positions, an agent's request to show a note.
 - Title uniqueness: a new note cannot take the title of an archived note, same as today.
 - The "No links" filter: links are counted as they are on disk, whatever the archive state of either end.
-- The Related panel of an open archived note shows its connections normally (the other notes still follow the switch).
+- The Related panel of an open archived note shows its connections normally (the other notes still follow the switch). The same holds for `get_connections` on an archived title.
+- Whether a title exists: `[[` suggestions follow the switch, but typing the exact title of a hidden archived note never offers to create it.
+- Turning the switch off while an archived note is open keeps that note open.
 
 ### With the switch on
 
@@ -172,7 +177,9 @@ The Rust side does not read it. The front end passes "include archived" with eac
 - `include_archived` (boolean, default false) on the four tools that list or search: `search_notes`, `list_tasks`, `list_tags`, `get_connections`. The other 13 tools take a title and are listed below.
 - `get_connections` takes a title. It answers for an archived note as for any other; the flag decides only whether archived neighbours are returned.
 - With the flag set, each returned note says whether it is archived, so an agent can tell.
-- Tools that take a title (`read_note` and the write tools) work on archived notes unchanged. A write does not unarchive.
+- Tools that take a title (`read_note` and the write tools) work on archived notes. A write does not unarchive.
+- `read_note` returns a note's backlinks. Archived notes are left out of that list, always; an agent that wants them calls `get_connections` with `include_archived`.
+- A task added to an archived note (`add_task`, or capture in the app) stays hidden with its note. That is intended.
 - The generated tool reference (`site/src/content/reference/mcp-tools.json`) and the README tool list are updated.
 
 ## Constraints
