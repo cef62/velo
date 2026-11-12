@@ -1,5 +1,12 @@
 # velo
 
+## 0.16.1
+
+### Patch Changes
+
+- c227ef8: Fixed unsaved edits in another note being lost when you opened it while a delete or merge was saving.
+- 9f41db1: Fixed the note title rename field being a sliver wide in the default window size.
+
 ## 0.16.0
 
 ### Minor Changes
