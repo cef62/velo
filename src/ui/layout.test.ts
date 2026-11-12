@@ -5,8 +5,18 @@ import { paneBarMode, showSearchHint, sidePanelMode, titleBarMode } from './layo
 describe('v2 layout rules', () => {
   it('default window 1000×700, horizontal: list 280, note ~711', () => {
     expect(paneBarMode(280)).toEqual({ labels: 'active', menusIconOnly: false })
-    expect(titleBarMode(711)).toEqual({ viewSwitch: 'segments', lockInMenu: false })
+    expect(titleBarMode(711)).toEqual({ viewSwitch: 'segments', lockInMenu: false, renameHint: false, hideActions: false })
     expect(sidePanelMode(711)).toBe('overlay') // 711 − 300 < 480
+  })
+  it('rename hint only when the title input keeps its room', () => {
+    expect(titleBarMode(799).renameHint).toBe(false)
+    expect(titleBarMode(800).renameHint).toBe(true)
+  })
+  it('renaming at the 320px note minimum drops the actions, not outside rename', () => {
+    expect(titleBarMode(320, true).hideActions).toBe(true)
+    expect(titleBarMode(320).hideActions).toBe(false)
+    expect(titleBarMode(419, true).hideActions).toBe(true)
+    expect(titleBarMode(420, true).hideActions).toBe(false)
   })
   it('wide window 1600×900: three panes dock', () => {
     expect(sidePanelMode(1251, 320)).toBe('docked')
@@ -16,7 +26,7 @@ describe('v2 layout rules', () => {
   })
   it('small window 600×400, horizontal: list 200, note 391', () => {
     expect(paneBarMode(200)).toEqual({ labels: 'active', menusIconOnly: true })
-    expect(titleBarMode(391)).toEqual({ viewSwitch: 'menu', lockInMenu: true })
+    expect(titleBarMode(391)).toEqual({ viewSwitch: 'menu', lockInMenu: true, renameHint: false, hideActions: false })
     expect(showSearchHint(600)).toBe(false)
   })
 })

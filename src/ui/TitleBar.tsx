@@ -15,7 +15,7 @@ const c = titleBar();
 const num = (n: number) => n.toLocaleString("en-US");
 const rename = css({
   flex: "1",
-  minW: "0",
+  minW: "160px", // neighbours (hint, actions) never shrink: without a floor the input collapsed to a sliver
   h: "control",
   ml: "-2",
   px: "2",
@@ -63,7 +63,7 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
     setW(e.offsetWidth);
     return () => ro.disconnect();
   }, []);
-  const mode = titleBarMode(w);
+  const mode = titleBarMode(w, s.renaming);
   const [canExtract, setCanExtract] = useState(false); // read when the ⋯ menu opens
   const bar = { ...c, root: `${c.root} ${root}` };
   const view: View = s.previewOn ? "preview" : s.editorStyle;
@@ -100,9 +100,11 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
             }}
             onBlur={() => void controller.commitRename(null)}
           />
-          <span className={hint}>
-            <Kbd>↩</Kbd> Rename <Kbd>Esc</Kbd> Cancel
-          </span>
+          {mode.renameHint && (
+            <span className={hint}>
+              <Kbd>↩</Kbd> Rename <Kbd>Esc</Kbd> Cancel
+            </span>
+          )}
         </>
       ) : (
         <h2 className={bar.title} data-note-title="" title={s.title} onDoubleClick={() => controller.startRename()}>
@@ -136,7 +138,7 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
           Saving…
         </span>
       ) : null}
-      {s.openPath && (
+      {s.openPath && !mode.hideActions && (
         <div className={bar.actions}>
           {mode.viewSwitch === "segments" ? (
             <SegmentGroup.Root size="2xs" value={view} onValueChange={(d) => d.value && d.value !== view && setView(d.value as View)} aria-label="View">
