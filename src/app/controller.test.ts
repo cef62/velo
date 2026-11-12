@@ -3203,7 +3203,7 @@ test("the archive result applies to the note it was for, not the one open afterw
   const b = store.get().openPath!;
   store.set({ infoOpen: true, sideTab: "related" });
   const related = api.connections.mock.calls.length;
-  d.resolve(); await done; await settle();
+  d.resolve(undefined); await done; await settle();
   expect(api.setArchived).toHaveBeenCalledWith(a, true);
   expect(store.get()).toMatchObject({ openPath: b, archived: false });
   expect(api.connections.mock.calls.length).toBeGreaterThan(related); // b's Related reloads without a
