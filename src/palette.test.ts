@@ -2,13 +2,13 @@ import { expect, test } from "vitest";
 import { paletteGroups, paletteSearch, pushRecent, type PaletteState } from "./palette";
 import { resolve } from "./shortcuts";
 
-const base: PaletteState = { keys: resolve(undefined, true), isMac: true, noteOpen: true, title: "Velo roadmap", encrypted: false, hasSelection: false, recent: [] };
+const base: PaletteState = { keys: resolve(undefined, true), isMac: true, noteOpen: true, title: "Velo roadmap", encrypted: false, hasSelection: false, archived: false, recent: [] };
 
 test("empty query: Recent, then the note's actions, then the rest; nothing twice; OS-level keys and the palette itself are not listed", () => {
   const groups = paletteGroups({ ...base, recent: ["lock_all", "rename"] });
   expect(groups.map((g) => g.title)).toEqual(["Recent", "Velo roadmap", "All commands"]);
   expect(groups[0].items.map((i) => i.action)).toEqual(["lock_all", "rename"]);
-  expect(groups[1].items.map((i) => i.action)).toEqual(["extract_note", "merge_note", "toggle_front_matter", "toggle_lock", "delete_note"]);
+  expect(groups[1].items.map((i) => i.action)).toEqual(["extract_note", "merge_note", "toggle_front_matter", "toggle_lock", "archive_note", "delete_note"]);
   const all = groups.flatMap((g) => g.items.map((i) => i.action));
   expect(new Set(all).size).toBe(all.length);
   expect(all).not.toContain("toggle_window");
@@ -46,4 +46,11 @@ test("pushRecent: most recent first, no repeats, five long", () => {
 
 test("reset window is a palette command", () => {
   expect(paletteSearch("reset window", base)[0]).toMatchObject({ action: "reset_window", label: "Reset window position and size" });
+});
+
+test("archive entry reads Archive or Unarchive for the open note and needs one", () => {
+  expect(paletteSearch("archive note", base)[0]).toMatchObject({ action: "archive_note", label: "Archive note", context: "Velo roadmap" });
+  expect(paletteSearch("archive", { ...base, archived: true }).find((i) => i.action === "archive_note")?.label).toBe("Unarchive note");
+  expect(paletteSearch("archive", { ...base, noteOpen: false }).find((i) => i.action === "archive_note")?.disabled).toBe("open a note first");
+  expect(paletteSearch("show / hide archived", base)[0]).toMatchObject({ action: "toggle_archived", binding: "" });
 });

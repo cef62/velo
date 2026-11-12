@@ -1916,6 +1916,8 @@ export class Controller {
     toggle_timeline: () => this.setPaneMode(this.store.get().paneMode === "timeline" ? "notes" : "timeline"),
     export: () => void this.startExport(),
     save_search: () => this.startSaveSearch(),
+    toggle_archived: () => {}, // Task 11
+    archive_note: () => {}, // Task 11
     quit: () => void this.api.quitApp(),
     reset_window: () => void this.api.resetWindow(),
   };

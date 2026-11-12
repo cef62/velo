@@ -40,7 +40,7 @@ function Body({ controller, store }: { controller: Controller; store: Store<AppS
   const [sel, setSel] = useState(0);
   const list = useRef<HTMLDivElement>(null);
   const hasSelection = useMemo(() => controller.hasSelection(), [controller]); // read once per open
-  const state = { keys, isMac, noteOpen: openPath !== null, title, encrypted, hasSelection, recent };
+  const state = { keys, isMac, noteOpen: openPath !== null, title, encrypted, hasSelection, archived: false /* Task 11: store.archived */, recent };
   const groups = useMemo(() => (query.trim() ? [{ title: "", items: paletteSearch(query, state) }] : paletteGroups(state)), [query, keys, isMac, openPath, title, encrypted, hasSelection, recent]); // eslint-disable-line react-hooks/exhaustive-deps
   const flat = groups.flatMap((g) => g.items);
   const cur = Math.min(sel, Math.max(0, flat.length - 1));
