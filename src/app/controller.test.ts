@@ -3269,6 +3269,7 @@ test("changing the switch reloads every listing", async () => {
   expect(api.listTags.mock.calls.length).toBeGreaterThan(n.tags);
   expect(api.listTags.mock.lastCall).toEqual([true]);
   expect(api.tasks.mock.calls.length).toBeGreaterThan(n.tasks);
+  expect(api.tasks.mock.lastCall?.[3]).toBe(true);
   expect(api.listLinkTargets.mock.lastCall).toEqual([true]);
   expect(api.timeline.mock.calls.length).toBeGreaterThan(n.tl);
   expect(api.connections.mock.calls.length).toBeGreaterThan(n.rel);
@@ -3287,11 +3288,49 @@ test("a list-write failure that lands after the operation is shown once", async 
   expect(store.get().err).toBe("");
 });
 
-test("the palette label follows the store flag set by archiving", async () => {
+test("the archive action flips the store flag the palette label reads", async () => {
   const { c, store } = setup();
   await c.start(); await settle();
   await c.toggleArchive();
   expect(store.get().archived).toBe(true);
   c.runAction("archive_note"); await settle();
   expect(store.get().archived).toBe(false);
+});
+
+test("a list-write failure during openTitle is shown once", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  const d = deferred<any>(); const real = api.openOrCreate.getMockImplementation()!;
+  api.openOrCreate.mockImplementationOnce(() => d.promise);
+  const done = c.openTitle("A", "enter");
+  c.onArchiveError("permission denied");
+  d.resolve(await real("A")); await done; await settle();
+  expect(store.get().err).toBe("The archived-notes list could not be updated: permission denied");
+  await c.select(1); await settle();
+  expect(store.get().err).toBe("");
+});
+
+test("a list-write failure during a merge is shown once", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  const d = deferred<any>();
+  api.mergeNotes.mockImplementationOnce(() => d.promise);
+  await c.startMerge();
+  store.set((s) => ({ merge: { ...s.merge!, target: { path: P("B"), title: "B", count: 0 } } }));
+  const done = c.commitMerge();
+  await settle();
+  c.onArchiveError("permission denied");
+  d.resolve({ path: P("B"), trash_error: null }); await done; await settle();
+  expect(store.get().err).toBe("The archived-notes list could not be updated: permission denied");
+  await c.select(1); await settle();
+  expect(store.get().err).toBe("");
+});
+
+test("two archive presses before the first resolves send one request", async () => {
+  const { c, api } = setup();
+  await c.start(); await settle();
+  const d = deferred<undefined>(); api.setArchived.mockImplementationOnce(() => d.promise);
+  const a = c.toggleArchive(), b = c.toggleArchive();
+  d.resolve(undefined); await Promise.all([a, b]);
+  expect(api.setArchived).toHaveBeenCalledTimes(1);
 });
