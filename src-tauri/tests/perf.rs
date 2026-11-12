@@ -82,7 +82,7 @@ fn search_p95_under_50ms() {
     let mut times = Vec::new();
     for _ in 0..30 {
         let t = Instant::now();
-        let v = group_tasks(idx.task_rows(&[]).unwrap(), "", true, "2026-10-27");
+        let v = group_tasks(idx.task_rows(&[], true).unwrap(), "", true, "2026-10-27");
         times.push(t.elapsed().as_secs_f64() * 1000.0);
         assert!(v.no_date.len() + v.upcoming.len() + v.today.len() + v.overdue.len() > 0);
     }

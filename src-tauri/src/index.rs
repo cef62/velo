@@ -14,6 +14,7 @@ pub struct Hit {
     pub snippet: String,
     pub mtime: i64,
     pub encrypted: bool,
+    pub archived: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
@@ -29,6 +30,8 @@ pub struct Page {
     pub has_more: bool,
     /// Notes the list shows across all pages; only computed for offset 0, else 0.
     pub total: usize,
+    /// Archived notes the list leaves out; filled by `Vault::search_where`, 0 from the index.
+    pub hidden: usize,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -72,6 +75,8 @@ pub fn all_tags(body: &str, fm: Option<&FrontMatter>) -> Vec<(String, String)> {
 /// Bump to rebuild every index once (5: `Tags:` / `tags :` / `Aliases:` front-matter keys are read; 6: task code fences
 /// close only on a matching fence, and a due/done date needs a boundary).
 const SCHEMA_VERSION: i64 = 6;
+/// Paths of notes whose title is archived.
+const ARCHIVED_PATHS: &str = "SELECT n.path FROM notes n JOIN temp.archived a ON a.title_folded = n.title_folded";
 
 #[derive(Serialize)]
 pub struct LinkTarget { pub name: String, pub title: String, pub path: String, pub modified: i64, pub locked: bool }
@@ -124,6 +129,7 @@ pub struct TaskRow {
     pub due: Option<String>,
     pub done_on: Option<String>,
     pub line_text: String,
+    pub archived: bool,
 }
 
 fn preview(title: &str, body: &str) -> String {
@@ -149,7 +155,7 @@ fn like_escape(t: &str) -> String {
 }
 
 fn hit(r: &rusqlite::Row) -> rusqlite::Result<Hit> {
-    Ok(Hit { path: r.get(0)?, title: r.get(1)?, snippet: r.get(2)?, mtime: r.get(3)?, encrypted: r.get(4)? })
+    Ok(Hit { path: r.get(0)?, title: r.get(1)?, snippet: r.get(2)?, mtime: r.get(3)?, encrypted: r.get(4)?, archived: false })
 }
 
 impl Index {
@@ -172,6 +178,8 @@ impl Index {
             db.execute_batch(&format!("DROP TABLE IF EXISTS tasks_stale; DROP TABLE IF EXISTS tasks; DROP TABLE IF EXISTS notes_fts; DROP TABLE IF EXISTS notes; DROP TABLE IF EXISTS links; DROP TABLE IF EXISTS tags; DROP TABLE IF EXISTS aliases; PRAGMA user_version={SCHEMA_VERSION};"))?;
         }
         db.execute_batch(SCHEMA)?;
+        // TEMP: per connection, never in the shared index file, so no write lock, no schema bump, no reindex.
+        db.execute_batch("CREATE TEMP TABLE IF NOT EXISTS archived(title_folded TEXT PRIMARY KEY)")?;
         let index = Index { db };
         if index.bulk_off() {
             // a bulk re-index was interrupted (crash, kill), or runs in another process: deleted text may sit in the
@@ -384,12 +392,37 @@ impl Index {
         }
     }
 
+    /// Replaces the archived set (titles are folded). All or nothing; not for use inside a `begin()` batch.
+    pub fn set_archived(&self, titles: &[String]) -> anyhow::Result<()> {
+        debug_assert!(!self.in_batch());
+        let tx = self.db.unchecked_transaction()?;
+        tx.execute("DELETE FROM temp.archived", [])?;
+        let mut st = tx.prepare("INSERT OR IGNORE INTO temp.archived(title_folded) VALUES (?)")?;
+        for t in titles {
+            st.execute([fold(t)])?;
+        }
+        drop(st);
+        Ok(tx.commit()?)
+    }
+
+    pub fn archived_titles(&self) -> anyhow::Result<HashSet<String>> {
+        let mut st = self.db.prepare("SELECT title_folded FROM temp.archived")?;
+        Ok(st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?)
+    }
+
+    pub fn archived_paths(&self) -> anyhow::Result<HashSet<String>> {
+        let mut st = self.db.prepare(ARCHIVED_PATHS)?;
+        Ok(st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?)
+    }
+
     pub fn search_page(&self, query: &str, sort: Sort, offset: usize, limit: usize, tags: &[String], unlocked: &HashMap<String, String>) -> anyhow::Result<Page> {
-        self.search_page_where(query, sort, offset, limit, tags, unlocked, false)
+        self.search_page_where(query, sort, offset, limit, tags, unlocked, false, false)
     }
 
     /// `no_links` keeps only plain notes with no resolving [[link]] in or out (title or alias, as `linked_from`); the unlocked map is ignored.
-    pub fn search_page_where(&self, query: &str, sort: Sort, offset: usize, limit: usize, tags: &[String], unlocked: &HashMap<String, String>, no_links: bool) -> anyhow::Result<Page> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn search_page_where(&self, query: &str, sort: Sort, offset: usize, limit: usize, tags: &[String], unlocked: &HashMap<String, String>, no_links: bool, include_archived: bool) -> anyhow::Result<Page> {
+        let archived = self.archived_titles()?;
         let folded = fold(query);
         let terms: Vec<&str> = folded.split_whitespace().collect();
         let order = match sort {
@@ -399,6 +432,9 @@ impl Index {
         let tags: Vec<String> = tags.iter().map(|t| fold(t)).collect();
         let tag_cond = |p: &str| {
             let mut c: String = tags.iter().map(|_| format!(" AND EXISTS (SELECT 1 FROM tags t WHERE t.path = {p}path AND t.tag_folded = ?)")).collect();
+            if !include_archived {
+                c += &format!(" AND {p}title_folded NOT IN (SELECT title_folded FROM temp.archived)");
+            }
             if no_links {
                 c += &format!(
                     " AND {p}encrypted = 0 \
@@ -454,6 +490,9 @@ impl Index {
                 });
                 let Ok((title, tf, mtime)) = row else { continue };
                 // Locked notes have no tags rows, so under a tag filter SQL never returned them.
+                if !include_archived && archived.contains(&tf) {
+                    continue;
+                }
                 if tags.is_empty() && terms.iter().all(|t| tf.contains(t)) {
                     continue; // already a group 0 title hit
                 }
@@ -462,7 +501,8 @@ impl Index {
                 let pf = fold(plain_body);
                 let have: Vec<String> = if wanted.is_empty() { vec![] } else { all_tags(plain_body, fm.as_ref()).into_iter().map(|(f, _)| f).collect() }; // only needed under a tag filter
                 if wanted.iter().all(|w| have.iter().any(|h| h == w)) && terms.iter().all(|t| tf.contains(t) || pf.contains(t)) {
-                    g2.push((tf, path.clone(), mtime, Hit { path: path.clone(), title, snippet: plain_body.chars().take(120).collect(), mtime, encrypted: true }));
+                    let arc = archived.contains(&tf);
+                    g2.push((tf, path.clone(), mtime, Hit { path: path.clone(), title, snippet: plain_body.chars().take(120).collect(), mtime, encrypted: true, archived: arc }));
                 }
             }
         }
@@ -482,12 +522,13 @@ impl Index {
                 let body: String = body_of.query_row([rowid], |r| r.get(0))?;
                 h.snippet = snippet(&body, &terms[long[0]], std::mem::take(&mut h.snippet));
             }
+            h.archived = archived.contains(&fold(&h.title));
             hits.push(h);
         }
         if hits.len() > limit {
             hits.truncate(limit);
             let total = if offset == 0 { self.sql_count(&union, &args)? + unlocked_hits().len() } else { 0 };
-            return Ok(Page { hits, has_more: true, total });
+            return Ok(Page { hits, has_more: true, total, hidden: 0 });
         }
 
         let mut g2 = unlocked_hits();
@@ -495,7 +536,7 @@ impl Index {
         // Only offset 0 can be short of the full SQL set here, and then hits is all of it.
         let total = if offset == 0 { sql_hits + g2.len() } else { 0 };
         if g2.is_empty() {
-            return Ok(Page { hits, has_more: false, total });
+            return Ok(Page { hits, has_more: false, total, hidden: 0 });
         }
         match sort {
             Sort::Modified => g2.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.1.cmp(&b.1))),
@@ -506,27 +547,29 @@ impl Index {
         hits.extend(rest.take(limit + 1 - hits.len()));
         let has_more = hits.len() > limit;
         hits.truncate(limit);
-        Ok(Page { hits, has_more, total })
+        Ok(Page { hits, has_more, total, hidden: 0 })
     }
 
     fn sql_count(&self, union: &str, args: &[String]) -> anyhow::Result<usize> {
         Ok(self.db.query_row(&format!("SELECT COUNT(*) FROM ({union})"), params_from_iter(args.iter()), |r| r.get::<_, i64>(0))? as usize)
     }
 
-    pub fn tags(&self) -> anyhow::Result<Vec<TagCount>> {
-        let mut st = self.db.prepare("SELECT MIN(tag_display), COUNT(DISTINCT path) FROM tags GROUP BY tag_folded ORDER BY tag_folded")?;
+    pub fn tags(&self, include_archived: bool) -> anyhow::Result<Vec<TagCount>> {
+        let skip = if include_archived { String::new() } else { format!(" WHERE path NOT IN ({ARCHIVED_PATHS})") };
+        let mut st = self.db.prepare(&format!("SELECT MIN(tag_display), COUNT(DISTINCT path) FROM tags{skip} GROUP BY tag_folded ORDER BY tag_folded"))?;
         Ok(st.query_map([], |r| Ok(TagCount { tag: r.get(0)?, count: r.get::<_, i64>(1)? as usize }))?.collect::<Result<_, _>>()?)
     }
 
     /// Task rows of notes carrying every tag in `tags` (same rule as `search_page`). Locked notes have none.
-    pub fn task_rows(&self, tags: &[String]) -> anyhow::Result<Vec<TaskRow>> {
+    pub fn task_rows(&self, tags: &[String], include_archived: bool) -> anyhow::Result<Vec<TaskRow>> {
         let tags: Vec<String> = tags.iter().map(|t| fold(t)).collect();
         let cond: String = tags.iter().map(|_| " AND EXISTS (SELECT 1 FROM tags g WHERE g.path = t.path AND g.tag_folded = ?)").collect();
+        let skip = if include_archived { String::new() } else { format!(" AND t.path NOT IN ({ARCHIVED_PATHS})") };
         let mut st = self.db.prepare(&format!(
-            "SELECT t.path, n.title, n.modified, t.line, t.text, t.done, t.due, t.done_on, t.line_text FROM tasks t JOIN notes n ON n.path = t.path WHERE 1{cond}"
+            "SELECT t.path, n.title, n.modified, t.line, t.text, t.done, t.due, t.done_on, t.line_text, n.title_folded IN (SELECT title_folded FROM temp.archived) FROM tasks t JOIN notes n ON n.path = t.path WHERE 1{cond}{skip}"
         ))?;
         let rows = st.query_map(params_from_iter(tags.iter()), |r| {
-            Ok(TaskRow { path: r.get(0)?, title: r.get(1)?, modified: r.get(2)?, line: r.get::<_, i64>(3)? as usize, text: r.get(4)?, done: r.get(5)?, due: r.get(6)?, done_on: r.get(7)?, line_text: r.get(8)? })
+            Ok(TaskRow { path: r.get(0)?, title: r.get(1)?, modified: r.get(2)?, line: r.get::<_, i64>(3)? as usize, text: r.get(4)?, done: r.get(5)?, due: r.get(6)?, done_on: r.get(7)?, line_text: r.get(8)?, archived: r.get(9)? })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
@@ -562,10 +605,11 @@ impl Index {
     }
 
     /// Every title and indexed alias with its note; `name == title` marks a title row.
-    pub fn link_targets(&self) -> anyhow::Result<Vec<LinkTarget>> {
-        let mut st = self.db.prepare(
-            "SELECT title, title, path, modified, encrypted FROM notes UNION ALL SELECT a.alias_display, n.title, n.path, n.modified, n.encrypted FROM aliases a JOIN notes n ON n.path = a.path",
-        )?;
+    pub fn link_targets(&self, include_archived: bool) -> anyhow::Result<Vec<LinkTarget>> {
+        let (n, a) = if include_archived { (String::new(), String::new()) } else { (format!(" WHERE path NOT IN ({ARCHIVED_PATHS})"), format!(" WHERE n.path NOT IN ({ARCHIVED_PATHS})")) };
+        let mut st = self.db.prepare(&format!(
+            "SELECT title, title, path, modified, encrypted FROM notes{n} UNION ALL SELECT a.alias_display, n.title, n.path, n.modified, n.encrypted FROM aliases a JOIN notes n ON n.path = a.path{a}"
+        ))?;
         let rows = st.query_map([], |r| Ok(LinkTarget { name: r.get(0)?, title: r.get(1)?, path: r.get(2)?, modified: r.get(3)?, locked: r.get(4)? }))?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
@@ -607,15 +651,16 @@ impl Index {
     }
 
     /// How many notes carry the tag, and up to `limit` of their paths.
-    pub fn tag_notes(&self, tag_folded: &str, limit: usize) -> anyhow::Result<(usize, Vec<String>)> {
-        let count = self.db.query_row("SELECT COUNT(DISTINCT path) FROM tags WHERE tag_folded=?", [tag_folded], |r| r.get::<_, i64>(0))? as usize;
-        let mut st = self.db.prepare("SELECT DISTINCT path FROM tags WHERE tag_folded=? ORDER BY path LIMIT ?")?;
+    pub fn tag_notes(&self, tag_folded: &str, limit: usize, include_archived: bool) -> anyhow::Result<(usize, Vec<String>)> {
+        let skip = if include_archived { String::new() } else { format!(" AND path NOT IN ({ARCHIVED_PATHS})") };
+        let count = self.db.query_row(&format!("SELECT COUNT(DISTINCT path) FROM tags WHERE tag_folded=?{skip}"), [tag_folded], |r| r.get::<_, i64>(0))? as usize;
+        let mut st = self.db.prepare(&format!("SELECT DISTINCT path FROM tags WHERE tag_folded=?{skip} ORDER BY path LIMIT ?"))?;
         Ok((count, st.query_map(params![tag_folded, limit as i64], |r| r.get(0))?.collect::<Result<_, _>>()?))
     }
 
     pub fn node(&self, path: &str) -> anyhow::Result<Option<NodeRow>> {
-        Ok(self.db.query_row("SELECT title, created, modified, preview, encrypted FROM notes WHERE path=?", [path], |r| {
-            Ok(NodeRow { title: r.get(0)?, created: r.get(1)?, modified: r.get(2)?, preview: r.get(3)?, encrypted: r.get(4)? })
+        Ok(self.db.query_row("SELECT title, created, modified, preview, encrypted, title_folded IN (SELECT title_folded FROM temp.archived) FROM notes WHERE path=?", [path], |r| {
+            Ok(NodeRow { title: r.get(0)?, created: r.get(1)?, modified: r.get(2)?, preview: r.get(3)?, encrypted: r.get(4)?, archived: r.get(5)? })
         }).optional()?)
     }
 }
@@ -626,6 +671,7 @@ pub struct NodeRow {
     pub modified: i64,
     pub preview: String,
     pub encrypted: bool,
+    pub archived: bool,
 }
 
 #[cfg(unix)]
@@ -673,6 +719,67 @@ mod tests {
         i.search_page(q, sort, off, lim, &[], u).unwrap().hits.into_iter().map(|h| h.path).collect()
     }
 
+    #[test] fn archived_paging_and_totals() {
+        let notes: Vec<(String, String, i64)> = (0..450).map(|n| (format!("n{n:03}.md"), String::new(), n)).collect();
+        let i = idx_owned(&notes);
+        i.set_archived(&(0..300).map(|n| format!("N{n:03}")).collect::<Vec<_>>()).unwrap(); // case differs from the files
+        for (inc, want) in [(false, 150), (true, 450)] {
+            for sort in [Sort::Modified, Sort::Title] {
+                let first = i.search_page_where("", sort, 0, 200, &[], &HashMap::new(), false, inc).unwrap();
+                assert_eq!(first.total, want);
+                let (mut all, mut off) = (vec![], 0);
+                loop { let pg = i.search_page_where("", sort, off, 200, &[], &HashMap::new(), false, inc).unwrap(); off += pg.hits.len(); all.extend(pg.hits); if !pg.has_more { break } }
+                assert_eq!(all.len(), want);
+                assert_eq!(all.iter().filter(|h| h.archived).count(), if inc { 300 } else { 0 });
+            }
+        }
+    }
+    #[test] fn failed_reload_keeps_the_previous_table() {
+        let i = idx(&[("A.md", "", 1), ("B.md", "", 2)]);
+        i.set_archived(&["A".into()]).unwrap();
+        i.raw().execute_batch("CREATE TEMP TRIGGER boom BEFORE INSERT ON archived WHEN NEW.title_folded = 'boom' BEGIN SELECT RAISE(ABORT, 'boom'); END;").unwrap();
+        assert!(i.set_archived(&["B".into(), "boom".into()]).is_err()); // rolls back
+        assert_eq!(i.archived_titles().unwrap(), HashSet::from(["a".to_string()]));
+    }
+    #[test] fn duplicate_titles_hide_and_do_not_error() {
+        let i = idx(&[("Foo.md", "", 1), ("Bar.md", "", 2)]);
+        i.set_archived(&["Foo".into(), "foo".into()]).unwrap();
+        assert_eq!(i.search_page_where("", Sort::Title, 0, 10, &[], &HashMap::new(), false, false).unwrap().total, 1);
+        assert_eq!(i.archived_paths().unwrap(), HashSet::from(["Foo.md".to_string()]));
+    }
+    #[test] fn archived_hidden_from_query_groups_and_tags() {
+        let i = idx(&[("Plan.md", "garden #t", 1), ("x.md", "garden plan #t", 2), ("y.md", "#t", 3)]);
+        i.set_archived(&["plan".into(), "X".into()]).unwrap();
+        assert!(i.search_page_where("plan", Sort::Title, 0, 10, &[], &HashMap::new(), false, false).unwrap().hits.is_empty());
+        assert_eq!(i.tags(false).unwrap(), vec![TagCount { tag: "t".into(), count: 1 }]);
+        assert_eq!(i.tags(true).unwrap(), vec![TagCount { tag: "t".into(), count: 3 }]);
+        assert_eq!(i.tag_notes("t", 10, false).unwrap(), (1, vec!["y.md".to_string()]));
+    }
+    #[test] fn archived_unlocked_note_follows_the_flag() {
+        let mut i = idx(&[]);
+        i.upsert("s.md.age", &NoteFile { title: "s".into(), encrypted: true }, &Meta { mtime: 1, size: 1, birth: 0 }, None).unwrap();
+        let u: HashMap<String, String> = [("s.md.age".to_string(), "secretword".to_string())].into();
+        i.set_archived(&["S".into()]).unwrap();
+        assert!(i.search_page_where("secretword", Sort::Title, 0, 10, &[], &u, false, false).unwrap().hits.is_empty());
+        let h = i.search_page_where("secretword", Sort::Title, 0, 10, &[], &u, false, true).unwrap();
+        assert!(h.hits[0].archived && h.total == 1);
+    }
+    #[test] fn no_links_ignores_archive_state() { // A links only to archived B: still not an orphan
+        let i = idx(&[("A.md", "[[B]]", 1), ("B.md", "", 2), ("C.md", "", 3)]);
+        i.set_archived(&["B".into()]).unwrap();
+        let p = i.search_page_where("", Sort::Title, 0, 10, &[], &HashMap::new(), true, false).unwrap();
+        assert_eq!(p.hits.iter().map(|h| h.path.as_str()).collect::<Vec<_>>(), ["C.md"]);
+    }
+    #[test] fn link_targets_and_tasks_follow_flag_titles_do_not() {
+        let i = idx(&[("A.md", "- [ ] t", 1), ("B.md", "- [ ] u", 2)]);
+        i.set_archived(&["a".into()]).unwrap();
+        assert_eq!(i.link_targets(false).unwrap().len(), 1);
+        assert_eq!(i.link_targets(true).unwrap().len(), 2);
+        assert_eq!(i.task_rows(&[], false).unwrap().len(), 1);
+        assert!(i.task_rows(&[], true).unwrap().iter().any(|r| r.archived && r.path == "A.md"));
+        assert_eq!(i.titles().unwrap().len(), 2); // link resolution and uniqueness keep archived titles
+        assert!(i.node("A.md").unwrap().unwrap().archived);
+    }
     #[test] fn title_sort_orders_groups_az() {
         let i = idx(&[("b garden.md", "", 3), ("a garden.md", "", 1), ("zz.md", "garden plan", 5), ("yy.md", "garden", 9)]);
         assert_eq!(paths(&i, "garden", Sort::Title, 0, 10, &HashMap::new()), vec!["a garden.md", "b garden.md", "yy.md", "zz.md"]);
@@ -744,7 +851,7 @@ mod tests {
         assert_eq!(t, vec!["B c", "a", "s"]); }
     #[test] fn tags_listed_with_counts_and_filter_is_and() {
         let i = idx(&[("a.md", "#work #idea", 1), ("b.md", "#work", 2), ("c.md", "nothing", 3)]);
-        assert_eq!(i.tags().unwrap(), vec![TagCount { tag: "idea".into(), count: 1 }, TagCount { tag: "work".into(), count: 2 }]);
+        assert_eq!(i.tags(true).unwrap(), vec![TagCount { tag: "idea".into(), count: 1 }, TagCount { tag: "work".into(), count: 2 }]);
         let p = |tags: &[&str]| i.search_page("", Sort::Title, 0, 10, &tags.iter().map(|s| s.to_string()).collect::<Vec<_>>(), &HashMap::new()).unwrap().hits.into_iter().map(|h| h.path).collect::<Vec<_>>();
         assert_eq!(p(&["work"]), vec!["a.md", "b.md"]); assert_eq!(p(&["work", "IDEA"]), vec!["a.md"]); assert_eq!(p(&[]).len(), 3);
     }
@@ -757,7 +864,7 @@ mod tests {
         let mut i = idx(&[]);
         i.upsert("e.md.age", &NoteFile { title: "e".into(), encrypted: true }, &Meta { mtime: 1, size: 1, birth: 0 }, None).unwrap();
         let u = HashMap::from([("e.md.age".to_string(), "x #Sec".to_string())]);
-        assert!(i.tags().unwrap().is_empty());
+        assert!(i.tags(true).unwrap().is_empty());
         for q in ["", "x"] {
             assert_eq!(i.search_page(q, Sort::Title, 0, 10, &["sec".to_string()], &u).unwrap().hits.len(), 1, "{q}");
             assert!(i.search_page(q, Sort::Title, 0, 10, &["other".to_string()], &u).unwrap().hits.is_empty());
@@ -786,26 +893,26 @@ mod tests {
     }
     #[test] fn upsert_fills_tasks_and_remove_clears() {
         let mut i = idx(&[("a.md", "# a\n- [ ] one\n- [x] two ✅ 2026-10-20\n", 1)]);
-        let r = i.task_rows(&[]).unwrap();
+        let r = i.task_rows(&[], true).unwrap();
         assert_eq!(r.len(), 2);
         assert_eq!((r[0].line, r[0].text.as_str(), r[0].line_text.as_str()), (1, "one", "- [ ] one"));
         i.remove("a.md").unwrap();
-        assert!(i.task_rows(&[]).unwrap().is_empty());
+        assert!(i.task_rows(&[], true).unwrap().is_empty());
     }
     #[test] fn task_rows_filter_by_tags() {
         let i = idx(&[("a.md", "#work\n- [ ] one", 1), ("b.md", "- [ ] two", 2)]);
-        assert_eq!(i.task_rows(&["Work".into()]).unwrap().len(), 1);
-        assert_eq!(i.task_rows(&[]).unwrap().len(), 2);
+        assert_eq!(i.task_rows(&["Work".into()], true).unwrap().len(), 1);
+        assert_eq!(i.task_rows(&[], true).unwrap().len(), 2);
     }
     #[test] fn schema_v3_db_is_rebuilt() {
         let dir = tempfile::tempdir().unwrap(); let db = dir.path().join("i.db");
         let mut i = Index::open(&db).unwrap();
         i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("- [ ] t")).unwrap(); drop(i);
         Connection::open(&db).unwrap().execute_batch("PRAGMA user_version=3").unwrap();
-        let mut i = Index::open(&db).unwrap(); assert!(i.known().unwrap().is_empty()); assert!(i.task_rows(&[]).unwrap().is_empty());
+        let mut i = Index::open(&db).unwrap(); assert!(i.known().unwrap().is_empty()); assert!(i.task_rows(&[], true).unwrap().is_empty());
         assert_eq!(i.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
         i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("- [ ] t")).unwrap();
-        assert_eq!(i.task_rows(&[]).unwrap().len(), 1);
+        assert_eq!(i.task_rows(&[], true).unwrap().len(), 1);
     }
     /// v5: `Tags:` / `tags :` / `Aliases:` are read now, so notes indexed by v4 must be parsed again once.
     #[test] fn schema_v4_db_is_rebuilt() {
@@ -833,14 +940,14 @@ mod tests {
         // a pre-0.7 build edits the note: same deletes and insert as its upsert, tasks untouched
         Connection::open(&db).unwrap().execute_batch("DELETE FROM notes WHERE path='a.md'; INSERT INTO notes(path,title,title_folded,mtime,size,encrypted,preview,created,created_src,modified,modified_src) VALUES('a.md','a','a',2,1,0,'',2,'file',2,'file');").unwrap();
         let i = Index::open(&db).unwrap();
-        assert!(i.known().unwrap().is_empty() && i.task_rows(&[]).unwrap().is_empty(), "rebuilt: reconcile reindexes every note");
+        assert!(i.known().unwrap().is_empty() && i.task_rows(&[], true).unwrap().is_empty(), "rebuilt: reconcile reindexes every note");
     }
     #[test] fn schema_upgrade_reindexes() {
         let dir = tempfile::tempdir().unwrap(); let db = dir.path().join("i.db");
         let mut i = Index::open(&db).unwrap();
         i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("#x")).unwrap(); drop(i);
         Connection::open(&db).unwrap().execute_batch("PRAGMA user_version=2").unwrap();
-        let i = Index::open(&db).unwrap(); assert!(i.known().unwrap().is_empty()); assert!(i.tags().unwrap().is_empty());
+        let i = Index::open(&db).unwrap(); assert!(i.known().unwrap().is_empty()); assert!(i.tags(true).unwrap().is_empty());
         assert_eq!(i.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
         let mut i = i; i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("#x")).unwrap(); drop(i);
         assert_eq!(Index::open(&db).unwrap().known().unwrap().len(), 1);
@@ -849,8 +956,8 @@ mod tests {
         assert!(i.search_page("zebra", Sort::Modified, 0, 10, &[], &HashMap::new()).unwrap().hits.is_empty()); assert!(i.backlinks("b").unwrap().is_empty()); }
     #[test] fn upsert_replaces_and_remove_drops_tags() { let mut i = idx(&[("a.md", "#one", 1)]);
         i.upsert("a.md", &NoteFile { title: "a".into(), encrypted: false }, &Meta { mtime: 2, size: 1, birth: 0 }, Some("#two")).unwrap();
-        assert_eq!(i.tags().unwrap()[0].tag, "two"); assert_eq!(i.tags().unwrap().len(), 1);
-        i.remove("a.md").unwrap(); assert!(i.tags().unwrap().is_empty()); }
+        assert_eq!(i.tags(true).unwrap()[0].tag, "two"); assert_eq!(i.tags(true).unwrap().len(), 1);
+        i.remove("a.md").unwrap(); assert!(i.tags(true).unwrap().is_empty()); }
     const FM: &str = "---\ncreated: 2020-01-02T03:04:05+00:00\nmodified: 2021-06-07T08:09:10+00:00\ntags: [Work, \"#Idea\"]\naliases: [Nick, Other]\n---\nbody zebra\n";
     fn row(i: &Index, p: &str) -> (i64, String, i64, String) {
         i.db.query_row("SELECT created, created_src, modified, modified_src FROM notes WHERE path=?", [p], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap()
@@ -876,7 +983,7 @@ mod tests {
     }
     #[test] fn frontmatter_tags_merge() {
         let i = idx(&[("a.md", &format!("{FM}#work #more"), 1)]);
-        assert_eq!(i.tags().unwrap().iter().map(|t| t.tag.as_str()).collect::<Vec<_>>(), vec!["Idea", "more", "work"]);
+        assert_eq!(i.tags(true).unwrap().iter().map(|t| t.tag.as_str()).collect::<Vec<_>>(), vec!["Idea", "more", "work"]);
     }
     #[test] fn aliases_count_as_titles() {
         let i = idx(&[("a.md", FM, 1), ("b.md", "x", 2)]);
@@ -901,7 +1008,7 @@ mod tests {
         let i = idx(&[("Nick.md", "[[Nick]] [[nobody]]", 1)]);
         assert!(i.linked_from("Nick.md").unwrap().is_empty());
     }
-    fn orphans(i: &Index, tags: &[String]) -> Page { i.search_page_where("", Sort::Title, 0, 10, tags, &HashMap::new(), true).unwrap() }
+    fn orphans(i: &Index, tags: &[String]) -> Page { i.search_page_where("", Sort::Title, 0, 10, tags, &HashMap::new(), true, true).unwrap() }
     #[test] fn no_links_lists_orphans_only() {
         let i = idx(&[("a.md", "[[B]]", 1), ("B.md", "", 2), ("c.md", "", 3), ("Nick.md", "---\naliases: [Nicholas]\n---\n", 4), ("d.md", "[[Nicholas]]", 5), ("e.md", "[[Missing]]", 6)]);
         assert_eq!(orphans(&i, &[]).hits.into_iter().map(|h| h.path).collect::<Vec<_>>(), vec!["c.md", "e.md"]);
@@ -913,7 +1020,7 @@ mod tests {
         assert_eq!(p.hits.iter().map(|h| h.path.as_str()).collect::<Vec<_>>(), vec!["c.md", "e.md"]);
         assert_eq!(p.total, 2);
         let unlocked = HashMap::from([("s.md.age".to_string(), "plain".to_string())]);
-        assert_eq!(i.search_page_where("", Sort::Title, 0, 10, &[], &unlocked, true).unwrap().total, 2, "unlocked map not merged");
+        assert_eq!(i.search_page_where("", Sort::Title, 0, 10, &[], &unlocked, true, true).unwrap().total, 2, "unlocked map not merged");
         let p = orphans(&i, &["t".to_string()]);
         assert_eq!((p.hits.len(), p.total, p.hits[0].path.as_str()), (1, 1, "c.md"));
     }
@@ -923,7 +1030,7 @@ mod tests {
     }
     #[test] fn tag_notes_counts_and_limits() {
         let notes: Vec<(String, String, i64)> = (0..20).map(|n| (format!("n{n:02}.md"), "#big".into(), n)).collect();
-        let (c, p) = idx_owned(&notes).tag_notes("big", 16).unwrap();
+        let (c, p) = idx_owned(&notes).tag_notes("big", 16, true).unwrap();
         assert_eq!((c, p.len()), (20, 16));
     }
     #[test] fn node_returns_metadata() {
@@ -1016,7 +1123,7 @@ mod tests {
     #[test] fn link_targets_lists_titles_and_aliases() {
         let mut i = idx(&[("Nick.md", "---\naliases: [Nicholas]\n---\n", 7)]);
         i.upsert("L.md.age", &NoteFile { title: "L".into(), encrypted: true }, &Meta { mtime: 9, size: 1, birth: 0 }, None).unwrap();
-        let mut got: Vec<_> = i.link_targets().unwrap().into_iter().map(|t| (t.name, t.title, t.modified, t.locked)).collect();
+        let mut got: Vec<_> = i.link_targets(true).unwrap().into_iter().map(|t| (t.name, t.title, t.modified, t.locked)).collect();
         got.sort();
         let m = i.title_modified("Nick.md").unwrap().unwrap().1;
         let l = i.title_modified("L.md.age").unwrap().unwrap().1;

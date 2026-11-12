@@ -103,6 +103,7 @@ pub struct TaskItem {
     pub done_on: Option<String>,
     /// Raw line: the `expected` for a tick.
     pub line_text: String,
+    pub archived: bool,
 }
 
 #[derive(Serialize, Debug, Default)]
@@ -126,7 +127,7 @@ pub fn group_tasks(rows: Vec<TaskRow>, query: &str, show_done: bool, today: &str
     rows.sort_by(|a, b| (a.due.is_none(), &a.due, std::cmp::Reverse(a.modified), &a.path, a.line).cmp(&(b.due.is_none(), &b.due, std::cmp::Reverse(b.modified), &b.path, b.line)));
     let mut v = TaskView::default();
     for r in rows {
-        let item = |r: TaskRow| TaskItem { path: r.path, title: r.title, line: r.line, text: r.text, due: r.due, done: r.done, done_on: r.done_on, line_text: r.line_text };
+        let item = |r: TaskRow| TaskItem { path: r.path, title: r.title, line: r.line, text: r.text, due: r.due, done: r.done, done_on: r.done_on, line_text: r.line_text, archived: r.archived };
         let bucket = if r.done {
             match (&r.done_on, &cutoff) {
                 (Some(d), Some(c)) if show_done && d > c => &mut v.done,
@@ -174,7 +175,7 @@ mod tests {
     }
 
     fn row(title: &str, text: &str, due: Option<&str>, modified: i64) -> TaskRow {
-        TaskRow { path: format!("{title}.md"), title: title.into(), modified, line: 0, text: text.into(), done: false, due: due.map(Into::into), done_on: None, line_text: String::new() }
+        TaskRow { path: format!("{title}.md"), title: title.into(), modified, line: 0, text: text.into(), done: false, due: due.map(Into::into), done_on: None, line_text: String::new(), archived: false }
     }
     fn texts(v: &[TaskItem]) -> Vec<&str> { v.iter().map(|t| t.text.as_str()).collect() }
 

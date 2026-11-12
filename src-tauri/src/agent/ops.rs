@@ -192,7 +192,7 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
         }
         let has_more = hits.len() > PAGE;
         hits.truncate(PAGE);
-        Ok(Page { hits, has_more, total: 0 })
+        Ok(Page { hits, has_more, total: 0, hidden: 0 })
     }
 
     fn tags(&self) -> anyhow::Result<Vec<TagCount>> {
@@ -337,7 +337,7 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
             g.count = if collapsed { g.count - g.unlocked } else { g.notes.len() };
             // a group only unlocked notes pushed over the cap would betray them by its empty list: list the rest
             if collapsed && g.count <= TAG_MAX {
-                let (_, paths) = self.vault.index.tag_notes(&fold(&g.tag), TAG_MAX + 1)?;
+                let (_, paths) = self.vault.index.tag_notes(&fold(&g.tag), TAG_MAX + 1, true)?;
                 g.notes = connections::nodes(&self.vault.index, paths.into_iter().filter(|p| p != path && !locked(p)))?;
                 g.count = g.notes.len();
             }

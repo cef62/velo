@@ -123,7 +123,7 @@ pub fn build(index: &Index, unlocked: &HashMap<String, String>, path: &str, text
     let indexed: HashSet<String> = index.tags_of(path)?.iter().map(|t| fold(t)).collect();
     let mut tags = vec![];
     for (tag, display) in all_tags(body, fm.as_ref()) {
-        let (count, mut paths) = index.tag_notes(&tag, TAG_MAX + 1)?;
+        let (count, mut paths) = index.tag_notes(&tag, TAG_MAX + 1, true)?;
         // the index counts the centre too when it carries the tag there
         let mut count = count.saturating_sub(indexed.contains(&tag) as usize);
         paths.retain(|p| p != path);

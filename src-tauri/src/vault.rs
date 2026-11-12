@@ -300,14 +300,14 @@ impl Vault {
     }
 
     pub fn search_where(&self, query: &str, sort: Sort, offset: usize, tags: &[String], no_links: bool) -> anyhow::Result<Page> {
-        self.index.search_page_where(query, sort, offset, PAGE, tags, &self.unlocked, no_links)
+        self.index.search_page_where(query, sort, offset, PAGE, tags, &self.unlocked, no_links, true)
     }
 
     /// Every note matching the search filters, newest first by `by`, dated by its indexed created/modified; `since_ms` drops older ones.
     /// Snippets are blanked for locked notes: an unlocked-in-memory one would otherwise carry its body.
     pub fn timeline(&self, query: &str, tags: &[String], no_links: bool, by: TimelineBy, since_ms: Option<i64>) -> anyhow::Result<Vec<TimelineRow>> {
         let dates = self.index.dates()?;
-        let mut rows: Vec<TimelineRow> = self.index.search_page_where(query, Sort::Modified, 0, ALL, tags, &self.unlocked, no_links)?.hits.into_iter().filter_map(|h| {
+        let mut rows: Vec<TimelineRow> = self.index.search_page_where(query, Sort::Modified, 0, ALL, tags, &self.unlocked, no_links, true)?.hits.into_iter().filter_map(|h| {
             let &(c, m) = dates.get(&h.path)?;
             let date = match by { TimelineBy::Created => c, TimelineBy::Updated => m };
             let snippet = if h.encrypted { String::new() } else { h.snippet };
@@ -319,7 +319,7 @@ impl Vault {
 
     /// Open and recent tasks; unlocked notes' tasks come from memory, so they never reach SQLite.
     pub fn tasks(&self, query: &str, tags: &[String], show_done: bool) -> anyhow::Result<TaskView> {
-        let mut rows = self.index.task_rows(tags)?;
+        let mut rows = self.index.task_rows(tags, true)?;
         let wanted: Vec<String> = tags.iter().map(|t| fold(t)).collect();
         for (path, plain) in &self.unlocked {
             let Some((title, modified)) = self.index.title_modified(path)? else { continue };
@@ -327,14 +327,14 @@ impl Vault {
             if !wanted.iter().all(|w| have.iter().any(|(h, _)| h == w)) {
                 continue;
             }
-            rows.extend(parse_tasks(plain).into_iter().map(|t| TaskRow { path: path.clone(), title: title.clone(), modified, line: t.line, text: t.text, done: t.done, due: t.due, done_on: t.done_on, line_text: t.line_text }));
+            rows.extend(parse_tasks(plain).into_iter().map(|t| TaskRow { path: path.clone(), title: title.clone(), modified, line: t.line, text: t.text, done: t.done, due: t.due, done_on: t.done_on, line_text: t.line_text, archived: false }));
         }
         Ok(group_tasks(rows, query, show_done, &local_today()))
     }
 
     /// Tags of plain notes only: unlocked notes' tags stay in memory and out of this list.
     pub fn tags(&self) -> anyhow::Result<Vec<TagCount>> {
-        self.index.tags()
+        self.index.tags(true)
     }
 
     pub fn titles(&self) -> anyhow::Result<Vec<String>> {
@@ -342,7 +342,7 @@ impl Vault {
     }
 
     pub fn link_targets(&self) -> anyhow::Result<Vec<LinkTarget>> {
-        self.index.link_targets()
+        self.index.link_targets(true)
     }
 
     /// A new plain note `title` holding `text`; refuses a title another note (locked ones too) already names. Returns its path.
@@ -978,7 +978,7 @@ mod tests {
         let _r = v.save_note(&d.path, "- [ ] secretzebra", &d.hash, None, false).unwrap();
         assert_eq!(v.tasks("", &[], false).unwrap().no_date.len(), 1);
         v.lock_note(&d.path, &id).unwrap();
-        assert!(v.index.task_rows(&[]).unwrap().iter().all(|r| !r.text.contains("secretzebra")));
+        assert!(v.index.task_rows(&[], true).unwrap().iter().all(|r| !r.text.contains("secretzebra")));
         drop(v);
         for suffix in ["", "-wal", "-shm"] {
             if let Ok(b) = std::fs::read(format!("{}{suffix}", db.display())) { assert!(!b.windows(11).any(|w| w == b"secretzebra"), "{suffix}"); }
