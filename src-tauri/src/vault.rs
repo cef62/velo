@@ -321,31 +321,38 @@ impl Vault {
     pub fn sync_archive(&self) {
         let list = match crate::archive::read(&self.store.dir) {
             Ok(l) => l,
-            Err(e) => {
-                if !self.archive_read_logged.replace(true) {
-                    let m = format!("cannot read {}: {e}", crate::archive::FILE);
-                    crate::log::line(&m);
-                    eprintln!("{m}");
-                }
-                return;
-            }
+            Err(e) => return self.log_archive_read(&e),
         };
         if *self.archive_loaded.borrow() != list && self.index.set_archived(&list).is_ok() {
             *self.archive_loaded.borrow_mut() = list;
         }
     }
 
+    fn log_archive_read(&self, e: &std::io::Error) {
+        if !self.archive_read_logged.replace(true) {
+            let m = format!("cannot read {}: {e}", crate::archive::FILE);
+            crate::log::line(&m);
+            eprintln!("{m}");
+        }
+    }
+
     fn archive_edit(&mut self, change: impl FnOnce(&mut Vec<String>)) -> anyhow::Result<()> {
         debug_assert!(!self.index.in_batch());
         let entries = crate::archive::update(&self.store.dir, change)?;
-        self.index.set_archived(&entries)?;
-        *self.archive_loaded.borrow_mut() = entries;
+        if *self.archive_loaded.borrow() != entries {
+            self.index.set_archived(&entries)?;
+            *self.archive_loaded.borrow_mut() = entries;
+        }
         Ok(())
     }
 
     /// `archive_edit` for a note operation that already succeeded: a failure is logged and kept in `archive_error`,
     /// never returned. Runs after the operation's index batch has committed.
+    /// An unreadable list (checked first, so only write failures reach `archive_error`) is logged once per vault.
     fn archive_follow(&mut self, change: impl FnOnce(&mut Vec<String>)) {
+        if let Err(e) = crate::archive::read(&self.store.dir) {
+            return self.log_archive_read(&e);
+        }
         if let Err(e) = self.archive_edit(change) {
             let m = format!("cannot update {}: {e}", crate::archive::FILE);
             crate::log::line(&m);
@@ -357,7 +364,7 @@ impl Vault {
     /// Some file in the vault still has a title folding to `title` (a twin: `Foo.md` beside `Foo.txt`).
     fn title_on_disk(&self, title: &str) -> bool {
         let f = fold(title);
-        self.store.list().is_ok_and(|l| l.iter().any(|(_, n, _)| fold(&n.title) == f))
+        self.store.list().map_or(true, |l| l.iter().any(|(_, n, _)| fold(&n.title) == f))
     }
 
     /// A title moved from `old` to `new`. A stale entry for `new` is always cleared; only an archived note carries its
@@ -2400,6 +2407,39 @@ mod tests {
         chmod(0o644); assert_eq!(shown(&v), ["B"]); // readable again: loaded
         chmod(0o000); assert_eq!(shown(&v), ["B"]); // unreadable later: the loaded set stays
         chmod(0o644);
+    }
+    #[cfg(unix)] #[test] fn unreadable_list_makes_note_operations_log_not_report() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, db) = setup(); std::fs::write(dir.join("Old.md"), "").unwrap();
+        std::fs::create_dir(dir.join(".velo")).unwrap(); std::fs::write(dir.join(".velo/archived"), "Old\n").unwrap();
+        let f = dir.join(".velo/archived");
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o000)).unwrap();
+        v.rename_note(&s(&dir.join("Old.md")), "New", false).unwrap();
+        v.create_from_selection("Fresh", "x", false).unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(v.archive_error.take().is_none()); // a read failure is log only
+        assert!(v.archive_read_logged.get());
+    }
+    #[test] fn archive_edit_skips_the_reload_when_nothing_changed() {
+        let (dir, db) = setup(); std::fs::write(dir.join("A.md"), "").unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap(); v.set_archived(&s(&dir.join("A.md")), true).unwrap();
+        v.index.set_archived(&[]).unwrap(); // marker: a reload would put "a" back
+        v.archive_edit(|_| {}).unwrap();
+        assert!(v.index.archived_titles().unwrap().is_empty());
+    }
+    #[test] fn title_on_disk_keeps_the_entry_when_the_listing_fails() {
+        let (dir, db) = setup();
+        let v = open(dir.clone(), &db, None).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(v.title_on_disk("Anything"));
+    }
+    #[test] fn open_or_create_on_an_existing_archived_note_leaves_it_archived() {
+        let (dir, db) = setup(); std::fs::write(dir.join("A.md"), "").unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap(); v.set_archived(&s(&dir.join("A.md")), true).unwrap();
+        assert!(v.open_or_create("a", None, false).unwrap().archived);
+        assert!(shown(&v).is_empty());
+        assert_eq!(std::fs::read_to_string(dir.join(".velo/archived")).unwrap(), "A\n");
     }
     #[test] fn unlocked_archived_note_follows_the_flag() {
         let (dir, db) = setup(); let id = crypto::new_identity();
