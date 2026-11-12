@@ -667,7 +667,7 @@ pub fn save_note(st: State<'_, AppState>, path: String, text: String, base_hash:
 #[tauri::command(async)]
 pub fn link_mention(st: State<'_, AppState>, path: String, target_title: String, expected_count: usize, editor_text: Option<String>) -> Res<Option<String>> {
     let fm = st.settings.lock().unwrap().write_front_matter;
-    with_vault(&st, |v, _| v.link_mention(&path, &target_title, expected_count, editor_text.as_deref(), fm))
+    with_vault(&st, |v, _| v.link_mention(&path, &target_title, expected_count, editor_text.as_deref(), fm, false))
 }
 
 #[tauri::command(async)]
@@ -729,7 +729,7 @@ pub fn rename_note(st: State<'_, AppState>, path: String, new_title: String, rew
 
 #[tauri::command(async)]
 pub fn connections(st: State<'_, AppState>, path: String) -> Res<crate::connections::Connections> {
-    with_vault(&st, |v, _| v.connections(&path, &|_| false))
+    with_vault(&st, |v, _| v.connections(&path, &|_| false, false))
 }
 
 #[tauri::command(async)]

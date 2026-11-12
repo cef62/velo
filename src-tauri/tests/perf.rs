@@ -258,7 +258,7 @@ fn connections_under_50ms() {
         seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
         let p = &paths[(seed >> 33) as usize % paths.len()];
         let t = Instant::now();
-        v.connections(p, &|_| false).unwrap();
+        v.connections(p, &|_| false, false).unwrap();
         times.push(t.elapsed().as_secs_f64() * 1000.0);
     }
     times.sort_by(|a, b| a.partial_cmp(b).unwrap());

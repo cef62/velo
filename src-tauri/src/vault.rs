@@ -603,11 +603,14 @@ impl Vault {
     /// Wrap the first mention of `target` in `path` as a link. With the editor's `editor_text` it only returns the
     /// rewritten text (the editor saves it); otherwise it saves through `save_note` and returns None.
     /// A locked note, or the plain twin of one, is never rewritten from here.
-    pub fn link_mention(&mut self, path: &str, target: &str, expected: usize, editor_text: Option<&str>, write_fm: bool) -> anyhow::Result<Option<String>> {
+    pub fn link_mention(&mut self, path: &str, target: &str, expected: usize, editor_text: Option<&str>, write_fm: bool, include_archived: bool) -> anyhow::Result<Option<String>> {
         if self.note(Path::new(path))?.encrypted || self.locked_twin(path) {
             return Err(anyhow!("locked"));
         }
-        let names: HashSet<String> = self.index.names()?.into_iter().map(|(n, _)| n).collect();
+        // the same names the Related panel offered: archived ones only when it showed them
+        self.sync_archive();
+        let hidden = if include_archived { HashSet::new() } else { self.index.archived_paths()? };
+        let names: HashSet<String> = self.index.names()?.into_iter().filter(|(_, p)| !hidden.contains(p)).map(|(n, _)| n).collect();
         let rewrite = |text: &str| link_mention_text(text, target, &names, expected).map_err(|e| anyhow!(e));
         if let Some(text) = editor_text {
             return rewrite(text).map(Some);
@@ -718,7 +721,8 @@ impl Vault {
     }
 
     /// The one-hop graph around `path`; an encrypted note gives `locked` unless unlocked. `hide`: see `connections::build`.
-    pub fn connections(&self, path: &str, hide: &dyn Fn(&str) -> bool) -> anyhow::Result<Connections> {
+    pub fn connections(&self, path: &str, hide: &dyn Fn(&str) -> bool, include_archived: bool) -> anyhow::Result<Connections> {
+        self.sync_archive();
         let p = Path::new(path);
         let plain;
         let text = if self.note(p)?.encrypted {
@@ -727,7 +731,7 @@ impl Vault {
             plain = lossy(&self.store.read(p)?);
             &plain
         };
-        connections::build(&self.index, &self.unlocked, path, text, hide)
+        connections::build(&self.index, &self.unlocked, path, text, hide, include_archived)
     }
 
     /// Notes whose links a rename of `title` would rewrite (the "Update N links?" count).
@@ -1131,15 +1135,26 @@ mod tests {
         let mut v = open(dir.clone(), &db, None).unwrap();
         let (c, n) = (s(&dir.join("C.md")), s(&dir.join("Nick.md")));
         assert_eq!(v.index.linked_from(&n).unwrap().len(), 0);
-        assert_eq!(v.link_mention(&c, "Nick", 1, None, false).unwrap(), None);
+        assert_eq!(v.link_mention(&c, "Nick", 1, None, false, false).unwrap(), None);
         assert_eq!(std::fs::read_to_string(dir.join("C.md")).unwrap(), "see [[Nick]]");
         assert_eq!(v.index.linked_from(&n).unwrap().len(), 1);
+    }
+    #[test] fn link_mention_uses_the_names_the_panel_shows() { // archived `Foo Bar` must not shadow the visible `Foo`
+        let (dir, db) = setup();
+        for (n, b) in [("Foo", ""), ("Foo Bar", ""), ("C", "see Foo Bar")] { std::fs::write(dir.join(format!("{n}.md")), b).unwrap(); }
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        v.set_archived(&s(&dir.join("Foo Bar.md")), true).unwrap();
+        let c = s(&dir.join("C.md"));
+        assert_eq!(v.connections(&c, &|_| false, false).unwrap().mentions[0].name, "Foo");
+        assert_eq!(v.link_mention(&c, "Foo", 1, None, false, true).unwrap_err().to_string(), "mention-moved");
+        assert_eq!(v.link_mention(&c, "Foo", 1, None, false, false).unwrap(), None);
+        assert_eq!(std::fs::read_to_string(dir.join("C.md")).unwrap(), "see [[Foo]] Bar");
     }
     #[test] fn link_mention_with_editor_text_writes_nothing() {
         let (dir, db) = setup();
         std::fs::write(dir.join("Nick.md"), "").unwrap(); std::fs::write(dir.join("C.md"), "see Nick").unwrap();
         let mut v = open(dir.clone(), &db, None).unwrap();
-        let got = v.link_mention(&s(&dir.join("C.md")), "Nick", 1, Some("typed Nick"), false).unwrap();
+        let got = v.link_mention(&s(&dir.join("C.md")), "Nick", 1, Some("typed Nick"), false, false).unwrap();
         assert_eq!(got.as_deref(), Some("typed [[Nick]]"));
         assert_eq!(std::fs::read_to_string(dir.join("C.md")).unwrap(), "see Nick");
     }
@@ -1147,7 +1162,7 @@ mod tests {
         let (dir, db) = setup();
         std::fs::write(dir.join("Nick.md"), "").unwrap(); std::fs::write(dir.join("C.md"), "see Nick").unwrap();
         let mut v = open(dir.clone(), &db, None).unwrap();
-        assert_eq!(v.link_mention(&s(&dir.join("C.md")), "Nick", 2, None, false).unwrap_err().to_string(), "mention-moved");
+        assert_eq!(v.link_mention(&s(&dir.join("C.md")), "Nick", 2, None, false, false).unwrap_err().to_string(), "mention-moved");
         assert_eq!(std::fs::read_to_string(dir.join("C.md")).unwrap(), "see Nick");
     }
     #[test] fn link_mention_refuses_locked() {
@@ -1157,10 +1172,10 @@ mod tests {
         v.save_note(&d.path, "see Nick", &d.hash, Some(&id), false).unwrap();
         let plain = d.path.clone();
         let locked = v.lock_note(&d.path, &id).unwrap();
-        let e = v.link_mention(&locked, "Nick", 1, None, false).unwrap_err();
+        let e = v.link_mention(&locked, "Nick", 1, None, false, false).unwrap_err();
         assert_eq!(e.to_string(), "locked");
         std::fs::write(&plain, "see Nick").unwrap(); // a plain twin of a locked note
-        assert_eq!(v.link_mention(&plain, "Nick", 1, None, false).unwrap_err().to_string(), "locked");
+        assert_eq!(v.link_mention(&plain, "Nick", 1, None, false, false).unwrap_err().to_string(), "locked");
     }
     #[test] fn save_to_plain_path_refused_when_locked_sibling_exists() {
         let (dir, db) = setup(); let id = crypto::new_identity();

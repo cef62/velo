@@ -16,6 +16,7 @@ pub struct Node {
     pub modified: i64,
     pub preview: String,
     pub locked: bool,
+    pub archived: bool,
     /// For `links_in`: the line holding the link (trimmed, cut around it); "" elsewhere and for locked sources.
     pub context: String,
 }
@@ -57,7 +58,7 @@ pub struct Connections {
 }
 
 fn node(index: &Index, path: &str) -> anyhow::Result<Option<Node>> {
-    Ok(index.node(path)?.map(|r| Node { path: path.into(), title: r.title, created: r.created, modified: r.modified, preview: r.preview, locked: r.encrypted, context: String::new() }))
+    Ok(index.node(path)?.map(|r| Node { path: path.into(), title: r.title, created: r.created, modified: r.modified, preview: r.preview, locked: r.encrypted, archived: r.archived, context: String::new() }))
 }
 
 /// Nodes for `paths` still in the index, most recently modified first.
@@ -91,21 +92,25 @@ fn link_context(body: &str, names: &[String]) -> String {
 
 /// The one-hop graph around `path`, whose text is `text`. Locked notes' own links and tags come only from `unlocked`.
 /// Names of notes whose path `hide` accepts are left out of mention matching, so they cannot shadow a shorter name.
-pub fn build(index: &Index, unlocked: &HashMap<String, String>, path: &str, text: &str, hide: &dyn Fn(&str) -> bool) -> anyhow::Result<Connections> {
+/// Without `include_archived`, archived notes other than the centre are hidden the same way and left out of every group.
+pub fn build(index: &Index, unlocked: &HashMap<String, String>, path: &str, text: &str, hide: &dyn Fn(&str) -> bool, include_archived: bool) -> anyhow::Result<Connections> {
     let centre = node(index, path)?.ok_or_else(|| anyhow!("not found"))?;
+    let archived: HashSet<String> = if include_archived { HashSet::new() } else { index.archived_paths()?.into_iter().filter(|p| p != path).collect() };
+    let hide = |p: &str| hide(p) || archived.contains(p);
     let fm = frontmatter::parse(text);
     let body = frontmatter::body(text);
     // unlocked notes other than the centre: (path, body, folded tags)
     let others: Vec<(&String, &str, HashSet<String>)> = unlocked
         .iter()
-        .filter(|(p, _)| *p != path)
+        .filter(|(p, _)| *p != path && !archived.contains(*p))
         .map(|(p, t)| (p, frontmatter::body(t), all_tags(frontmatter::body(t), frontmatter::parse(t).as_ref()).into_iter().map(|(f, _)| f).collect()))
         .collect();
 
     let (mut out, missing) = targets(index, body)?;
     out.remove(path);
+    out.retain(|p| !archived.contains(p));
 
-    let mut sources: HashSet<String> = index.linked_from(path)?.into_iter().collect();
+    let mut sources: HashSet<String> = index.linked_from(path)?.into_iter().filter(|p| !archived.contains(p)).collect();
     for (p, b, _) in &others {
         if targets(index, b)?.0.contains(path) {
             sources.insert(p.to_string());
@@ -123,9 +128,9 @@ pub fn build(index: &Index, unlocked: &HashMap<String, String>, path: &str, text
     let indexed: HashSet<String> = index.tags_of(path)?.iter().map(|t| fold(t)).collect();
     let mut tags = vec![];
     for (tag, display) in all_tags(body, fm.as_ref()) {
-        let (count, mut paths) = index.tag_notes(&tag, TAG_MAX + 1, true)?;
-        // the index counts the centre too when it carries the tag there
-        let mut count = count.saturating_sub(indexed.contains(&tag) as usize);
+        let (count, mut paths) = index.tag_notes(&tag, TAG_MAX + 1, include_archived)?;
+        // the index counts the centre too when it carries the tag there, unless it is archived and archived notes are left out
+        let mut count = count.saturating_sub((indexed.contains(&tag) && (include_archived || !centre.archived)) as usize);
         paths.retain(|p| p != path);
         let mut unlocked = 0;
         for (p, _, t) in &others {
@@ -195,7 +200,7 @@ mod tests {
 
     #[test] fn one_hop_groups() {
         let (v, d) = vault(&[("C.md", "see [[A]] #t and Delta"), ("A.md", ""), ("B.md", "[[C]]"), ("D.md", "#t"), ("Delta.md", "")], "", false);
-        let c = v.connections(&p(&d, "C.md"), &|_| false).unwrap();
+        let c = v.connections(&p(&d, "C.md"), &|_| false, false).unwrap();
         assert_eq!(c.centre.title, "C");
         assert_eq!(paths(&c.links_out), [p(&d, "A.md")]);
         assert_eq!(paths(&c.links_in), [p(&d, "B.md")]);
@@ -209,7 +214,7 @@ mod tests {
     #[test] fn backlink_and_mention_carry_their_line_but_never_a_locked_notes_text() {
         let id = crypto::new_identity();
         let (v, d) = vault(&[("C.md", "intro\nDelta came up in the Q4 planning\n"), ("B.md", "# B\nfirst line\nSee [[C]] for the header plan\n"), ("Delta.md", ""), ("L.md.age", "secret [[C]] text")], &id, true);
-        let c = v.connections(&p(&d, "C.md"), &|_| false).unwrap();
+        let c = v.connections(&p(&d, "C.md"), &|_| false, false).unwrap();
         let by_path: std::collections::HashMap<_, _> = c.links_in.iter().map(|n| (n.path.clone(), n.context.clone())).collect();
         assert_eq!(by_path[&p(&d, "B.md")], "See [[C]] for the header plan");
         assert_eq!(by_path[&p(&d, "L.md.age")], "", "an unlocked locked source shows no text");
@@ -217,20 +222,20 @@ mod tests {
         assert!(c.links_out.iter().all(|n| n.context.is_empty()));
         // a locked centre: mention lines come from its own text, so none
         let (v, d) = vault(&[("L.md.age", "Delta came up"), ("Delta.md", "")], &id, true);
-        let c = v.connections(&p(&d, "L.md.age"), &|_| false).unwrap();
+        let c = v.connections(&p(&d, "L.md.age"), &|_| false, false).unwrap();
         assert_eq!(c.mentions.len(), 1);
         assert_eq!(c.mentions[0].context, "");
     }
 
     #[test] fn missing_link_targets_are_listed() {
         let (v, d) = vault(&[("C.md", "see [[A]] and [[Nowhere]] and [[ nowhere ]]"), ("A.md", "")], "", false);
-        let c = v.connections(&p(&d, "C.md"), &|_| false).unwrap();
+        let c = v.connections(&p(&d, "C.md"), &|_| false, false).unwrap();
         assert_eq!(c.missing, ["Nowhere"]);
     }
 
     #[test] fn alias_link_is_a_backlink() {
         let (v, d) = vault(&[("Nicholas.md", "---\naliases: [Nick]\n---\n"), ("B.md", "[[Nick]]")], "", false);
-        assert_eq!(paths(&v.connections(&p(&d, "Nicholas.md"), &|_| false).unwrap().links_in), [p(&d, "B.md")]);
+        assert_eq!(paths(&v.connections(&p(&d, "Nicholas.md"), &|_| false, false).unwrap().links_in), [p(&d, "B.md")]);
     }
 
     #[test] fn big_tag_collapses() {
@@ -238,21 +243,21 @@ mod tests {
         files.extend((0..17).map(|i| (format!("n{i}.md"), "#big".to_string())));
         let files: Vec<(&str, &str)> = files.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
         let (v, d) = vault(&files, "", false);
-        let c = v.connections(&p(&d, "C.md"), &|_| false).unwrap();
+        let c = v.connections(&p(&d, "C.md"), &|_| false, false).unwrap();
         assert_eq!(c.tags[0].count, 17);
         assert!(c.tags[0].notes.is_empty());
     }
 
     #[test] fn linked_note_is_not_a_mention() {
         let (v, d) = vault(&[("C.md", "[[Alpha]] and Alpha again"), ("Alpha.md", "")], "", false);
-        let c = v.connections(&p(&d, "C.md"), &|_| false).unwrap();
+        let c = v.connections(&p(&d, "C.md"), &|_| false, false).unwrap();
         assert_eq!(paths(&c.links_out), [p(&d, "Alpha.md")]);
         assert!(c.mentions.is_empty());
     }
 
     #[test] fn mention_counts_its_spelling_and_every_note_it_names() {
         let (v, d) = vault(&[("C.md", "velo roadmap, Velo Roadmap, plan"), ("Velo roadmap.md", ""), ("Other.md", "---\naliases: [Velo roadmap]\n---\n")], "", false);
-        let c = v.connections(&p(&d, "C.md"), &|_| false).unwrap();
+        let c = v.connections(&p(&d, "C.md"), &|_| false, false).unwrap();
         let mut got: Vec<_> = c.mentions.iter().map(|m| (m.node.path.clone(), m.name.as_str(), m.count)).collect();
         got.sort();
         assert_eq!(got, [(p(&d, "Other.md"), "velo roadmap", 2), (p(&d, "Velo roadmap.md"), "velo roadmap", 2)]);
@@ -260,18 +265,18 @@ mod tests {
 
     #[test] fn alias_equal_to_title_counts_once_and_links() {
         let (mut v, d) = vault(&[("C.md", "see Résumé"), ("Resume.md", "---\naliases: [Résumé]\n---\n")], "", false);
-        let c = v.connections(&p(&d, "C.md"), &|_| false).unwrap();
+        let c = v.connections(&p(&d, "C.md"), &|_| false, false).unwrap();
         assert_eq!(c.mentions.iter().map(|m| (m.name.as_str(), m.count)).collect::<Vec<_>>(), [("Résumé", 1)]);
-        v.link_mention(&p(&d, "C.md"), &c.mentions[0].name, c.mentions[0].count, None, false).unwrap();
+        v.link_mention(&p(&d, "C.md"), &c.mentions[0].name, c.mentions[0].count, None, false, false).unwrap();
         assert_eq!(std::fs::read_to_string(d.join("C.md")).unwrap(), "see [[Résumé]]");
     }
 
     #[test] fn link_it_accepts_what_the_graph_shows_past_the_word_cap() {
         // the 9-word title is past the cap, so only "alpha" is a mention, in the graph and in Link it alike
         let (mut v, d) = vault(&[("C.md", "alpha b c d e f g h i"), ("alpha.md", ""), ("alpha b c d e f g h i.md", "")], "", false);
-        let c = v.connections(&p(&d, "C.md"), &|_| false).unwrap();
+        let c = v.connections(&p(&d, "C.md"), &|_| false, false).unwrap();
         assert_eq!(c.mentions.iter().map(|m| (m.name.as_str(), m.count)).collect::<Vec<_>>(), [("alpha", 1)]);
-        v.link_mention(&p(&d, "C.md"), "alpha", 1, None, false).unwrap();
+        v.link_mention(&p(&d, "C.md"), "alpha", 1, None, false, false).unwrap();
         assert_eq!(std::fs::read_to_string(d.join("C.md")).unwrap(), "[[alpha]] b c d e f g h i");
     }
 
@@ -279,9 +284,9 @@ mod tests {
         let id = crypto::new_identity();
         let files = [("L.md.age", "[[Alpha]]"), ("Alpha.md", "")];
         let (v, d) = vault(&files, &id, false);
-        assert_eq!(v.connections(&p(&d, "L.md.age"), &|_| false).unwrap_err().to_string(), "locked");
+        assert_eq!(v.connections(&p(&d, "L.md.age"), &|_| false, false).unwrap_err().to_string(), "locked");
         let (v, d) = vault(&files, &id, true);
-        let c = v.connections(&p(&d, "L.md.age"), &|_| false).unwrap();
+        let c = v.connections(&p(&d, "L.md.age"), &|_| false, false).unwrap();
         assert!(c.centre.locked);
         assert_eq!(paths(&c.links_out), [p(&d, "Alpha.md")]);
     }
@@ -290,7 +295,7 @@ mod tests {
         let id = crypto::new_identity();
         let files = [("L.md.age", "[[C]] #t"), ("C.md", "[[L]] #t")];
         let (v, d) = vault(&files, &id, false);
-        let c = v.connections(&p(&d, "C.md"), &|_| false).unwrap();
+        let c = v.connections(&p(&d, "C.md"), &|_| false, false).unwrap();
         assert_eq!(c.links_out.len(), 1);
         assert_eq!((c.links_out[0].title.as_str(), c.links_out[0].locked), ("L", true));
         assert_eq!(c.links_out[0].preview, "");
@@ -298,9 +303,23 @@ mod tests {
         assert_eq!((c.tags[0].count, c.tags[0].notes.len(), c.tags[0].unlocked), (0, 0, 0));
         // unlocked: its links and tags come from memory
         let (v, d) = vault(&files, &id, true);
-        let c = v.connections(&p(&d, "C.md"), &|_| false).unwrap();
+        let c = v.connections(&p(&d, "C.md"), &|_| false, false).unwrap();
         assert_eq!(paths(&c.links_in), [p(&d, "L.md.age")]);
         assert_eq!(paths(&c.tags[0].notes), [p(&d, "L.md.age")]);
         assert_eq!((c.tags[0].count, c.tags[0].unlocked), (1, 1));
+    }
+
+    #[test] fn archived_neighbours_follow_the_flag_centre_does_not() {
+        let (mut v, d) = vault(&[("C.md", "[[A]] #t mentions Bee"), ("A.md", "[[C]] #t"), ("Bee.md", "#t")], &crypto::new_identity(), false);
+        for n in ["A.md", "Bee.md"] { v.set_archived(&p(&d, n), true).unwrap(); }
+        let c = v.connections(&p(&d, "C.md"), &|_| false, false).unwrap();
+        assert!(c.links_out.is_empty() && c.links_in.is_empty() && c.mentions.is_empty() && c.tags[0].count == 0);
+        let c = v.connections(&p(&d, "C.md"), &|_| false, true).unwrap();
+        assert!(c.links_out[0].archived && c.tags[0].count == 2 && c.mentions.len() == 1);
+        v.set_archived(&p(&d, "C.md"), true).unwrap(); // an archived centre still shows its plain neighbours
+        v.set_archived(&p(&d, "A.md"), false).unwrap();
+        let c = v.connections(&p(&d, "C.md"), &|_| false, false).unwrap();
+        assert_eq!(paths(&c.links_out), [p(&d, "A.md")]);
+        assert_eq!((c.tags[0].count, paths(&c.tags[0].notes)), (1, vec![p(&d, "A.md")])); // C archived, A not: count 1, not 0
     }
 }
