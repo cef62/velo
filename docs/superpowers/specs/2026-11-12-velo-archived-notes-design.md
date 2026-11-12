@@ -89,7 +89,7 @@ These are the designer's calls. The owner has not ruled on them one by one; each
 ### The list file
 
 - Path: `<notes folder>/.velo/archived`. UTF-8, one entry per line, `\n` line ends, no header.
-- An entry is the note's title, which is its file name without the extension. Reason: lock and unlock change only the extension (`.md` to `.md.age` and back), so the entry survives them with no extra work.
+- An entry is the note's title, which is its file name without the extension. Reason: lock and unlock normally change only the extension (`.md` to `.md.age` and back), so the entry survives them with no extra work. The exception: lock and unlock clean up the file name, so a title with, for example, a trailing space changes; then the entry moves with it, as for a rename.
 - Entries are matched the way velo already matches titles: case-folded with `crate::text::fold` (the function behind the index's `title_folded` column).
 - velo itself never creates two notes with the same title (`vault.rs` refuses), but two files with one title can exist on disk: a stale lock twin (`Foo.md` next to `Foo.md.age`) or a file added by hand (`Foo.txt`). An entry applies to every file with that title. Archiving must not make such twins behave differently from today in any other way.
 - A missing file means no note is archived. velo creates the file on the first archive.
@@ -97,7 +97,7 @@ These are the designer's calls. The owner has not ruled on them one by one; each
 - An entry that matches no note is kept and ignored. velo does not prune the list against the files on disk: a note that is absent for a moment (evicted by iCloud, mid-transfer in a sync tool) must not lose its archived state. Clearing the entry when a title comes into being stops a leftover entry (after a delete or rename done in Finder) from archiving the new note.
 - Reading is forgiving: a leading byte-order mark and `\r\n` line ends are accepted, empty lines are skipped, invalid bytes do not make the read fail. Titles are not trimmed.
 - The same title twice in the file (a hand edit, a sync tool's merge) counts once.
-- A title that contains a line break cannot be archived; velo reports an error.
+- A title that contains a line break, or starts with a byte-order mark, cannot be archived; velo reports an error. A malformed line left by a hand edit is cleaned up the next time velo writes the file.
 - If the file exists but cannot be read, velo keeps the list it last read. At start-up, with nothing read yet, it treats the list as empty and writes one line to the log. Accepted limit: until the file is readable again, archived notes show.
 - A failed write is never silent. Archive and unarchive report the error. Rename, delete, merge and create still succeed and report that the list could not be updated.
 - Writes are atomic (write a temporary file, then rename), like `settings.json`.
@@ -112,7 +112,7 @@ These are the designer's calls. The owner has not ruled on them one by one; each
 |---|---|
 | Rename of an archived note (owner or agent) | entry follows the new title |
 | Rename of an unarchived note | any leftover entry for the new title is removed |
-| Lock, unlock | unchanged (title-keyed) |
+| Lock, unlock | unchanged (title-keyed); if the title itself changes, the entry follows it |
 | Delete (to the OS trash) | entry removed |
 | Merge | source's entry removed; an archived target stays archived |
 | Extract to a new note, new note, conflict copy | the new note is not archived |

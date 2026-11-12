@@ -4,7 +4,7 @@
 
 **Goal:** Archive and unarchive notes; archived notes leave every listing (app and MCP) until "show archived" is on, and then show dimmed with an "archived" badge.
 
-**Architecture:** The archived state is a title list in `<notes folder>/.velo/archived`, owned by a new module `src-tauri/src/archive.rs`. Each `Index` connection mirrors the list into a per-connection `TEMP` table `archived(title_folded)`, and every listing query gains one SQL condition against it, so paging, `has_more` and totals stay in SQL. The table is keyed by folded title, not by path, so rescans, watcher batches, lock and unlock need no refresh: a re-indexed file matches by its title. `Vault` reads the (tiny) list file at the start of every query method and reloads the table only when the entries differ from the ones loaded; it rewrites the file itself on archive, rename, delete, merge and note creation. Every listing takes `include_archived: bool`: the front end passes the `show_archived` setting, MCP passes its per-call flag.
+**Architecture:** The archived state is a title list in `<notes folder>/.velo/archived`, owned by a new module `src-tauri/src/archive.rs`. Each `Index` connection mirrors the list into a per-connection `TEMP` table `archived(title_folded)`, and every listing query gains one SQL condition against it, so paging, `has_more` and totals stay in SQL. The table is keyed by folded title, not by path, so rescans and watcher batches need no refresh: a re-indexed file matches by its title. Lock and unlock keep the title unless `note_path` sanitizes it (`Foo .md` locks to `Foo.md.age`); then the entry moves as on a rename. `Vault` reads the (tiny) list file at the start of every query method and reloads the table only when the entries differ from the ones loaded; it rewrites the file itself on archive, rename, delete, merge and note creation. Every listing takes `include_archived: bool`: the front end passes the `show_archived` setting, MCP passes its per-call flag.
 
 **Tech Stack:** Tauri 2 (Rust, rusqlite), React 19, Park UI v1 / Panda CSS 1.12.1, Vitest. No new dependency.
 
@@ -14,7 +14,7 @@
 
 - List file: `<notes folder>/.velo/archived`, UTF-8 (read lossily), one title per line, `\n` line ends, no header. Parsing: strip a leading BOM, split on `\n`, strip one trailing `\r`, skip empty lines, never `trim` (titles keep their spaces). A missing file means nothing is archived. velo creates the file on the first archive.
 - Entries match titles case-folded with `crate::text::fold` (what fills the `title_folded` column).
-- Entries are removed only by velo's own events: unarchive, delete, merge source, a title coming into being (creation, or a rename of a non-archived note onto it); a rename of an archived note moves the entry. An entry that matches no note is kept and ignored (no pruning). Writes are atomic (temporary file, then rename) and re-read the file first.
+- Entries are removed only by velo's own events: unarchive, delete, merge source, a title coming into being (creation, or a rename of a non-archived note onto it); a rename of an archived note moves the entry (so does a lock or unlock whose file name `note_path` sanitizes). An entry that matches no note is kept and ignored (no pruning). Writes are atomic (temporary file, then rename) and re-read the file first.
 - Archiving never changes a note file, its content or its dates. It never needs the passphrase and writes no plaintext.
 - Not filtered in any state: link resolution (`list_titles`, `find_titles`), the "does this title exist" checks (search Create hint, `[[` Create row), opening by path, title uniqueness, the "No links" condition, the centre of a connections query (its own Related panel, counts included).
 - Filtered always, with no flag: MCP `read_note.backlinks` leaves out archived titles (agents use `get_connections` with `include_archived` to see them).
@@ -22,7 +22,7 @@
 - A hand edit of `.velo/archived` leaves the open note's badge and palette label stale until the note is reopened (accepted).
 - A failed list write never fails a rename, delete, merge or create: the note operation succeeds, the failure is logged and shown through the `archive-error` event (Tasks 4, 6, 7). Archive and unarchive return the error.
 - An unreadable list (exists, cannot be read): velo keeps the last loaded set; at cold start nothing is loaded, so archived notes show until it can be read (accepted limit). Log only: one line per vault (`crate::log::line` and `eprintln!`), not per query, and no UI event. The `archive-error` event is for write failures only.
-- A title containing `\n` or ending in `\r` cannot be archived (it would read back as other titles): `archive::update` refuses it and writes nothing.
+- A title containing `\n`, ending in `\r` or starting with U+FEFF cannot be archived (it would read back as other titles): `archive::update` refuses it and writes nothing. A malformed line already in the file is written back as parsed, so it is normalised on the next write (such a title could never be archived by velo).
 - The temporary file is `.velo/archived.<pid>.tmp`, unique per process, so the app and `velo --mcp` never share one.
 - Archive acts on the open note only (palette, shortcut and `⋯` menu alike) and is disabled when none is open. A locked note is opened (passphrase) first; archiving itself never decrypts or rewrites the file (`set_archived` takes a path and needs no key).
 - Setting key `show_archived: bool`, default `false`. The Rust side never reads it. MCP ignores it and takes its own `include_archived` (default `false`) on `search_notes`, `list_tasks`, `list_tags`, `get_connections` only.
@@ -68,7 +68,7 @@
   - `pub const FILE: &str = ".velo/archived";`
   - `pub fn parse(text: &str) -> Vec<String>`: strip a leading `\u{feff}`, split on `\n`, strip one trailing `\r` per line, skip empty lines, no `trim`.
   - `pub fn read(dir: &Path) -> std::io::Result<Vec<String>>`: missing file is `Ok(vec![])`; bytes decoded with `String::from_utf8_lossy`, then `parse`, then de-duplicated by `fold` (first spelling wins), so a hand or sync-tool duplicate never reaches the index twice. Only an I/O error (permissions) is `Err`.
-  - `pub fn update(dir: &Path, change: impl FnOnce(&mut Vec<String>)) -> std::io::Result<Vec<String>>`: re-reads the file, applies `change`, keeps the first of entries that fold the same (no pruning: an entry naming no note stays), refuses (`ErrorKind::InvalidInput`, nothing written) when an entry the change ADDS contains `\n` or ends in `\r` (existing entries, however malformed, never make a write fail), writes each entry followed by `\n` (an empty list writes an empty file) through `.velo/archived.<std::process::id()>.tmp` plus rename (creating `.velo/` if needed, like `settings::save`). Returns the entries now in effect. No write when the result equals what was read, so a missing file stays missing while nothing is archived.
+  - `pub fn update(dir: &Path, change: impl FnOnce(&mut Vec<String>)) -> std::io::Result<Vec<String>>`: re-reads the file, applies `change`, keeps the first of entries that fold the same (no pruning: an entry naming no note stays), refuses (`ErrorKind::InvalidInput`, nothing written) when an entry the change ADDS contains `\n`, ends in `\r` or starts with `\u{feff}` (existing entries, however malformed, never make a write fail), writes each entry followed by `\n` (an empty list writes an empty file) through `.velo/archived.<std::process::id()>.tmp` plus rename (creating `.velo/` if needed, like `settings::save`). Returns the entries now in effect. No write when the result equals what was read, so a missing file stays missing while nothing is archived.
 - Do not use `Store::write_atomic`: it records a self-write the non-recursive watcher never consumes.
 
 - [ ] **Step 1: Write the failing tests**
@@ -94,14 +94,14 @@
 }
 #[test] fn malformed_existing_entries_never_block_a_write() {
     let d = tempfile::tempdir().unwrap(); std::fs::create_dir(d.path().join(".velo")).unwrap();
-    std::fs::write(d.path().join(FILE), "Foo\r\r\n").unwrap(); // reads back as "Foo\r"
+    std::fs::write(d.path().join(FILE), "Foo\r\r\n").unwrap(); // parsed as "Foo\r", normalised on the next write
     update(d.path(), |e| e.push("Bar".into())).unwrap(); // an unrelated archive
     update(d.path(), |e| { e.retain(|t| t != "Bar"); e.push("Baz".into()) }).unwrap(); // a rename
-    assert_eq!(read(d.path()).unwrap(), ["Foo\r", "Baz"]);
+    assert!(read(d.path()).unwrap().contains(&"Baz".to_string()));
 }
 #[test] fn update_refuses_titles_with_line_breaks() {
     let d = tempfile::tempdir().unwrap();
-    for bad in ["A\nB", "A\r"] {
+    for bad in ["A\nB", "A\r", "\u{feff}A"] {
         let e = update(d.path(), |e| e.push(bad.into())).unwrap_err();
         assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput);
     }
@@ -326,7 +326,7 @@ fn shown(v: &Vault) -> Vec<String> { v.search_where("", Sort::Title, 0, &[], fal
 ### Task 4: Keep the list in step (rename, delete, merge, create, lock)
 
 **Files:**
-- Modify: `src-tauri/src/vault.rs` (`archive_follow`, `title_on_disk`, `rename_note`, `delete_note_with`, `create_from_selection`, `open_or_create_new`, `save_note`)
+- Modify: `src-tauri/src/vault.rs` (`archive_follow`, `title_on_disk`, `archive_retitle`, `rename_note`, `lock_note`, `unlock_note`, `delete_note_with`, `create_from_selection`, `open_or_create_new`, `save_note`)
 - Test: `src-tauri/src/vault.rs` tests (`rm` helper exists for merge and delete)
 
 **Interfaces:**
@@ -335,10 +335,12 @@ fn shown(v: &Vault) -> Vec<String> { v.search_where("", Sort::Title, 0, &[], fal
   - `fn archive_follow(&mut self, change: impl FnOnce(&mut Vec<String>))`: runs `archive_edit`; on failure writes the message to `crate::log::line` and `eprintln!` (as `Index::finish_bulk` does: `velo --mcp` direct mode has no velo.log) and stores it in `archive_error` (Task 3). The note operation still returns `Ok`. Tasks 6 and 7 show it to the owner. `set_archived` keeps returning its error directly.
   - Placement: `archive_follow` always runs after the note operation's index work has committed and never inside `Index::begin()`; `archive_edit` starts with `debug_assert!(!self.index.in_batch())`. Exact spots: `rename_note` after `rewrite_backlinks` returns (it commits its batch before returning); `delete_note_with` after `remove_note` and `self.unlocked.remove`; `merge_notes_with` through `delete_note_with`, which it calls after `rewrite_backlinks`; `create_from_selection`, `open_or_create_new` and `save_note` after their `reindex` (a single upsert, its own savepoint, no batch). The TEMP reload in `sync_archive` runs from query methods, which never run inside a batch.
   - `fn title_on_disk(&self, title: &str) -> bool`: some file in `self.store.list()` still has a title folding to `title` (a twin: `Foo.md` beside `Foo.md.age` or `Foo.txt`).
-  - `rename_note`: after the file moved, `let twin = fold(&old.title) != fold(&nf.title) && self.title_on_disk(&old.title);` (a case-only rename finds itself on disk, so it never counts as a twin) then `self.archive_follow(|e| { let was = e.iter().any(|t| fold(t) == fold(&old.title)); if was && !twin { e.retain(|t| fold(t) != fold(&old.title)) } e.retain(|t| fold(t) != fold(&nf.title)); if was { e.push(nf.title.clone()) } })`. A title comes into being by rename too: a stale entry for the new title is always cleared, and only an archived note carries its entry over. Nothing may fail a rename once the file moved, hence `archive_follow`. Owner (`commands::rename_note`) and agent (`VaultOps::rename`, direct and app mode) both call this.
+  - `fn archive_retitle(&mut self, old: &str, new: &str)`: `let twin = fold(old) != fold(new) && self.title_on_disk(old);` (a case-only rename finds itself on disk, so it never counts as a twin) then `self.archive_follow(|e| { let was = e.iter().any(|t| fold(t) == fold(old)); if was && !twin { e.retain(|t| fold(t) != fold(old)) } e.retain(|t| fold(t) != fold(new)); if was { e.push(new.to_string()) } })`.
+  - `rename_note`: after the file moved, `self.archive_retitle(&old.title, &nf.title)`. A title comes into being by rename too: a stale entry for the new title is always cleared, and only an archived note carries its entry over. Nothing may fail a rename once the file moved, hence `archive_follow`. Owner (`commands::rename_note`) and agent (`VaultOps::rename`, direct and app mode) both call this.
   - `delete_note_with`: take `title` from its `self.note(p)?`; after `remove_note`, unless `self.title_on_disk(&title)`, `self.archive_follow(|e| e.retain(|t| fold(t) != fold(&title)))` (a remaining twin keeps the entry). `merge_notes_with` gets the source's removal through it; the target's entry is untouched.
-  - `create_from_selection`, and `open_or_create_new` when it wrote the file (after its `reindex`, before its `open_note`, so the returned doc says `archived: false`): `self.archive_follow(|e| e.retain(|t| fold(t) != fold(title)))`. Covers new note, extract, `[[` create, MCP `create_note`, `daily_note` and capture into a missing note. `save_note` on `SaveResult::Conflict { conflict_path, .. }`: `let conflict_title = parse_note_file(Path::new(&conflict_path)).map(|n| n.title)` (the copy's own title, `"{stem} (conflict {stamp})[ n]"` as `Store::save` builds it at `store.rs:108-113`; never the source note's title, which would unarchive the real note), then `self.archive_follow(|e| e.retain(|t| fold(t) != fold(&conflict_title)))`, since a conflict name (minute resolution) can repeat after a Finder delete of an archived copy.
-  - Lock, unlock, save, agent write: no step (title-keyed).
+  - `create_from_selection`, and `open_or_create_new` when it wrote the file (after its `reindex`, before its `open_note`, so the returned doc says `archived: false`): `self.archive_follow(|e| e.retain(|t| fold(t) != fold(&written)))`, where `written` is `parse_note_file(&p)` of the path actually written (`note_path` sanitizes: input `A:B` writes `A-B.md`). `create_from_selection` refuses such titles (`title_ok`), so its input title is the written one. Covers new note, extract, `[[` create, MCP `create_note`, `daily_note` and capture into a missing note. `save_note` on `SaveResult::Conflict { conflict_path, .. }`: `let conflict_title = parse_note_file(Path::new(&conflict_path)).map(|n| n.title)` (the copy's own title, `"{stem} (conflict {stamp})[ n]"` as `Store::save` builds it at `store.rs:108-113`; never the source note's title, which would unarchive the real note), then `self.archive_follow(|e| e.retain(|t| fold(t) != fold(&conflict_title)))`, since a conflict name (minute resolution) can repeat after a Finder delete of an archived copy.
+  - `lock_note`, `unlock_note`: they build the target with `note_path`, which sanitizes the title (`title_to_stem` trims: `Foo .md` locks to `Foo.md.age`). After the move (after `checkpoint` in `lock_note`, after `reindex` in `unlock_note`; no batch open), when `fold` of the parsed new title differs from the old one, `self.archive_retitle(&nf.title, &new_title)`.
+  - Save, agent write: no step (title-keyed).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -355,6 +357,23 @@ fn shown(v: &Vault) -> Vec<String> { v.search_where("", Sort::Title, 0, &[], fal
     let mut v = open(dir.clone(), &db, None).unwrap(); let p = s(&dir.join("meeting notes.md"));
     v.set_archived(&p, true).unwrap(); v.rename_note(&p, "Meeting Notes", false).unwrap();
     assert!(shown(&v).is_empty());
+}
+#[test] fn sanitized_create_clears_the_written_title() {
+    let (dir, db) = setup(); std::fs::create_dir(dir.join(".velo")).unwrap(); std::fs::write(dir.join(".velo/archived"), "A-B\n").unwrap();
+    let mut v = open(dir.clone(), &db, None).unwrap();
+    assert!(!v.open_or_create("A:B", None, false).unwrap().archived); // writes A-B.md
+    assert_eq!(shown(&v), ["A-B"]);
+}
+#[test] fn lock_and_unlock_move_the_entry_when_the_title_is_sanitized() {
+    let (dir, db) = setup(); let id = crypto::new_identity();
+    std::fs::write(dir.join("Foo .md"), "x").unwrap();
+    std::fs::write(dir.join("Bar .md.age"), crypto::encrypt(&id, b"y").unwrap()).unwrap();
+    let mut v = open(dir.clone(), &db, Some(&id)).unwrap();
+    for n in ["Foo .md", "Bar .md.age"] { v.set_archived(&s(&dir.join(n)), true).unwrap(); }
+    v.lock_note(&s(&dir.join("Foo .md")), &id).unwrap(); // -> Foo.md.age
+    v.unlock_note(&s(&dir.join("Bar .md.age")), &id).unwrap(); // -> Bar.md
+    assert!(shown(&v).is_empty());
+    assert_eq!(std::fs::read_to_string(dir.join(".velo/archived")).unwrap(), "Foo\nBar\n");
 }
 #[test] fn rename_onto_a_stale_entry_is_not_archived() {
     let (dir, db) = setup(); std::fs::create_dir(dir.join(".velo")).unwrap(); std::fs::write(dir.join("Foo.md"), "").unwrap();
@@ -501,7 +520,7 @@ fn shown(v: &Vault) -> Vec<String> { v.search_where("", Sort::Title, 0, &[], fal
 ### Task 6: Setting, commands and export (Rust)
 
 **Files:**
-- Modify: `src-tauri/src/settings.rs` (`Settings.show_archived`, `Default`), `src-tauri/src/commands.rs` (`search`, `timeline`, `list_tags`, `list_link_targets`, `tasks`, `connections`, new `set_archived`, new `emit_archive_error`; `rename_note`, `delete_note`, `merge_notes`, `create_from_selection`, `open_or_create`, `save_note`, plus `capture_task` (it may create the note and saves through `save_note`), `toggle_task` and `link_mention` (both save through `save_note`, whose conflict hook can write the list) emit the list error), `src-tauri/src/agent/listener.rs` (after `tools::call`, line ~83), `src-tauri/src/lib.rs` (register `commands::set_archived`), `src-tauri/src/export.rs` (`ExportRequest.include_archived`, `build`, test `req` at `:115`)
+- Modify: `src-tauri/src/settings.rs` (`Settings.show_archived`, `Default`), `src-tauri/src/commands.rs` (`search`, `timeline`, `list_tags`, `list_link_targets`, `tasks`, `connections`, new `set_archived`, new `emit_archive_error`; `rename_note`, `delete_note`, `merge_notes`, `create_from_selection`, `open_or_create`, `save_note`, plus `capture_task` (it may create the note and saves through `save_note`), `toggle_task` and `link_mention` (both save through `save_note`, whose conflict hook can write the list), `lock_note` and `unlock_note` (a sanitized title moves the entry) emit the list error), `src-tauri/src/agent/listener.rs` (after `tools::call`, line ~83), `src-tauri/src/lib.rs` (register `commands::set_archived`), `src-tauri/src/export.rs` (`ExportRequest.include_archived`, `build`, test `req` at `:115`)
 - Test: `src-tauri/src/settings.rs`, `src-tauri/src/export.rs`, `src-tauri/src/commands.rs` tests
 
 **Interfaces:**
@@ -511,7 +530,7 @@ fn shown(v: &Vault) -> Vec<String> { v.search_where("", Sort::Title, 0, &[], fal
   - Commands gain `include_archived: bool` (camelCase `includeArchived` from TS): `search(.., no_links: Option<bool>, include_archived: bool)`, `timeline(.., no_links, include_archived, by, since_ms)`, `list_tags(include_archived)`, `list_link_targets(include_archived)`, `tasks(.., show_done, include_archived)`, `connections(path, include_archived)`. Task 7 updates the TS callers in the same PR; between the two commits only a running app would notice.
   - `#[tauri::command(async)] pub fn set_archived(st: State<'_, AppState>, path: String, archived: bool) -> Res<()>` via `with_vault`. It takes a path, not "the open note": a locked note is archived by path without a key (Task 4 test). App commands need no capability entry (`build.rs` is plain `tauri_build::build()`).
   - `ExportRequest.include_archived: bool` with `#[serde(default)]`; `build` passes it to `Vault::timeline`.
-  - `pub fn emit_archive_error(v: &Vault, emit: impl FnOnce(&str, serde_json::Value))`: takes `v.archive_error` and, when set, calls `emit("archive-error", json!({ "message": m }))`. The nine note commands above take `app: AppHandle` and call it inside their `with_vault` closure with `|e, p| { app.emit(e, p).ok(); }`. In `src-tauri/src/agent/listener.rs`, after `tools::call` returns (line ~83), take the vault lock again (`st.vault.lock()`) and call it with `app.emit`, so agent writes in app mode report too. Query commands emit nothing (read failures are log-only). In the front end, Task 7 adds the `listen("archive-error", ..)` call in `src/ui/main.tsx` and `Controller.onArchiveError` in `src/app/controller.ts`, the same path as `index-error` (`main.tsx:67`). Direct `velo --mcp` only logs (Task 4).
+  - `pub fn emit_archive_error(v: &Vault, emit: impl FnOnce(&str, serde_json::Value))`: takes `v.archive_error` and, when set, calls `emit("archive-error", json!({ "message": m }))`. The eleven note commands above take `app: AppHandle` and call it inside their `with_vault` closure with `|e, p| { app.emit(e, p).ok(); }`. In `src-tauri/src/agent/listener.rs`, after `tools::call` returns (line ~83), take the vault lock again (`st.vault.lock()`) and call it with `app.emit`, so agent writes in app mode report too. Query commands emit nothing (read failures are log-only). In the front end, Task 7 adds the `listen("archive-error", ..)` call in `src/ui/main.tsx` and `Controller.onArchiveError` in `src/app/controller.ts`, the same path as `index-error` (`main.tsx:67`). Direct `velo --mcp` only logs (Task 4).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -561,7 +580,8 @@ fn shown(v: &Vault) -> Vec<String> { v.search_where("", Sort::Title, 0, &[], fal
   - `listTitles()` unchanged: link existence (resolution) and the create checks keep archived titles.
   - `src/complete.ts`: `CompleteSource.exists?: (title: string) => boolean`; the `[[` "Create" row shows only when `!(src.exists?.(title) ?? src.links().some((r) => r.f === fold(title)))`.
 - Produces (store/controller): `AppState.showArchived: boolean` (initial `false`), loaded in `start()` as `s.show_archived === true` and in the settings-saved `store.set` (today's line with `tasksByNote: next.tasks_by_note !== false`). Every call site passes `this.store.get().showArchived`: `Results` fetch, `loadLinkTargets`, `doLoadTimeline`, `exportRequest`, `loadRelated`, `doLoadTasks` (both `tasks` calls, so the Dock badge follows the switch too), `refreshTags`. `mergeCandidates` and `[[` options read `linkIndex`, so they follow `listLinkTargets`. Existence never follows the switch: `editorOpts().complete.exists = (t) => this.titles.has(fold(t))` (unfiltered `listTitles`), and `listChanged` sets `exactTitleMatch: q !== "" && (r.loaded.some(..) || this.titles.has(q))`, so a hidden archived title never offers ⇧↩ Create.
-  - `onArchiveError(message: string)`: ``setErr(`The archived-notes list could not be updated: ${message}`)``; `main.tsx` adds `void listen<{ message: string }>("archive-error", (ev) => controller.onArchiveError(ev.payload.message));`.
+  - `onArchiveError(message: string)`: sets `this.notice` to ``The archived-notes list could not be updated: ${message}`` and shows it with `setErr`; the two `setErr("")` calls that end an open-by-title (`controller.ts:829`) and a rename (`controller.ts:1056`) become `clearErr()`, so an event that lands before those commands resolve is still shown (the existing one-shot notice pattern).
+  - `loadLinkTargets` gets `protected readonly newLinkTargetsReq = latest()` and drops a stale response, like the other loaders; `main.tsx` adds `void listen<{ message: string }>("archive-error", (ev) => controller.onArchiveError(ev.payload.message));`.
 - Produces (fakes): `fakeApi` keeps `archived = new Set<string>()` (titles): `setArchived` adds or deletes; `search` and `listLinkTargets` drop archived unless `includeArchived`, and `search` returns `hidden: includeArchived ? 0 : <archived count>`; `docOf` sets `archived`; `hit()` sets `archived: false`; settings literal gets `show_archived: false`.
 - Produces (demo): `src/demo/api.ts` same signatures; an in-memory `archived: Set<string>` of folded titles cleared by `resetDemo`; `filtered(query, tags, noLinks, includeArchived)` drops archived notes; `search` returns `hidden` like Rust; `timeline`, `tasks`, `listTags`, `listLinkTargets`, `connections`, `exportPreview` follow the flag; `setArchived`; `renameNote` moves the title, `deleteNote` and `mergeNotes` (source) delete it, `createFromSelection` and `openOrCreate` clear it; `show_archived: false` in the demo settings. No archived note is seeded (screenshots archive one in-session).
 
@@ -590,10 +610,24 @@ test("merge picker follows the switch; an archived title still exists for Create
   store.set({ showArchived: true }); await c.loadLinkTargets();
   expect(c.mergeCandidates("").map((t) => t.title)).toContain("B");
 });
-test("a list-write failure is shown", () => {
-  const { c, store } = setup();
+test("a list-write failure is shown, even when it lands before the rename resolves", async () => {
+  const { c, api, store, notes } = setup();
+  await c.start(); await settle();
+  notes.Z = "a"; // what the fake opens after the rename
+  const d = deferred<RenameResult>(); api.renameNote.mockImplementationOnce(() => d.promise);
+  c.startRename(); const done = c.commitRename("Z");
   c.onArchiveError("permission denied");
+  d.resolve({ path: "/n/Z.md", rewritten: 0 }); await done; await settle();
   expect(store.get().err).toBe("The archived-notes list could not be updated: permission denied");
+});
+test("a stale link-target response is dropped", async () => {
+  const { c, api } = setup({ A: "a", B: "b" });
+  const first = deferred<LinkTarget[]>(), second = deferred<LinkTarget[]>();
+  api.listLinkTargets.mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise);
+  const p1 = c.loadLinkTargets(), p2 = c.loadLinkTargets();
+  second.resolve([{ name: "B", title: "B", path: "/n/B.md", modified: 0, locked: false }]); await p2;
+  first.resolve([{ name: "A", title: "A", path: "/n/A.md", modified: 0, locked: false }]); await p1;
+  expect(c.mergeCandidates("").map((t) => t.title)).toEqual(["B"]);
 });
 // complete.test.ts (uses the file's `source` and `options` helpers)
 test("no Create row when exists says the title is taken, even if it is not suggested", () => {
@@ -750,8 +784,9 @@ test("archive entry reads Archive or Unarchive for the open note and needs one",
 - Produces:
   - `AppState.archived: boolean` (the open note; `loadedDoc` sets `doc.archived`, `closedDoc` sets `false`), `AppState.hiddenArchived: number` (from `Results.hidden` in `listChanged`).
   - `Results.hidden: number`: `page.hidden` of the latest first page (`reset` and `refresh`, like `total`).
-  - `async setShowArchived(on: boolean): Promise<void>`: persists `show_archived` through `updateSettings` (as `toggleFrontMatter`), sets `showArchived`, then refreshes every listing without moving the editor: in Notes mode `runSearch(false)` (refresh in place, `reselect`; never `filterChanged`, whose fresh first page would `select(0, "auto")` and replace an open archived note), in Tasks and Timeline mode set `listStale = true`; then `loadTasks()`, `refreshTimeline()`, `refreshTags()`, `loadLinkTargets()`, `loadRelated()`. Errors go to `setErr(errText(e))`.
-  - `async toggleArchive(): Promise<void>`: acts on the open note only; a rejected `setArchived` goes to `setErr(errText(e))` and leaves `archived` unchanged; none → `setErr("Open a note to archive")`; `busy` or indexing → `BUSY_MSG`. Capture `path` and `archived` before the await, call `api.setArchived(path, !archived)`, then set `archived` only if `editor.currentPath() === path` still (another note may be open by then); always `runSearch(false)` (the open note stays in the editor; `reselect` leaves `sel` at `-1` when its row left), `loadTasks()`, `refreshTimeline()`, `refreshTags()`, `loadLinkTargets()`. Never opens, unlocks or rewrites the note.
+  - `async setShowArchived(on: boolean): Promise<void>`: persists `show_archived` through `updateSettings` (as `toggleFrontMatter`), sets `showArchived`, then refreshes every listing without moving the editor: in Notes mode `refreshKeepingEditor()` (never `filterChanged`, whose fresh first page would `select(0, "auto")` and replace an open archived note), in Tasks and Timeline mode set `listStale = true`; then `loadTasks()`, `refreshTimeline()`, `refreshTags()`, `loadLinkTargets()`, `loadRelated()`. Errors go to `setErr(errText(e))`.
+  - `protected refreshKeepingEditor(): Promise<void>`: `this.pendingFirst !== null ? this.runSearch(true, "highlight") : this.runSearch(false)`. A plain `runSearch(false)` inherits a pending first page's rule (`controller.ts:692`), which may open row 0; `"highlight"` never opens a note.
+  - `async toggleArchive(): Promise<void>`: acts on the open note only; a rejected `setArchived` goes to `setErr(errText(e))` and leaves `archived` unchanged; none → `setErr("Open a note to archive")`; `busy` or indexing → `BUSY_MSG`. Capture `path` and `archived` before the await, call `api.setArchived(path, !archived)`, then set `archived` only if `editor.currentPath() === path` still (another note may be open by then); always `refreshKeepingEditor()` (the open note stays in the editor; `reselect` leaves `sel` at `-1` when its row left), `loadTasks()`, `refreshTimeline()`, `refreshTags()`, `loadLinkTargets()`, `loadRelated()`. Never opens, unlocks or rewrites the note.
   - `actions.toggle_archived: () => void this.setShowArchived(!this.store.get().showArchived)`, `actions.archive_note: () => void this.toggleArchive()`.
   - `src/list.ts`: `hiddenText(hidden: number, showArchived: boolean, filtering: boolean): string | null` → `null` unless `!showArchived && filtering && hidden > 0`; else "1 archived note hidden" / "N archived notes hidden".
   - `src/list.ts`: `archivedLabel(name: string, archived: boolean): string` → ``archived ? `${name}, archived` : name`` (Task 12's aria labels).
@@ -795,10 +830,26 @@ test("the archive result applies to the note it was for, not the one open afterw
   const done = c.toggleArchive();
   await c.select(1); await settle();
   const b = store.get().openPath!;
+  store.set({ infoOpen: true, sideTab: "related" });
+  const related = api.connections.mock.calls.length;
   d.resolve(); await done; await settle();
   expect(api.setArchived).toHaveBeenCalledWith(a, true);
   expect(store.get()).toMatchObject({ openPath: b, archived: false });
+  expect(api.connections.mock.calls.length).toBeGreaterThan(related); // b's Related reloads without a
 });
+for (const act of ["toggleArchive", "setShowArchived"] as const)
+  test(`${act} never opens row 0 while a fresh first page is pending`, async () => {
+    const { c, api, store, editor } = setup();
+    await c.start(); await settle();
+    await c.select(1); await settle(); // the open note is not row 0
+    const open = store.get().openPath!;
+    const d = deferred<Page>(); const real = api.search.getMockImplementation()!;
+    api.search.mockImplementationOnce(() => d.promise);
+    c.setQuery("x"); // fresh first page in flight (pendingFirst = false: would open row 0)
+    await (act === "toggleArchive" ? c.toggleArchive() : c.setShowArchived(true));
+    d.resolve(await real("x", "modified", 0, [], false, false)); await settle();
+    expect(editor.currentPath()).toBe(open);
+  });
 test("the hidden-matches line turns the switch on and persists it", async () => {
   const { c, api, store } = setup();
   await c.start(); await settle();
@@ -851,6 +902,7 @@ test("archivedLabel adds the word, not a colour", () => {
 - Produces (no exports):
   - PaneBar: one toggle after each mode's controls, in all three modes: `<button type="button" className={menuButton({ iconOnly: true })} aria-pressed={showArchived} aria-label="Show archived notes">` with lucide `Archive`, inside `Tooltip` `tip("toggle_archived", "Show archived notes")`. Always icon-only, so `paneBarMode` widths stay as they are. `aria-pressed` reuses the "Show done" lit style in `menu-button.ts`.
   - Rows: `data-archived` on `listRow` roots (NoteList, TimelineView) and on TaskList's `row` and note heading (add the same selector to the `row` css object there); a `<Badge size="sm" variant="subtle">archived</Badge>` (`@/components/ui`) after the title. `TaskList.sameRow` (`src/ui/TaskList.tsx:74-77`) compares a fixed key list and memoises rows, so an archive-only change would keep stale rows: add `export function sameTask(a: TaskItem, b: TaskItem): boolean` to `src/tasks.ts`, comparing `["path", "line", "line_text", "text", "title", "due", "done", "archived"]`, and make `sameRow` call `sameTask(a.t, b.t)` instead of its inline list. `sameRow` itself stays in `TaskList.tsx` (it also compares props and highlight marks); `TaskList.tsx` has no test file, so `src/tasks.test.ts` tests `sameTask`. Text badge inside the row gives the accessible name; TaskList heading `aria-label` and a flat task row's checkbox `aria-label` go through `archivedLabel(.., t.archived)`.
+  - NoteList: the "No notes match" empty state (`NoteList.tsx:129`) drops its ⇧↩ Create sentence when `exactTitleMatch` is true (a hidden archived note has that title).
   - NoteList: below the list (and below the "No notes match" empty state), when `hiddenText(hiddenArchived, showArchived, query.trim() !== "" || selectedTags.length > 0 || noLinks)` is not null, `<Button variant="plain" size="sm" onClick={() => void controller.setShowArchived(true)}>{text}</Button>`. Not in timeline or Tasks.
   - TitleBar: `<Badge size="sm" variant="subtle">archived</Badge>` next to the title when `s.archived`; `⋯` menu item `value="archive"` (`disabled={noNote}`, `onSelect={() => void controller.toggleArchive()}`), icon `Archive` / `ArchiveRestore`, text "Archive note" / "Unarchive note", `kbd("archive_note")`, before "Move to Trash".
   - CommandPalette: `archived` (from the store) in `state` and in the `useMemo` deps.
@@ -866,7 +918,7 @@ test("a task row re-renders when only archived changes", () => {
 ```
 - [ ] **Step 1b: Implement** the Interfaces.
 - [ ] **Step 2: Typecheck and tests.** `pnpm build`, `pnpm test` → PASS.
-- [ ] **Step 3: Demo check.** `pnpm demo:build` and open the demo in a browser (never the app): archive the open note from `⋯` (it stays open, its row leaves, title badge shows); with VoiceOver or the browser's accessibility tree, check an archived row's name contains "archived"; search a word it contains → hidden line, click → switch lit, row dimmed with badge; check timeline and Tasks (with the switch on, archive a note whose tasks show: its rows dim at once); toggle from the palette. Record what was seen in the PR's Test plan; real-window rendering stays unverified.
+- [ ] **Step 3: Demo check.** `pnpm demo:build` and open the demo in a browser (never the app): archive the open note from `⋯` (it stays open, its row leaves, title badge shows); with VoiceOver or the browser's accessibility tree, check an archived row's name contains "archived"; search a word it contains → hidden line, click → switch lit, row dimmed with badge; check timeline and Tasks (with the switch on, archive a note whose tasks show: its rows dim at once); toggle from the palette; with the switch off, type an archived note's exact title: the empty state shows no ⇧↩ Create sentence. Record what was seen in the PR's Test plan; real-window rendering stays unverified.
 - [ ] **Step 4: Commit** `feat(archive): archive toggle, badges and hidden-matches line`.
 
 ### Task 13: PR 2 gate, docs, changeset, review
@@ -898,6 +950,7 @@ Added archived notes: archive a note from its ⋯ menu or the command palette to
 - "Keeps the list in step" rows: rename owner/agent (T4, T8), rename onto a stale entry (T4), lock/unlock (T4), delete (T4), merge (T4), extract/new (T4), conflict copy (T4 `conflict_copy_of_an_archived_note_is_not_archived`), edit/save/agent write (T4 `save_keeps_archived`), folder changed (T3 `each_folder_has_its_own_list`), unwritable list (T4 `rename_succeeds_and_reports_when_the_list_is_unwritable`, `delete_merge_and_create_succeed_and_report_when_the_list_is_unwritable`, T6 `emit_archive_error_sends_once_then_nothing`, T7 `a list-write failure is shown`).
 - "Hidden" table rows: list/search/timeline/tasks/tags (T2, T3), `[[` suggestions and Create (T7), Related with an archived centre (T5, T8), merge picker (T7 `merge picker follows the switch…`), export (T6), MCP (T8), Tasks rows re-render (T12 `sameTask`).
 - Type check across tasks: `archive::{FILE, parse, read, update}` (T1) is consumed only by `Vault::{sync_archive, archive_edit}` (T3); `Vault.archive_error: Cell<Option<String>>` (T3) is set by T3 and T4 and taken by T6 `emit_archive_error(&Vault, emit)`; `archive_follow` (T4); `include_archived` order is `(.., no_links, include_archived, ..)` in Index, Vault, commands and `NoteOps`; TS `includeArchived` is always the last argument; the open note's `archived` flows `NoteDoc.archived` (T3 Rust, T7 TS) → `AppState.archived` (T11) → `PaletteState.archived` (T10) and the TitleBar (T12); `toggleArchive()` (T11) takes no argument everywhere.
+- Sanitized titles: create (T4 `sanitized_create_clears_the_written_title`), lock and unlock (T4 `lock_and_unlock_move_the_entry_when_the_title_is_sanitized`). Controller races: pending first page (T11 `… never opens row 0 …`), stale link targets and early `archive-error` (T7).
 - Task numbering: PR 1 is T1-T9 (T6 Rust commands, T7 TS API, T8 MCP, T9 gate); PR 2 is T10-T13.
 - Proportion: about 3.8 times the spec's length; mostly concrete test code from the review rounds.
 - Verified against the code this round: every call-site line cited in Tasks 3, 6, 7 and 8 (`commands.rs`, `export.rs`, `ops.rs`, `app_ops.rs`, `tools.rs`, `controller.ts`) and the literal counts in Task 2; `Controller.refreshTitles` exists (`controller.ts:217`).
