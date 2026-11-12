@@ -81,6 +81,9 @@ pub fn start(app: AppHandle) -> anyhow::Result<ListenerHandle> {
             let mut ops = AppOps::new(&st, route);
             ops.release = release;
             let r = super::tools::call(&mut ops, name, args);
+            if let Some(v) = st.vault.lock().unwrap().as_ref() {
+                crate::commands::emit_archive_error(v, |e, p| { app.emit(e, p).ok(); });
+            }
             // the watcher drops the backend's own writes: refresh the UI as for an outside change
             if !ops.touched.is_empty() {
                 app.emit("notes-changed", json!({ "paths": ops.touched })).ok();

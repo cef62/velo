@@ -20,6 +20,8 @@ pub struct ExportRequest {
     pub since_ms: Option<i64>,
     pub tasks_only: bool,
     pub title: String,
+    #[serde(default)]
+    pub include_archived: bool,
 }
 
 #[derive(Serialize, Default, Debug, PartialEq)]
@@ -47,7 +49,7 @@ fn range_line(since_ms: Option<i64>, now_ms: i64) -> String {
 }
 
 pub fn build(v: &Vault, r: &ExportRequest, today: &str) -> anyhow::Result<(String, ExportCounts)> {
-    let rows = v.timeline(&r.query, &r.tags, r.no_links, false, r.by, r.since_ms)?;
+    let rows = v.timeline(&r.query, &r.tags, r.no_links, r.include_archived, r.by, r.since_ms)?;
     Ok(build_from(rows, &v.index.dates()?, r, today, chrono::Utc::now().timestamp_millis()))
 }
 
@@ -112,7 +114,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn req(tasks_only: bool) -> ExportRequest {
-        ExportRequest { query: String::new(), tags: vec![], no_links: false, by: TimelineBy::Updated, since_ms: None, tasks_only, title: "Export".into() }
+        ExportRequest { query: String::new(), tags: vec![], no_links: false, by: TimelineBy::Updated, since_ms: None, tasks_only, title: "Export".into(), include_archived: false }
     }
     fn vault(notes: &[(&str, &str, &str)]) -> (Vault, PathBuf) {
         let dir = tempfile::tempdir().unwrap().keep();
@@ -123,6 +125,12 @@ mod tests {
         (Vault::open_with_progress(dir.clone(), &db, None, &mut |_, _| {}).unwrap(), dir)
     }
 
+    #[test] fn export_leaves_out_archived_unless_included() {
+        let (mut v, d) = vault(&[("A", "2026-01-01T00:00:00+00:00", "x"), ("B", "2026-01-02T00:00:00+00:00", "y")]);
+        v.set_archived(&d.join("A.md").to_string_lossy(), true).unwrap();
+        assert_eq!(build(&v, &req(false), "2026-01-03").unwrap().1.notes, 1);
+        assert_eq!(build(&v, &ExportRequest { include_archived: true, ..req(false) }, "2026-01-03").unwrap().1.notes, 2);
+    }
     #[test] fn export_full_has_summary_and_sections() {
         let (v, _) = vault(&[("older", "2026-10-01T12:00:00+00:00", "plain text"), ("newer", "2026-10-29T12:00:00+00:00", "intro\n- [ ] a\n- [x] b @done(2026-10-29)")]);
         let (t, c) = build(&v, &req(false), "2026-10-30").unwrap();

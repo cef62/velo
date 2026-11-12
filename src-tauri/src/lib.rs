@@ -189,6 +189,7 @@ pub fn run() {
             commands::unlock_note,
             commands::lock_all,
             commands::delete_note,
+            commands::set_archived,
             commands::merge_notes,
             commands::snapshot_agent,
             commands::drop_agent_snapshot,
