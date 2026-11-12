@@ -166,6 +166,7 @@ export class Controller {
       count: r.count,
       hasMore: r.hasMore,
       total: r.total,
+      hiddenArchived: r.hidden,
       exactTitleMatch: this.exactMatch(),
     }));
   }
@@ -546,7 +547,7 @@ export class Controller {
 
   /** The note is now in the editor: title, path and lock state follow it; the conflict banner belongs to the previous note. */
   protected loadedDoc(doc: NoteDoc) {
-    this.store.set({ title: doc.title, openPath: doc.path, encrypted: doc.encrypted, conflict: null, info: { ...noInfo, meta: doc.meta } });
+    this.store.set({ title: doc.title, openPath: doc.path, encrypted: doc.encrypted, archived: doc.archived, conflict: null, info: { ...noInfo, meta: doc.meta } });
     this.textInfo();
     void this.loadInfo();
   }
@@ -609,7 +610,7 @@ export class Controller {
 
   /** The editor holds no note any more (deleted, or locked away by Lock all). */
   protected closedDoc() {
-    this.store.set({ title: "", openPath: null, encrypted: false, conflict: null, info: noInfo });
+    this.store.set({ title: "", openPath: null, encrypted: false, archived: false, conflict: null, info: noInfo });
   }
 
   /**
@@ -1622,6 +1623,61 @@ export class Controller {
     }
   }
 
+  /** The toggle flips the saved value inside the queued update, so two quick presses can't both read the old one. */
+  toggleShowArchived() {
+    return this.applyShowArchived((cur) => !cur.show_archived);
+  }
+
+  setShowArchived(on: boolean) {
+    return this.applyShowArchived(() => on);
+  }
+
+  protected async applyShowArchived(pick: (cur: Settings) => boolean) {
+    try {
+      await this.updateSettings(async (cur) => {
+        const next = pick(cur);
+        await this.api.setSettings({ ...cur, show_archived: next });
+        this.store.set({ showArchived: next });
+      });
+    } catch (e) {
+      return this.setErr(errText(e));
+    }
+    if (this.store.get().paneMode === "notes") await this.refreshKeepingEditor();
+    else this.listStale = true; // the hidden Notes list reloads when shown
+    this.reloadAround();
+  }
+
+  /** Reload a first page without moving the editor: a plain refresh would inherit a pending first page's rule and could open row 0. */
+  protected refreshKeepingEditor() {
+    return this.pendingFirst !== null ? this.runSearch(true, "highlight") : this.runSearch(false);
+  }
+
+  /** Everything besides the Notes list that lists notes. */
+  protected reloadAround() {
+    void this.loadTasks();
+    this.refreshTimeline();
+    void this.refreshTags();
+    void this.loadLinkTargets();
+    void this.loadRelated();
+  }
+
+  /** Archive or unarchive the open note. It stays in the editor; only the listings change. */
+  async toggleArchive() {
+    const s = this.store.get();
+    const path = this.editor.currentPath();
+    if (!path) return this.setErr("Open a note to archive");
+    if (this.busy || s.indexing) return this.setErr(BUSY_MSG);
+    const next = !s.archived;
+    try {
+      await this.api.setArchived(path, next);
+    } catch (e) {
+      return this.setErr(errText(e));
+    }
+    if (this.editor.currentPath() === path) this.store.set({ archived: next }); // from our own call: the index may not know a new note yet
+    await this.refreshKeepingEditor();
+    this.reloadAround();
+  }
+
   /** Replace the open note with revision `id` as a user edit, after confirming and snapshotting the current text. */
   async restoreRevision(id: string) {
     if (this.busy) return this.setErr(BUSY_MSG); // lock hand-off: the editor is suspended, the file is moving
@@ -1916,8 +1972,8 @@ export class Controller {
     toggle_timeline: () => this.setPaneMode(this.store.get().paneMode === "timeline" ? "notes" : "timeline"),
     export: () => void this.startExport(),
     save_search: () => this.startSaveSearch(),
-    toggle_archived: () => {}, // Task 11
-    archive_note: () => {}, // Task 11
+    toggle_archived: () => void this.toggleShowArchived(),
+    archive_note: () => void this.toggleArchive(),
     quit: () => void this.api.quitApp(),
     reset_window: () => void this.api.resetWindow(),
   };
@@ -2104,8 +2160,9 @@ export class Controller {
 
   /** A note operation succeeded but the archived-notes list could not be written. */
   onArchiveError(message: string) {
-    this.notice = `The archived-notes list could not be updated: ${message}`;
-    this.setErr(this.notice);
+    const msg = `The archived-notes list could not be updated: ${message}`;
+    if (this.busy) this.notice = msg; // the operation still running ends with clearErr(), which must keep it; one that finished has nothing left to clear
+    this.setErr(msg);
   }
 
   onIndexError(message: string) {

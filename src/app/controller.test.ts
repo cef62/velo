@@ -3162,3 +3162,136 @@ test("exactTitleMatch: a hidden note renamed to the query counts once the title 
   await c.runSearch(false); await c.refreshTitles(); await settle();
   expect(store.get().exactTitleMatch).toBe(true);
 });
+
+test("archiving the open note with the switch off keeps it open and clears the selection", async () => {
+  const { c, api, store, editor } = setup();
+  await c.start(); await settle();
+  const path = store.get().openPath!;
+  await c.toggleArchive();
+  expect(api.setArchived).toHaveBeenCalledWith(path, true);
+  expect(store.get()).toMatchObject({ openPath: path, archived: true, sel: -1 });
+  expect(editor.currentPath()).toBe(path);
+  expect(c.row(0)?.path).not.toBe(path);
+  await c.toggleArchive(); // unarchive: one step away
+  expect(api.setArchived).toHaveBeenLastCalledWith(path, false);
+  expect(store.get().archived).toBe(false);
+});
+
+test("no open note: archive says why", async () => {
+  const { c, store, api } = setup({});
+  await c.start(); await settle();
+  await c.toggleArchive();
+  expect(store.get().err).toBe("Open a note to archive");
+  expect(api.setArchived).not.toHaveBeenCalled();
+});
+
+test("a failed archive shows the error and leaves the flag", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  api.setArchived.mockRejectedValueOnce("permission denied");
+  await c.toggleArchive();
+  expect(store.get()).toMatchObject({ err: "permission denied", archived: false });
+});
+
+test("the archive result applies to the note it was for, not the one open afterwards", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  const a = store.get().openPath!;
+  const d = deferred<undefined>(); api.setArchived.mockImplementationOnce(() => d.promise);
+  const done = c.toggleArchive();
+  await c.select(1); await settle();
+  const b = store.get().openPath!;
+  store.set({ infoOpen: true, sideTab: "related" });
+  const related = api.connections.mock.calls.length;
+  d.resolve(); await done; await settle();
+  expect(api.setArchived).toHaveBeenCalledWith(a, true);
+  expect(store.get()).toMatchObject({ openPath: b, archived: false });
+  expect(api.connections.mock.calls.length).toBeGreaterThan(related); // b's Related reloads without a
+});
+
+for (const act of ["toggleArchive", "setShowArchived"] as const)
+  test(`${act} never opens row 0 while a fresh first page is pending`, async () => {
+    const { c, api, store, editor } = setup();
+    await c.start(); await settle();
+    await c.select(1); await settle(); // the open note is not row 0
+    const open = store.get().openPath!;
+    const d = deferred<Page>(); const real = api.search.getMockImplementation()!;
+    api.search.mockImplementationOnce(() => d.promise);
+    c.setQuery("x"); // fresh first page in flight (pendingFirst = false: would open row 0)
+    await (act === "toggleArchive" ? c.toggleArchive() : c.setShowArchived(true));
+    d.resolve(await real("x", "modified", 0, [], false, false)); await settle();
+    expect(editor.currentPath()).toBe(open);
+  });
+
+test("the hidden-matches line turns the switch on and persists it", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  await c.toggleArchive(); c.setQuery("a"); await settle();
+  expect(store.get().hiddenArchived).toBe(1);
+  await c.setShowArchived(true); await settle();
+  expect(api.setSettings).toHaveBeenLastCalledWith(expect.objectContaining({ show_archived: true }));
+  expect(store.get().showArchived).toBe(true);
+  expect(api.search.mock.lastCall?.[5]).toBe(true);
+});
+
+test("switching show archived off keeps an open archived note open", async () => {
+  const { c, api, store, editor } = setup();
+  api.getSettings.mockResolvedValue({ ...(await api.getSettings()), show_archived: true });
+  await c.start(); await settle();
+  const path = store.get().openPath!;
+  await c.toggleArchive(); await settle(); // archived, still listed (switch on)
+  const opens = api.openNote.mock.calls.length;
+  await c.setShowArchived(false); await settle();
+  expect(editor.currentPath()).toBe(path);
+  expect(store.get()).toMatchObject({ openPath: path, archived: true, sel: -1 });
+  expect(api.openNote.mock.calls.length).toBe(opens); // row 0 was not opened in its place
+});
+
+test("two fast toggles of the switch end where they started", async () => {
+  const { c, api, store } = setup();
+  let cur = { ...(await api.getSettings()) };
+  api.getSettings.mockImplementation(async () => ({ ...cur }));
+  const gate = deferred<void>(); let first = true;
+  api.setSettings.mockImplementation(async (s) => { if (first) { first = false; await gate.promise; } cur = s; });
+  await c.start(); await settle();
+  const a = c.toggleShowArchived(), b = c.toggleShowArchived();
+  gate.resolve(); await Promise.all([a, b]); await settle();
+  expect(cur.show_archived).toBe(false);
+  expect(store.get().showArchived).toBe(false);
+});
+
+test("changing the switch reloads every listing", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  store.set({ paneMode: "timeline", infoOpen: true, sideTab: "related" });
+  const n = { tags: api.listTags.mock.calls.length, tasks: api.tasks.mock.calls.length, targets: api.listLinkTargets.mock.calls.length, tl: api.timeline.mock.calls.length, rel: api.connections.mock.calls.length };
+  await c.setShowArchived(true); await settle();
+  expect(api.listTags.mock.calls.length).toBeGreaterThan(n.tags);
+  expect(api.listTags.mock.lastCall).toEqual([true]);
+  expect(api.tasks.mock.calls.length).toBeGreaterThan(n.tasks);
+  expect(api.listLinkTargets.mock.lastCall).toEqual([true]);
+  expect(api.timeline.mock.calls.length).toBeGreaterThan(n.tl);
+  expect(api.connections.mock.calls.length).toBeGreaterThan(n.rel);
+  const searches = api.search.mock.calls.length;
+  c.setPaneMode("notes"); await settle(); // the hidden Notes list was marked stale
+  expect(api.search.mock.calls.length).toBeGreaterThan(searches);
+  expect(api.search.mock.lastCall?.[5]).toBe(true);
+});
+
+test("a list-write failure that lands after the operation is shown once", async () => {
+  const { c, store } = setup();
+  await c.start(); await settle();
+  c.onArchiveError("permission denied");
+  expect(store.get().err).toBe("The archived-notes list could not be updated: permission denied");
+  await c.select(1); await settle(); // clears the error
+  expect(store.get().err).toBe("");
+});
+
+test("the palette label follows the store flag set by archiving", async () => {
+  const { c, store } = setup();
+  await c.start(); await settle();
+  await c.toggleArchive();
+  expect(store.get().archived).toBe(true);
+  c.runAction("archive_note"); await settle();
+  expect(store.get().archived).toBe(false);
+});

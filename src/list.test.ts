@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { Hit, Page } from "./api";
-import { Results, visibleRange } from "./list";
+import { archivedLabel, hiddenText, Results, visibleRange } from "./list";
 
 const PAGE = 200;
 const hit = (n: number): Hit => ({ path: `n${n}.md`, title: `Note ${n}`, snippet: "", mtime: n, encrypted: false, archived: false });
@@ -94,4 +94,26 @@ test("ensure started during a slow reset leaves rows contiguous", async () => {
   resolvers[200]?.({ hits: all.slice(200, 400), has_more: true, total: 0, hidden: 0 });
   await Promise.race([ens, new Promise((res) => setTimeout(res, 50))]);
   for (let i = 0; i < r.count; i++) expect(r.get(i)?.path).toBe(`n${i}.md`);
+});
+
+test("hiddenText only with a filter, the switch off and something hidden", () => {
+  expect(hiddenText(3, false, true)).toBe("3 archived notes hidden");
+  expect(hiddenText(1, false, true)).toBe("1 archived note hidden");
+  expect(hiddenText(3, false, false)).toBeNull();
+  expect(hiddenText(3, true, true)).toBeNull();
+  expect(hiddenText(0, false, true)).toBeNull();
+});
+
+test("archivedLabel adds the word, not a colour", () => {
+  expect(archivedLabel("Standup, 2 tasks", true)).toBe("Standup, 2 tasks, archived");
+  expect(archivedLabel("Standup", false)).toBe("Standup");
+});
+
+test("Results.hidden follows the latest first page", async () => {
+  const r = new Results(async () => ({ hits: [], has_more: false, total: 0, hidden: 4 }));
+  expect(r.hidden).toBe(0);
+  await r.reset();
+  expect(r.hidden).toBe(4);
+  await r.refresh();
+  expect(r.hidden).toBe(4);
 });
