@@ -95,6 +95,9 @@ These are the designer's calls. The owner has not ruled on them one by one; each
 - Entries are removed only by velo's own events: unarchive, delete, merge (the source), and a title coming into being, which happens when a note is created with that title or an unarchived note is renamed to it. Renaming an archived note moves its entry.
 - An entry that matches no note is kept and ignored. velo does not prune the list against the files on disk: a note that is absent for a moment (evicted by iCloud, mid-transfer in a sync tool) must not lose its archived state. Clearing the entry when a title comes into being stops a leftover entry (after a delete or rename done in Finder) from archiving the new note.
 - Reading is forgiving: a leading byte-order mark and `\r\n` line ends are accepted, empty lines are skipped, invalid bytes do not make the read fail. Titles are not trimmed.
+- The same title twice in the file (a hand edit, a sync tool's merge) counts once.
+- A title that contains a line break cannot be archived; velo reports an error.
+- If the file exists but cannot be read, velo keeps the list it last read. At start-up, with nothing read yet, it treats the list as empty and reports the error once. Accepted limit: until the file is readable again, archived notes show.
 - A failed write is never silent. Archive and unarchive report the error. Rename, delete, merge and create still succeed and report that the list could not be updated.
 - Writes are atomic (write a temporary file, then rename), like `settings.json`.
 - Two processes use the file: the app, and the headless MCP server (`velo --mcp`), which renames, deletes and merges notes for agents. Neither may trust a copy read earlier:
