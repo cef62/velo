@@ -15,11 +15,7 @@ export function undoHistory() {
   return { extension: slot.of(history()), reset: [{ effects: slot.reconfigure([]) }, { effects: slot.reconfigure(history()) }] };
 }
 
-/** Replace the whole doc with the caret at the top; a hidden front matter's caret guard then moves it past the block. */
-/**
- * The smallest single change turning `a` into `b` (null if equal): common prefix and suffix are kept, so CodeMirror maps
- * selection and scroll through it. Never cuts a surrogate pair, never lets prefix and suffix overlap.
- */
+/** The smallest single change turning `a` into `b` (null if equal): common prefix and suffix kept, no surrogate cut, no overlap. */
 export function middleChange(a: string, b: string): { from: number; to: number; insert: string } | null {
   if (a === b) return null;
   const max = Math.min(a.length, b.length);
@@ -32,6 +28,18 @@ export function middleChange(a: string, b: string): { from: number; to: number; 
   return { from: p, to: a.length - s, insert: b.slice(p, b.length - s) };
 }
 
+/**
+ * A reload of the same note: only the differing middle changes (CRLF read as LF, as CodeMirror's own text split does) and the
+ * selection is mapped explicitly, so the hidden-front-matter guard runs (it skips transactions without a selection). Null if equal.
+ */
+export function reloadSpec(state: EditorState, text: string) {
+  const c = middleChange(state.doc.toString(), text.replace(/\r\n?/g, "\n"));
+  if (!c) return null;
+  const changes = state.changes(c);
+  return { changes, selection: state.selection.map(changes) };
+}
+
+/** Replace the whole doc with the caret at the top; a hidden front matter's caret guard then moves it past the block. */
 export function replaceAll(doc: Text, text: string) {
   return { changes: { from: 0, to: doc.length, insert: text }, selection: { anchor: 0 } };
 }

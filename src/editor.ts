@@ -6,7 +6,7 @@ import { writingSetup } from "./editortheme";
 import { refreshRich, richMarkdown, type RichOpts } from "./richmd";
 import { dueInputRule, localToday, toggleTaskAt } from "./tasks";
 import { SaveController } from "./saver";
-import { frontMatterHide, ISOLATED, middleChange, replaceAll, stampSelection, undoHistory } from "./fmhide";
+import { frontMatterHide, ISOLATED, reloadSpec, replaceAll, stampSelection, undoHistory } from "./fmhide";
 import { stampChange } from "./frontmatter";
 import { clampPos, getPos, renamePos, setPos, type Pos } from "./positions";
 import { openNote, saveNote, type NoteDoc, type NoteMeta } from "./api";
@@ -109,14 +109,19 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
   let shown: string | null = null; // path whose text the editor holds: setText on that same path is a reload, not a switch
   const setText = (text: string) => {
     loading = true;
-    const old = view.state.doc.toString();
     if (shown !== null && shown === ctrl.currentPath()) {
       // Same note reloaded: change only the differing middle, so CodeMirror keeps caret, selection and scroll.
-      const c = middleChange(old, text);
-      // The explicit (mapped) selection makes the hidden-front-matter guard run, as a bare change would skip it.
-      if (c) view.dispatch({ changes: c, selection: view.state.selection.map(view.state.changes(c)) });
-    } else view.dispatch(replaceAll(view.state.doc, text)); // Caret to the top; a hidden front matter moves it past the block.
-    for (const spec of undo.reset) view.dispatch(spec);
+      const spec = reloadSpec(view.state, text);
+      // The undo reset below overwrites the scroll anchor: re-apply it mapped through the change (hidden: it would scroll to the top).
+      const snap = spec && view.dom.offsetParent ? view.scrollSnapshot() : null;
+      if (spec) view.dispatch(spec);
+      for (const r of undo.reset) view.dispatch(r);
+      const anchor = snap?.map(spec!.changes);
+      if (anchor) view.dispatch({ effects: anchor });
+    } else {
+      view.dispatch(replaceAll(view.state.doc, text)); // Caret to the top; a hidden front matter moves it past the block.
+      for (const r of undo.reset) view.dispatch(r);
+    }
     loading = false;
   };
 
