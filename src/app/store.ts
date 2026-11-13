@@ -46,6 +46,7 @@ export interface AppState {
   sel: number;
   listActive: boolean; // focus in search or list (selection style)
   openPath: string | null;
+  unlocking: boolean; // a locked note's inline unlock covers the note area; openPath is the note hidden behind it
   title: string;
   encrypted: boolean;
   err: string;
@@ -112,6 +113,7 @@ export const initialState = (isMac: boolean): AppState => ({
   sel: -1,
   listActive: false,
   openPath: null,
+  unlocking: false,
   title: "",
   encrypted: false,
   err: "",
@@ -161,3 +163,6 @@ export const initialState = (isMac: boolean): AppState => ({
   palette: false,
   recentActions: [],
 });
+
+/** The note the user sees: none while the unlock screen covers the one still in the editor. */
+export const shownPath = (s: AppState) => (s.unlocking ? null : s.openPath);

@@ -3,7 +3,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { css } from "styled-system/css";
 import { countBadge, sidePanel } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
-import type { AppState, Store } from "../app/store";
+import { shownPath, type AppState, type Store } from "../app/store";
 import { IconButton, Tooltip } from "@/components/ui";
 import { relatedCount } from "../related";
 import { InfoTab } from "./InfoPanel";
@@ -19,7 +19,7 @@ export function SidePanel({ controller, store }: { controller: Controller; store
   const open = useStore(store, (s) => s.infoOpen);
   const tab = useStore(store, (s) => s.sideTab);
   const layout = useStore(store, (s) => s.layout);
-  const count = useStore(store, (s) => relatedCount(s.related?.centre === s.openPath ? (s.related?.data ?? null) : null));
+  const count = useStore(store, (s) => relatedCount(s.related?.centre === shownPath(s) ? (s.related?.data ?? null) : null));
   const el = useRef<HTMLElement>(null);
   const [paneW, setPaneW] = useState(1000);
   useLayoutEffect(() => {

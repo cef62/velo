@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { css } from "styled-system/css";
 import { relatedRow, sectionHeader } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
-import type { AppState, Store } from "../app/store";
+import { shownPath, type AppState, type Store } from "../app/store";
 import { Button, Kbd } from "@/components/ui";
 import { dateText, defaultClosed, relatedRows, stem, stepRelated, type RelatedRow } from "../related";
 import { formatBinding, NONE } from "../shortcuts";
@@ -29,7 +29,7 @@ let consumedFocusReq = 0; // the last ⌘⇧C request the tree answered (module-
 
 export function RelatedPanel({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const related = useStore(store, (s) => s.related);
-  const openPath = useStore(store, (s) => s.openPath);
+  const openPath = useStore(store, shownPath);
   const title = useStore(store, (s) => s.title);
   const keys = useStore(store, (s) => s.keys);
   const isMac = useStore(store, (s) => s.isMac);

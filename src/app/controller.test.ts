@@ -3,7 +3,7 @@ import type { LinkTarget, Page, RenameResult, TaskItem, TaskView, TimelineRow } 
 import { Controller, INVALID_TITLE, type KeyEventLike } from "./controller";
 import { chipsFor } from "../searchChips";
 import { emptyConnections, FakeEditor, FakePreview, deferred, fakeApi, fakeUi, hit, noMeta, settle } from "./fakes";
-import { createStore, initialState } from "./store";
+import { createStore, initialState, shownPath } from "./store";
 import { localToday, toggleTaskLine } from "../tasks";
 import { getPos, setPos } from "../positions";
 import { chipTags } from "../tags";
@@ -3833,4 +3833,108 @@ test("a rejected link-target lookup after the query changed voids that Enter (#1
   await entered; await settle();
   expect(t.api.openNote).not.toHaveBeenCalledWith(P("B"));
   expect(t.api.openOrCreate).not.toHaveBeenCalled();
+});
+
+// #126: A is open with an unsaved edit, then the locked note L is selected. Its inline unlock stays up until `pw`
+// settles; the editor still holds A behind the lock screen. `cancelPassphrase` resolves the field as the real one does.
+async function behindUnlock() {
+  const s = setup({ A: "a", L: "secret", C: "c" });
+  const { c, api, ui, editor } = s;
+  const preview = new FakePreview();
+  c.attachPreview(preview);
+  await c.runSearch(true); await settle(); // row 0 (A) auto-opens
+  await c.select(0);
+  editor.flush.mockImplementation(async () => ((editor.dirty = false), true)); // a flush saves
+  editor.applyChange({ from: 1, to: 1, insert: "!" });
+  let locked = true;
+  const real = api.openNote.getMockImplementation()!;
+  api.openNote.mockImplementation(async (p: string) => {
+    if (p === P("L") && locked) throw "locked";
+    return real(p);
+  });
+  const pw = deferred<boolean>();
+  let cancel = () => {};
+  (ui as any).passphrase = () => new Promise<boolean>((res) => {
+    cancel = () => res(false);
+    void pw.promise.then((ok) => ((locked = !ok), res(ok)));
+  });
+  (ui as any).cancelPassphrase = () => cancel();
+  const shown = c.select(1);
+  await settle();
+  return { ...s, preview, pw, shown };
+}
+
+type Behind = Awaited<ReturnType<typeof behindUnlock>>;
+const hiddenNoteCases: [string, (t: Behind) => unknown, (t: Behind, previewWas: boolean) => boolean][] = [
+  ["⌘⌫ delete", (t) => t.c.onKeyDown(key("Backspace", { meta: true })), (t) => t.api.deleteNote.mock.calls.length > 0 || !("A" in t.notes)],
+  ["palette delete", (t) => t.c.runPaletteAction("delete_note"), (t) => t.api.deleteNote.mock.calls.length > 0],
+  ["⌘R rename", (t) => t.c.onKeyDown(key("KeyR", { meta: true })), (t) => t.store.get().renaming],
+  ["⌘⇧P preview", (t) => t.c.onKeyDown(key("KeyP", { meta: true, shift: true })), (t, was) => t.preview.on !== was],
+  ["⌘⇧E lock", (t) => t.c.onKeyDown(key("KeyE", { meta: true, shift: true })), (t) => t.api.lockNote.mock.calls.length > 0],
+  ["⌘⇧N extract", (t) => t.c.onKeyDown(key("KeyN", { meta: true, shift: true })), (t) => t.store.get().extract !== null],
+  ["palette merge", (t) => t.c.runPaletteAction("merge_note"), (t) => t.store.get().merge !== null],
+  ["tray/backend archive", (t) => t.c.runAction("archive_note"), (t) => t.api.setArchived.mock.calls.length > 0],
+];
+test.each(hiddenNoteCases)("while a locked note's unlock is up, %s does not act on the note hidden behind it (#126)", async (_name, run, acted) => {
+  const t = await behindUnlock();
+  expect(t.editor.currentPath()).toBe(P("A")); // the hidden note
+  t.editor.selection = { from: 0, to: 1 };
+  const was = t.preview.on;
+  const handled = run(t);
+  if (typeof handled === "boolean") expect(handled).toBe(true); // a key stays handled: ⌘R must not reload the webview
+  await settle();
+  expect(acted(t, was)).toBe(false);
+  expect(t.notes).toHaveProperty("A");
+  expect(t.store.get().unlocking).toBe(true);
+  expect(shownPath(t.store.get())).toBeNull(); // side panel and palette: no note is open
+});
+
+test("while a locked note's unlock is up, app-wide shortcuts still work (#126)", async () => {
+  const { c, calls, store } = await behindUnlock();
+  c.onKeyDown(key("KeyL", { meta: true }));
+  expect(calls.some(([m]) => m === "focusSearch")).toBe(true);
+  c.onKeyDown(key("KeyX", { meta: true, shift: true }));
+  expect(store.get().paneMode).toBe("tasks");
+  c.onKeyDown(key("Comma", { meta: true }));
+  await settle();
+  expect(store.get().settings).not.toBeNull();
+});
+
+test("selecting another note dismisses the unlock; note shortcuts then act on that note (#126)", async () => {
+  const { c, api, store } = await behindUnlock();
+  await c.show(P("C")); // a click on C's row (past the fake's first page), a Related link, a task
+  await settle();
+  expect(store.get().unlocking).toBe(false);
+  expect(shownPath(store.get())).toBe(P("C"));
+  c.onKeyDown(key("Backspace", { meta: true }));
+  await settle();
+  expect(api.deleteNote).toHaveBeenCalledWith(P("C"));
+});
+
+test("after a successful unlock, note shortcuts act on the unlocked note (#126)", async () => {
+  const { c, api, store, pw, shown } = await behindUnlock();
+  pw.resolve(true);
+  await shown; await settle();
+  expect(store.get().unlocking).toBe(false);
+  expect(shownPath(store.get())).toBe(P("L"));
+  c.runAction("archive_note"); await settle();
+  expect(api.setArchived).toHaveBeenCalledWith(P("L"), true);
+});
+
+test("after the unlock is cancelled, the note shown again is the current one and shortcuts act on it (#126)", async () => {
+  const { c, api, store, pw, shown } = await behindUnlock();
+  pw.resolve(false); // Escape
+  await shown; await settle();
+  expect(store.get().unlocking).toBe(false);
+  expect(shownPath(store.get())).toBe(P("A")); // the lock screen is gone: A is visible again
+  c.runAction("archive_note"); await settle();
+  expect(api.setArchived).toHaveBeenCalledWith(P("A"), true);
+});
+
+test("an edit made just before a locked note is selected is saved before the unlock is asked for (#126)", async () => {
+  const { api, editor } = await behindUnlock();
+  expect(editor.dirty).toBe(false);
+  const lastFlush = Math.max(...editor.flush.mock.invocationCallOrder);
+  const openL = api.openNote.mock.calls.findIndex(([p]) => p === P("L"));
+  expect(lastFlush).toBeLessThan(api.openNote.mock.invocationCallOrder[openL]);
 });

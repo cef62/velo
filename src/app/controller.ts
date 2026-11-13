@@ -23,7 +23,7 @@ import { prepare, rank, type Ranked } from "../fuzzy";
 import { extractTitle } from "../writing";
 import { appliedSearch, cleanName, defaultName, removeFrom, renameIn, sameFilters, upsert, type Filters } from "../saved";
 import { chipsFor, type Chip } from "../searchChips";
-import { pushRecent } from "../palette";
+import { NOTE_ACTIONS, pushRecent } from "../palette";
 import { dropPos } from "../positions";
 import type { MenuSpec, UiPort } from "./ports";
 import { noInfo, type AppState, type Store } from "./store";
@@ -68,6 +68,7 @@ export class Controller {
   protected linkIndex: Ranked<LinkTarget>[] = []; // [[ autocomplete
   protected tagIndex: Ranked<TagCount>[] = []; // # autocomplete
   protected readonly newShow = latest();
+  protected unlockSeq = 0; // the newest inline unlock: only it clears `unlocking`
   protected searchSeq = 0;
   protected searching: Promise<void> = Promise.resolve(); // latest list reset, awaited by Enter so it never acts on stale rows
   protected settingsQueue: Promise<unknown> = Promise.resolve();
@@ -639,7 +640,11 @@ export class Controller {
     } catch (e) {
       if (how === "nav" && e === "not-found") return "missing";
       if (e === "locked" && !retried && how !== "auto") { // never pop the dialog up while typing in search
+        // the lock screen covers the note area while the editor still holds the previous note: see runAction
+        const seq = ++this.unlockSeq;
+        this.store.set({ unlocking: true });
         const ok = await this.promptPassphrase({ trigger: "open", context: null, inline: true });
+        if (seq === this.unlockSeq) this.store.set({ unlocking: false });
         if (!current()) return true; // a newer note was opened while the field was up: leave it alone
         if (ok) {
           const r = await this.show(path, how, true);
@@ -1995,12 +2000,17 @@ export class Controller {
   runPaletteAction(a: Action) {
     if (!(a in this.actions)) return;
     this.store.set((s) => ({ palette: false, recentActions: pushRecent(s.recentActions, a) }));
-    void this.ui.nextFrame().then(() => this.actions[a as keyof typeof this.actions]());
+    void this.ui.nextFrame().then(() => this.runAction(a));
   }
 
-  /** An action sent by the backend (tray menu); unknown names are ignored. */
+  /**
+   * Every bound action runs here: shortcuts, the palette and the backend (tray menu); unknown names are ignored.
+   * While a locked note's unlock is up, the editor still holds the previous note: actions on "the open note" are dropped.
+   */
   runAction(a: string) {
-    if (a in this.actions) this.actions[a as keyof typeof this.actions]();
+    if (!(a in this.actions)) return;
+    if (this.store.get().unlocking && (a === "toggle_preview" || NOTE_ACTIONS.includes(a as Action))) return;
+    this.actions[a as keyof typeof this.actions]();
   }
 
   // context_menu is not a global command: each focused list or chip opens its own menu through isMenuKey
@@ -2058,11 +2068,11 @@ export class Controller {
       this.stepTimeline(arrow);
       return true;
     }
-    for (const [action, run] of Object.entries(this.actions)) {
+    for (const action of Object.keys(this.actions)) {
       if (!matches(e, keys[action as Action], this.opts.isMac)) continue;
       // Backspace combos keep their editing meaning in the editor and in a non-empty search box
       if (keys[action as Action].endsWith("+Backspace") && (e.inEditor || e.inSearchWithText)) continue;
-      if (!e.repeat || REPEATABLE.has(action as Action)) run(); // a held key fires toggles and one-shot commands once
+      if (!e.repeat || REPEATABLE.has(action as Action)) this.runAction(action); // a held key fires toggles and one-shot commands once
       return true;
     }
     return false;
