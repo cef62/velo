@@ -40,8 +40,11 @@ const UNDO_MS = 5000;
 const NO_KEY_MSG =
   "This note was locked with a velo key that isn't on this computer. Copy `.velo/identity.age` from the other computer into this notes folder.";
 
+/** Bound actions where holding the key is useful (stepping through history); every other action fires once per press. */
+const REPEATABLE: ReadonlySet<Action> = new Set<Action>(["back", "forward"]);
+
 /** What the window's capture-phase keydown handler passes in; the flags say where focus is. */
-export type KeyEventLike = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey"> & {
+export type KeyEventLike = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey" | "repeat"> & {
   getModifierState?: (k: string) => boolean; // pass it through so AltGr never fires a Mod+Alt binding off-mac
   inEditor: boolean;
   inSearchWithText: boolean;
@@ -819,6 +822,7 @@ export class Controller {
       return;
     }
     await settled(() => this.searching);
+    if (!force && (await this.openHiddenArchived())) return;
     const a = enterAction(this.store.get().query, this.results.loaded, this.results.get(this.store.get().sel), force);
     if (!a) return;
     try {
@@ -829,6 +833,38 @@ export class Controller {
       } else await this.openTitle(a.title, "enter", checklist);
     } catch (e) {
       this.setErr(errText(e));
+    }
+  }
+
+  protected confirmingEnter = false;
+  /**
+   * Plain Enter on the exact title or alias of an archived note the switch hides, with row 0 (or nothing) selected:
+   * open that note, not row 0. The title cache may be stale and the hit's archived flag is only known to a search, so
+   * one search with archived notes and no tags confirms it. This path never creates a note; when the title is not confirmed (no archived hit, search failed) it returns false and Enter acts as before, which creates a note only when there are no results. true = this Enter is handled or void (the query, the list or the selection moved on meanwhile).
+   * ponytail: the note must be on the confirm search's first page; upgrade: page on.
+   */
+  protected async openHiddenArchived(): Promise<boolean> {
+    if (this.confirmingEnter) return true; // a second Enter while the first confirms: one open only
+    const s = this.store.get();
+    const q = fold(s.query.trim());
+    if (s.showArchived || s.sel > 0 || q === "" || !this.titles.has(q) || this.results.loaded.some((h) => fold(h.title) === q)) return false;
+    this.confirmingEnter = true;
+    const seq = this.searchSeq;
+    const movedOn = () => seq !== this.searchSeq || this.store.get().query !== s.query || this.store.get().sel > 0; // the user went elsewhere: this Enter is void
+    try {
+      const [page, targets] = await Promise.all([this.api.search(s.query, s.sort, 0, [], s.noLinks, true), this.api.listLinkTargets(true)]);
+      if (movedOn()) return true;
+      const paths = new Set(targets.filter((t) => fold(t.name) === q).map((t) => t.path));
+      const hit = page.hits.find((h) => h.archived && paths.has(h.path));
+      if (!hit) return false;
+      this.confirmingEnter = false; // the confirm is over: an unlock field left up must not freeze Enter
+      if ((await this.show(hit.path)) && this.editor.currentPath() === hit.path) this.settleAfterOpen(false, "enter");
+      return true;
+    } catch (e) {
+      console.warn("confirming a hidden title failed", e);
+      return movedOn();
+    } finally {
+      this.confirmingEnter = false;
     }
   }
 
@@ -2028,7 +2064,7 @@ export class Controller {
       if (!matches(e, keys[action as Action], this.opts.isMac)) continue;
       // Backspace combos keep their editing meaning in the editor and in a non-empty search box
       if (keys[action as Action].endsWith("+Backspace") && (e.inEditor || e.inSearchWithText)) continue;
-      run();
+      if (!e.repeat || REPEATABLE.has(action as Action)) run(); // a held key fires toggles and one-shot commands once
       return true;
     }
     return false;

@@ -581,6 +581,7 @@ const key = (code: string, mods: { meta?: boolean; shift?: boolean } = {}, where
   ctrlKey: false,
   altKey: false,
   shiftKey: !!mods.shift,
+  repeat: false,
   inEditor: false,
   inSearchWithText: false,
   inDialog: false,
@@ -981,7 +982,7 @@ test("openTask shows the note and reveals the line", async () => {
 
 test("toggle_tasks switches the pane and notes-changed refreshes tasks", async () => {
   const { c, api, store } = setup();
-  c.onKeyDown({ key: "x", code: "KeyX", metaKey: true, ctrlKey: false, altKey: false, shiftKey: true, inEditor: false, inSearchWithText: false, inDialog: false, inRename: false });
+  c.onKeyDown({ key: "x", code: "KeyX", metaKey: true, ctrlKey: false, altKey: false, shiftKey: true, repeat: false, inEditor: false, inSearchWithText: false, inDialog: false, inRename: false });
   expect(store.get().paneMode).toBe("tasks");
   await settle();
   expect(api.tasks).toHaveBeenCalledTimes(1);
@@ -989,8 +990,8 @@ test("toggle_tasks switches the pane and notes-changed refreshes tasks", async (
   expect(api.tasks).toHaveBeenCalledTimes(2);
 });
 
-const KEY_C = { key: "c", code: "KeyC", metaKey: true, ctrlKey: false, altKey: false, shiftKey: true, inEditor: false, inSearchWithText: false, inDialog: false, inRename: false };
-const KEY_P = { key: "p", code: "KeyP", metaKey: true, ctrlKey: false, altKey: false, shiftKey: false, inEditor: false, inSearchWithText: false, inDialog: false, inRename: false };
+const KEY_C = { key: "c", code: "KeyC", metaKey: true, ctrlKey: false, altKey: false, shiftKey: true, repeat: false, inEditor: false, inSearchWithText: false, inDialog: false, inRename: false };
+const KEY_P = { key: "p", code: "KeyP", metaKey: true, ctrlKey: false, altKey: false, shiftKey: false, repeat: false, inEditor: false, inSearchWithText: false, inDialog: false, inRename: false };
 
 test("⌘⇧C opens the side panel on Related for the open note; again, it closes; ⌘I keeps the tab", async () => {
   const { c, api, store, editor } = setup();
@@ -1172,7 +1173,7 @@ test("submit re-reads the target: a capture across midnight never writes yesterd
 
 test("daily_note opens today's note", async () => {
   const { c, api } = setup();
-  c.onKeyDown({ key: "D", code: "KeyD", metaKey: true, ctrlKey: false, altKey: false, shiftKey: true, inEditor: false, inSearchWithText: false, inDialog: false, inRename: false });
+  c.onKeyDown({ key: "D", code: "KeyD", metaKey: true, ctrlKey: false, altKey: false, shiftKey: true, repeat: false, inEditor: false, inSearchWithText: false, inDialog: false, inRename: false });
   await settle();
   expect(api.openOrCreate).toHaveBeenCalledWith(localToday());
 });
@@ -3428,4 +3429,222 @@ test("archive toggle in Tasks mode marks the Notes list stale instead of refresh
   c.setPaneMode("notes"); await settle();
   expect(api.search.mock.calls.length).toBeGreaterThan(searches); // it reloads when shown
   expect(store.get().hiddenArchived).toBe(1);
+});
+
+// #87: Enter on the exact title of an archived note hidden by the switch
+async function withHiddenB() {
+  const t = setup();
+  await t.api.setArchived("/n/B.md", true);
+  await t.c.start(); await settle();
+  return t;
+}
+
+test("Enter on the exact title of a hidden archived note opens it by path, creates nothing, keeps the switch off (#87)", async () => {
+  const { c, api, store, notes } = await withHiddenB();
+  c.setQuery("B"); await settle();
+  expect(c.row(0)?.title).toBe("A"); // row 0 is not the note typed
+  await c.enter();
+  expect(store.get().openPath).toBe(P("B"));
+  expect(store.get()).toMatchObject({ archived: true, showArchived: false });
+  expect(Object.keys(notes)).toEqual(["A", "B", "C"]);
+  expect(api.openNote).toHaveBeenLastCalledWith(P("B"));
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+});
+
+test("Enter on an exact alias of a hidden archived note opens that note (#87)", async () => {
+  const { c, api, store, notes } = await withHiddenB();
+  api.listTitles.mockResolvedValue(["A", "B", "C", "Bee"]);
+  api.listLinkTargets.mockResolvedValue(["A", "B", "C"].map((t) => ({ name: t, title: t, path: P(t), modified: 0, locked: false })).concat([{ name: "Bee", title: "B", path: P("B"), modified: 0, locked: false }]));
+  await c.refreshTitles();
+  c.setQuery("Bee"); await settle();
+  await c.enter();
+  expect(store.get().openPath).toBe(P("B"));
+  expect(Object.keys(notes)).toEqual(["A", "B", "C"]);
+});
+
+test("Enter on an exact title hidden only by a tag filter opens row 0, as before (#87)", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  api.search.mockImplementation(async (_q, _s, _o, tags) => ({ hits: (tags.length ? ["A", "C"] : ["A", "B", "C"]).map(hit), has_more: false, total: 3, hidden: 0 }));
+  store.set({ selectedTags: ["x"] });
+  c.setQuery("B"); await settle();
+  await c.enter();
+  expect(store.get().openPath).toBe(P("A"));
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+});
+
+test("a stale title-cache entry with rows listed opens row 0 and creates nothing (#87)", async () => {
+  const { c, api, store, notes } = await withHiddenB();
+  api.listTitles.mockResolvedValue(["A", "B", "C", "Ghost"]);
+  await c.refreshTitles();
+  c.setQuery("Ghost"); await settle();
+  await c.enter();
+  expect(store.get().openPath).toBe(P("A"));
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+  expect(Object.keys(notes)).toEqual(["A", "B", "C"]);
+});
+
+test("a row the user arrowed to beats a hidden exact title (#87)", async () => {
+  const { c, store } = await withHiddenB();
+  c.setQuery("B"); await settle();
+  await c.step(1); await settle();
+  expect(store.get().sel).toBe(1);
+  await c.enter();
+  expect(store.get().openPath).toBe(P("C"));
+});
+
+test("a locked hidden archived title goes through the normal open path (passphrase prompt) (#87)", async () => {
+  const { c, api, calls, store } = await withHiddenB();
+  c.setQuery("B"); await settle();
+  api.openNote.mockRejectedValueOnce("locked");
+  await c.enter();
+  expect(calls.some((x) => x[0] === "passphrase")).toBe(true);
+  expect(store.get().err).not.toBe("locked");
+});
+
+test("a query change during the confirming search voids that Enter; a second Enter opens once (#87)", async () => {
+  const { c, api, store } = await withHiddenB();
+  c.setQuery("B"); await settle();
+  const d = deferred<Page>();
+  api.search.mockImplementationOnce(() => d.promise);
+  const first = c.enter();
+  const second = c.enter();
+  await settle();
+  c.setQuery("zzz");
+  d.resolve({ hits: [{ ...hit("B"), archived: true }], has_more: false, total: 1, hidden: 0 });
+  await Promise.all([first, second]); await settle();
+  expect(api.openNote).not.toHaveBeenCalledWith(P("B"));
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+  expect(store.get().openPath).not.toBe(P("B"));
+});
+
+test("two quick Enters on a hidden archived title open it once (#87)", async () => {
+  const { c, api } = await withHiddenB();
+  c.setQuery("B"); await settle();
+  await Promise.all([c.enter(), c.enter()]);
+  expect(api.openNote.mock.calls.filter((x) => x[0] === P("B"))).toHaveLength(1);
+});
+
+test("Shift+Enter on the exact title of a hidden archived note still opens it (#87)", async () => {
+  const { c, store, notes } = await withHiddenB();
+  c.setQuery("B"); await settle();
+  await c.enter(true);
+  expect(store.get().openPath).toBe(P("B"));
+  expect(Object.keys(notes)).toEqual(["A", "B", "C"]);
+});
+
+test("Enter on a visible note's exact title keeps opening the selected row (#87)", async () => {
+  const { c, store, api } = await withHiddenB();
+  c.setQuery("C"); await settle();
+  await c.enter();
+  expect(store.get().openPath).toBe(P("A")); // row 0, as before
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+});
+
+test("Enter with no matching title still creates the note (#87)", async () => {
+  const { c, store, notes } = await withHiddenB();
+  c.setQuery("zzz"); await settle();
+  await c.enter(true);
+  expect(store.get().openPath).toBe(P("zzz"));
+  expect(Object.keys(notes)).toContain("zzz");
+});
+
+test("Enter with the switch on is unchanged: the archived note is listed, so the selected row opens (#87)", async () => {
+  const { c, store, api } = await withHiddenB();
+  await c.setShowArchived(true); await settle();
+  c.setQuery("B"); await settle();
+  await c.enter();
+  expect(store.get().openPath).toBe(P("A"));
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+});
+
+// #89: a held bound key fires once
+test("a held Archive shortcut toggles once; a second press toggles again (#89)", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  store.set({ keys: { ...store.get().keys, archive_note: "Mod+KeyY" } });
+  expect(c.onKeyDown(key("KeyY", { meta: true }))).toBe(true);
+  await settle();
+  expect(api.setArchived).toHaveBeenCalledTimes(1);
+  expect(c.onKeyDown({ ...key("KeyY", { meta: true }), repeat: true })).toBe(true); // handled: no browser default
+  await settle();
+  expect(api.setArchived).toHaveBeenCalledTimes(1);
+  expect(c.onKeyDown(key("KeyY", { meta: true }))).toBe(true);
+  await settle();
+  expect(api.setArchived).toHaveBeenCalledTimes(2);
+});
+
+test("a held Back shortcut keeps stepping (#89)", async () => {
+  const { c } = setup();
+  const nav = vi.spyOn(c, "navigate").mockResolvedValue(undefined);
+  c.onKeyDown({ ...key("KeyJ", { meta: true }), repeat: true }); // back's default
+  expect(nav).toHaveBeenCalledWith("back");
+});
+
+test("an unlock field left up after Enter on a locked hidden archived title does not freeze Enter (#87)", async () => {
+  const { c, api, ui, store } = await withHiddenB();
+  c.setQuery("B"); await settle();
+  api.openNote.mockRejectedValueOnce("locked");
+  (ui as any).passphrase = () => new Promise(() => {}); // the field stays up
+  void c.enter();
+  await settle();
+  c.setQuery("C"); await settle();
+  const opens = api.openNote.mock.calls.length;
+  await c.enter();
+  await settle();
+  expect(api.openNote.mock.calls.length).toBeGreaterThan(opens); // Enter opens the selected row, as on main
+  expect(store.get().openPath).toBe(P("A"));
+});
+
+const noHits = async (): Promise<Page> => ({ hits: [], has_more: false, total: 0, hidden: 0 });
+
+test("a stale title-cache entry with no results behaves as on main: Enter creates the typed title (#87)", async () => {
+  const { c, api, store, notes } = await withHiddenB();
+  api.listTitles.mockResolvedValue(["A", "B", "C", "Ghost"]);
+  await c.refreshTitles();
+  api.search.mockImplementation(noHits);
+  c.setQuery("Ghost"); await settle();
+  await c.enter();
+  expect(api.openOrCreate).toHaveBeenCalledWith("Ghost");
+  expect(store.get().openPath).toBe(P("Ghost"));
+  expect(Object.keys(notes)).toContain("Ghost");
+});
+
+test("a failing confirm search with the query unchanged falls back to row 0 (#87)", async () => {
+  const { c, api, store } = await withHiddenB();
+  c.setQuery("B"); await settle();
+  api.search.mockRejectedValueOnce("boom");
+  await c.enter();
+  expect(store.get().openPath).toBe(P("A"));
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+});
+
+test("a failing confirm search after the query changed voids that Enter: nothing opens, nothing is created (#87)", async () => {
+  const { c, api, store, notes } = await withHiddenB();
+  c.setQuery("B"); await settle();
+  const d = deferred<Page>();
+  api.search.mockImplementationOnce(() => d.promise);
+  const entered = c.enter();
+  await settle();
+  api.search.mockImplementation(noHits);
+  c.setQuery("zzz"); await settle();
+  d.reject("boom");
+  await entered; await settle();
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+  expect(Object.keys(notes)).toEqual(["A", "B", "C"]);
+  expect(store.get().openPath).not.toBe(P("zzz"));
+});
+
+test("arrowing to another row during the confirm search voids that Enter; the arrowed row stays open (#87)", async () => {
+  const { c, api, store } = await withHiddenB();
+  c.setQuery("B"); await settle();
+  const d = deferred<Page>();
+  api.search.mockImplementationOnce(() => d.promise);
+  const entered = c.enter();
+  await settle();
+  await c.step(1); await settle(); // step() opens the row itself
+  d.resolve({ hits: [{ ...hit("B"), archived: true }], has_more: false, total: 1, hidden: 0 });
+  await entered; await settle();
+  expect(api.openNote).not.toHaveBeenCalledWith(P("B"));
+  expect(store.get().openPath).toBe(P("C"));
 });

@@ -44,6 +44,7 @@ window.addEventListener(
       ctrlKey: e.ctrlKey,
       altKey: e.altKey,
       shiftKey: e.shiftKey,
+      repeat: e.repeat,
       getModifierState: (k) => e.getModifierState(k),
       inEditor: !!t.closest?.("[data-editor-host]"),
       inSearchWithText: isSearchInput(t) && (t as HTMLInputElement).value !== "",
