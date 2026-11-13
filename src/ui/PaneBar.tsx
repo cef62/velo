@@ -49,20 +49,22 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
   // exact counts the bar hides or caps ride on the tab tooltips (hover and keyboard focus) and, for the Notes tab, its accessible name
   const tabExtra = (t: PaneTab) => (t === "notes" ? notesExtra(total, countShown) : t === "tasks" ? dueExtra(dueCount) : "");
   const tabTip = (t: PaneTab) => [tip(TAB[t].action, TAB[t].text), tabExtra(t)].filter(Boolean).join(" · ");
-  // The menu trigger; icon-only, a tooltip carries the label the button would show (it names the current value too).
-  const menuBtn = (text: string, aria: string, glyph: ReactNode) => {
-    const trigger = (
-      <Menu.Trigger asChild>
-        <button type="button" className={menuButton({ iconOnly: mode.menusIconOnly })} aria-label={aria}>
-          {glyph}
-          <span data-label>{text}</span>
-          <ChevronDown data-chevron aria-hidden />
-        </button>
-      </Menu.Trigger>
-    );
-    // the tooltip wraps a span, not the trigger: two refs on one button would lose the menu's anchor (it opened off-screen)
-    return mode.menusIconOnly ? <Tooltip content={text} openDelay={500}><span className={css({ display: "inline-flex", flex: "none" })}>{trigger}</span></Tooltip> : trigger;
-  };
+  // The menu trigger; icon-only, the tooltip shows the same text as the accessible name (what it is and its current value).
+  // One tree in both modes (Tooltip disabled, wrapper `display: contents`): the button stays mounted when the pane crosses the threshold, so focus and an open menu survive.
+  // The tooltip wraps a span, not the trigger: two refs on one button lose the menu's anchor (it opened off-screen). The name carries the value, so no aria-describedby is needed.
+  const menuBtn = (aria: string, text: string, glyph: ReactNode) => (
+    <Tooltip content={aria} openDelay={500} disabled={!mode.menusIconOnly}>
+      <span className={css({ display: mode.menusIconOnly ? "inline-flex" : "contents", flex: "none" })}>
+        <Menu.Trigger asChild>
+          <button type="button" className={menuButton({ iconOnly: mode.menusIconOnly })} aria-label={aria}>
+            {glyph}
+            <span data-label>{text}</span>
+            <ChevronDown data-chevron aria-hidden />
+          </button>
+        </Menu.Trigger>
+      </span>
+    </Tooltip>
+  );
 
   const archivedToggle = (
     <Tooltip content={tip("toggle_archived", "Show archived notes")} openDelay={500}>
@@ -105,7 +107,7 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
             </Tooltip>
           )}
           <Menu.Root positioning={{ placement: "bottom-end" }}>
-            {menuBtn(sort === "title" ? "Title A→Z" : "Recent", `Sort: ${sort === "title" ? "title" : "recent"}`, sort === "title" ? <ArrowDownAZ /> : <Clock />)}
+            {menuBtn(`Sort: ${sort === "title" ? "Title A→Z" : "Recent"}`, sort === "title" ? "Title A→Z" : "Recent", sort === "title" ? <ArrowDownAZ /> : <Clock />)}
             <Menu.Positioner>
               <Menu.Content minW="200px">
                 <Menu.RadioItemGroup value={sort} onValueChange={(d) => d.value !== sort && void controller.setSort(d.value as typeof sort)}>
@@ -133,7 +135,7 @@ export function PaneBar({ controller, store }: { controller: Controller; store: 
       {cur === "timeline" && (
         <>
           <Menu.Root positioning={{ placement: "bottom-end" }}>
-            {menuBtn(`${tl.by === "created" ? "Created" : "Updated"} · ${tl.range === "all" ? "All" : `${tl.range}d`}`, `Timeline: by ${tl.by}, ${tl.range === "all" ? "all time" : `last ${tl.range} days`}`, mode.menusIconOnly ? <CalendarDays /> : null)}
+            {menuBtn(`Timeline: by ${tl.by}, ${tl.range === "all" ? "all time" : `last ${tl.range} days`}`, `${tl.by === "created" ? "Created" : "Updated"} · ${tl.range === "all" ? "All" : `${tl.range}d`}`, mode.menusIconOnly ? <CalendarDays /> : null)}
             <Menu.Positioner>
               <Menu.Content minW="200px">
                 <Menu.RadioItemGroup value={tl.by} onValueChange={(d) => d.value !== tl.by && void controller.setTimelineBy(d.value as typeof tl.by)}>

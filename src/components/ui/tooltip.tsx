@@ -42,10 +42,9 @@ export const Tooltip = forwardRef<HTMLDivElement, TooltipProps>(function Tooltip
     ...rootProps
   } = props
 
-  if (disabled) return children
-
+  // Root's own `disabled` (not an early return): the same tree in both states keeps the trigger mounted, so focus survives a toggle
   return (
-    <Root {...rootProps}>
+    <Root disabled={disabled} {...rootProps}>
       <Trigger asChild>{children}</Trigger>
       <Portal disabled={!portalled} container={portalRef}>
         <Positioner>
