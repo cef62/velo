@@ -41,6 +41,12 @@ pub fn line(msg: &str) {
     }
 }
 
+/// `line`, also on stderr: `velo --mcp` direct mode has no velo.log.
+pub fn warn(msg: &str) {
+    line(msg);
+    eprintln!("{msg}");
+}
+
 fn append(path: &Path, msg: &str) {
     let text = format!("{} {msg}\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f %z"));
     let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
