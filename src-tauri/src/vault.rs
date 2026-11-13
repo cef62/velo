@@ -120,7 +120,9 @@ pub struct Vault {
     revisions: Revisions,
     /// the entries last loaded into the index's archived table (empty = the empty table)
     archive_loaded: std::cell::RefCell<Vec<String>>,
-    /// latest list-write failure; `take()` reads and clears it
+    /// latest list-write failure; `take()` reads and clears it. Whoever runs a note operation takes it before
+    /// releasing the vault's lock (`run_reporting`, `AppOps::with`, the direct-mode `gate`), so it never reaches
+    /// another caller.
     pub archive_error: std::cell::Cell<Option<String>>,
     archive_read_logged: std::cell::Cell<bool>,
 }
@@ -357,7 +359,7 @@ impl Vault {
             let m = format!("cannot update {}: {e}", crate::archive::FILE);
             crate::log::line(&m);
             eprintln!("{m}");
-            self.archive_error.set(Some(m));
+            self.archive_error.set(Some(e.to_string())); // the reason only: the reports name the list themselves
         }
     }
 

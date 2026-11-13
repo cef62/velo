@@ -60,7 +60,7 @@
     "name": "read_note"
   },
   {
-    "description": "Create a new note. Fails if a note with that title or alias exists. Front matter is stamped as for any new note. Returns the title and new hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list: tell the user.",
+    "description": "Create a new note. Fails if a note with that title or alias exists. Front matter is stamped as for any new note. Returns the title and new hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list; an error can end with the same news. Tell the user.",
     "input_schema": {
       "properties": {
         "summary": {
@@ -83,7 +83,7 @@
     "name": "create_note"
   },
   {
-    "description": "Append text at the end of a note, on a new line. Creates the note if it does not exist. Returns the title and new hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list: tell the user.",
+    "description": "Append text at the end of a note, on a new line. Creates the note if it does not exist. Returns the title and new hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list; an error can end with the same news. Tell the user.",
     "input_schema": {
       "properties": {
         "summary": {
@@ -106,7 +106,7 @@
     "name": "append_to_note"
   },
   {
-    "description": "Replace `old_text` with `new_text` in a note. `old_text` must occur exactly once in the current text (include surrounding text to make it unique); otherwise nothing changes and the error gives the match count. Returns the new hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list: tell the user.",
+    "description": "Replace `old_text` with `new_text` in a note. `old_text` must occur exactly once in the current text (include surrounding text to make it unique); otherwise nothing changes and the error gives the match count. Returns the new hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list; an error can end with the same news. Tell the user.",
     "input_schema": {
       "properties": {
         "new_text": {
@@ -133,7 +133,7 @@
     "name": "edit_note"
   },
   {
-    "description": "Replace a note's whole text (front matter included). `expected_hash` must be the hash from your latest read_note or write; if the note changed since, nothing changes. Prefer edit_note for small changes. Returns the new hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list: tell the user.",
+    "description": "Replace a note's whole text (front matter included). `expected_hash` must be the hash from your latest read_note or write; if the note changed since, nothing changes. Prefer edit_note for small changes. Returns the new hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list; an error can end with the same news. Tell the user.",
     "input_schema": {
       "properties": {
         "expected_hash": {
@@ -160,7 +160,7 @@
     "name": "replace_note"
   },
   {
-    "description": "Add up to 50 tags to up to 200 notes (`titles`). Each note is its own write; the result lists `changed` (with the new hash), `unchanged` (already has the tag, in front matter or inline) or `failed` with a reason per title. Tags go in the front-matter `tags:` list (or as a #tag line at the end of the note when velo's front-matter setting is off). velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list: tell the user.",
+    "description": "Add up to 50 tags to up to 200 notes (`titles`). Each note is its own write; the result lists `changed` (with the new hash), `unchanged` (already has the tag, in front matter or inline) or `failed` with a reason per title. Tags go in the front-matter `tags:` list (or as a #tag line at the end of the note when velo's front-matter setting is off). velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list; an error can end with the same news. Tell the user.",
     "input_schema": {
       "properties": {
         "summary": {
@@ -191,7 +191,7 @@
     "name": "add_tags"
   },
   {
-    "description": "Remove up to 50 tags from up to 200 notes (`titles`): from the front-matter `tags:` list and exact inline #tag words (never inside code or links). Each note is its own write; the result lists `changed` (with the new hash), `unchanged` or `failed` with a reason per title. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list: tell the user.",
+    "description": "Remove up to 50 tags from up to 200 notes (`titles`): from the front-matter `tags:` list and exact inline #tag words (never inside code or links). Each note is its own write; the result lists `changed` (with the new hash), `unchanged` or `failed` with a reason per title. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list; an error can end with the same news. Tell the user.",
     "input_schema": {
       "properties": {
         "summary": {
@@ -246,7 +246,7 @@
     "name": "list_tasks"
   },
   {
-    "description": "Add a `- [ ] text` task line. Without `title` it goes to velo's capture target (the Inbox or today's daily note, per the user's setting); the note is created if missing. `due` (YYYY-MM-DD) adds ` 📅 due`. Returns the note title and new hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list: tell the user.",
+    "description": "Add a `- [ ] text` task line. Without `title` it goes to velo's capture target (the Inbox or today's daily note, per the user's setting); the note is created if missing. `due` (YYYY-MM-DD) adds ` 📅 due`. Returns the note title and new hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list; an error can end with the same news. Tell the user.",
     "input_schema": {
       "properties": {
         "due": {
@@ -272,7 +272,7 @@
     "name": "add_task"
   },
   {
-    "description": "Tick (`done` true) or untick a task in a note, with velo's done date handling (`@done(YYYY-MM-DD)`). Pass `line` and `line_text` from list_tasks or read_note; if the line changed since, it fails with task-moved. Returns status `changed` (with the new hash and line) or `unchanged` when the task is already in that state. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list: tell the user.",
+    "description": "Tick (`done` true) or untick a task in a note, with velo's done date handling (`@done(YYYY-MM-DD)`). Pass `line` and `line_text` from list_tasks or read_note; if the line changed since, it fails with task-moved. Returns status `changed` (with the new hash and line) or `unchanged` when the task is already in that state. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list; an error can end with the same news. Tell the user.",
     "input_schema": {
       "properties": {
         "done": {
@@ -304,7 +304,7 @@
     "name": "set_task_done"
   },
   {
-    "description": "Rename a note. With `rewrite_links` true, [[links]] to it in other notes are updated. Returns the new title and hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list: tell the user.",
+    "description": "Rename a note. With `rewrite_links` true, [[links]] to it in other notes are updated. Returns the new title and hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list; an error can end with the same news. Tell the user.",
     "input_schema": {
       "properties": {
         "new_title": {
@@ -331,7 +331,7 @@
     "name": "rename_note"
   },
   {
-    "description": "Move a note to the OS Trash (recoverable there; nothing is deleted permanently). Its revisions are kept. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list: tell the user.",
+    "description": "Move a note to the OS Trash (recoverable there; nothing is deleted permanently). Its revisions are kept. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list; an error can end with the same news. Tell the user.",
     "input_schema": {
       "properties": {
         "summary": {
@@ -350,7 +350,7 @@
     "name": "move_to_trash"
   },
   {
-    "description": "Merge note `source` into note `target`: the source's text is appended to the target under a `## Source title` heading, its tags and aliases (and its title, as an alias) join the target's front matter, [[links]] to the source in other notes are rewritten to the target, and the source goes to the OS Trash. Returns the target's title and hash, the number of links rewritten and whether the source was trashed. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list: tell the user.",
+    "description": "Merge note `source` into note `target`: the source's text is appended to the target under a `## Source title` heading, its tags and aliases (and its title, as an alias) join the target's front matter, [[links]] to the source in other notes are rewritten to the target, and the source goes to the OS Trash. Returns the target's title and hash, the number of links rewritten and whether the source was trashed. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list; an error can end with the same news. Tell the user.",
     "input_schema": {
       "properties": {
         "source": {

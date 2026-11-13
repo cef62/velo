@@ -172,6 +172,22 @@ mod tests {
         fake_app(&data, std::process::id(), true);
         assert_eq!(call("merge_notes", serde_json::json!({"source": "a", "target": "b", "summary": "s"})), Ok(serde_json::json!({"fake": "merge_notes"})));
     }
+    /// #95: direct mode reports a failed list write to the call that caused it, and never to the next one.
+    #[test] fn gate_reports_a_failed_list_write_once() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_t, p, data, notes) = setup(true);
+        std::fs::write(notes.join("a.md"), "x").unwrap();
+        std::fs::create_dir(notes.join(".velo")).unwrap();
+        std::fs::write(notes.join(".velo/archived"), "a\n").unwrap();
+        let call = gate(p, data);
+        call("list_tags", serde_json::json!({})).unwrap(); // the vault opens with the list readable
+        std::fs::set_permissions(notes.join(".velo"), std::fs::Permissions::from_mode(0o555)).unwrap();
+        let r = call("rename_note", serde_json::json!({"title": "a", "new_title": "b", "rewrite_links": false, "summary": "s"}));
+        std::fs::set_permissions(notes.join(".velo"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(r.unwrap()["warning"].as_str().unwrap().contains(".velo/archived"));
+        assert!(call("read_note", serde_json::json!({"title": "b"})).unwrap().get("warning").is_none());
+        assert!(call("list_tags", serde_json::json!({})).unwrap().get("warning").is_none());
+    }
     #[test] fn direct_when_pid_alive_but_port_refused_stale_file() {
         // a stale agent.json whose pid was reused: nothing listens, so there is no app to wait for
         let (_t, p, data, notes) = setup(true); fake_app(&data, std::process::id(), false); // listener dropped: port closed

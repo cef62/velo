@@ -87,13 +87,13 @@ fn with_vault_emit<T>(app: &AppHandle, st: &AppState, f: impl FnOnce(&mut Vault,
 /// Runs `f`, then reports a kept archive error whatever `f` returned (a failed note operation can still have written the list).
 fn run_reporting<T>(v: &mut Vault, id: Option<&str>, f: impl FnOnce(&mut Vault, Option<&str>) -> anyhow::Result<T>, emit: impl FnOnce(&str, serde_json::Value)) -> anyhow::Result<T> {
     let r = f(v, id);
-    emit_archive_error(v, emit);
+    emit_archive_error(v.archive_error.take(), emit); // under the same lock as `f`: only this operation's failure
     r
 }
 
-/// Reports (once) a failed `.velo/archived` write that a note operation kept in `v.archive_error`.
-pub fn emit_archive_error(v: &Vault, emit: impl FnOnce(&str, serde_json::Value)) {
-    if let Some(m) = v.archive_error.take() {
+/// Reports a failed `.velo/archived` write, taken by the caller from the operation that left it.
+pub fn emit_archive_error(m: Option<String>, emit: impl FnOnce(&str, serde_json::Value)) {
+    if let Some(m) = m {
         emit("archive-error", serde_json::json!({ "message": m }));
     }
 }
@@ -958,15 +958,6 @@ mod tests {
         assert_eq!(*gate.lock().unwrap(), None);
         assert_eq!(gated(&gate, || Ok(1)).unwrap(), 1);
         assert_eq!(*gate.lock().unwrap(), None);
-    }
-    #[test] fn emit_archive_error_sends_once_then_nothing() {
-        let dir = tempfile::tempdir().unwrap().keep(); let db = tempfile::tempdir().unwrap().keep().join("i.sqlite");
-        let v = Vault::open_with_progress(dir, &db, None, &mut |_, _| {}).unwrap();
-        v.archive_error.set(Some("denied".into()));
-        let mut got = vec![];
-        emit_archive_error(&v, |e, p| got.push((e.to_string(), p)));
-        emit_archive_error(&v, |e, p| got.push((e.to_string(), p)));
-        assert_eq!(got, [("archive-error".to_string(), serde_json::json!({"message": "denied"}))]);
     }
     #[cfg(unix)] #[test] fn note_operations_report_a_failed_list_write_once() {
         use std::os::unix::fs::PermissionsExt;

@@ -47,7 +47,7 @@ pub trait NoteOps {
     fn backlinks(&self, path: &str) -> anyhow::Result<Vec<String>>;
     /// The one-hop graph around the plain note at `path`, without locked notes.
     fn connections(&self, path: &str, include_archived: bool) -> anyhow::Result<Connections>;
-    /// The failed `.velo/archived` write a note operation kept (not taken: the app reports it too).
+    /// The failed `.velo/archived` write this call's operations left (not taken: the app reports it too).
     fn archive_warning(&self) -> Option<String>;
 }
 
