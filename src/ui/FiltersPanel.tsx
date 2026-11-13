@@ -6,6 +6,7 @@ import type { AppState, Store } from "../app/store";
 import { Button, Kbd } from "@/components/ui";
 import { activeFilterCount, appliedSearch } from "../saved";
 import { fold } from "../search";
+import { chipTags, focusAfterRemoval } from "../tags";
 import { formatBinding, NONE } from "../shortcuts";
 import { useStore } from "./useStore";
 
@@ -23,7 +24,7 @@ export function FiltersPanel({ controller, store }: { controller: Controller; st
   const keys = useStore(store, (s) => s.keys);
   const isMac = useStore(store, (s) => s.isMac);
   const noLinks = useStore(store, (s) => s.noLinks);
-  const tags = useStore(store, (s) => s.tags);
+  const visibleTags = useStore(store, (s) => s.tags);
   const query = useStore(store, (s) => s.query);
   const saved = useStore(store, (s) => s.savedSearches);
   const group = useRef<HTMLDivElement>(null);
@@ -32,16 +33,21 @@ export function FiltersPanel({ controller, store }: { controller: Controller; st
   const [cur, setCur] = useState(0); // roving tab stop: Tab enters the group once, arrows move inside
   const k = saved.length; // one roving sequence: saved chips, No links, tag chips
   const menuAt = useRef<number | null>(null); // the saved chip whose menu opened last
-  // Deleting the focused last chip drops focus to <body>: move it to the chip now at that place, the one before, or No links.
-  useEffect(() => {
-    const i = menuAt.current;
-    menuAt.current = null;
+  const tagAt = useRef<number | null>(null); // the tag chip just clicked; each anchor is consumed only by its own change
+  // Removing the focused chip drops focus to <body>: move it to the chip now at that place, the one before, or No links.
+  const refocus = (at: { current: number | null }, kind: "saved" | "tag") => {
+    const i = at.current;
+    at.current = null;
     if (i === null || document.activeElement !== document.body || !group.current) return;
-    const to = k === 0 ? 0 : Math.min(i, k - 1);
+    const btns = group.current.querySelectorAll<HTMLButtonElement>("button");
+    const to = focusAfterRemoval(kind, i, k, btns.length);
     setCur(to);
-    group.current.querySelectorAll<HTMLButtonElement>("button")[to]?.focus();
-  }, [k]);
+    btns[to]?.focus();
+  };
+  useEffect(() => refocus(menuAt, "saved"), [k]);
+  useEffect(() => refocus(tagAt, "tag"), [visibleTags, selectedTags]);
   if (!tagPanelOpen) return null;
+  const tags = chipTags(visibleTags, selectedTags); // derived per render: no stale or missing chip
   const move = (to: number) => {
     const btns = group.current!.querySelectorAll<HTMLButtonElement>("button");
     const i = (to + btns.length) % btns.length;
@@ -140,7 +146,10 @@ export function FiltersPanel({ controller, store }: { controller: Controller; st
             const on = selectedTags.some((x) => fold(x) === fold(t.tag));
             const c = tagChip({ selected: on });
             return (
-              <button key={t.tag} type="button" className={c.root} aria-pressed={on} tabIndex={stop(k + i + 1)} onFocus={() => setCur(k + i + 1)} onClick={() => controller.toggleTagFilter(t.tag)}>
+              <button key={t.tag} type="button" className={c.root} aria-pressed={on} tabIndex={stop(k + i + 1)} onFocus={() => setCur(k + i + 1)} onClick={(e) => {
+                if (e.detail === 0) tagAt.current = k + i + 1; // keyboard activation only: a mouse click must not pull focus into the panel (WKWebView leaves body focused)
+                controller.toggleTagFilter(t.tag);
+              }}>
                 #{t.tag} <span className={c.count}>{t.count}</span>
               </button>
             );

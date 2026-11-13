@@ -6,6 +6,7 @@ import { emptyConnections, FakeEditor, FakePreview, deferred, fakeApi, fakeUi, h
 import { createStore, initialState } from "./store";
 import { localToday, toggleTaskLine } from "../tasks";
 import { getPos, setPos } from "../positions";
+import { chipTags } from "../tags";
 
 const lsStore = new Map<string, string>();
 (globalThis as any).localStorage = { getItem: (k: string) => lsStore.get(k) ?? null, setItem: (k: string, v: string) => void lsStore.set(k, v) };
@@ -3382,7 +3383,7 @@ test("archiving the only note with the selected tag keeps the filter and shows t
   await c.toggleArchive(); await settle();
   expect(store.get().selectedTags).toEqual(["solo"]);
   expect(store.get()).toMatchObject({ total: 0, hiddenArchived: 1 });
-  expect(store.get().tags).toEqual([{ tag: "solo", count: 0 }]); // stays in the panel, selected, so it can be cleared
+  expect(chipTags(store.get().tags, store.get().selectedTags)).toEqual([{ tag: "solo", count: 0 }]); // stays in the panel, selected, so it can be cleared
 });
 
 test("switching show archived off keeps a selected tag only archived notes carry", async () => {
@@ -3395,7 +3396,7 @@ test("switching show archived off keeps a selected tag only archived notes carry
   await c.setShowArchived(false); await settle();
   expect(store.get().selectedTags).toEqual(["solo"]);
   expect(store.get()).toMatchObject({ total: 0, hiddenArchived: 1 });
-  expect(store.get().tags).toEqual([{ tag: "solo", count: 0 }]);
+  expect(chipTags(store.get().tags, store.get().selectedTags)).toEqual([{ tag: "solo", count: 0 }]);
 });
 
 test("a saved search with a tag only archived notes carry keeps it", async () => {
@@ -3403,11 +3404,37 @@ test("a saved search with a tag only archived notes carry keeps it", async () =>
   archiveB(true);
   api.getSettings.mockResolvedValue({ ...(await api.getSettings()), saved_searches: [{ name: "Solo", query: "", tags: ["solo"], no_links: false }] });
   await c.start(); await settle();
-  c.applySaved("Solo"); await settle();
-  c.showTags(true); await settle();
+  c.applySaved("Solo"); // no panel reopen, no await: the chip is derived from the state of this update
+  expect(chipTags(store.get().tags, store.get().selectedTags)).toEqual([{ tag: "solo", count: 0 }]);
+  await settle();
   expect(store.get().selectedTags).toEqual(["solo"]);
   expect(store.get()).toMatchObject({ total: 0, hiddenArchived: 1 });
-  expect(store.get().tags).toEqual([{ tag: "solo", count: 0 }]);
+  expect(chipTags(store.get().tags, store.get().selectedTags)).toEqual([{ tag: "solo", count: 0 }]);
+});
+
+test("deselecting a zero-count chip removes it in the same update", async () => {
+  const { c, api, store, archiveB } = soloSetup();
+  archiveB(true);
+  api.getSettings.mockResolvedValue({ ...(await api.getSettings()), show_archived: true });
+  await c.start(); await settle();
+  c.toggleTagFilter("solo"); await settle();
+  await c.setShowArchived(false); await settle();
+  c.toggleTagFilter("solo");
+  expect(store.get().tags).toEqual([]); // no zero-count entry cached in the store
+  expect(chipTags(store.get().tags, store.get().selectedTags)).toEqual([]);
+});
+
+test("chip counts exclude archived notes when show archived is off and include them when on", async () => {
+  const { c, api, store, archiveB } = soloSetup();
+  archiveB(true);
+  await c.start(); await settle();
+  await c.refreshTags(); await settle();
+  expect(store.get().tags).toEqual([]); // "solo" is only on archived B
+  await c.setShowArchived(true); await settle();
+  expect(store.get().tags).toEqual([{ tag: "solo", count: 1 }]);
+  expect(api.listTags).toHaveBeenLastCalledWith(true);
+  await c.setShowArchived(false); await settle();
+  expect(store.get().tags).toEqual([]);
 });
 
 test("a selected tag that no note carries any more is still dropped", async () => {
