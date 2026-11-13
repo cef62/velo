@@ -6,7 +6,7 @@ import { writingSetup } from "./editortheme";
 import { refreshRich, richMarkdown, type RichOpts } from "./richmd";
 import { dueInputRule, localToday, toggleTaskAt } from "./tasks";
 import { SaveController } from "./saver";
-import { frontMatterHide, ISOLATED, replaceAll, stampSelection, undoHistory } from "./fmhide";
+import { frontMatterHide, ISOLATED, middleChange, replaceAll, stampSelection, undoHistory } from "./fmhide";
 import { stampChange } from "./frontmatter";
 import { clampPos, getPos, renamePos, setPos, type Pos } from "./positions";
 import { openNote, saveNote, type NoteDoc, type NoteMeta } from "./api";
@@ -109,11 +109,14 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
   let shown: string | null = null; // path whose text the editor holds: setText on that same path is a reload, not a switch
   const setText = (text: string) => {
     loading = true;
-    const keep = shown !== null && shown === ctrl.currentPath() ? currentPos() : null;
-    // Caret to the top (a hidden front matter moves it past the block), unless the same note reloads.
-    view.dispatch(replaceAll(view.state.doc, text, keep?.h));
+    const old = view.state.doc.toString();
+    if (shown !== null && shown === ctrl.currentPath()) {
+      // Same note reloaded: change only the differing middle, so CodeMirror keeps caret, selection and scroll.
+      const c = middleChange(old, text);
+      // The explicit (mapped) selection makes the hidden-front-matter guard run, as a bare change would skip it.
+      if (c) view.dispatch({ changes: c, selection: view.state.selection.map(view.state.changes(c)) });
+    } else view.dispatch(replaceAll(view.state.doc, text)); // Caret to the top; a hidden front matter moves it past the block.
     for (const spec of undo.reset) view.dispatch(spec);
-    if (keep) place(clampPos(keep, view.state.doc.length));
     loading = false;
   };
 
@@ -155,16 +158,11 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     const p = snap();
     if (!same(p, base)) setPos(path, p);
   };
-  // Hidden (preview): the scroll is not measurable, so only the caret is kept.
-  const currentPos = (): Pos => view.dom.offsetParent ? snap() : { h: view.state.selection.main.head, t: 0, m: 0 };
-  const place = (p: Pos) => {
-    view.dispatch({ selection: EditorSelection.cursor(p.h), effects: view.dom.offsetParent ? EditorView.scrollIntoView(p.t, { y: "start", yMargin: p.m }) : [] });
-  };
   const restore = (path: string) => {
-    shown = path;
     const stored = getPos(path);
     if (stored) {
-      place(clampPos(stored, view.state.doc.length));
+      const p = clampPos(stored, view.state.doc.length);
+      view.dispatch({ selection: EditorSelection.cursor(p.h), effects: EditorView.scrollIntoView(p.t, { y: "start", yMargin: p.m }) });
       base = null;
       // after CodeMirror's own scheduled measure has applied the scroll
       requestAnimationFrame(() => { if (ctrl.currentPath() === path) base = snap(); });
@@ -174,7 +172,13 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
   const ed: Editor = {
     load(doc) {
       remember(); // the old note is still current here
-      if (!ctrl.load(doc)) return false;
+      const prev = shown;
+      shown = null; // a load is a switch: full replace even for the same path
+      if (!ctrl.load(doc)) {
+        shown = prev; // refused: the old note stays
+        return false;
+      }
+      shown = doc.path;
       setEditable(true);
       restore(doc.path);
       return true;
@@ -183,9 +187,9 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       remember();
       const dirty = ctrl.isDirty(); // dirty: the text is kept as it is, so is the caret
       if (!ctrl.rebind(fromPath, doc)) return false;
+      shown = doc.path;
       renamePos(fromPath, doc.path);
       if (!dirty) restore(doc.path);
-      else shown = doc.path;
       return true;
     },
     suspend() {

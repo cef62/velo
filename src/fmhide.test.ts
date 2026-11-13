@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { Compartment, EditorSelection, EditorState, type Transaction } from "@codemirror/state";
 import { history, redo, undo } from "@codemirror/commands";
-import { frontMatterHide, replaceAll, stampSelection, undoHistory } from "./fmhide";
+import { frontMatterHide, middleChange, replaceAll, stampSelection, undoHistory } from "./fmhide";
 import { stampChange } from "./frontmatter";
 
 const FM = "---\ncreated: 1\n---\n"; // 19 chars
@@ -96,10 +96,52 @@ test("stampSelection: no selection unless the caret sits on the stamp (a selecti
   expect(stampSelection(empty.selection, e)!.main.head).toBe(FM.length);
 });
 
-test("a reload keeps the caret, clamped to the new length", () => {
-  let s = mk(true, "0123456789");
-  s = s.update(replaceAll(s.doc, "abcdef", 4)).state;
-  expect(s.selection.main.head).toBe(4);
-  s = s.update(replaceAll(s.doc, "ab", 4)).state;
-  expect(s.selection.main.head).toBe(2);
+const apply = (a: string, b: string) => { const c = middleChange(a, b); return c ? a.slice(0, c.from) + c.insert + a.slice(c.to) : a; };
+
+test("middleChange: equal is null; every edit shape round-trips with the smallest span", () => {
+  expect(middleChange("abc", "abc")).toBeNull();
+  expect(middleChange("", "")).toBeNull();
+  expect(middleChange("bc", "abc")).toEqual({ from: 0, to: 0, insert: "a" }); // insert at start
+  expect(middleChange("ac", "abc")).toEqual({ from: 1, to: 1, insert: "b" }); // middle
+  expect(middleChange("ab", "abc")).toEqual({ from: 2, to: 2, insert: "c" }); // end
+  expect(middleChange("abc", "ac")).toEqual({ from: 1, to: 2, insert: "" }); // delete
+  expect(middleChange("abc", "aXc")).toEqual({ from: 1, to: 2, insert: "X" }); // replace
+  expect(middleChange("", "abc")).toEqual({ from: 0, to: 0, insert: "abc" });
+  expect(middleChange("abc", "")).toEqual({ from: 0, to: 3, insert: "" });
+});
+
+test("middleChange: prefix and suffix never overlap", () => {
+  for (const [a, b] of [["aaa", "aa"], ["aa", "aaa"], ["abab", "ab"], ["ab", "abab"], ["aXa", "aa"], ["aba", "ababa"]]) {
+    const c = middleChange(a, b)!;
+    expect(c.from).toBeLessThanOrEqual(c.to);
+    expect(c.from + (a.length - c.to)).toBeLessThanOrEqual(Math.min(a.length, b.length));
+    expect(apply(a, b)).toBe(b);
+  }
+});
+
+test("middleChange: never splits a surrogate pair", () => {
+  // 😀 = D83D DE00, 😁 = D83D DE01: same high surrogate, different low
+  const c = middleChange("a😀b", "a😁b")!;
+  expect(c).toEqual({ from: 1, to: 3, insert: "😁" });
+  expect(apply("a😀b", "a😁b")).toBe("a😁b");
+  // same low surrogate, different high (😀 vs another pair ending DE00)
+  const d = middleChange("a\ud83d\ude00", "a\ud83e\ude00")!;
+  expect(d).toEqual({ from: 1, to: 3, insert: "\ud83e\ude00" });
+});
+
+test("a reload change keeps the caret on its text and a selection range", () => {
+  let s = mk(true, "line1\nline2\nline3");
+  s = s.update({ selection: { anchor: 8, head: 10 } }).state; // inside line2
+  s = s.update({ changes: middleChange(s.doc.toString(), "new\nline1\nline2\nline3")! }).state;
+  expect(s.selection.main.anchor).toBe(12);
+  expect(s.selection.main.head).toBe(14);
+  expect(s.sliceDoc(12, 14)).toBe("ne"); // same characters as before the reload
+});
+
+test("hidden: a reload that grows the front matter leaves the caret after the block", () => {
+  let s = mk(true, "body text");
+  s = s.update({ selection: { anchor: 0 } }).state;
+  const changes = s.changes(middleChange("body text", FM + "body text")!);
+  s = s.update({ changes, selection: s.selection.map(changes) }).state; // as the editor's reload does
+  expect(s.selection.main.head).toBeGreaterThanOrEqual(FM.length);
 });

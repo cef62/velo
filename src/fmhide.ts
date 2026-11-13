@@ -16,8 +16,24 @@ export function undoHistory() {
 }
 
 /** Replace the whole doc with the caret at the top; a hidden front matter's caret guard then moves it past the block. */
-export function replaceAll(doc: Text, text: string, anchor = 0) {
-  return { changes: { from: 0, to: doc.length, insert: text }, selection: { anchor: Math.min(anchor, text.length) } };
+/**
+ * The smallest single change turning `a` into `b` (null if equal): common prefix and suffix are kept, so CodeMirror maps
+ * selection and scroll through it. Never cuts a surrogate pair, never lets prefix and suffix overlap.
+ */
+export function middleChange(a: string, b: string): { from: number; to: number; insert: string } | null {
+  if (a === b) return null;
+  const max = Math.min(a.length, b.length);
+  let p = 0;
+  while (p < max && a.charCodeAt(p) === b.charCodeAt(p)) p++;
+  if (p > 0 && (a.charCodeAt(p - 1) & 0xfc00) === 0xd800) p--; // prefix ends on a high surrogate: its pair is cut
+  let s = 0;
+  while (s < max - p && a.charCodeAt(a.length - 1 - s) === b.charCodeAt(b.length - 1 - s)) s++;
+  if (s > 0 && (a.charCodeAt(a.length - s) & 0xfc00) === 0xdc00) s--; // suffix starts on a low surrogate
+  return { from: p, to: a.length - s, insert: b.slice(p, b.length - s) };
+}
+
+export function replaceAll(doc: Text, text: string) {
+  return { changes: { from: 0, to: doc.length, insert: text }, selection: { anchor: 0 } };
 }
 
 const shownTheme = EditorView.theme({
