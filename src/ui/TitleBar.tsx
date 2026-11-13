@@ -1,5 +1,5 @@
-import { Archive, ArchiveRestore, ChevronDown, Code, Ellipsis, Eye, Lock, LockOpen, PanelRight, TriangleAlert, Type, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Archive, ArchiveRestore, ChevronDown, Code, Ellipsis, Eye, Lock, LockOpen, PanelRight, TriangleAlert, Type } from "lucide-react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { css } from "styled-system/css";
 import { menuButton, titleBar } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
@@ -51,6 +51,7 @@ const withCode = (t: string): ReactNode[] => t.split("`").map((p, i) => (i % 2 ?
 export function TitleBar({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const s = useStore(store);
   const input = useRef<HTMLInputElement>(null);
+  const hintId = useId();
   const el = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(1000);
   useEffect(() => {
@@ -90,6 +91,7 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
             className={rename}
             data-rename=""
             aria-label="Note title"
+            aria-describedby={hintId}
             defaultValue={s.title}
             autoFocus
             onKeyDown={(e) => {
@@ -100,8 +102,10 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
             }}
             onBlur={() => void controller.commitRename(null)}
           />
+          {/* the keys, as a sentence for assistive technology; always rendered (the input points at it), the visual hint only when there is room */}
+          <span id={hintId} className={css({ srOnly: true })}>Press Enter to rename, Escape to cancel.</span>
           {mode.renameHint && (
-            <span className={hint}>
+            <span className={hint} aria-hidden>
               <Kbd>↩</Kbd> Rename <Kbd>Esc</Kbd> Cancel
             </span>
           )}
@@ -125,17 +129,6 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
           )}
         </>
       ) : null}
-      {s.archiveErr && (
-        <>
-          <span className={bar.status} data-tone="error" role="alert">
-            <TriangleAlert size={14} aria-hidden />
-            {s.archiveErr}
-          </span>
-          <IconButton variant="plain" size="2xs" aria-label="Dismiss" onClick={() => controller.dismissArchiveErr()}>
-            <X />
-          </IconButton>
-        </>
-      )}
       {s.indexing ? (
         <span className={bar.status} role="status">
           <Spinner size="sm" />
