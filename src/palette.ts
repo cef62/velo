@@ -29,7 +29,7 @@ export function paletteItem(a: Action, s: PaletteState): PaletteItem {
     else if ((a === "extract_note" || a === "merge_note") && s.encrypted) it.disabled = "locked note";
     else it.context = s.title;
     if (a === "archive_note") it.label = s.archived ? "Unarchive note" : "Archive note";
-  }
+  } else if (a === "toggle_preview" && !s.noteOpen) it.disabled = "open a note first";
   return it;
 }
 

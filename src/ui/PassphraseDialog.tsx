@@ -16,7 +16,7 @@ const err = css({ display: "flex", alignItems: "center", gap: "1.5", fontSize: "
 
 /** Implements UiPort.passphrase: mounted once in the note area; platform routes the controller's requests here.
  *  Create (first lock) is a dialog; unlock (a locked note opened without the key) is the inline LockScreen (v2 §3 #14). */
-export function PassphraseDialog({ onLock }: { onLock: (locked: boolean) => void }) {
+export function PassphraseDialog() {
   const [req, setReq] = useState<Req | null>(null);
   const [n, setN] = useState(0); // a new request remounts the inline field: fresh text, error and focus
   const done = useRef<((ok: boolean) => void) | null>(null);
@@ -40,11 +40,7 @@ export function PassphraseDialog({ onLock }: { onLock: (locked: boolean) => void
       () => pending.current?.inline && finish(false),
     );
   }, []);
-  const inline = req?.mode === "unlock" && !!req.inline;
-  useEffect(() => {
-    onLock(inline); // App makes the note area inert while the lock screen covers it
-    return () => onLock(false);
-  }, [inline, onLock]);
+  // App makes the note area inert from the controller's `unlocking`, set and cleared with the request rendered here
   if (req?.mode === "unlock" && req.inline) return <LockScreen key={n} req={req} finish={finish} />;
   return (
     <Dialog.Root open={req !== null} onOpenChange={(d) => !d.open && finish(false)} role="dialog" closeOnInteractOutside={false}>

@@ -4,7 +4,7 @@ import { css } from "styled-system/css";
 import { listRow, sectionHeader } from "styled-system/recipes";
 import type { TimelineRow } from "../api";
 import type { Controller } from "../app/controller";
-import type { AppState, Store } from "../app/store";
+import { shownPath, type AppState, type Store } from "../app/store";
 import { Spinner } from "@/components/ui";
 import { rowHeight } from "../app/fontscale";
 import { visibleRange } from "../list";
@@ -24,7 +24,7 @@ type Item = { label: string; row?: TimelineRow; n?: number }; // no row = the da
 
 export function TimelineView({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const tl = useStore(store, (s) => s.timeline);
-  const openPath = useStore(store, (s) => s.openPath);
+  const openPath = useStore(store, shownPath);
   const fontSize = useStore(store, (s) => s.fontSize);
   const query = useStore(store, (s) => s.query);
   const tags = useStore(store, (s) => s.selectedTags);

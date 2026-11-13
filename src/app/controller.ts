@@ -68,7 +68,7 @@ export class Controller {
   protected linkIndex: Ranked<LinkTarget>[] = []; // [[ autocomplete
   protected tagIndex: Ranked<TagCount>[] = []; // # autocomplete
   protected readonly newShow = latest();
-  protected unlockSeq = 0; // the newest inline unlock: only it clears `unlocking`
+  protected prompt: Promise<boolean> | null = null; // the passphrase request the UI shows now (the newest one)
   protected searchSeq = 0;
   protected searching: Promise<void> = Promise.resolve(); // latest list reset, awaited by Enter so it never acts on stale rows
   protected settingsQueue: Promise<unknown> = Promise.resolve();
@@ -640,11 +640,7 @@ export class Controller {
     } catch (e) {
       if (how === "nav" && e === "not-found") return "missing";
       if (e === "locked" && !retried && how !== "auto") { // never pop the dialog up while typing in search
-        // the lock screen covers the note area while the editor still holds the previous note: see runAction
-        const seq = ++this.unlockSeq;
-        this.store.set({ unlocking: true });
-        const ok = await this.promptPassphrase({ trigger: "open", context: null, inline: true });
-        if (seq === this.unlockSeq) this.store.set({ unlocking: false });
+        const ok = await this.promptPassphrase({ trigger: "open", context: null, inline: true, wanted: current });
         if (!current()) return true; // a newer note was opened while the field was up: leave it alone
         if (ok) {
           const r = await this.show(path, how, true);
@@ -652,6 +648,7 @@ export class Controller {
           return r;
         }
         if (ok === null) return how !== "nav"; // no key on this computer: keep the copy-identity error
+        this.selectOpen(); // cancelled: highlight (and the list's focus) go back to the note shown again
       }
       this.setErr(e === "locked" ? "Note is locked" : errText(e));
       if (how === "nav") return false; // history cursor must be restored
@@ -663,15 +660,17 @@ export class Controller {
    * Passphrase dialog; true once the identity is available. Wording depends on identity.age existing.
    * null = opening a locked note with no key anywhere: a new key couldn't decrypt it, so no dialog, just the copy-identity error.
    * context: the note title when locking, for the create dialog's subtitle.
+   * wanted: false once a newer open superseded the one asking (checked after the identity awaits): no prompt then.
    */
-  protected async promptPassphrase(req: { trigger: "open" | "lock"; context: string | null; inline?: boolean }): Promise<boolean | null> {
+  protected async promptPassphrase(req: { trigger: "open" | "lock"; context: string | null; inline?: boolean; wanted?: () => boolean }): Promise<boolean | null> {
     try {
       if (req.trigger === "open" && !(await this.api.hasIdentity()) && !(await this.api.identityFileExists())) {
         this.setErr(NO_KEY_MSG);
         return null;
       }
       const exists = await this.api.identityFileExists();
-      return await this.ui.passphrase({
+      if (req.wanted && !req.wanted()) return false;
+      const p = this.ui.passphrase({
         mode: exists ? "unlock" : "create",
         context: req.context,
         inline: req.inline,
@@ -682,6 +681,17 @@ export class Controller {
           }
         },
       });
+      // `unlocking` is true exactly while this prompt is the inline lock screen: any newer request (inline or a
+      // dialog) replaces it in the UI, so only the latest one may clear the flag.
+      this.prompt = p;
+      this.store.set({ unlocking: exists && !!req.inline });
+      const settled = () => {
+        if (this.prompt !== p) return;
+        this.prompt = null;
+        this.store.set({ unlocking: false });
+      };
+      p.then(settled, settled);
+      return await p;
     } catch (e) {
       this.setErr(errText(e));
       return false;
@@ -876,6 +886,7 @@ export class Controller {
       return false;
     }
     const current = this.newShow(); // a pending auto-show must not replace this note when its reply lands later
+    this.ui.cancelPassphrase(); // as in show(): this note replaces a locked one still waiting for its passphrase
     try {
       const doc = await this.loading(() => this.api.openOrCreate(title));
       if (!doc) return false;

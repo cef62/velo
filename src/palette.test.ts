@@ -58,3 +58,8 @@ test("archive entry reads Archive or Unarchive for the open note and needs one",
   expect(paletteSearch("archive", { ...base, noteOpen: false }).find((i) => i.action === "archive_note")?.disabled).toBe("open a note first");
   expect(paletteSearch("show / hide archived", base)[0]).toMatchObject({ action: "toggle_archived", binding: "" });
 });
+
+test("Toggle preview needs a note on screen, as the note's own actions do (#126)", () => {
+  expect(paletteSearch("toggle preview", { ...base, noteOpen: false })[0]?.disabled).toBe("open a note first");
+  expect(paletteSearch("toggle preview", base)[0]?.disabled).toBeUndefined();
+});
