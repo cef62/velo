@@ -3117,7 +3117,7 @@ test("a list-write failure is shown, even when it lands before the rename resolv
   c.startRename(); const done = c.commitRename("Z");
   c.onArchiveError("permission denied");
   d.resolve({ path: "/n/Z.md", rewritten: 0 }); await done; await settle();
-  expect(store.get().err).toBe("The archived-notes list could not be updated: permission denied");
+  expect(store.get().archiveErr).toBe("The archived-notes list could not be updated: permission denied");
 });
 
 test("a stale link-target response is dropped", async () => {
@@ -3280,13 +3280,56 @@ test("changing the switch reloads every listing", async () => {
   expect(api.search.mock.lastCall?.[5]).toBe(true);
 });
 
-test("a list-write failure that lands after the operation is shown once", async () => {
+test("a list-write failure stays through navigation and refresh until dismissed", async () => {
   const { c, store } = setup();
   await c.start(); await settle();
   c.onArchiveError("permission denied");
-  expect(store.get().err).toBe("The archived-notes list could not be updated: permission denied");
-  await c.select(1); await settle(); // clears the error
-  expect(store.get().err).toBe("");
+  expect(store.get().archiveErr).toBe("The archived-notes list could not be updated: permission denied");
+  await c.select(1); await settle(); // opens another note: clears err, not the list failure
+  await c.onNotesChanged(["/n/A.md"]); await settle();
+  await c.refreshTitles(); await settle();
+  expect(store.get().archiveErr).toBe("The archived-notes list could not be updated: permission denied");
+  c.dismissArchiveErr();
+  expect(store.get().archiveErr).toBe("");
+});
+
+test("a list-write failure during a save with a conflict copy stays after the save status settles (#95)", async () => {
+  const { c, store } = setup();
+  await c.start(); await settle();
+  const o = c.editorOpts();
+  o.onSaving(true);
+  c.onArchiveError("permission denied"); // the backend emits before the save command resolves
+  o.onSaving(false);
+  o.onConflict(P("A (conflict)"));
+  o.onError(null); // the saver reports a settled save
+  o.onError("Save failed: disk full"); // and a later one fails
+  expect(store.get().err).toBe("Save failed: disk full");
+  expect(store.get().archiveErr).toBe("The archived-notes list could not be updated: permission denied");
+  o.onError(null);
+  expect(store.get().archiveErr).toBe("The archived-notes list could not be updated: permission denied");
+});
+
+test("an operation error and its list-write failure are both shown (#95)", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  api.renameNote.mockImplementationOnce(async () => {
+    c.onArchiveError("permission denied"); // the backend emits before the command rejects
+    throw "already-exists";
+  });
+  c.startRename(); await c.commitRename("B"); await settle();
+  expect(store.get().err).not.toBe("");
+  expect(store.get().archiveErr).toBe("The archived-notes list could not be updated: permission denied");
+});
+
+test("a working archive clears an older list-write failure; a failed one keeps it", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  c.onArchiveError("permission denied");
+  api.setArchived.mockImplementationOnce(async () => { throw "denied"; });
+  await c.toggleArchive(); await settle();
+  expect(store.get().archiveErr).toBe("The archived-notes list could not be updated: permission denied");
+  await c.toggleArchive(); await settle();
+  expect(store.get().archiveErr).toBe("");
 });
 
 test("the archive action flips the store flag the palette label reads", async () => {
@@ -3328,9 +3371,9 @@ test("a list-write failure during openTitle is shown once", async () => {
   const done = c.openTitle("A", "enter");
   c.onArchiveError("permission denied");
   d.resolve(await real("A")); await done; await settle();
-  expect(store.get().err).toBe("The archived-notes list could not be updated: permission denied");
+  expect(store.get().archiveErr).toBe("The archived-notes list could not be updated: permission denied");
   await c.select(1); await settle();
-  expect(store.get().err).toBe("");
+  expect(store.get().archiveErr).toBe("The archived-notes list could not be updated: permission denied");
 });
 
 test("a list-write failure during a merge is shown once", async () => {
@@ -3344,9 +3387,9 @@ test("a list-write failure during a merge is shown once", async () => {
   await settle();
   c.onArchiveError("permission denied");
   d.resolve({ path: P("B"), trash_error: null }); await done; await settle();
-  expect(store.get().err).toBe("The archived-notes list could not be updated: permission denied");
+  expect(store.get().archiveErr).toBe("The archived-notes list could not be updated: permission denied");
   await c.select(1); await settle();
-  expect(store.get().err).toBe("");
+  expect(store.get().archiveErr).toBe("The archived-notes list could not be updated: permission denied");
 });
 
 test("two archive presses before the first resolves send one request", async () => {

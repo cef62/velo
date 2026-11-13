@@ -16,7 +16,7 @@ macro_rules! conventions {
 Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. \
 Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. \
 Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. \
-A `warning` in the result means the change was made but velo could not update its archived-notes list: tell the user."
+A `warning` in the result means the change was made but velo could not update its archived-notes list; an error can end with the same news. Tell the user."
     };
 }
 
@@ -162,12 +162,16 @@ fn occurrences(text: &str, pat: &str) -> usize {
     n
 }
 
-/// `dispatch`, plus a `warning` when the call succeeded but left a failed `.velo/archived` write (the note change
-/// stands). The error stays in the vault for the app to report as its own `archive-error`.
+/// `dispatch`, plus the failed `.velo/archived` write the call left, if any: a `warning` on a result (the note change
+/// stands), one more sentence on an error. It is not taken: the caller reports it to the app as `archive-error` too.
 pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String> {
     let mut r = dispatch(ops, name, a);
-    if let (Ok(Value::Object(o)), Some(m)) = (&mut r, ops.archive_warning()) {
-        o.insert("warning".into(), format!("the note was changed, but the archived-notes list was not updated: {m}").into());
+    match (&mut r, ops.archive_warning()) {
+        (Ok(Value::Object(o)), Some(m)) => {
+            o.insert("warning".into(), format!("the note was changed, but the archived-notes list was not updated: {m}").into());
+        }
+        (Err(e), Some(m)) => e.push_str(&format!("\nThe archived-notes list was not updated either: {m}")),
+        _ => {}
     }
     r
 }
@@ -499,6 +503,13 @@ mod tests {
         assert!(r["warning"].as_str().unwrap().contains(".velo/archived"));
         assert!(ops.vault.archive_error.take().is_some()); // kept for the app's own event
         assert!(call(&mut ops, "read_note", json!({"title": "b"})).unwrap().get("warning").is_none());
+    }
+    /// #95: an erroring call still tells the agent about the list write it left failed.
+    #[test] fn a_failed_call_carries_its_list_failure_in_the_error() {
+        let (mut ops, _dir) = vault(&[("a.md", "x")]);
+        ops.vault.archive_error.set(Some("cannot update .velo/archived: denied".into())); // as a failed write leaves it
+        let e = call(&mut ops, "rename_note", json!({"title": "nope", "new_title": "b", "rewrite_links": false, "summary": "s"})).unwrap_err();
+        assert!(e.starts_with("not found") && e.contains("archived-notes list was not updated") && e.contains("denied"), "{e}");
     }
     #[test] fn get_connections_of_an_archived_centre_counts_right() {
         let (mut ops, dir) = vault(&[("c.md", "#t"), ("a.md", "#t")]);

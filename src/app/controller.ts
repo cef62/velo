@@ -344,15 +344,6 @@ export class Controller {
 
   /** Same detach order as deleteNote: save, then drop the editor's hold on source/target so autosave can't overwrite the merge. */
   async commitMerge() {
-    this.archiveOps++; // ends after the final show(), whose clearErr() must not drop a list-write failure
-    try {
-      await this.doCommitMerge();
-    } finally {
-      this.endArchiveOp();
-    }
-  }
-
-  protected async doCommitMerge() {
     const m = this.store.get().merge;
     if (!m?.target || this.busy) return;
     const target = m.target;
@@ -875,7 +866,6 @@ export class Controller {
       return false;
     }
     const current = this.newShow(); // a pending auto-show must not replace this note when its reply lands later
-    this.archiveOps++;
     try {
       const doc = await this.loading(() => this.api.openOrCreate(title));
       if (!doc) return false;
@@ -896,8 +886,6 @@ export class Controller {
     } catch (e) {
       this.setErr(errText(e));
       return false;
-    } finally {
-      this.endArchiveOp();
     }
   }
 
@@ -947,11 +935,11 @@ export class Controller {
     if (this.busy) return this.setErr(BUSY_MSG);
     const path = this.editor.currentPath();
     if (!path) return;
-    this.busy = true; this.archiveOps++;
+    this.busy = true;
     try {
       await this.lockHandoff(path);
     } finally {
-      this.busy = false; this.endArchiveOp();
+      this.busy = false;
     }
   }
 
@@ -1009,7 +997,7 @@ export class Controller {
     const title = open ? this.store.get().title : this.results.get(sel)?.title;
     const row = this.results.indexOf(path);
     if (!(await this.ui.confirm(`Move “${title}” to the Trash?`, { title: "Delete note", kind: "warning", okLabel: "Move to Trash" }))) return;
-    this.busy = true; this.archiveOps++;
+    this.busy = true;
     let reopen = false;
     try {
       if (this.editor.currentPath() === path) {
@@ -1033,7 +1021,7 @@ export class Controller {
     } catch (e) {
       this.setErr(errText(e));
     } finally {
-      this.busy = false; this.endArchiveOp();
+      this.busy = false;
     }
     if (reopen) await this.show(path); // delete failed after detaching: put the note back
     await this.runSearch(false);
@@ -1046,7 +1034,7 @@ export class Controller {
 
   async lockEverything() {
     if (this.busy) return this.setErr(BUSY_MSG);
-    this.busy = true; this.archiveOps++;
+    this.busy = true;
     try {
       const path = this.editor.currentPath();
       if (!(await this.editor.flush())) return;
@@ -1073,7 +1061,7 @@ export class Controller {
     } catch (e) {
       this.setErr(errText(e));
     } finally {
-      this.busy = false; this.endArchiveOp();
+      this.busy = false;
     }
   }
 
@@ -1100,7 +1088,7 @@ export class Controller {
       this.setErr(BUSY_MSG);
       return this.editor.focus();
     }
-    this.busy = true; this.archiveOps++; // its editor.load would end an update install's suspension
+    this.busy = true; // its editor.load would end an update install's suspension
     let renamed = false;
     try {
       if (!(await this.editor.flush())) return this.editor.focus();
@@ -1118,7 +1106,7 @@ export class Controller {
     } catch (e) {
       this.setErr(e === "already-exists" ? "A note with that title exists" : e === "invalid-title" ? INVALID_TITLE : errText(e));
     } finally {
-      this.busy = false; this.endArchiveOp();
+      this.busy = false;
     }
     if (renamed) {
       await this.runSearch(false);
@@ -1732,6 +1720,7 @@ export class Controller {
       this.archivePending = false;
     }
     if (this.editor.currentPath() === path) this.store.set({ archived: next }); // from our own call: the index may not know a new note yet
+    this.store.set({ archiveErr: "" }); // the list was written: an older failure to update it is over
     if (this.store.get().paneMode === "notes") await this.refreshKeepingEditor();
     else this.listStale = true;
     this.reloadAround();
@@ -2124,7 +2113,7 @@ export class Controller {
       if (!open() || this.busy || this.editor.isDirty()) return "refused";
       if (req.kind === "rename") {
         // frozen until `renamed`, so autosave can't recreate the file under its old name
-        this.busy = true; this.archiveOps++;
+        this.busy = true;
         this.editor.suspend();
         this.agentRenaming = req.path;
         return "ready";
@@ -2196,7 +2185,7 @@ export class Controller {
         this.setErr(errText(e));
       }
     } finally {
-      this.busy = false; this.endArchiveOp();
+      this.busy = false;
     }
     void this.runSearch(false);
     void this.refreshTitles();
@@ -2218,19 +2207,14 @@ export class Controller {
     void this.loadTasks();
   }
 
-  /** A note operation succeeded but the archived-notes list could not be written. */
+  /** A note operation (whatever its own outcome) could not update the archived-notes list. Kept apart from `err`, so no
+   * later status or error replaces it: it stays until dismissed or until archiving works again. */
   onArchiveError(message: string) {
-    const msg = `The archived-notes list could not be updated: ${message}`;
-    // An operation still running ends with clearErr(), which must keep the message; with none running nothing is left to clear it.
-    if (this.archiveOps > 0) this.notice = this.archiveMsg = msg;
-    this.setErr(msg);
+    this.store.set({ archiveErr: `The archived-notes list could not be updated: ${message}` });
   }
 
-  protected archiveOps = 0; // operations whose backend command may emit archive-error (rename, delete, merge, lock, open or create)
-  protected archiveMsg = "";
-  /** The last such operation is over, after its clearErr(): the message was shown once and must not come back. */
-  protected endArchiveOp() {
-    if (--this.archiveOps === 0 && this.notice === this.archiveMsg) this.notice = "";
+  dismissArchiveErr() {
+    this.store.set({ archiveErr: "" });
   }
 
   onIndexError(message: string) {

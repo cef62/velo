@@ -146,11 +146,13 @@ pub struct AppOps<'a> {
     pub touched: Vec<String>,
     /// Called once the backend wrote a note the webview said is not open (see `with_route`).
     pub release: &'a dyn Fn(&str),
+    /// The failed `.velo/archived` write this call's operations left, taken from the vault under the lock that wrote it.
+    pub archive: std::cell::Cell<Option<String>>,
 }
 
 impl<'a> AppOps<'a> {
     pub fn new(st: &'a AppState, route: &'a dyn Fn(Value) -> anyhow::Result<Value>) -> Self {
-        AppOps { st, route, remove: crate::vault::move_to_trash, touched: Vec::new(), release: &no_release }
+        AppOps { st, route, remove: crate::vault::move_to_trash, touched: Vec::new(), release: &no_release, archive: Default::default() }
     }
 
     /// Runs `f` on the app's vault, locked for this one operation only (the editor round trip needs it free).
@@ -162,7 +164,12 @@ impl<'a> AppOps<'a> {
         let v = g.as_mut().ok_or_else(|| anyhow!("No notes folder set in velo"))?;
         let mut o = VaultOps::new(v, self.st.settings_path.clone());
         o.remove = self.remove;
-        f(&mut o)
+        let r = f(&mut o);
+        // taken before the lock is released: another caller must never see (or take) this call's failure
+        if let Some(m) = o.vault.archive_error.take() {
+            self.archive.set(Some(m));
+        }
+        r
     }
 
     /// The webview's reply to `req`, which must be one of `ok` (`conflict` and `refused` become errors).
@@ -187,7 +194,9 @@ impl<'a> AppOps<'a> {
 
 impl NoteOps for AppOps<'_> {
     fn archive_warning(&self) -> Option<String> {
-        self.with(|o| Ok(o.archive_warning())).ok().flatten()
+        let m = self.archive.take();
+        self.archive.set(m.clone());
+        m
     }
 
     fn find(&self, title: &str) -> anyhow::Result<Option<String>> {
@@ -475,6 +484,61 @@ mod tests {
         st.vault.lock().unwrap().as_ref().unwrap().archive_error.set(Some("kept".into()));
         assert!(call("rename_note", json!({"title": "Nope", "new_title": "X", "rewrite_links": false, "summary": "s"})).is_err());
         assert_eq!(count(), 2); // the error path still emits
+    }
+    /// #95: a read-only call that runs between the steps of a rename whose list write failed (here while the editor
+    /// follows the rename) gets no warning; the rename does, and the app hears of it once.
+    #[cfg(unix)] #[test] fn a_read_between_a_renames_steps_never_carries_its_list_failure() {
+        use std::os::unix::fs::PermissionsExt;
+        let (st, dir) = state();
+        let p = dir.join("P.md").to_string_lossy().into_owned();
+        st.vault.lock().unwrap().as_mut().unwrap().set_archived(&p, true).unwrap();
+        std::fs::set_permissions(dir.join(".velo"), std::fs::Permissions::from_mode(0o555)).unwrap();
+        let editors = Editors::default();
+        let events = Mutex::new(Vec::<String>::new());
+        let read = Mutex::new(None);
+        let read_emit = |e: &str, _: Value| events.lock().unwrap().push(format!("read {e}"));
+        let emit = |e: &str, v: Value| {
+            if e == "agent-write" {
+                if v["kind"] == "renamed" {
+                    *read.lock().unwrap() = Some(crate::agent::listener::run_call(&st, &editors, &read_emit, "list_tags", json!({})));
+                }
+                editors.done(v["id"].as_u64().unwrap(), json!(if v["kind"] == "rename" { "ready" } else { "ok" }));
+            }
+            events.lock().unwrap().push(e.to_string());
+        };
+        let r = crate::agent::listener::run_call(&st, &editors, &emit, "rename_note", json!({"title": "P", "new_title": "Q", "rewrite_links": false, "summary": "s"}));
+        std::fs::set_permissions(dir.join(".velo"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let read = read.lock().unwrap().take().expect("the read ran").unwrap();
+        assert!(read.get("warning").is_none(), "{read}");
+        assert!(r.unwrap()["warning"].as_str().unwrap().contains(".velo/archived"));
+        let ev = events.lock().unwrap();
+        assert_eq!(ev.iter().filter(|e| e.ends_with("archive-error")).collect::<Vec<_>>(), ["archive-error"]);
+    }
+    /// #95: an agent write that fails for its own reason (a conflict copy) after its list write failed reports both.
+    #[cfg(unix)] #[test] fn a_failed_call_still_reports_its_list_failure() {
+        use std::os::unix::fs::PermissionsExt;
+        let (st, dir) = state();
+        let p = dir.join("P.md");
+        st.vault.lock().unwrap().as_mut().unwrap().set_archived(&p.to_string_lossy(), true).unwrap();
+        let now = chrono::Local::now(); // stale entries for the copy's possible names, so dropping one must write
+        let names: Vec<String> = [now, now + chrono::Duration::minutes(1)].iter().map(|t| format!("P (conflict {})", t.format("%Y-%m-%d %H%M"))).collect();
+        std::fs::write(dir.join(".velo/archived"), format!("P\n{}\n", names.join("\n"))).unwrap();
+        std::fs::set_permissions(dir.join(".velo"), std::fs::Permissions::from_mode(0o555)).unwrap();
+        let editors = Editors::default();
+        let events = Mutex::new(Vec::<String>::new());
+        let emit = |e: &str, v: Value| {
+            if e == "agent-write" {
+                std::fs::write(&p, "changed outside\n").unwrap(); // after the read: the write conflicts
+                editors.done(v["id"].as_u64().unwrap(), json!("not-open"));
+            }
+            events.lock().unwrap().push(e.to_string());
+        };
+        let hash = crate::store::hash(&std::fs::read(&p).unwrap());
+        let r = crate::agent::listener::run_call(&st, &editors, &emit, "replace_note", json!({"title": "P", "text": "mine", "expected_hash": hash, "summary": "s"}));
+        std::fs::set_permissions(dir.join(".velo"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let e = r.unwrap_err();
+        assert!(e.starts_with("conflict: saved to P (conflict ") && e.contains("archived-notes list") && e.contains(".velo/archived"), "{e}");
+        assert_eq!(events.lock().unwrap().iter().filter(|e| *e == "archive-error").count(), 1);
     }
 
     #[test] fn app_ops_filters_unlocked_locked_notes() {

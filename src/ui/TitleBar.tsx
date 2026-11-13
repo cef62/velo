@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, ChevronDown, Code, Ellipsis, Eye, Lock, LockOpen, PanelRight, TriangleAlert, Type } from "lucide-react";
+import { Archive, ArchiveRestore, ChevronDown, Code, Ellipsis, Eye, Lock, LockOpen, PanelRight, TriangleAlert, Type, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { css } from "styled-system/css";
 import { menuButton, titleBar } from "styled-system/recipes";
@@ -125,6 +125,17 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
           )}
         </>
       ) : null}
+      {s.archiveErr && (
+        <>
+          <span className={bar.status} data-tone="error" role="alert">
+            <TriangleAlert size={14} aria-hidden />
+            {s.archiveErr}
+          </span>
+          <IconButton variant="plain" size="2xs" aria-label="Dismiss" onClick={() => controller.dismissArchiveErr()}>
+            <X />
+          </IconButton>
+        </>
+      )}
       {s.indexing ? (
         <span className={bar.status} role="status">
           <Spinner size="sm" />

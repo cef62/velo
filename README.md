@@ -80,6 +80,8 @@ The Show archived notes button sits in the bar above the list, in the Notes, Tas
 
 Renaming or locking an archived note keeps it archived. The list is stored in `.velo/archived` inside your notes folder, one title per line.
 
+If velo cannot update `.velo/archived` while it renames, deletes, merges, creates, locks or saves a note, the note change still happens (or fails for its own reason, shown as usual) and a second message in the title bar says the list could not be updated. That message stays, whatever you open or save next, until you dismiss it or archive or unarchive a note.
+
 Known limits:
 
 - A rename done in Finder (or any tool other than velo) un-archives the note, because the list goes by title.

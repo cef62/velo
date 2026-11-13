@@ -49,6 +49,7 @@ export interface AppState {
   title: string;
   encrypted: boolean;
   err: string;
+  archiveErr: string; // the archived-notes list could not be updated; independent of err, cleared only by dismissing it or a working archive
   errFromSave: boolean; // err came from a failed save (the UI offers Retry)
   saving: boolean;
   conflict: string | null;
@@ -114,6 +115,7 @@ export const initialState = (isMac: boolean): AppState => ({
   title: "",
   encrypted: false,
   err: "",
+  archiveErr: "",
   errFromSave: false,
   saving: false,
   conflict: null,
