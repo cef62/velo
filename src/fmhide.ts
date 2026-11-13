@@ -16,8 +16,8 @@ export function undoHistory() {
 }
 
 /** Replace the whole doc with the caret at the top; a hidden front matter's caret guard then moves it past the block. */
-export function replaceAll(doc: Text, text: string) {
-  return { changes: { from: 0, to: doc.length, insert: text }, selection: { anchor: 0 } };
+export function replaceAll(doc: Text, text: string, anchor = 0) {
+  return { changes: { from: 0, to: doc.length, insert: text }, selection: { anchor: Math.min(anchor, text.length) } };
 }
 
 const shownTheme = EditorView.theme({

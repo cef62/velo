@@ -106,11 +106,14 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     ],
   });
 
+  let shown: string | null = null; // path whose text the editor holds: setText on that same path is a reload, not a switch
   const setText = (text: string) => {
     loading = true;
-    // Caret to the top; a hidden front matter moves it past the block.
-    view.dispatch(replaceAll(view.state.doc, text));
+    const keep = shown !== null && shown === ctrl.currentPath() ? currentPos() : null;
+    // Caret to the top (a hidden front matter moves it past the block), unless the same note reloads.
+    view.dispatch(replaceAll(view.state.doc, text, keep?.h));
     for (const spec of undo.reset) view.dispatch(spec);
+    if (keep) place(clampPos(keep, view.state.doc.length));
     loading = false;
   };
 
@@ -152,11 +155,16 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     const p = snap();
     if (!same(p, base)) setPos(path, p);
   };
+  // Hidden (preview): the scroll is not measurable, so only the caret is kept.
+  const currentPos = (): Pos => view.dom.offsetParent ? snap() : { h: view.state.selection.main.head, t: 0, m: 0 };
+  const place = (p: Pos) => {
+    view.dispatch({ selection: EditorSelection.cursor(p.h), effects: view.dom.offsetParent ? EditorView.scrollIntoView(p.t, { y: "start", yMargin: p.m }) : [] });
+  };
   const restore = (path: string) => {
+    shown = path;
     const stored = getPos(path);
     if (stored) {
-      const p = clampPos(stored, view.state.doc.length);
-      view.dispatch({ selection: EditorSelection.cursor(p.h), effects: EditorView.scrollIntoView(p.t, { y: "start", yMargin: p.m }) });
+      place(clampPos(stored, view.state.doc.length));
       base = null;
       // after CodeMirror's own scheduled measure has applied the scroll
       requestAnimationFrame(() => { if (ctrl.currentPath() === path) base = snap(); });
@@ -177,6 +185,7 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       if (!ctrl.rebind(fromPath, doc)) return false;
       renamePos(fromPath, doc.path);
       if (!dirty) restore(doc.path);
+      else shown = doc.path;
       return true;
     },
     suspend() {
@@ -193,10 +202,12 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     },
     discard() {
       ctrl.discard();
+      shown = null;
       setEditable(false);
     },
     unload() {
       if (!ctrl.unload()) return false;
+      shown = null;
       setEditable(false);
       return true;
     },

@@ -95,3 +95,11 @@ test("stampSelection: no selection unless the caret sits on the stamp (a selecti
   const e = empty.changes({ from: 0, insert: FM });
   expect(stampSelection(empty.selection, e)!.main.head).toBe(FM.length);
 });
+
+test("a reload keeps the caret, clamped to the new length", () => {
+  let s = mk(true, "0123456789");
+  s = s.update(replaceAll(s.doc, "abcdef", 4)).state;
+  expect(s.selection.main.head).toBe(4);
+  s = s.update(replaceAll(s.doc, "ab", 4)).state;
+  expect(s.selection.main.head).toBe(2);
+});
