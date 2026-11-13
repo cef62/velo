@@ -139,7 +139,7 @@ export function TimelineView({ controller, store }: { controller: Controller; st
                     <div className={css({ display: "flex", alignItems: "center", gap: "2.5", minW: "0" })}>
                       {r.locked && <span className={c.lock}><Lock aria-label="Locked" /></span>}
                       <span className={c.title}>{r.title}</span>
-                      {r.archived && <ArchivedBadge />}
+                      {r.archived && <ArchivedBadge list="timeline" />}
                       <span className={c.date}><span className={srOnly}>{it.label}, </span>{time.format(r.date)}</span>
                     </div>
                     <span className={c.snippet}>{r.locked ? "" : r.snippet}</span>
