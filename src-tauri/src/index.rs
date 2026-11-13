@@ -203,7 +203,7 @@ impl Index {
         Ok(self.db.execute_batch(
             "BEGIN IMMEDIATE; INSERT INTO notes_fts(notes_fts, rank) VALUES('secure-delete', 0); INSERT INTO notes_fts(notes_fts, rank) VALUES('automerge', 0); INSERT INTO notes_fts(notes_fts, rank) VALUES('crisismerge', 1000); COMMIT;",
         ).inspect_err(|_| {
-            _ = self.db.execute_batch("ROLLBACK");
+            self.rollback("ROLLBACK");
             _ = self.autocheckpoint(1000);
         })?)
     }
@@ -225,7 +225,7 @@ impl Index {
             }
             Ok(off)
         })()
-        .inspect_err(|_| _ = self.db.execute_batch("ROLLBACK"))?;
+        .inspect_err(|_| self.rollback("ROLLBACK"))?;
         self.commit()?;
         if off {
             // shortcut: a reader (`velo --mcp`) makes this checkpoint a no-op, as on main; the next one copies the zeroed pages
@@ -297,8 +297,16 @@ impl Index {
 
     /// Commit a `begin` batch; on failure roll it back so the connection is usable (the next diff reindexes it).
     pub fn commit(&self) -> anyhow::Result<()> {
-        self.db.execute_batch("COMMIT").inspect_err(|_| _ = self.db.execute_batch("ROLLBACK"))?;
+        self.db.execute_batch("COMMIT").inspect_err(|_| self.rollback("ROLLBACK"))?;
         Ok(())
+    }
+
+    /// Ends a failed transaction or savepoint. An error with the connection back in autocommit is expected (SQLite
+    /// already rolled back, e.g. on a full disk); one that leaves a transaction open is logged, as nothing else shows it.
+    fn rollback(&self, sql: &str) {
+        if let Err(e) = self.db.execute_batch(sql) && !self.db.is_autocommit() {
+            crate::log::warn(&format!("velo: ending a failed search index transaction failed: {e}"));
+        }
     }
 
     pub fn upsert(&mut self, path: &str, nf: &NoteFile, meta: &Meta, body: Option<&str>) -> anyhow::Result<()> {
@@ -306,7 +314,7 @@ impl Index {
         let r = self.upsert_in_savepoint(path, nf, meta, body);
         // A failed RELEASE (disk full) can leave the outermost savepoint's transaction open: end it, like `remove_with`.
         if r.is_err() && outer && !self.db.is_autocommit() {
-            _ = self.db.execute_batch("ROLLBACK");
+            self.rollback("ROLLBACK");
         }
         r
     }
@@ -396,7 +404,7 @@ impl Index {
         // A failed COMMIT or RELEASE (disk full) can leave the transaction or savepoint open: end it too.
         let r = r.and_then(|()| Ok(self.db.execute_batch(if outer { "COMMIT" } else { "RELEASE remove" })?));
         if r.is_err() {
-            _ = self.db.execute_batch(if outer { "ROLLBACK" } else { "ROLLBACK TO remove; RELEASE remove" });
+            self.rollback(if outer { "ROLLBACK" } else { "ROLLBACK TO remove; RELEASE remove" });
         }
         r
     }

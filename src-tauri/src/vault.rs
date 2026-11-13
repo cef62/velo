@@ -640,7 +640,9 @@ impl Vault {
         // save recreates the old file. Index errors heal on the next change; an unreadable link source is skipped.
         let (from_s, to_s) = (path.to_string(), s(&to));
         if to_s != from_s {
-            self.index.remove(&from_s).ok();
+            if let Err(e) = self.index.remove(&from_s) {
+                crate::log::warn(&format!("velo: removing a renamed note's old index entry failed: {e}"));
+            }
             if let Some(plain) = self.unlocked.remove(&from_s) {
                 self.unlocked.insert(to_s.clone(), plain);
             }
@@ -767,12 +769,34 @@ impl Vault {
         // first: on failure nothing else has changed, and no plaintext snapshot survives a lock
         self.revisions.encrypt_all(&nf.title, |b| crypto::encrypt(identity, b))?;
         let plain = self.store.read(from)?;
-        self.store.write_atomic(&to, &crypto::encrypt(identity, &plain)?)?;
-        finish_move(from, &to).context("removing plaintext note")?;
+        let created = self.index.created_from_file(path)?; // the erase drops it; a failed lock's re-index restores it
+        // Erase before the move: a failure here fails the lock with nothing changed, never a lock that reports success
+        // while the plain row stays searchable.
+        self.index.remove_erasing(path)?;
+        let moved = crypto::encrypt(identity, &plain)
+            .and_then(|c| Ok(self.store.write_atomic(&to, &c)?))
+            .and_then(|_| finish_move(from, &to).context("removing plaintext note"));
+        if let Err(e) = moved {
+            // still plain: back in the index (else the next rescan does it), with its earliest file date (see `upsert`)
+            let back = stat(from).and_then(|mut m| {
+                if let Some(c) = created {
+                    m.birth = if m.birth > 0 { m.birth.min(c) } else { c };
+                }
+                self.index.upsert(path, &nf, &m, Some(&lossy(&plain)))
+            });
+            if let Err(re) = back {
+                crate::log::warn(&format!("velo: re-indexing a note after a failed lock failed, missing from search until the next rescan: {re}"));
+            }
+            return Err(e);
+        }
         // The file has moved: from here on nothing may fail the lock (as in `rename_note`), or the UI keeps the old
         // path, whose saves are refused. Index errors heal on the next change.
-        self.index.remove_erasing(path).ok();
         self.reindex(&to, None).ok();
+        // Again, now the plaintext is gone: another process (`velo --mcp` direct mode, as the app starts) may have
+        // re-indexed it since the first erase. A failure is logged; the watcher's delete event erases it too.
+        if let Err(e) = self.index.remove_erasing(path) {
+            crate::log::warn(&format!("velo: erasing a locked note's plain index entry failed, retried by the watcher: {e}"));
+        }
         // Older versions from a bulk (even this process's) are still in the FTS segments. Best effort from here: the
         // note is locked, and a failure (disk full) stays marked for the next lock or open.
         self.index.finish_bulk();
@@ -797,8 +821,11 @@ impl Vault {
         let plain = crypto::decrypt(identity, &self.store.read(from)?)?;
         self.store.write_atomic(&to, &plain)?;
         finish_move(from, &to).context("removing encrypted note")?;
-        // as in `lock_note`: the file has moved, so nothing may fail the unlock
-        self.index.remove(path).ok();
+        // as in `lock_note`: the file has moved, so nothing may fail the unlock. The stale row has no text (locked
+        // notes are indexed without a body); the watcher's delete event removes it.
+        if let Err(e) = self.index.remove(path) {
+            crate::log::warn(&format!("velo: removing an unlocked note's old index entry failed: {e}"));
+        }
         self.unlocked.remove(path);
         self.reindex(&to, Some(&lossy(&plain))).ok();
         if let Some(n) = parse_note_file(&to).filter(|n| fold(&n.title) != fold(&nf.title)) {
@@ -975,10 +1002,12 @@ impl Vault {
                 }
                 // Only a missing file is a deletion: iCloud-evicted, unreadable or sync-locked files stay listed.
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    if self.remove_note(&key).is_err() {
+                    if let Err(e) = self.remove_note(&key) {
                         if batched && !self.index.in_batch() {
                             return false;
                         }
+                        // a plain twin's text stays searchable until then: say so (the next open's diff erases it)
+                        crate::log::warn(&format!("velo: removing a deleted note from the search index failed, retried at the next launch: {e}"));
                         continue;
                     }
                     self.unlocked.remove(&key);
@@ -1240,9 +1269,14 @@ mod tests {
         let mut v = open(dir.clone(), &db, None).unwrap();
         let d = v.open_or_create("s", None, false).unwrap();
         let c = rusqlite::Connection::open(&db).unwrap();
-        c.execute_batch("CREATE TRIGGER boom BEFORE DELETE ON notes BEGIN SELECT RAISE(FAIL, 'boom'); END;").unwrap();
+        // the lock's erase of the plain row runs before the move (see `lock_fails_when_the_index_cannot_erase_the_plaintext`)
+        c.execute_batch("CREATE TRIGGER boom BEFORE INSERT ON notes WHEN NEW.path LIKE '%.age' BEGIN SELECT RAISE(FAIL, 'boom'); END;").unwrap();
         let p = v.lock_note(&d.path, &id).unwrap();
         assert!(Path::new(&p).exists() && !Path::new(&d.path).exists());
+        c.execute_batch("DROP TRIGGER boom").unwrap();
+        v.reindex(Path::new(&p), None).unwrap(); // the unlock's delete must find a row to fail on
+        c.execute_batch("CREATE TRIGGER boom BEFORE DELETE ON notes BEGIN SELECT RAISE(FAIL, 'boom'); END;").unwrap();
+        assert!(v.index.remove(&p).is_err());
         let q = v.unlock_note(&p, &id).unwrap();
         assert!(Path::new(&q).exists() && !Path::new(&p).exists());
         c.execute_batch("DROP TRIGGER boom").unwrap();
@@ -1262,14 +1296,65 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test] fn lock_rolls_back_when_the_plaintext_cannot_be_removed() {
         let (dir, db) = setup(); let id = crypto::new_identity();
+        let p = dir.join("s.md");
+        std::fs::write(&p, "old").unwrap();
+        let jan = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_704_067_200); // 2024-01-01
+        std::fs::File::options().write(true).open(&p).unwrap().set_modified(jan).unwrap();
         let mut v = open(dir.clone(), &db, None).unwrap();
-        let d = v.open_or_create("s", None, false).unwrap();
+        let d = v.open_note(&p.to_string_lossy(), None).unwrap();
+        let _r = v.save_note(&d.path, "plainzebra", &d.hash, None, false).unwrap(); // new file: only the index keeps January
+        let dates = |v: &Vault| (v.index.created_from_file(&d.path).unwrap(), v.index.title_modified(&d.path).unwrap());
+        let before = dates(&v);
+        assert!(before.0.unwrap() <= 1_704_067_200_000);
         let flags = |f: &str| assert!(std::process::Command::new("chflags").args([f, &d.path]).status().unwrap().success());
         flags("uchg"); // immutable: can't be deleted
         let r = v.lock_note(&d.path, &id);
         flags("nouchg");
         assert!(r.is_err());
         assert!(Path::new(&d.path).exists() && !dir.join("s.md.age").exists());
+        assert_eq!(v.search("plainzebra", Sort::Modified, 0, &[]).unwrap().hits.len(), 1); // still indexed: it is still plain
+        assert_eq!(dates(&v), before); // the re-index keeps the indexed created date
+    }
+    /// A plain row put back between the lock's first erase and the move (a rescan in `velo --mcp` direct mode, on
+    /// another connection) is erased after the move. A trigger on a second connection stands in for that process.
+    #[test] fn lock_erases_a_plain_row_reinserted_before_the_move() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let d = v.open_or_create("s", None, false).unwrap();
+        let _r = v.save_note(&d.path, "racezebra", &d.hash, None, false).unwrap();
+        let c = rusqlite::Connection::open(&db).unwrap();
+        let path = d.path.replace('\'', "''");
+        c.execute_batch(&format!(
+            "CREATE TRIGGER back AFTER INSERT ON notes WHEN NEW.path LIKE '%.md.age' BEGIN
+               INSERT INTO notes(path,title,title_folded,mtime,size,encrypted,preview,created,created_src,modified,modified_src) VALUES('{path}','s','s',1,1,0,'racezebra',1,'file',1,'file');
+               INSERT INTO notes_fts(rowid,path,body) VALUES((SELECT rowid FROM notes WHERE path='{path}'),'{path}','racezebra');
+             END;")).unwrap();
+        v.lock_note(&d.path, &id).unwrap();
+        c.execute_batch("DROP TRIGGER back").unwrap();
+        v.lock_all();
+        assert!(v.search("racezebra", Sort::Modified, 0, &[]).unwrap().hits.is_empty(), "the reinserted plain row is still live");
+        assert!(v.index.title_modified(&d.path).unwrap().is_none());
+    }
+    /// A lock that can't erase the note from the index must fail: it used to succeed and leave the old plain row
+    /// (body, preview, tasks) searchable until the watcher's delete or the next launch.
+    #[test] fn lock_fails_when_the_index_cannot_erase_the_plaintext() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let d = v.open_or_create("s", None, false).unwrap();
+        let _r = v.save_note(&d.path, "- [ ] secretzebra", &d.hash, None, false).unwrap();
+        v.index.raw().execute_batch("CREATE TEMP TRIGGER full BEFORE DELETE ON notes WHEN OLD.path NOT LIKE '%.age' BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END;").unwrap();
+        let r = v.lock_note(&d.path, &id);
+        v.lock_all();
+        let hits = v.search("secretzebra", Sort::Modified, 0, &[]).unwrap().hits;
+        assert!(r.is_err(), "lock reported success (plain text still searchable: {})", !hits.is_empty());
+        assert!(Path::new(&d.path).exists() && !dir.join("s.md.age").exists()); // still plain on disk
+        assert_eq!(v.open_note(&d.path, None).unwrap().text, "- [ ] secretzebra");
+        assert_eq!(hits.iter().map(|h| h.path.as_str()).collect::<Vec<_>>(), vec![d.path.as_str()]); // still indexed
+        v.index.raw().execute_batch("DROP TRIGGER full").unwrap();
+        v.lock_note(&d.path, &id).unwrap();
+        v.lock_all();
+        assert!(v.search("secretzebra", Sort::Modified, 0, &[]).unwrap().hits.is_empty());
+        assert!(v.index.task_rows(&[], true).unwrap().is_empty());
     }
     /// With front matter off, an atomic save (new inode, new birth time) keeps the indexed created date.
     #[test] fn file_dated_created_survives_saves() {
