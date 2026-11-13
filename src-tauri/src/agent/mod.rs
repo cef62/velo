@@ -72,7 +72,9 @@ fn gate(settings_path: PathBuf, data_dir: PathBuf) -> impl Fn(&str, Value) -> Re
         if let Err(e) = ops.rescan() {
             eprintln!("velo --mcp: rescan of the notes folder failed: {e}"); // the call goes on with the index as it is
         }
-        tools::call(ops, name, args)
+        let r = tools::call(ops, name, args);
+        ops.vault.archive_error.take(); // reported in the reply; the next call starts clean
+        r
     }
 }
 

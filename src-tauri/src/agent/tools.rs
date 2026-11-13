@@ -15,7 +15,8 @@ macro_rules! conventions {
         " velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). \
 Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. \
 Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. \
-Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions."
+Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. \
+A `warning` in the result means the change was made but velo could not update its archived-notes list: tell the user."
     };
 }
 
@@ -102,7 +103,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "daily_note",
-        description: "The daily note for a date (`date` YYYY-MM-DD, default today, local time): title, text and whether this call created it (no template; optional `summary` describes the creation in the note's revisions).",
+        description: "The daily note for a date (`date` YYYY-MM-DD, default today, local time): title, text and whether this call created it (no template; optional `summary` describes the creation in the note's revisions). A `warning` in the result means the note was created but velo could not update its archived-notes list: tell the user.",
         input_schema: r#"{"type":"object","properties":{"date":{"type":"string","pattern":"^\\d{4}-\\d{2}-\\d{2}$"},"summary":{"type":"string"}}}"#,
     },
 ];
@@ -161,7 +162,17 @@ fn occurrences(text: &str, pat: &str) -> usize {
     n
 }
 
+/// `dispatch`, plus a `warning` when the call succeeded but left a failed `.velo/archived` write (the note change
+/// stands). The error stays in the vault for the app to report as its own `archive-error`.
 pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String> {
+    let mut r = dispatch(ops, name, a);
+    if let (Ok(Value::Object(o)), Some(m)) = (&mut r, ops.archive_warning()) {
+        o.insert("warning".into(), format!("the note was changed, but the archived-notes list was not updated: {m}").into());
+    }
+    r
+}
+
+fn dispatch(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String> {
     let is_write = matches!(name, "create_note" | "append_to_note" | "edit_note" | "replace_note" | "add_tags" | "remove_tags" | "add_task" | "set_task_done" | "rename_note" | "move_to_trash" | "merge_notes");
     let summary = if is_write {
         let s = a.get("summary").and_then(Value::as_str).unwrap_or("");
@@ -474,6 +485,20 @@ mod tests {
         assert_eq!(call(&mut ops, "list_tags", json!({"include_archived": true})).unwrap()["tags"], json!([{"tag": "t", "count": 2}]));
         assert_eq!(call(&mut ops, "read_note", json!({"title": "a"})).unwrap()["title"], "a"); // by title: always
         assert_eq!(call(&mut ops, "read_note", json!({"title": "b"})).unwrap()["backlinks"], json!([])); // a is archived
+    }
+    #[cfg(unix)] #[test] fn a_failed_list_write_comes_back_as_a_warning() {
+        use std::os::unix::fs::PermissionsExt;
+        let (mut ops, dir) = vault(&[("a.md", "x")]);
+        ops.vault.set_archived(&dir.join("a.md").to_string_lossy(), true).unwrap();
+        let lock = |m| std::fs::set_permissions(dir.join(".velo"), std::fs::Permissions::from_mode(m)).unwrap();
+        lock(0o555);
+        let r = call(&mut ops, "rename_note", json!({"title": "a", "new_title": "b", "rewrite_links": false, "summary": "s"}));
+        lock(0o755);
+        let r = r.unwrap();
+        assert_eq!(r["title"], "b"); // the rename itself succeeded
+        assert!(r["warning"].as_str().unwrap().contains(".velo/archived"));
+        assert!(ops.vault.archive_error.take().is_some()); // kept for the app's own event
+        assert!(call(&mut ops, "read_note", json!({"title": "b"})).unwrap().get("warning").is_none());
     }
     #[test] fn get_connections_of_an_archived_centre_counts_right() {
         let (mut ops, dir) = vault(&[("c.md", "#t"), ("a.md", "#t")]);

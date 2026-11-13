@@ -186,6 +186,10 @@ impl<'a> AppOps<'a> {
 }
 
 impl NoteOps for AppOps<'_> {
+    fn archive_warning(&self) -> Option<String> {
+        self.with(|o| Ok(o.archive_warning())).ok().flatten()
+    }
+
     fn find(&self, title: &str) -> anyhow::Result<Option<String>> {
         self.with(|o| o.find(title))
     }
@@ -463,8 +467,9 @@ mod tests {
         lock(0o555);
         let r = call("rename_note", json!({"title": "P", "new_title": "Q", "rewrite_links": false, "summary": "s"}));
         lock(0o755);
-        assert!(r.is_ok());
-        assert_eq!(count(), 1); // the rename worked, the list write failed
+        let w = r.unwrap()["warning"].as_str().unwrap().to_string();
+        assert!(w.contains(".velo/archived") && !w.contains('Q'), "{w}"); // the agent hears of it, without note text
+        assert_eq!(count(), 1); // the rename worked, the list write failed, the app still hears too
         call("list_tags", json!({})).unwrap();
         assert_eq!(count(), 1); // a clean call emits nothing
         st.vault.lock().unwrap().as_ref().unwrap().archive_error.set(Some("kept".into()));
