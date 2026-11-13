@@ -3424,6 +3424,19 @@ test("deselecting a zero-count chip removes it in the same update", async () => 
   expect(chipTags(store.get().tags, store.get().selectedTags)).toEqual([]);
 });
 
+test("chip counts exclude archived notes when show archived is off and include them when on", async () => {
+  const { c, api, store, archiveB } = soloSetup();
+  archiveB(true);
+  await c.start(); await settle();
+  await c.refreshTags(); await settle();
+  expect(store.get().tags).toEqual([]); // "solo" is only on archived B
+  await c.setShowArchived(true); await settle();
+  expect(store.get().tags).toEqual([{ tag: "solo", count: 1 }]);
+  expect(api.listTags).toHaveBeenLastCalledWith(true);
+  await c.setShowArchived(false); await settle();
+  expect(store.get().tags).toEqual([]);
+});
+
 test("a selected tag that no note carries any more is still dropped", async () => {
   const { c, api, store } = soloSetup();
   await c.start(); await settle();

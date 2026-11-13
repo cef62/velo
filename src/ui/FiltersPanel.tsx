@@ -32,16 +32,17 @@ export function FiltersPanel({ controller, store }: { controller: Controller; st
   const appliedName = useStore(store, (s) => s.appliedSaved);
   const [cur, setCur] = useState(0); // roving tab stop: Tab enters the group once, arrows move inside
   const k = saved.length; // one roving sequence: saved chips, No links, tag chips
-  const menuAt = useRef<number | null>(null); // the saved chip whose menu opened last
-  // Deleting the focused last chip drops focus to <body>: move it to the chip now at that place, the one before, or No links.
+  const menuAt = useRef<number | null>(null); // the chip (button index) a delete or deselect acts on last
+  // Removing the focused chip (saved delete, or deselecting a count-0 tag chip) drops focus to <body>: move it to the chip now at that place, the one before, or No links.
   useEffect(() => {
     const i = menuAt.current;
     menuAt.current = null;
     if (i === null || document.activeElement !== document.body || !group.current) return;
-    const to = k === 0 ? 0 : Math.min(i, k - 1);
+    const btns = group.current.querySelectorAll<HTMLButtonElement>("button");
+    const to = i >= k ? Math.min(i, btns.length - 1) : k === 0 ? 0 : Math.min(i, k - 1);
     setCur(to);
-    group.current.querySelectorAll<HTMLButtonElement>("button")[to]?.focus();
-  }, [k]);
+    btns[to]?.focus();
+  }, [k, visibleTags, selectedTags]);
   if (!tagPanelOpen) return null;
   const tags = chipTags(visibleTags, selectedTags); // derived per render: no stale or missing chip
   const move = (to: number) => {
@@ -142,7 +143,10 @@ export function FiltersPanel({ controller, store }: { controller: Controller; st
             const on = selectedTags.some((x) => fold(x) === fold(t.tag));
             const c = tagChip({ selected: on });
             return (
-              <button key={t.tag} type="button" className={c.root} aria-pressed={on} tabIndex={stop(k + i + 1)} onFocus={() => setCur(k + i + 1)} onClick={() => controller.toggleTagFilter(t.tag)}>
+              <button key={t.tag} type="button" className={c.root} aria-pressed={on} tabIndex={stop(k + i + 1)} onFocus={() => setCur(k + i + 1)} onClick={() => {
+                menuAt.current = k + i + 1;
+                controller.toggleTagFilter(t.tag);
+              }}>
                 #{t.tag} <span className={c.count}>{t.count}</span>
               </button>
             );
