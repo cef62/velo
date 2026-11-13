@@ -224,6 +224,68 @@ test("reloadChanges: 1 MB / 20k lines with two edited lines is fast", () => {
   expect(applyAll(x, cs)).toBe(y);
 });
 
+test("reloadChanges: a partly changed line keeps its common prefix and suffix", () => {
+  expect(reloadChanges("abc def\nx", "abc DEF\nx")).toEqual([{ from: 4, to: 7, insert: "DEF" }]);
+  let s = mk(true, "abc def\nx\ny");
+  s = s.update({ selection: { anchor: 3 } }).state; // after "abc"
+  s = s.update(reloadSpec(s, "abc DEF\nx\nY")!).state;
+  expect(s.selection.main.head).toBe(3);
+});
+
+test("reloadChanges: common prefix and suffix lines are trimmed before the LCS budget applies", () => {
+  const same = lines(1500, () => "same");
+  const a = [...same, "1", "d", "d", "2", ...same].join("\n"), b = [...same, "3", "d", "d", "4", ...same].join("\n");
+  expect(check(a, b).length).toBe(2); // untrimmed it would be 3004 x 3004 cells: over budget, one hunk
+  expect(check([...same, "1", "d", "d", "2"].join("\n"), [...same, "3", "d", "d", "4"].join("\n")).length).toBe(2);
+  expect(check(["1", "d", "d", "2", ...same].join("\n"), ["3", "d", "d", "4", ...same].join("\n")).length).toBe(2);
+});
+
+test("reloadChanges: the LCS budget is exactly 1,000,000 cells", () => {
+  const mkSide = (k: number, first: string, last: string) => [first, ...lines(k, () => "d"), last].join("\n");
+  expect(check(mkSide(998, "1", "2"), mkSide(998, "3", "4")).length).toBe(2); // 1000 x 1000: exact LCS
+  expect(check(mkSide(998, "1", "2"), mkSide(999, "3", "4")).length).toBe(1); // 1000 x 1001: one hunk
+});
+
+test("reloadChanges: the nesting shape that made patience quadratic and overflowed the stack stays cheap and right", () => {
+  const D = 10000, o = Array(1000).fill("f"), n = Array(1000).fill("g");
+  for (let d = 1; d <= D; d++) { o.push(`m${d}`); if (d > 1) o.push(`m${d - 1}`); n.push(`m${d}`); }
+  const [x, y] = [o.join("\n"), n.join("\n")];
+  const t = performance.now();
+  const cs = reloadChanges(x, y);
+  expect(performance.now() - t).toBeLessThan(150);
+  expect(applyAll(x, cs)).toBe(y);
+});
+
+test("reloadChanges: a last line without a newline matches the same line once a newline follows (and back)", () => {
+  for (const [a, b, at, kept] of [["a\nb\nfoo", "a\nB\nfoo\nbar", 5, "foo"], ["a\nB\nfoo\nbar", "a\nb\nfoo", 5, "foo"], ["head\nkeep caret here", "HEAD\nkeep caret here\ntail", 8, "keep caret here"], ["a\nb\nfoo\n", "a\nB\nfoo", 5, "foo"]] as const) {
+    check(a, b);
+    let s = mk(true, a);
+    s = s.update({ selection: { anchor: at } }).state;
+    s = s.update(reloadSpec(s, b)!).state;
+    expect(s.doc.toString()).toBe(b);
+    const l = s.doc.lineAt(s.selection.main.head);
+    expect([l.text, s.selection.main.head - l.from]).toEqual([kept, at - a.indexOf(kept)]);
+  }
+});
+
+test("reloadSpec: a throwing or wrong diff falls back to the single middle change with the right text", () => {
+  const s = mk(true, "a\nb\nc\nd");
+  const want = "a\nB\nc\nD";
+  const bad: ((a: string, b: string) => { from: number; to: number; insert: string }[])[] = [
+    () => { throw new RangeError("boom"); },
+    () => [{ from: 0, to: 1, insert: "zz" }], // applies, but not to the new text
+    () => [{ from: 6, to: 7, insert: "D" }, { from: 2, to: 3, insert: "B" }], // unsorted
+    () => [{ from: 0, to: 99, insert: want }], // out of range
+  ];
+  for (const diff of bad) {
+    const spec = reloadSpec(s, want, diff)!;
+    expect(s.update(spec).state.doc.toString()).toBe(want);
+    const cs: unknown[] = [];
+    spec.changes.iterChanges((fa, ta, _fb, _tb, ins) => cs.push([fa, ta, ins.toString()]));
+    expect(cs).toEqual([[2, 7, "B\nc\nD"]]);
+  }
+});
+
 test("reloadSpec: identical text is null", () => {
   expect(reloadSpec(mk(true, "same"), "same")).toBeNull();
 });

@@ -30,19 +30,22 @@ export function middleChange(a: string, b: string): { from: number; to: number; 
 
 type Hunk = { from: number; to: number; insert: string };
 
-/** Max old-lines x new-lines cells of the exact LCS table (4 MB); larger gaps are split on unique lines first. */
+/** Max old-lines x new-lines cells of one exact LCS table (4 MB). */
 const LCS_BUDGET = 1_000_000;
+/** Work units one reload may spend in all: an LCS cell costs 1, a patience scan costs 10 per line. About 15 ms worst case. */
+const WORK_BUDGET = 3_000_000;
+/** Patience recursion depth cap (the stack stays shallow whatever the input). */
+const MAX_DEPTH = 100;
 
-/** Line tokens keeping each "\n" with its line: joined they give the text back, and a cut never lands inside a surrogate pair. */
-const tokens = (t: string) => t.match(/[^\n]*\n|[^\n]+/g) ?? [];
-
-/** Push hunks [a0,a1) -> [b0,b1) (line ranges, in order, never touching) turning old lines `a` into new lines `b`. */
-function lineDiff(a: string[], b: string[], a0: number, a1: number, b0: number, b1: number, out: number[][]): void {
+/** Push hunks [a0,a1) -> [b0,b1) (line ranges, in order, never touching) turning old lines `a` into new lines `b`.
+ *  Total cost is bounded by `work`; a gap that no longer fits becomes one hunk. */
+function lineDiff(a: string[], b: string[], a0: number, a1: number, b0: number, b1: number, out: number[][], work: { left: number }, depth = 0): void {
   while (a0 < a1 && b0 < b1 && a[a0] === b[b0]) { a0++; b0++; }
   while (a0 < a1 && b0 < b1 && a[a1 - 1] === b[b1 - 1]) { a1--; b1--; }
   const n = a1 - a0, m = b1 - b0;
   if (!n || !m) { if (n || m) out.push([a0, a1, b0, b1]); return; }
-  if (n * m <= LCS_BUDGET) {
+  if (n * m <= LCS_BUDGET && n * m <= work.left) {
+    work.left -= n * m;
     const w = m + 1, L = new Uint32Array((n + 1) * w); // L[i*w+j]: LCS length of a[a0+i..] and b[b0+j..]
     for (let i = n - 1; i >= 0; i--)
       for (let j = m - 1; j >= 0; j--)
@@ -57,6 +60,9 @@ function lineDiff(a: string[], b: string[], a0: number, a1: number, b0: number, 
     close();
     return;
   }
+  // shortcut: out of budget, too deep, or no unique line in a gap above the LCS budget: one hunk (its caret may jump); upgrade to Myers if that bites.
+  if (depth >= MAX_DEPTH || work.left < 10 * (n + m)) { out.push([a0, a1, b0, b1]); return; }
+  work.left -= 10 * (n + m);
   // Patience: lines unique on both sides, their longest increasing run as anchors, then diff each gap.
   const seen = new Map<string, { o: number; n: number; i: number; j: number }>(); // counts and positions per line
   for (let i = a0; i < a1; i++) { const e = seen.get(a[i]); if (e) e.o++; else seen.set(a[i], { o: 1, n: 0, i, j: -1 }); }
@@ -74,39 +80,62 @@ function lineDiff(a: string[], b: string[], a0: number, a1: number, b0: number, 
   const anchors: number[][] = [];
   for (let p = tails.length ? tails[tails.length - 1] : -1; p >= 0; p = prev[p]) anchors.push(pairs[p]);
   anchors.reverse();
-  // shortcut: a gap above the budget with no unique line becomes one hunk (its caret may jump); upgrade to Myers if that bites.
   if (!anchors.length) { out.push([a0, a1, b0, b1]); return; }
   let i = a0, j = b0;
-  for (const [ai, bj] of anchors) { lineDiff(a, b, i, ai, j, bj, out); i = ai + 1; j = bj + 1; }
-  lineDiff(a, b, i, a1, j, b1, out);
+  for (const [ai, bj] of anchors) { lineDiff(a, b, i, ai, j, bj, out, work, depth + 1); i = ai + 1; j = bj + 1; }
+  lineDiff(a, b, i, a1, j, b1, out, work, depth + 1);
 }
 
 /**
  * Changes turning `a` into `b` (both LF): one per differing run of lines, so unchanged lines between edits keep their
  * positions and a caret on them stays put; inside a run the common prefix and suffix are kept too. Sorted, disjoint, in `a` coordinates.
+ * Lines compare without their terminator, so a last line without "\n" matches the same line once a newline follows it.
+ * Cost is bounded (WORK_BUDGET, MAX_DEPTH, LCS_BUDGET): the worst input costs a few ms more than one middle change.
  */
 export function reloadChanges(a: string, b: string): Hunk[] {
   if (a === b) return [];
-  const ta = tokens(a), tb = tokens(b);
-  const starts = [0]; // char offset of each old token
-  for (const t of ta) starts.push(starts[starts.length - 1] + t.length);
+  const la = a.split("\n"), lb = b.split("\n");
+  const starts = [0]; // char offset of each old line
+  for (const l of la) starts.push(starts[starts.length - 1] + l.length + 1);
   const hunks: number[][] = [];
-  lineDiff(ta, tb, 0, ta.length, 0, tb.length, hunks);
+  lineDiff(la, lb, 0, la.length, 0, lb.length, hunks, { left: WORK_BUDGET });
   const out: Hunk[] = [];
   for (const [a0, a1, b0, b1] of hunks) {
-    const c = middleChange(a.slice(starts[a0], starts[a1]), tb.slice(b0, b1).join(""));
-    if (c) out.push({ from: starts[a0] + c.from, to: starts[a0] + c.to, insert: c.insert });
+    // old lines [a0,a1) -> new lines [b0,b1), keeping the "\n" of every neighbouring line
+    let from: number, to: number, ins = lb.slice(b0, b1).join("\n");
+    if (a1 > a0 && b1 > b0) { from = starts[a0]; to = starts[a1] - 1; }
+    else if (b1 > b0) { // pure insertion
+      if (a0 < la.length) { from = to = starts[a0]; ins += "\n"; } else { from = to = a.length; ins = "\n" + ins; }
+    } else if (a1 < la.length) { from = starts[a0]; to = starts[a1]; } // pure deletion
+    else { from = a0 > 0 ? starts[a0] - 1 : 0; to = a.length; }
+    const c = middleChange(a.slice(from, to), ins);
+    if (c) out.push({ from: from + c.from, to: from + c.to, insert: c.insert });
   }
   return out;
+}
+
+/** `changes` applied to `a`, or null if they are not sorted, disjoint and inside `a`. */
+function applied(a: string, changes: Hunk[]) {
+  let out = "", at = 0;
+  for (const c of changes) {
+    if (c.from < at || c.to < c.from || c.to > a.length) return null;
+    out += a.slice(at, c.from) + c.insert;
+    at = c.to;
+  }
+  return out + a.slice(at);
 }
 
 /**
  * A reload of the same note: only the differing lines change (CRLF read as LF, as CodeMirror's own text split does) and the
  * selection is mapped explicitly, so the hidden-front-matter guard runs (it skips transactions without a selection). Null if equal.
+ * The diff is checked against the new text; a throw or a wrong result falls back to the single middle change, so the editor never gets wrong text.
  */
-export function reloadSpec(state: EditorState, text: string) {
-  const c = reloadChanges(state.doc.toString(), text.replace(/\r\n?/g, "\n"));
-  if (!c.length) return null;
+export function reloadSpec(state: EditorState, text: string, diff: (a: string, b: string) => Hunk[] = reloadChanges) {
+  const a = state.doc.toString(), b = text.replace(/\r\n?/g, "\n");
+  if (a === b) return null;
+  let c: Hunk[] | null = null;
+  try { c = diff(a, b); if (applied(a, c) !== b) c = null; } catch { c = null; }
+  if (!c) c = [middleChange(a, b)!];
   const changes = state.changes(c);
   return { changes, selection: state.selection.map(changes) };
 }

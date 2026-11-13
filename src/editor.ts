@@ -109,20 +109,23 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
   let shown: string | null = null; // path whose text the editor holds: setText on that same path is a reload, not a switch
   const setText = (text: string) => {
     loading = true;
-    if (shown !== null && shown === ctrl.currentPath()) {
-      // Same note reloaded: change only the differing middle, so CodeMirror keeps caret, selection and scroll.
-      const spec = reloadSpec(view.state, text);
-      // The undo reset below overwrites the scroll anchor: re-apply it mapped through the change (hidden: it would scroll to the top).
-      const snap = spec && view.dom.offsetParent ? view.scrollSnapshot() : null;
-      if (spec) view.dispatch(spec);
-      for (const r of undo.reset) view.dispatch(r);
-      const anchor = snap?.map(spec!.changes);
-      if (anchor) view.dispatch({ effects: anchor });
-    } else {
-      view.dispatch(replaceAll(view.state.doc, text)); // Caret to the top; a hidden front matter moves it past the block.
-      for (const r of undo.reset) view.dispatch(r);
+    try {
+      if (shown !== null && shown === ctrl.currentPath()) {
+        // Same note reloaded: change only the differing lines (one change per run), so CodeMirror keeps caret, selection and scroll.
+        const spec = reloadSpec(view.state, text);
+        // The undo reset below overwrites the scroll anchor: re-apply it mapped through the change (hidden: it would scroll to the top).
+        const snap = spec && view.dom.offsetParent ? view.scrollSnapshot() : null;
+        if (spec) view.dispatch(spec);
+        for (const r of undo.reset) view.dispatch(r);
+        const anchor = snap?.map(spec!.changes);
+        if (anchor) view.dispatch({ effects: anchor });
+      } else {
+        view.dispatch(replaceAll(view.state.doc, text)); // Caret to the top; a hidden front matter moves it past the block.
+        for (const r of undo.reset) view.dispatch(r);
+      }
+    } finally {
+      loading = false; // a throw above must not leave later edits unsaved
     }
-    loading = false;
   };
 
   ctrl = new SaveController({
