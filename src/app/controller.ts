@@ -648,7 +648,12 @@ export class Controller {
           return r;
         }
         if (ok === null) return how !== "nav"; // no key on this computer: keep the copy-identity error
-        this.selectOpen(); // cancelled: highlight (and the list's focus) go back to the note shown again
+        // cancelled: the list and timeline highlights go back to the note shown again, only where it is listed
+        // (an empty selection would turn the next Enter in search into "create a note")
+        const open = this.editor.currentPath();
+        const i = this.results.indexOf(open ?? "");
+        if (i >= 0) this.store.set({ sel: i });
+        if (open && this.store.get().timeline.rows?.some((r) => r.path === open)) this.setTimelineSel(open);
       }
       this.setErr(e === "locked" ? "Note is locked" : errText(e));
       if (how === "nav") return false; // history cursor must be restored

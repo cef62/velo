@@ -4005,6 +4005,8 @@ test("today's daily note opened from behind the unlock dismisses it and is the n
 test("random opens, answers and late identity checks: unlocking always equals the lock screen being shown (#126)", async () => {
   let seed = 126;
   const rnd = (n: number) => ((seed = (seed * 1103515245 + 12345) % 2147483648), seed % n);
+  // the fakes settle on microtasks: draining them per step avoids ~700 setTimeout(0) rounds (slow on Windows timers)
+  const drain = async () => { for (let k = 0; k < 40; k++) await Promise.resolve(); };
   for (let run = 0; run < 25; run++) {
     const t = await lockedSetup({ A: "a", L1: "s1", L2: "s2", C: "c" });
     const checks: ReturnType<typeof deferred<boolean>>[] = [];
@@ -4019,25 +4021,51 @@ test("random opens, answers and late identity checks: unlocking always equals th
       else if (op === 1) void t.c.show(P(["L1", "L2"][rnd(2)]));
       else if (op === 2 && checks.length) checks.splice(rnd(checks.length), 1)[0].resolve(true);
       else if (op === 3 && t.dlg.cur) t.answer(rnd(3) === 0); // a right passphrase or Escape; a wrong one leaves it pending
-      await settle();
+      await drain();
       expect(t.store.get().unlocking).toBe(t.lockScreen());
       if (t.store.get().unlocking) {
         t.c.runAction("delete_note");
         t.c.runAction("archive_note");
-        await settle();
+        await drain();
         expect(t.api.deleteNote).not.toHaveBeenCalled();
         expect(t.api.setArchived).not.toHaveBeenCalled();
       }
     }
   }
-});
+}, 30_000);
 
 test("an inline unlock replacing a pending passphrase dialog keeps unlocking on (#126)", async () => {
   const t = await lockedSetup({ A: "a", L1: "- [ ] x", L2: "s2" });
   t.api.toggleTask.mockRejectedValueOnce("locked");
   void (t.c as any).flipTask(P("L1"), 0, "- [ ] x"); await settle(); // a task tick asks in a dialog
   expect(t.dlg.cur?.inline).toBe(false);
+  expect(t.store.get().unlocking).toBe(false); // a modal dialog, not the lock screen: the note area stays live under it
   void t.c.show(P("L2")); await settle(); // its inline unlock replaces the dialog (the dialog's request settles false)
   expect(t.lockScreen()).toBe(true);
   expect(t.store.get().unlocking).toBe(true);
+});
+
+test("Escape on an unlock opened from search results that do not list the open note keeps the highlight: Enter does not create a note (#126)", async () => {
+  const t = await lockedSetup();
+  t.api.search.mockImplementation(async () => ({ hits: [hit("L")], has_more: false, total: 1, hidden: 0 }));
+  t.c.setQuery("L"); await settle(); // row 0 (L) is auto-shown: locked, so no prompt; A stays open, unlisted
+  expect(t.store.get().openPath).toBe(P("A"));
+  const first = t.c.enter(); await settle();
+  expect(t.lockScreen()).toBe(true);
+  t.answer(false); // Escape
+  await first; await settle();
+  expect(t.store.get().sel).toBe(0); // as on main: L's row stays highlighted
+  void t.c.enter(); await settle();
+  expect(t.api.openOrCreate).not.toHaveBeenCalled();
+  expect(t.lockScreen()).toBe(true); // Enter asks for L again
+});
+
+test("Escape on an unlock opened from the timeline moves its selection back to the note shown (#126)", async () => {
+  const t = await lockedSetup();
+  const row = (title: string) => ({ path: P(title), title }) as unknown as TimelineRow;
+  t.store.set((s) => ({ paneMode: "timeline", timeline: { ...s.timeline, rows: [row("A"), row("L")], sel: P("L") } }));
+  const shown = t.c.show(P("L")); await settle(); // a click on L's timeline row
+  t.answer(false);
+  await shown; await settle();
+  expect(t.store.get().timeline.sel).toBe(P("A"));
 });
