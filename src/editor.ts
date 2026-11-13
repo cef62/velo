@@ -6,7 +6,7 @@ import { writingSetup } from "./editortheme";
 import { refreshRich, richMarkdown, type RichOpts } from "./richmd";
 import { dueInputRule, localToday, toggleTaskAt } from "./tasks";
 import { SaveController } from "./saver";
-import { frontMatterHide, ISOLATED, replaceAll, stampSelection, undoHistory } from "./fmhide";
+import { frontMatterHide, ISOLATED, reloadSpec, replaceAll, stampSelection, undoHistory } from "./fmhide";
 import { stampChange } from "./frontmatter";
 import { clampPos, getPos, renamePos, setPos, type Pos } from "./positions";
 import { openNote, saveNote, type NoteDoc, type NoteMeta } from "./api";
@@ -106,11 +106,22 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     ],
   });
 
+  let shown: string | null = null; // path whose text the editor holds: setText on that same path is a reload, not a switch
   const setText = (text: string) => {
     loading = true;
-    // Caret to the top; a hidden front matter moves it past the block.
-    view.dispatch(replaceAll(view.state.doc, text));
-    for (const spec of undo.reset) view.dispatch(spec);
+    if (shown !== null && shown === ctrl.currentPath()) {
+      // Same note reloaded: change only the differing middle, so CodeMirror keeps caret, selection and scroll.
+      const spec = reloadSpec(view.state, text);
+      // The undo reset below overwrites the scroll anchor: re-apply it mapped through the change (hidden: it would scroll to the top).
+      const snap = spec && view.dom.offsetParent ? view.scrollSnapshot() : null;
+      if (spec) view.dispatch(spec);
+      for (const r of undo.reset) view.dispatch(r);
+      const anchor = snap?.map(spec!.changes);
+      if (anchor) view.dispatch({ effects: anchor });
+    } else {
+      view.dispatch(replaceAll(view.state.doc, text)); // Caret to the top; a hidden front matter moves it past the block.
+      for (const r of undo.reset) view.dispatch(r);
+    }
     loading = false;
   };
 
@@ -166,7 +177,13 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
   const ed: Editor = {
     load(doc) {
       remember(); // the old note is still current here
-      if (!ctrl.load(doc)) return false;
+      const prev = shown;
+      shown = null; // a load is a switch: full replace even for the same path
+      if (!ctrl.load(doc)) {
+        shown = prev; // refused: the old note stays
+        return false;
+      }
+      shown = doc.path;
       setEditable(true);
       restore(doc.path);
       return true;
@@ -175,6 +192,7 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       remember();
       const dirty = ctrl.isDirty(); // dirty: the text is kept as it is, so is the caret
       if (!ctrl.rebind(fromPath, doc)) return false;
+      shown = doc.path;
       renamePos(fromPath, doc.path);
       if (!dirty) restore(doc.path);
       return true;
@@ -193,10 +211,12 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     },
     discard() {
       ctrl.discard();
+      shown = null;
       setEditable(false);
     },
     unload() {
       if (!ctrl.unload()) return false;
+      shown = null;
       setEditable(false);
       return true;
     },
