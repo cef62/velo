@@ -40,8 +40,11 @@ const UNDO_MS = 5000;
 const NO_KEY_MSG =
   "This note was locked with a velo key that isn't on this computer. Copy `.velo/identity.age` from the other computer into this notes folder.";
 
+/** Bound actions where holding the key is useful (stepping through history); every other action fires once per press. */
+const REPEATABLE: ReadonlySet<Action> = new Set<Action>(["back", "forward"]);
+
 /** What the window's capture-phase keydown handler passes in; the flags say where focus is. */
-export type KeyEventLike = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey"> & {
+export type KeyEventLike = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey" | "repeat"> & {
   getModifierState?: (k: string) => boolean; // pass it through so AltGr never fires a Mod+Alt binding off-mac
   inEditor: boolean;
   inSearchWithText: boolean;
@@ -819,7 +822,10 @@ export class Controller {
       return;
     }
     await settled(() => this.searching);
-    const a = enterAction(this.store.get().query, this.results.loaded, this.results.get(this.store.get().sel), force);
+    // An exact title (or alias) no loaded row carries is a hidden archived note: Enter opens it like Shift+Enter, never row 0.
+    const q = fold(this.store.get().query.trim());
+    const hidden = q !== "" && this.titles.has(q) && !this.results.loaded.some((h) => fold(h.title) === q);
+    const a = enterAction(this.store.get().query, this.results.loaded, this.results.get(this.store.get().sel), force || hidden);
     if (!a) return;
     try {
       if (a.kind === "open") {
@@ -2028,7 +2034,7 @@ export class Controller {
       if (!matches(e, keys[action as Action], this.opts.isMac)) continue;
       // Backspace combos keep their editing meaning in the editor and in a non-empty search box
       if (keys[action as Action].endsWith("+Backspace") && (e.inEditor || e.inSearchWithText)) continue;
-      run();
+      if (!e.repeat || REPEATABLE.has(action as Action)) run(); // a held key fires toggles and one-shot commands once
       return true;
     }
     return false;

@@ -24,7 +24,7 @@ Inspired by nvALT and Notational Velocity; not affiliated with or endorsed by th
 
 ## Keyboard shortcuts
 
-All shortcuts below are remappable in Settings (click a shortcut, press the new keys; Esc cancels). Enter in search, Esc in the editor, ↑/↓ in search and the list, the Edit menu and ⌘Q are fixed. `Mod` is ⌘ on macOS and Ctrl on Windows/Linux.
+All shortcuts below are remappable in Settings (click a shortcut, press the new keys; Esc cancels). A held key runs its shortcut once (only Back and Forward repeat). Enter in search, Esc in the editor, ↑/↓ in search and the list, the Edit menu and ⌘Q are fixed. `Mod` is ⌘ on macOS and Ctrl on Windows/Linux.
 
 | macOS | Windows/Linux | Action |
 | --- | --- | --- |
@@ -60,7 +60,7 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 
 Right-click a note in the list (or press the Menu key / Shift+F10 on the highlighted row; Shift+F10 can be changed in Settings → Keyboard shortcuts as "Open context menu") for a menu: open, rename, lock/unlock, copy `[[link]]`, show in Finder/Explorer, move to Trash. It opens the note first, so no menu appears if the switch is refused.
 
-Fixed: Enter (in search) opens the highlighted note, or creates a note titled with the query when nothing matches; Shift+Enter creates a note titled exactly as typed (or opens that exact title if it exists); Alt+Enter (⌥↩) does the same and starts the new note with an empty `- [ ]` task; in Tasks, Enter opens the first task shown, or (when no task matches) opens or creates the note titled with the query, and Shift+Enter / ⌥↩ work as above; ↑ / ↓ move the selection; Esc (in editor) returns to search.
+Fixed: Enter (in search) opens the highlighted note (or the note whose exact title or alias you typed, when the list does not show it), or creates a note titled with the query when nothing matches; Shift+Enter creates a note titled exactly as typed (or opens that exact title if it exists); Alt+Enter (⌥↩) does the same and starts the new note with an empty `- [ ]` task; in Tasks, Enter opens the first task shown, or (when no task matches) opens or creates the note titled with the query, and Shift+Enter / ⌥↩ work as above; ↑ / ↓ move the selection; Esc (in editor) returns to search.
 
 ## Tags
 
@@ -74,7 +74,7 @@ Keep a search you use often. With a search text, tags or the No links chip activ
 
 Archive a note to take it out of your way without deleting it. Open the note, then choose Archive note in its `⋯` menu or in the command palette (or press a shortcut you bind in Settings). The same entry reads Unarchive note on an archived note. A locked note must be opened (passphrase) first; archiving never decrypts or rewrites it.
 
-Archived notes are hidden from the list, search, the timeline, Tasks, the tags panel and its counts (a selected tag that only archived notes carry stays there with count 0), and from agents (see Agents (MCP)). An existing link to an archived note still opens it. `[[` suggests archived titles only while the Show archived notes button is on, and typing the exact title of an archived note never offers to create it (Shift+Enter opens that note). A task added to an archived note stays hidden with it.
+Archived notes are hidden from the list, search, the timeline, Tasks, the tags panel and its counts (a selected tag that only archived notes carry stays there with count 0), and from agents (see Agents (MCP)). An existing link to an archived note still opens it. `[[` suggests archived titles only while the Show archived notes button is on, and typing the exact title of an archived note never offers to create it (Enter and Shift+Enter open that note, even while it is hidden). A task added to an archived note stays hidden with it.
 
 The Show archived notes button sits in the bar above the list, in the Notes, Tasks and Timeline views. It stays on until you switch it off, including across a relaunch. While it is on, archived rows are dimmed and carry an "archived" badge. While it is off, a line under the Notes list says how many archived notes the current search or filter hides ("1 archived note hidden", "3 archived notes hidden").
 
