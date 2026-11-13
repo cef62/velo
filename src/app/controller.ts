@@ -840,7 +840,7 @@ export class Controller {
   /**
    * Plain Enter on the exact title or alias of an archived note the switch hides, with row 0 (or nothing) selected:
    * open that note, not row 0. The title cache may be stale and the hit's archived flag is only known to a search, so
-   * one search with archived notes and no tags confirms it; any doubt (no archived hit, search failed, query changed) = false: Enter acts as before.
+   * one search with archived notes and no tags confirms it. This path never creates a note; when the title is not confirmed (no archived hit, search failed) it returns false and Enter acts as before, which creates a note only when there are no results. true = this Enter is handled or void (the query, the list or the selection moved on meanwhile).
    * ponytail: the note must be on the confirm search's first page; upgrade: page on.
    */
   protected async openHiddenArchived(): Promise<boolean> {
@@ -850,9 +850,10 @@ export class Controller {
     if (s.showArchived || s.sel > 0 || q === "" || !this.titles.has(q) || this.results.loaded.some((h) => fold(h.title) === q)) return false;
     this.confirmingEnter = true;
     const seq = this.searchSeq;
+    const movedOn = () => seq !== this.searchSeq || this.store.get().query !== s.query || this.store.get().sel > 0; // the user went elsewhere: this Enter is void
     try {
       const [page, targets] = await Promise.all([this.api.search(s.query, s.sort, 0, [], s.noLinks, true), this.api.listLinkTargets(true)]);
-      if (seq !== this.searchSeq || this.store.get().query !== s.query) return true; // the query moved on: this Enter is void
+      if (movedOn()) return true;
       const paths = new Set(targets.filter((t) => fold(t.name) === q).map((t) => t.path));
       const hit = page.hits.find((h) => h.archived && paths.has(h.path));
       if (!hit) return false;
@@ -861,7 +862,7 @@ export class Controller {
       return true;
     } catch (e) {
       console.warn("confirming a hidden title failed", e);
-      return false;
+      return movedOn();
     } finally {
       this.confirmingEnter = false;
     }

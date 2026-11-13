@@ -3473,7 +3473,7 @@ test("Enter on an exact title hidden only by a tag filter opens row 0, as before
   expect(api.openOrCreate).not.toHaveBeenCalled();
 });
 
-test("a stale title-cache entry never creates a note: Enter opens row 0 (#87)", async () => {
+test("a stale title-cache entry with rows listed opens row 0 and creates nothing (#87)", async () => {
   const { c, api, store, notes } = await withHiddenB();
   api.listTitles.mockResolvedValue(["A", "B", "C", "Ghost"]);
   await c.refreshTitles();
@@ -3594,4 +3594,57 @@ test("an unlock field left up after Enter on a locked hidden archived title does
   await settle();
   expect(api.openNote.mock.calls.length).toBeGreaterThan(opens); // Enter opens the selected row, as on main
   expect(store.get().openPath).toBe(P("A"));
+});
+
+const noHits = async (): Promise<Page> => ({ hits: [], has_more: false, total: 0, hidden: 0 });
+
+test("a stale title-cache entry with no results behaves as on main: Enter creates the typed title (#87)", async () => {
+  const { c, api, store, notes } = await withHiddenB();
+  api.listTitles.mockResolvedValue(["A", "B", "C", "Ghost"]);
+  await c.refreshTitles();
+  api.search.mockImplementation(noHits);
+  c.setQuery("Ghost"); await settle();
+  await c.enter();
+  expect(api.openOrCreate).toHaveBeenCalledWith("Ghost");
+  expect(store.get().openPath).toBe(P("Ghost"));
+  expect(Object.keys(notes)).toContain("Ghost");
+});
+
+test("a failing confirm search with the query unchanged falls back to row 0 (#87)", async () => {
+  const { c, api, store } = await withHiddenB();
+  c.setQuery("B"); await settle();
+  api.search.mockRejectedValueOnce("boom");
+  await c.enter();
+  expect(store.get().openPath).toBe(P("A"));
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+});
+
+test("a failing confirm search after the query changed voids that Enter: nothing opens, nothing is created (#87)", async () => {
+  const { c, api, store, notes } = await withHiddenB();
+  c.setQuery("B"); await settle();
+  const d = deferred<Page>();
+  api.search.mockImplementationOnce(() => d.promise);
+  const entered = c.enter();
+  await settle();
+  api.search.mockImplementation(noHits);
+  c.setQuery("zzz"); await settle();
+  d.reject("boom");
+  await entered; await settle();
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+  expect(Object.keys(notes)).toEqual(["A", "B", "C"]);
+  expect(store.get().openPath).not.toBe(P("zzz"));
+});
+
+test("arrowing to another row during the confirm search voids that Enter; the arrowed row stays open (#87)", async () => {
+  const { c, api, store } = await withHiddenB();
+  c.setQuery("B"); await settle();
+  const d = deferred<Page>();
+  api.search.mockImplementationOnce(() => d.promise);
+  const entered = c.enter();
+  await settle();
+  await c.step(1); await settle(); // step() opens the row itself
+  d.resolve({ hits: [{ ...hit("B"), archived: true }], has_more: false, total: 1, hidden: 0 });
+  await entered; await settle();
+  expect(api.openNote).not.toHaveBeenCalledWith(P("B"));
+  expect(store.get().openPath).toBe(P("C"));
 });
