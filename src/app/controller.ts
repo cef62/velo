@@ -1711,6 +1711,7 @@ export class Controller {
     if (this.busy || s.indexing) return this.setErr(BUSY_MSG);
     if (this.archivePending) return; // a second press would read the same flag and send the same value
     const next = !s.archived;
+    const seq = this.archiveErrSeq; // a failure reported while this call is in flight is newer: it must stay
     this.archivePending = true;
     try {
       await this.api.setArchived(path, next);
@@ -1720,7 +1721,7 @@ export class Controller {
       this.archivePending = false;
     }
     if (this.editor.currentPath() === path) this.store.set({ archived: next }); // from our own call: the index may not know a new note yet
-    this.store.set({ archiveErr: "" }); // the list was written: an older failure to update it is over
+    if (seq === this.archiveErrSeq) this.store.set({ archiveErr: "" }); // the list was written: an older failure to update it is over
     if (this.store.get().paneMode === "notes") await this.refreshKeepingEditor();
     else this.listStale = true;
     this.reloadAround();
@@ -1818,7 +1819,7 @@ export class Controller {
       // saved above; anything typed since could only fail to save into the new folder
       if (!this.editor.unload()) this.editor.discard();
       this.closedDoc();
-      this.store.set({ phase: "ready" });
+      this.store.set({ phase: "ready", archiveErr: "" }); // a list failure was about the old folder's list
       await this.runSearch(true);
       void this.refreshTitles();
     } else if (next.sort !== cur.sort) await this.resort();
@@ -1831,7 +1832,7 @@ export class Controller {
       const dir = await this.ui.chooseDirectory();
       if (typeof dir !== "string") return;
       await this.updateSettings((cur) => this.api.setSettings({ ...cur, notes_dir: dir }));
-      this.store.set({ phase: "ready" });
+      this.store.set({ phase: "ready", archiveErr: "" }); // a list failure was about another folder's list
       await this.runSearch(true);
       void this.refreshTitles();
     } catch (e) {
@@ -2210,8 +2211,11 @@ export class Controller {
   /** A note operation (whatever its own outcome) could not update the archived-notes list. Kept apart from `err`, so no
    * later status or error replaces it: it stays until dismissed or until archiving works again. */
   onArchiveError(message: string) {
-    this.store.set({ archiveErr: `The archived-notes list could not be updated: ${message}` });
+    this.archiveErrSeq++;
+    this.store.set({ archiveErr: `The archived-notes list (.velo/archived) could not be updated: ${message}` });
   }
+
+  protected archiveErrSeq = 0; // bumped per reported failure: an archive call clears only one older than itself
 
   dismissArchiveErr() {
     this.store.set({ archiveErr: "" });

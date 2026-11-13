@@ -359,7 +359,7 @@ impl Vault {
             let m = format!("cannot update {}: {e}", crate::archive::FILE);
             crate::log::line(&m);
             eprintln!("{m}");
-            self.archive_error.set(Some(m));
+            self.archive_error.set(Some(e.to_string())); // the reason only: the reports name the list themselves
         }
     }
 

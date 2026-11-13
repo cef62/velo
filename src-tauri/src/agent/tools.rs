@@ -168,9 +168,9 @@ pub fn call(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
     let mut r = dispatch(ops, name, a);
     match (&mut r, ops.archive_warning()) {
         (Ok(Value::Object(o)), Some(m)) => {
-            o.insert("warning".into(), format!("the note was changed, but the archived-notes list was not updated: {m}").into());
+            o.insert("warning".into(), format!("the note was changed, but the archived-notes list ({}) was not updated: {m}", crate::archive::FILE).into());
         }
-        (Err(e), Some(m)) => e.push_str(&format!("\nThe archived-notes list was not updated either: {m}")),
+        (Err(e), Some(m)) => e.push_str(&format!("\nThe archived-notes list ({}) was not updated either: {m}", crate::archive::FILE)),
         _ => {}
     }
     r
@@ -507,9 +507,9 @@ mod tests {
     /// #95: an erroring call still tells the agent about the list write it left failed.
     #[test] fn a_failed_call_carries_its_list_failure_in_the_error() {
         let (mut ops, _dir) = vault(&[("a.md", "x")]);
-        ops.vault.archive_error.set(Some("cannot update .velo/archived: denied".into())); // as a failed write leaves it
+        ops.vault.archive_error.set(Some("denied".into())); // as a failed write leaves it
         let e = call(&mut ops, "rename_note", json!({"title": "nope", "new_title": "b", "rewrite_links": false, "summary": "s"})).unwrap_err();
-        assert!(e.starts_with("not found") && e.contains("archived-notes list was not updated") && e.contains("denied"), "{e}");
+        assert_eq!(e, "not found\nThe archived-notes list (.velo/archived) was not updated either: denied");
     }
     #[test] fn get_connections_of_an_archived_centre_counts_right() {
         let (mut ops, dir) = vault(&[("c.md", "#t"), ("a.md", "#t")]);

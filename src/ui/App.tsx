@@ -11,7 +11,7 @@ import { PaneBar } from "./PaneBar";
 import { TaskList } from "./TaskList";
 import { TimelineView } from "./TimelineView";
 import { TitleBar } from "./TitleBar";
-import { ConflictBanner } from "./ConflictBanner";
+import { ArchiveBanner, ConflictBanner } from "./ConflictBanner";
 import { TagBar } from "./TagBar";
 import { Divider } from "./Divider";
 import { FiltersPanel } from "./FiltersPanel";
@@ -76,6 +76,7 @@ export function App({ controller, store }: { controller: Controller; store: Stor
       <section className={note}>
         <TitleBar controller={controller} store={store} />
         <ConflictBanner controller={controller} store={store} />
+        <ArchiveBanner controller={controller} store={store} />
         <TagBar controller={controller} store={store} />
         <EditorHost controller={controller} />
         <PreviewHost controller={controller} />
