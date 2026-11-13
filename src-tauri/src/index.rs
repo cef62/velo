@@ -302,6 +302,16 @@ impl Index {
     }
 
     pub fn upsert(&mut self, path: &str, nf: &NoteFile, meta: &Meta, body: Option<&str>) -> anyhow::Result<()> {
+        let outer = self.db.is_autocommit();
+        let r = self.upsert_in_savepoint(path, nf, meta, body);
+        // A failed RELEASE (disk full) can leave the outermost savepoint's transaction open: end it, like `remove_with`.
+        if r.is_err() && outer && !self.db.is_autocommit() {
+            _ = self.db.execute_batch("ROLLBACK");
+        }
+        r
+    }
+
+    fn upsert_in_savepoint(&mut self, path: &str, nf: &NoteFile, meta: &Meta, body: Option<&str>) -> anyhow::Result<()> {
         // A savepoint is its own transaction outside `begin`, and nests inside one.
         let tx = self.db.savepoint()?;
         // a write first: a read would take a lock that fails at once, not after busy_timeout, under another writer
@@ -1094,6 +1104,31 @@ mod tests {
         assert_eq!(stale_marks(&i), 0); // the rolled-back mark is gone too
         drop(i);
         assert_eq!(Index::open(&db).unwrap().known().unwrap().len(), 3); // reopen keeps the index: no rebuild
+    }
+    /// Disk full at the outermost savepoint's RELEASE used to leave the connection inside a transaction. The sweep
+    /// finds page limits where the upsert fails at different statements, RELEASE included.
+    #[test] fn failed_outermost_upsert_leaves_autocommit() {
+        let nf = |t: &str| NoteFile { title: t.into(), encrypted: false };
+        let m = Meta { mtime: 1, size: 1, birth: 0 };
+        let huge: String = (0..200_000).map(|i| format!("w{i} ")).collect();
+        let mut failed = 0;
+        for pages in (0..450).step_by(3) {
+            let tmp = tempfile::tempdir().unwrap();
+            let mut i = Index::open(&tmp.path().join("index.db")).unwrap();
+            let n: i64 = i.db.query_row("PRAGMA page_count", [], |r| r.get(0)).unwrap();
+            i.db.query_row(&format!("PRAGMA max_page_count={}", n + pages), [], |_| Ok(())).unwrap();
+            if i.upsert("b.md", &nf("b"), &m, Some(&huge)).is_err() {
+                failed += 1;
+                assert!(i.db.is_autocommit(), "left a transaction open at +{pages} pages");
+                i.db.query_row("PRAGMA max_page_count=1000000", [], |_| Ok(())).unwrap();
+                i.begin().unwrap();
+                i.upsert("a.md", &nf("a"), &m, Some("alpha")).unwrap();
+                i.commit().unwrap();
+                i.upsert("c.md", &nf("c"), &m, Some("gamma")).unwrap();
+                assert_eq!(i.known().unwrap().len(), 2);
+            }
+        }
+        assert!(failed > 10, "the limit never made the upsert fail");
     }
     /// Re-indexing runs every DELETE once per note: a scan instead of an index search is O(notes²) over a rescan.
     #[test] fn note_deletes_search_an_index() {
