@@ -135,7 +135,9 @@ impl Store {
             return Ok(to);
         }
         let wanted = fold(&stem);
-        if self.list()?.iter().any(|(p, n, _)| p != from && fold(&n.title) == wanted) {
+        // the listing may spell the note NFD while `from` is NFC: still the same file, not its own twin
+        let me = crate::names::nfc_name(from);
+        if self.list()?.iter().any(|(p, n, _)| crate::names::nfc_name(p) != me && fold(&n.title) == wanted) {
             return Err(io::ErrorKind::AlreadyExists.into());
         }
         if fold(&old.title) == wanted {
@@ -259,6 +261,37 @@ mod tests {
         assert_eq!(fs::read_to_string(d.path().join("Bar.md")).unwrap(), "kept");
         assert!(d.path().join(".Bar.md.rename").exists(), "never replaces a note");
         assert!(d.path().join(".other.tmp").exists());
+    }
+    // macOS only: elsewhere NFC and NFD names are two files. APFS accepts an NFD name and finds it by its NFC spelling.
+    #[cfg(target_os = "macos")] #[test] fn rename_a_note_listed_nfd_is_not_its_own_twin() {
+        for (to, ext) in [("Cafe", "md"), ("CAF\u{c9}", "md"), ("Other", "md"), ("Caff\u{e8}", "md"), ("Cafe", "txt")] {
+            let d = tempfile::tempdir().unwrap();
+            let s = Store::new(d.path().to_path_buf());
+            fs::write(d.path().join(format!("Cafe\u{301}.{ext}")), "x").unwrap();
+            let from = d.path().join(format!("Caf\u{e9}.{ext}"));
+            let p = s.rename(&from, to).unwrap_or_else(|e| panic!("{to}: {e}"));
+            let names: Vec<String> = fs::read_dir(d.path()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+            assert_eq!(names, vec![format!("{to}.{ext}")], "{to}");
+            assert_eq!(p.file_name().unwrap().to_string_lossy(), format!("{to}.{ext}"));
+        }
+    }
+    #[cfg(target_os = "macos")] #[test] fn rename_still_refused_for_a_real_twin_when_listed_nfd() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Store::new(d.path().to_path_buf());
+        fs::write(d.path().join("Cafe\u{301}.md"), "x").unwrap();
+        fs::write(d.path().join("cafe.txt"), "y").unwrap();
+        let other = d.path().join("Other.md"); fs::write(&other, "z").unwrap();
+        assert_eq!(s.rename(&other, "Cafe").unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        let nfc = d.path().join("Caf\u{e9}.md");
+        assert_eq!(s.rename(&nfc, "cafe").unwrap_err().kind(), io::ErrorKind::AlreadyExists); // cafe.txt holds it
+    }
+    #[cfg(target_os = "macos")] #[test] fn case_only_rename_of_an_nfc_note_works() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Store::new(d.path().to_path_buf());
+        fs::write(d.path().join("Caf\u{e9}.md"), "x").unwrap();
+        s.rename(&d.path().join("Caf\u{e9}.md"), "CAF\u{c9}").unwrap();
+        let names: Vec<String> = fs::read_dir(d.path()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, vec!["CAF\u{c9}.md"]);
     }
     #[test] fn rename_onto_existing_non_note_refused() {
         let d = tempfile::tempdir().unwrap();
