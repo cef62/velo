@@ -86,6 +86,18 @@ test("stale clean reload ignored when edited during openNote", async () => {
   expect(text).toBe("typed");
 });
 
+test("a reload whose setText throws leaves baseHash old, so the next save conflicts instead of overwriting the disk text", async () => {
+  const setText = vi.fn().mockImplementationOnce((t: string) => void (text = t)).mockImplementationOnce(() => { throw new RangeError("boom"); }).mockImplementation((t: string) => void (text = t));
+  const { c, d } = mk({ setText });
+  text = "base";
+  c.external("a.md");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(setText).toHaveBeenCalledTimes(2); // load, then the reload whose throw was swallowed
+  type(c, "typed");
+  await c.flush();
+  expect(d.saveNote).toHaveBeenCalledWith("a.md", "typed", "h0"); // not "hd": the outside change was never applied
+});
+
 test("latest(): last request wins", () => {
   const g = latest();
   const a = g();

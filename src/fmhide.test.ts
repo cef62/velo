@@ -256,6 +256,25 @@ test("reloadChanges: the nesting shape that made patience quadratic and overflow
   expect(applyAll(x, cs)).toBe(y);
 });
 
+test("reloadChanges: 1000 changed 16 KB lines sharing a long prefix cost integer compares, not string compares", () => {
+  const P = "p".repeat(16 * 1024 - 6);
+  const x = lines(1000, (i) => P + String(i).padStart(6, "0")).join("\n"), y = lines(1000, (i) => P + String(i + 500000).padStart(6, "0")).join("\n");
+  const t = performance.now();
+  const cs = reloadChanges(x, y);
+  expect(performance.now() - t).toBeLessThan(150); // about 430 ms when lines were compared as strings
+  expect(applyAll(x, cs)).toBe(y);
+});
+
+test("reloadChanges: the nesting shape at D = 100k is bounded by the shared work budget, not just the depth cap", () => {
+  const D = 100000, o = Array(1000).fill("f"), n = Array(1000).fill("g");
+  for (let d = 1; d <= D; d++) { o.push(`m${d}`); if (d > 1) o.push(`m${d - 1}`); n.push(`m${d}`); }
+  const [x, y] = [o.join("\n"), n.join("\n")];
+  const t = performance.now();
+  const cs = reloadChanges(x, y);
+  expect(performance.now() - t).toBeLessThan(300); // about 870 ms with only the depth cap
+  expect(applyAll(x, cs)).toBe(y);
+});
+
 test("reloadChanges: a last line without a newline matches the same line once a newline follows (and back)", () => {
   for (const [a, b, at, kept] of [["a\nb\nfoo", "a\nB\nfoo\nbar", 5, "foo"], ["a\nB\nfoo\nbar", "a\nb\nfoo", 5, "foo"], ["head\nkeep caret here", "HEAD\nkeep caret here\ntail", 8, "keep caret here"], ["a\nb\nfoo\n", "a\nB\nfoo", 5, "foo"]] as const) {
     check(a, b);
