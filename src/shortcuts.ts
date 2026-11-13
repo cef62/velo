@@ -77,7 +77,7 @@ export const LABELS: Record<Action, string> = {
   command_palette: "Command palette",
   quit: "Quit velo",
   reset_window: "Reset window position and size",
-  check_updates: "Check for Updates…",
+  check_updates: "Check for Updates",
 };
 
 type Ev = Pick<KeyboardEvent, "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">;

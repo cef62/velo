@@ -49,7 +49,7 @@ test("reset window is a palette command", () => {
 });
 
 test("check for updates is a palette command", () => {
-  expect(paletteSearch("update", base)[0]).toMatchObject({ action: "check_updates", label: "Check for Updates…" });
+  expect(paletteSearch("update", base)[0]).toMatchObject({ action: "check_updates", label: "Check for Updates" });
 });
 
 test("archive entry reads Archive or Unarchive for the open note and needs one", () => {
