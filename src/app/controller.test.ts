@@ -3942,7 +3942,7 @@ test("after the unlock is cancelled, the note shown again is the current one and
   await shown; await settle();
   expect(store.get().unlocking).toBe(false);
   expect(shownPath(store.get())).toBe(P("A")); // the lock screen is gone: A is visible again
-  expect(store.get().sel).toBe(0); // the list highlight (and its focus) follow: ⌘⌫ there names the note it trashes
+  expect(store.get().sel).toBe(1); // as on main: the highlight stays on L's row (the next arrow moves on from it)
   c.runAction("archive_note"); await settle();
   expect(api.setArchived).toHaveBeenCalledWith(P("A"), true);
 });
@@ -4060,12 +4060,32 @@ test("Escape on an unlock opened from search results that do not list the open n
   expect(t.lockScreen()).toBe(true); // Enter asks for L again
 });
 
-test("Escape on an unlock opened from the timeline moves its selection back to the note shown (#126)", async () => {
+test("Escape on an unlock opened from the timeline leaves its selection on the locked row, as on main (#126)", async () => {
   const t = await lockedSetup();
   const row = (title: string) => ({ path: P(title), title }) as unknown as TimelineRow;
   t.store.set((s) => ({ paneMode: "timeline", timeline: { ...s.timeline, rows: [row("A"), row("L")], sel: P("L") } }));
   const shown = t.c.show(P("L")); await settle(); // a click on L's timeline row
   t.answer(false);
   await shown; await settle();
-  expect(t.store.get().timeline.sel).toBe(P("A"));
+  expect(t.store.get().timeline.sel).toBe(P("L")); // its focus stays there too: arrows move on from L
+});
+
+test("arrowing onto a locked row, Escape, and arrowing on moves past it in both directions, as on main (#126)", async () => {
+  const t = await lockedSetup(); // rows A, L, C; A open
+  const arrow = async (d: 1 | -1) => {
+    const stepped = t.c.step(d); await settle();
+    if (t.lockScreen()) t.answer(false); // Escape
+    await stepped; await settle();
+  };
+  await arrow(1); // onto L: its unlock, then Escape
+  expect(t.store.get().sel).toBe(1);
+  expect(t.store.get().openPath).toBe(P("A"));
+  await arrow(1);
+  expect(t.store.get().openPath).toBe(P("C")); // the row after L, not L again
+  expect(t.store.get().sel).toBe(2);
+  await arrow(-1); // back onto L, Escape
+  expect(t.store.get().sel).toBe(1);
+  await arrow(-1);
+  expect(t.store.get().openPath).toBe(P("A")); // the row before L
+  expect(t.store.get().sel).toBe(0);
 });

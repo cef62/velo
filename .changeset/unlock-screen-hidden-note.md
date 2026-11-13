@@ -2,4 +2,4 @@
 "velo": patch
 ---
 
-Fixed a shortcut deleting, renaming, archiving or locking the previously open note while it was hidden behind a locked note's unlock screen, the side panel showing that hidden note, today's note opening behind the unlock screen, and the list highlight staying on the locked note after cancelling its unlock.
+Fixed shortcuts and the command palette acting on the note hidden behind a locked note's unlock screen, which could delete or rename it, and the side panel showing that hidden note; opening today's note or a link now dismisses the unlock screen.
