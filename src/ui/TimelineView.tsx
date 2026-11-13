@@ -5,10 +5,11 @@ import { listRow, sectionHeader } from "styled-system/recipes";
 import type { TimelineRow } from "../api";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
-import { Badge, Spinner } from "@/components/ui";
+import { Spinner } from "@/components/ui";
 import { rowHeight } from "../app/fontscale";
 import { visibleRange } from "../list";
 import { filtersLine, groupByDay } from "../timeline";
+import { ArchivedBadge, rowBox } from "./ArchivedBadge";
 import { useStore } from "./useStore";
 
 const PAD = 4; // space around the rows inside the scroll content (css p: "1")
@@ -110,7 +111,7 @@ export function TimelineView({ controller, store }: { controller: Controller; st
           </div>
         ) : (
           <div style={{ padding: PAD }}>
-            <div role="listbox" id="timeline-list" aria-label="Timeline" onKeyDown={move} style={{ position: "relative", height: items.length * rowH }}>
+            <div role="listbox" id="timeline-list" aria-label="Timeline" className={rowBox} onKeyDown={move} style={{ position: "relative", height: items.length * rowH }}>
               {idx.map((i) => {
                 const it = items[i];
                 const pos = { position: "absolute", left: 0, right: 0, top: i * rowH, height: rowH } as const;
@@ -138,7 +139,7 @@ export function TimelineView({ controller, store }: { controller: Controller; st
                     <div className={css({ display: "flex", alignItems: "center", gap: "2.5", minW: "0" })}>
                       {r.locked && <span className={c.lock}><Lock aria-label="Locked" /></span>}
                       <span className={c.title}>{r.title}</span>
-                      {r.archived && <Badge size="sm" variant="subtle" flex="none">archived</Badge>}
+                      {r.archived && <ArchivedBadge />}
                       <span className={c.date}><span className={srOnly}>{it.label}, </span>{time.format(r.date)}</span>
                     </div>
                     <span className={c.snippet}>{r.locked ? "" : r.snippet}</span>
