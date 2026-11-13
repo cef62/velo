@@ -80,7 +80,7 @@ The Show archived notes button sits in the bar above the list, in the Notes, Tas
 
 Renaming or locking an archived note keeps it archived. The list is stored in `.velo/archived` inside your notes folder, one title per line.
 
-If velo cannot update `.velo/archived` while it renames, deletes, merges, creates, locks or saves a note, the note change still happens (or fails for its own reason, shown as usual) and a banner under the title bar says the list could not be updated. The banner stays, whatever you open or save next, until you dismiss it, archive or unarchive a note, or switch notes folder. A list that cannot be read is only written to the log. An agent is told in its tool result, except when its change went through the note open in velo's editor: then only the banner shows.
+If velo cannot update `.velo/archived` while it renames, deletes, merges, creates, locks, unlocks or saves a note, the note change still happens (or fails for its own reason, shown as usual) and a banner under the title bar says the list could not be updated. The banner stays, whatever you open or save next, until you dismiss it, archive or unarchive a note, or switch notes folder. A list that cannot be read is only written to the log. An agent is told in its tool result, except when its change went through the note open in velo's editor: then only the banner shows.
 
 Known limits:
 

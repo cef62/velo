@@ -3281,7 +3281,7 @@ test("changing the switch reloads every listing", async () => {
 });
 
 test("a list-write failure stays through navigation and refresh until dismissed", async () => {
-  const { c, store } = setup();
+  const { c, store, calls } = setup();
   await c.start(); await settle();
   c.onArchiveError("permission denied");
   expect(store.get().archiveErr).toBe("The archived-notes list (.velo/archived) could not be updated: permission denied");
@@ -3290,8 +3290,10 @@ test("a list-write failure stays through navigation and refresh until dismissed"
   await c.onNotesChanged(["/n/A.md"]); await settle();
   await c.refreshTitles(); await settle();
   expect(store.get().archiveErr).toBe("The archived-notes list (.velo/archived) could not be updated: permission denied");
+  const focused = calls.filter((x) => x[0] === "focusSearch").length;
   c.dismissArchiveErr();
   expect(store.get().archiveErr).toBe("");
+  expect(calls.filter((x) => x[0] === "focusSearch").length - focused).toBe(1); // the banner unmounts: focus goes to search
 });
 
 test("a list-write failure during a save with a conflict copy stays after the save status settles (#95)", async () => {
@@ -3349,6 +3351,16 @@ test("a list-write failure is dropped when the notes folder changes", async () =
   const s = await api.getSettings();
   expect(await c.saveSettings({ ...s, notes_dir: "/other" })).toBeNull();
   expect(store.get().archiveErr).toBe("");
+});
+
+test("a list-write failure about the new folder survives the folder change", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  c.onArchiveError("old folder");
+  api.setSettings.mockImplementationOnce(async () => { c.onArchiveError("permission denied"); }); // reported before the reply
+  const s = await api.getSettings();
+  expect(await c.saveSettings({ ...s, notes_dir: "/other" })).toBeNull();
+  expect(store.get().archiveErr).toBe("The archived-notes list (.velo/archived) could not be updated: permission denied");
 });
 
 test("a list-write failure is dropped when a folder is chosen", async () => {

@@ -1806,6 +1806,7 @@ export class Controller {
     // the open note belongs to the old folder: save it while that folder is still the vault (an agent write may have
     // landed while the dialog was open)
     if (next.notes_dir !== cur.notes_dir && !(await this.editor.flush())) return "Save the open note first";
+    const seq = this.archiveErrSeq; // a failure reported after this is about the new folder: it must stay
     try {
       await this.updateSettings(() => this.api.setSettings(next)); // on hotkey registration failure this throws and the old hotkey stays
     } catch (err) {
@@ -1819,7 +1820,8 @@ export class Controller {
       // saved above; anything typed since could only fail to save into the new folder
       if (!this.editor.unload()) this.editor.discard();
       this.closedDoc();
-      this.store.set({ phase: "ready", archiveErr: "" }); // a list failure was about the old folder's list
+      this.store.set({ phase: "ready" });
+      if (seq === this.archiveErrSeq) this.store.set({ archiveErr: "" }); // a list failure was about the old folder's list
       await this.runSearch(true);
       void this.refreshTitles();
     } else if (next.sort !== cur.sort) await this.resort();
@@ -1831,8 +1833,10 @@ export class Controller {
     try {
       const dir = await this.ui.chooseDirectory();
       if (typeof dir !== "string") return;
+      const seq = this.archiveErrSeq; // a failure reported after this is about the new folder: it must stay
       await this.updateSettings((cur) => this.api.setSettings({ ...cur, notes_dir: dir }));
-      this.store.set({ phase: "ready", archiveErr: "" }); // a list failure was about another folder's list
+      this.store.set({ phase: "ready" });
+      if (seq === this.archiveErrSeq) this.store.set({ archiveErr: "" }); // a list failure was about another folder's list
       await this.runSearch(true);
       void this.refreshTitles();
     } catch (e) {
@@ -1879,6 +1883,7 @@ export class Controller {
 
   dismissConflict() {
     this.store.set({ conflict: null });
+    this.focusSearch(); // the banner unmounts: focus must not fall to <body>
   }
 
   /** The background check found a new version (the backend announces each version once). */
@@ -2219,6 +2224,7 @@ export class Controller {
 
   dismissArchiveErr() {
     this.store.set({ archiveErr: "" });
+    this.focusSearch(); // the banner unmounts: focus must not fall to <body>
   }
 
   onIndexError(message: string) {
