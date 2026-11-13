@@ -48,6 +48,10 @@ test("reset window is a palette command", () => {
   expect(paletteSearch("reset window", base)[0]).toMatchObject({ action: "reset_window", label: "Reset window position and size" });
 });
 
+test("check for updates is a palette command", () => {
+  expect(paletteSearch("update", base)[0]).toMatchObject({ action: "check_updates", label: "Check for Updates…" });
+});
+
 test("archive entry reads Archive or Unarchive for the open note and needs one", () => {
   expect(paletteSearch("archive note", base)[0]).toMatchObject({ action: "archive_note", label: "Archive note", context: "Velo roadmap" });
   expect(paletteSearch("archive", { ...base, archived: true }).find((i) => i.action === "archive_note")?.label).toBe("Unarchive note");
