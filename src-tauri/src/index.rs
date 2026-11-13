@@ -393,13 +393,12 @@ impl Index {
             }
             Ok(())
         })();
-        match r {
-            Ok(()) => Ok(self.db.execute_batch(if outer { "COMMIT" } else { "RELEASE remove" })?),
-            Err(e) => {
-                _ = self.db.execute_batch(if outer { "ROLLBACK" } else { "ROLLBACK TO remove; RELEASE remove" });
-                Err(e)
-            }
+        // A failed COMMIT or RELEASE (disk full) can leave the transaction or savepoint open: end it too.
+        let r = r.and_then(|()| Ok(self.db.execute_batch(if outer { "COMMIT" } else { "RELEASE remove" })?));
+        if r.is_err() {
+            _ = self.db.execute_batch(if outer { "ROLLBACK" } else { "ROLLBACK TO remove; RELEASE remove" });
         }
+        r
     }
 
     /// Replaces the archived set (titles are folded). All or nothing; not for use inside a `begin()` batch.
@@ -1129,6 +1128,34 @@ mod tests {
             }
         }
         assert!(failed > 10, "the limit never made the upsert fail");
+    }
+    /// A deferred foreign key violation makes COMMIT fail and leaves the transaction open (SQLite keeps it so the
+    /// caller can fix the data). `max_page_count` cannot do it: deletes free pages, they never allocate. Inside a batch
+    /// RELEASE of a nested savepoint cannot fail this way (deferred keys are checked at the outermost end only).
+    #[test] fn failed_outermost_remove_leaves_autocommit() {
+        let nf = |t: &str| NoteFile { title: t.into(), encrypted: false };
+        let m = Meta { mtime: 1, size: 1, birth: 0 };
+        for erase in [false, true] {
+            let mut i = idx(&[("a.md", "alpha", 1)]);
+            i.upsert("b.md", &nf("b"), &m, Some("beta")).unwrap();
+            i.db.execute_batch(
+                "PRAGMA foreign_keys=ON;
+                 CREATE TEMP TABLE parent(id INTEGER PRIMARY KEY);
+                 CREATE TEMP TABLE child(p INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED);
+                 CREATE TEMP TRIGGER bad AFTER DELETE ON notes BEGIN INSERT INTO child VALUES(1); END;",
+            ).unwrap();
+            let r = if erase { i.remove_erasing("a.md") } else { i.remove("a.md") };
+            assert!(r.is_err(), "COMMIT did not fail (erase={erase})");
+            assert!(i.db.is_autocommit(), "left a transaction open (erase={erase})");
+            assert_eq!(i.known().unwrap().len(), 2); // rolled back
+            i.db.execute_batch("DROP TRIGGER bad").unwrap();
+            i.remove("a.md").unwrap();
+            assert_eq!(i.known().unwrap().len(), 1);
+            i.begin().unwrap(); // not stuck in a stale transaction
+            i.remove("b.md").unwrap();
+            i.commit().unwrap();
+            assert!(i.known().unwrap().is_empty());
+        }
     }
     /// Re-indexing runs every DELETE once per note: a scan instead of an index search is O(notes²) over a rescan.
     #[test] fn note_deletes_search_an_index() {
