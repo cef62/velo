@@ -3564,7 +3564,8 @@ test("Enter on the exact title of a hidden archived note opens it by path, creat
 test("Enter on an exact alias of a hidden archived note opens that note (#87)", async () => {
   const { c, api, store, notes } = await withHiddenB();
   api.listTitles.mockResolvedValue(["A", "B", "C", "Bee"]);
-  api.listLinkTargets.mockResolvedValue(["A", "B", "C"].map((t) => ({ name: t, title: t, path: P(t), modified: 0, locked: false })).concat([{ name: "Bee", title: "B", path: P("B"), modified: 0, locked: false }]));
+  const base = api.listLinkTargets.getMockImplementation()!;
+  api.listLinkTargets.mockImplementation(async (all) => [...(await base(all)), ...(all ? [{ name: "Bee", title: "B", path: P("B"), modified: 0, locked: false }] : [])]);
   await c.refreshTitles();
   c.setQuery("Bee"); await settle();
   await c.enter();
@@ -3615,13 +3616,13 @@ test("a locked hidden archived title goes through the normal open path (passphra
 test("a query change during the confirming search voids that Enter; a second Enter opens once (#87)", async () => {
   const { c, api, store } = await withHiddenB();
   c.setQuery("B"); await settle();
-  const d = deferred<Page>();
-  api.search.mockImplementationOnce(() => d.promise);
+  const d = deferred<LinkTarget[]>();
+  api.listLinkTargets.mockImplementationOnce(() => d.promise);
   const first = c.enter();
   const second = c.enter();
   await settle();
   c.setQuery("zzz");
-  d.resolve({ hits: [{ ...hit("B"), archived: true }], has_more: false, total: 1, hidden: 0 });
+  d.resolve(await api.listLinkTargets(true));
   await Promise.all([first, second]); await settle();
   expect(api.openNote).not.toHaveBeenCalledWith(P("B"));
   expect(api.openOrCreate).not.toHaveBeenCalled();
@@ -3720,20 +3721,20 @@ test("a stale title-cache entry with no results behaves as on main: Enter create
   expect(Object.keys(notes)).toContain("Ghost");
 });
 
-test("a failing confirm search with the query unchanged falls back to row 0 (#87)", async () => {
+test("a failing confirm lookup with the query unchanged falls back to row 0 (#87)", async () => {
   const { c, api, store } = await withHiddenB();
   c.setQuery("B"); await settle();
-  api.search.mockRejectedValueOnce("boom");
+  api.listLinkTargets.mockRejectedValueOnce("boom");
   await c.enter();
   expect(store.get().openPath).toBe(P("A"));
   expect(api.openOrCreate).not.toHaveBeenCalled();
 });
 
-test("a failing confirm search after the query changed voids that Enter: nothing opens, nothing is created (#87)", async () => {
+test("a failing confirm lookup after the query changed voids that Enter: nothing opens, nothing is created (#87)", async () => {
   const { c, api, store, notes } = await withHiddenB();
   c.setQuery("B"); await settle();
-  const d = deferred<Page>();
-  api.search.mockImplementationOnce(() => d.promise);
+  const d = deferred<LinkTarget[]>();
+  api.listLinkTargets.mockImplementationOnce(() => d.promise);
   const entered = c.enter();
   await settle();
   api.search.mockImplementation(noHits);
@@ -3748,13 +3749,88 @@ test("a failing confirm search after the query changed voids that Enter: nothing
 test("arrowing to another row during the confirm search voids that Enter; the arrowed row stays open (#87)", async () => {
   const { c, api, store } = await withHiddenB();
   c.setQuery("B"); await settle();
-  const d = deferred<Page>();
-  api.search.mockImplementationOnce(() => d.promise);
+  const d = deferred<LinkTarget[]>();
+  api.listLinkTargets.mockImplementationOnce(() => d.promise);
   const entered = c.enter();
   await settle();
   await c.step(1); await settle(); // step() opens the row itself
-  d.resolve({ hits: [{ ...hit("B"), archived: true }], has_more: false, total: 1, hidden: 0 });
+  d.resolve(await api.listLinkTargets(true));
   await entered; await settle();
   expect(api.openNote).not.toHaveBeenCalledWith(P("B"));
   expect(store.get().openPath).toBe(P("C"));
+});
+
+// #107: each guard of the confirm has its own test; each fails when only that guard is removed
+// Enter's confirm starts; `during` runs while its lookup is in flight; the lookup then lands.
+async function confirmWith(t: Awaited<ReturnType<typeof withHiddenB>>, during: () => Promise<void> | void) {
+  const d = deferred<LinkTarget[]>();
+  t.api.listLinkTargets.mockImplementationOnce(() => d.promise);
+  const entered = t.c.enter();
+  await settle();
+  await during();
+  d.resolve(await t.api.listLinkTargets(true));
+  await entered; await settle();
+}
+
+test("another note opened during the confirm voids that Enter, sel unchanged (#107)", async () => {
+  const t = await withHiddenB();
+  t.c.setQuery("B"); await settle();
+  await confirmWith(t, async () => { await t.c.openTitle("C", "wikilink"); t.store.set({ sel: 0 }); });
+  expect(t.api.openNote).not.toHaveBeenCalledWith(P("B"));
+  expect(t.store.get().openPath).toBe(P("C"));
+});
+
+test("a row selected past 0 during the confirm voids that Enter, query and open note unchanged (#107)", async () => {
+  const t = await withHiddenB();
+  t.c.setQuery("B"); await settle();
+  await confirmWith(t, () => t.store.set({ sel: 1 }));
+  expect(t.api.openNote).not.toHaveBeenCalledWith(P("B"));
+});
+
+test("a changed query during the confirm voids that Enter, sel and open note unchanged (#107)", async () => {
+  const t = await withHiddenB();
+  t.c.setQuery("B"); await settle();
+  await confirmWith(t, () => t.store.set({ query: "Bx" })); // no search runs: only the query guard can stop it
+  expect(t.api.openNote).not.toHaveBeenCalledWith(P("B"));
+});
+
+test("a watcher refresh during the confirm does not eat the Enter (#107)", async () => {
+  const t = await withHiddenB();
+  t.c.setQuery("B"); await settle();
+  await confirmWith(t, async () => { await t.c.onNotesChanged(["/n/C.md"]); }); // bumps searchSeq
+  expect(t.store.get().openPath).toBe(P("B"));
+});
+
+test("a visible note carrying the archived note's name as alias wins: Enter opens the selected row (#107)", async () => {
+  const { c, api, store } = await withHiddenB();
+  const base = api.listLinkTargets.getMockImplementation()!;
+  api.listLinkTargets.mockImplementation(async (all) => [...(await base(all)), { name: "B", title: "C", path: P("C"), modified: 0, locked: false }]);
+  c.setQuery("B"); await settle();
+  await c.enter();
+  expect(store.get().openPath).toBe(P("A"));
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+});
+
+test("the confirm ignores the no-links filter and asks no paged search (#107)", async () => {
+  const { c, api, store } = await withHiddenB();
+  store.set({ noLinks: true });
+  c.setQuery("B"); await settle();
+  const searches = api.search.mock.calls.length;
+  await c.enter();
+  expect(store.get().openPath).toBe(P("B"));
+  expect(api.search.mock.calls.length).toBe(searches);
+});
+
+test("a rejected link-target lookup after the query changed voids that Enter (#107)", async () => {
+  const t = await withHiddenB();
+  t.c.setQuery("B"); await settle();
+  const d = deferred<LinkTarget[]>();
+  t.api.listLinkTargets.mockImplementationOnce(() => d.promise);
+  const entered = t.c.enter();
+  await settle();
+  t.store.set({ query: "Bx" });
+  d.reject("boom");
+  await entered; await settle();
+  expect(t.api.openNote).not.toHaveBeenCalledWith(P("B"));
+  expect(t.api.openOrCreate).not.toHaveBeenCalled();
 });

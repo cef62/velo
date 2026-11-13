@@ -1,5 +1,5 @@
 import { CircleAlert, Lock } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { css } from "styled-system/css";
 import { lockScreen } from "styled-system/recipes";
 import type { UiPort } from "../app/ports";
@@ -19,12 +19,6 @@ export function LockScreen({ req, finish }: { req: Req; finish: (ok: boolean) =>
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const pw = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    // the panel covers the previous note's title bar and banners: their buttons must not be reachable with Shift+Tab
-    const els = [...document.querySelectorAll<HTMLElement>("[data-titlebar], [data-banner]")];
-    els.forEach((e) => e.setAttribute("inert", ""));
-    return () => els.forEach((e) => e.removeAttribute("inert"));
-  }, []);
   const submit = async (e: { preventDefault(): void }) => {
     e.preventDefault();
     if (busy) return;

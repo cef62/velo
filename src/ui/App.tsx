@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { css } from "styled-system/css";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
@@ -52,6 +52,8 @@ const top = css({ flex: "none", minW: "0", "[data-layout=horizontal] &": { gridC
 export function App({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const previewOn = useStore(store, (s) => s.previewOn);
   const paneMode = useStore(store, (s) => s.paneMode);
+  const setup = useStore(store, (s) => s.phase === "setup");
+  const [locked, setLocked] = useState(false); // the inline unlock is showing
   // The hosts' layout effects (attachEditor/attachPreview) run before this effect, so start() sees them; once only under StrictMode.
   const started = useRef(false);
   const root = useRef<HTMLDivElement>(null);
@@ -74,14 +76,16 @@ export function App({ controller, store }: { controller: Controller; store: Stor
       <Divider store={store} app={root} />
       <div className={pane}>
       <section className={note}>
-        <TitleBar controller={controller} store={store} />
-        <ConflictBanner controller={controller} store={store} />
-        <ArchiveBanner controller={controller} store={store} />
-        <TagBar controller={controller} store={store} />
-        <EditorHost controller={controller} />
-        <PreviewHost controller={controller} />
-        {/* the editor stays mounted under the first-run screen; the inline unlock covers the note area the same way */}
-        <PassphraseDialog />
+        {/* The first-run screen and the inline unlock cover this group. It is inert from the same state that shows them, so a banner that mounts later is covered too; `contents` keeps the section's flex layout. */}
+        <div className={css({ display: "contents" })} inert={locked || setup}>
+          <TitleBar controller={controller} store={store} />
+          <ConflictBanner controller={controller} store={store} />
+          <ArchiveBanner controller={controller} store={store} />
+          <TagBar controller={controller} store={store} />
+          <EditorHost controller={controller} />
+          <PreviewHost controller={controller} />
+        </div>
+        <PassphraseDialog onLock={setLocked} />
         <FirstRun controller={controller} store={store} />
       </section>
       <SidePanel controller={controller} store={store} />
