@@ -63,3 +63,7 @@ export const chipTags = (tags: TagCount[], selected: string[]): TagCount[] => [
   ...tags,
   ...selected.filter((s) => !tags.some((t) => fold(t.tag) === fold(s))).map((tag) => ({ tag, count: 0 })),
 ];
+
+/** Panel button to focus after the focused chip at index `i` vanished. k = saved chips left, n = buttons left. Saved delete: the chip now at that place, the one before, or No links. Tag deselect: the next chip, else the one before, else No links. */
+export const focusAfterRemoval = (kind: "saved" | "tag", i: number, k: number, n: number): number =>
+  kind === "saved" ? (k === 0 ? 0 : Math.min(i, k - 1)) : Math.min(i, n - 1);

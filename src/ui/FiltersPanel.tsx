@@ -6,7 +6,7 @@ import type { AppState, Store } from "../app/store";
 import { Button, Kbd } from "@/components/ui";
 import { activeFilterCount, appliedSearch } from "../saved";
 import { fold } from "../search";
-import { chipTags } from "../tags";
+import { chipTags, focusAfterRemoval } from "../tags";
 import { formatBinding, NONE } from "../shortcuts";
 import { useStore } from "./useStore";
 
@@ -35,17 +35,17 @@ export function FiltersPanel({ controller, store }: { controller: Controller; st
   const menuAt = useRef<number | null>(null); // the saved chip whose menu opened last
   const tagAt = useRef<number | null>(null); // the tag chip just clicked; each anchor is consumed only by its own change
   // Removing the focused chip drops focus to <body>: move it to the chip now at that place, the one before, or No links.
-  const refocus = (at: { current: number | null }) => {
+  const refocus = (at: { current: number | null }, kind: "saved" | "tag") => {
     const i = at.current;
     at.current = null;
     if (i === null || document.activeElement !== document.body || !group.current) return;
     const btns = group.current.querySelectorAll<HTMLButtonElement>("button");
-    const to = i >= k ? Math.min(i, btns.length - 1) : k === 0 ? 0 : Math.min(i, k - 1);
+    const to = focusAfterRemoval(kind, i, k, btns.length);
     setCur(to);
     btns[to]?.focus();
   };
-  useEffect(() => refocus(menuAt), [k]);
-  useEffect(() => refocus(tagAt), [visibleTags, selectedTags]);
+  useEffect(() => refocus(menuAt, "saved"), [k]);
+  useEffect(() => refocus(tagAt, "tag"), [visibleTags, selectedTags]);
   if (!tagPanelOpen) return null;
   const tags = chipTags(visibleTags, selectedTags); // derived per render: no stale or missing chip
   const move = (to: number) => {
@@ -146,8 +146,8 @@ export function FiltersPanel({ controller, store }: { controller: Controller; st
             const on = selectedTags.some((x) => fold(x) === fold(t.tag));
             const c = tagChip({ selected: on });
             return (
-              <button key={t.tag} type="button" className={c.root} aria-pressed={on} tabIndex={stop(k + i + 1)} onFocus={() => setCur(k + i + 1)} onClick={() => {
-                tagAt.current = k + i + 1;
+              <button key={t.tag} type="button" className={c.root} aria-pressed={on} tabIndex={stop(k + i + 1)} onFocus={() => setCur(k + i + 1)} onClick={(e) => {
+                if (e.detail === 0) tagAt.current = k + i + 1; // keyboard activation only: a mouse click must not pull focus into the panel (WKWebView leaves body focused)
                 controller.toggleTagFilter(t.tag);
               }}>
                 #{t.tag} <span className={c.count}>{t.count}</span>
