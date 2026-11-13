@@ -26,7 +26,12 @@ const W = {
 // Below the first number the tabs go icon-only; the narrowest pane (MIN_LIST_W) fits that for every mode.
 const PANE_FULL = { notes: [269, 357, 460], tasks: [235, 308, 410], timeline: [271, 368, 456] } as const
 /** Notes count beside the tabs: at most 5 characters whatever the vault size; never rounds up (10,500 -> "10K"). */
-export const noteCount = (n: number) => (n < 10000 ? n.toLocaleString('en-US') : new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 0, roundingMode: 'trunc' } as Intl.NumberFormatOptions).format(n)) // roundingMode is missing from the TS lib
+export const noteCount = (n: number) => {
+  if (n < 10000) return n.toLocaleString('en-US')
+  // Floor to the unit ourselves (K, M, B, T): Intl's roundingMode is ignored by old WebKitGTK, which would round 99,999 up to "100K".
+  const unit = 10 ** Math.min(12, 3 * Math.floor((String(Math.trunc(n)).length - 1) / 3))
+  return new Intl.NumberFormat('en-US', { notation: 'compact' }).format(Math.floor(n / unit) * unit)
+}
 /** The exact total with its unit, as the count would read uncapped. */
 export const notesText = (n: number) => `${n.toLocaleString('en-US')} ${n === 1 ? 'note' : 'notes'}`
 /** Extra text for the Notes tab (tooltip, accessible name) when the count beside the tabs is hidden or capped; else ''. */
