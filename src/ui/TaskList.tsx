@@ -10,11 +10,12 @@ import { renderInline } from "../preview";
 import { highlightRanges, markHtml } from "../highlight";
 import { archivedLabel } from "../list";
 import { byNote, sameTask } from "../tasks";
+import { ArchivedBadge, rowBox } from "./ArchivedBadge";
 import { HighlightedText } from "./HighlightedText";
 import { useStore } from "./useStore";
 
 const pane = css({ flex: "1", display: "flex", flexDirection: "column", minH: "0" }); // fills the left pane under its bar
-const scroller = css({ flex: "1", minH: "0", overflowY: "auto", p: "1" });
+const scroller = cx(rowBox, css({ flex: "1", minH: "0", overflowY: "auto", p: "1" }));
 const row = css({
   display: "flex",
   alignItems: "center",
@@ -107,13 +108,13 @@ const TaskRow = memo(function TaskRow({ t, overdue, query, controller, stop, onS
         <Checkbox.Control>
           <Checkbox.Indicator />
         </Checkbox.Control>
-        <Checkbox.HiddenInput aria-label={archivedLabel(t.text, t.archived)} tabIndex={-1} />
+        <Checkbox.HiddenInput aria-label={archivedLabel(t.text, t.archived && !showNote)} tabIndex={-1} />
       </Checkbox.Root>
       <div className={body}>
         <span className={text} aria-hidden="true" dangerouslySetInnerHTML={{ __html: html }} />
         {showNote && <span className={note}><HighlightedText text={t.title} query={query} /></span>}
       </div>
-      {t.archived && showNote && <Badge size="sm" variant="subtle" flex="none">archived</Badge>}
+      {t.archived && showNote && <ArchivedBadge list="task" />}
       {t.due && (
         <Badge size="sm" variant="subtle" colorPalette={overdue ? "red" : "gray"} flex="none" marginLeft="auto">
           {t.due}
@@ -193,9 +194,9 @@ export function TaskList({ controller, store }: { controller: Controller; store:
                           e.preventDefault();
                         }}
                       >
-                        <ChevronDown aria-hidden />
+                        <ChevronDown aria-hidden data-chevron="" />
                         <span data-title=""><HighlightedText text={n.title} query={query} /></span>
-                        {n.items[0].archived && <Badge size="sm" variant="subtle" flex="none">archived</Badge>}
+                        {n.items[0].archived && <ArchivedBadge list="head" />}
                         <span data-count="" className={countBadge()}>{n.items.length}</span>
                       </div>
                       {open && <div className={indent}>{n.items.map((t) => row(t, k, false))}</div>}

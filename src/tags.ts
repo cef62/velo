@@ -57,3 +57,13 @@ export const pruneSelection = (sel: string[], available: TagCount[]): string[] =
 /** Chips for the tag bar: note tags in order, flagged when in the active filter. */
 export const tagBarItems = (tags: string[], selected: string[]): { tag: string; selected: boolean }[] =>
   tags.map((tag) => ({ tag, selected: selected.some((s) => fold(s) === fold(tag)) }));
+
+/** Panel chips: tags with visible notes, plus every selected tag (count 0 when no visible note carries it), so the active filter can always be seen and cleared. */
+export const chipTags = (tags: TagCount[], selected: string[]): TagCount[] => [
+  ...tags,
+  ...selected.filter((s) => !tags.some((t) => fold(t.tag) === fold(s))).map((tag) => ({ tag, count: 0 })),
+];
+
+/** Panel button to focus after the focused chip at index `i` vanished. k = saved chips left, n = buttons left. Saved delete: the chip now at that place, the one before, or No links. Tag deselect: the next chip, else the one before, else No links. */
+export const focusAfterRemoval = (kind: "saved" | "tag", i: number, k: number, n: number): number =>
+  kind === "saved" ? (k === 0 ? 0 : Math.min(i, k - 1)) : Math.min(i, n - 1);

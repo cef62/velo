@@ -2,11 +2,12 @@ import { Lock } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { css } from "styled-system/css";
 import { listRow } from "styled-system/recipes";
-import { Badge, Button, Kbd, Spinner } from "@/components/ui";
+import { Button, Kbd, Spinner } from "@/components/ui";
 import { rowHeight } from "../app/fontscale";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { ago, hiddenText, visibleRange } from "../list";
+import { ArchivedBadge, rowBox } from "./ArchivedBadge";
 import { HighlightedText } from "./HighlightedText";
 import { useStore } from "./useStore";
 
@@ -92,7 +93,7 @@ export function NoteList({ controller, store }: { controller: Controller; store:
       <>
         {h.encrypted && <span className={c.lock}><Lock aria-hidden="true" /></span>}
         <span className={c.title}><HighlightedText text={h.title} query={query} /></span>
-        {h.archived && <Badge size="sm" variant="subtle" flex="none">archived</Badge>}
+        {h.archived && <ArchivedBadge list="notes" />}
       </>
     );
     const date = <span className={c.date}>{ago(h.mtime)}</span>;
@@ -153,7 +154,7 @@ export function NoteList({ controller, store }: { controller: Controller; store:
         </div>
       ) : (
         <div style={{ padding: PAD }}>
-        <div role="listbox" aria-label="Notes" tabIndex={sel < 0 || sel >= count ? 0 : undefined} style={{ position: "relative", height: (count + (hasMore ? 1 : 0)) * rowH }}>
+        <div role="listbox" aria-label="Notes" className={rowBox} tabIndex={sel < 0 || sel >= count ? 0 : undefined} style={{ position: "relative", height: (count + (hasMore ? 1 : 0)) * rowH }}>
           {rows}
           {hasMore && (
             <div className={loader} style={{ top: count * rowH, height: rowH }}>
