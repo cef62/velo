@@ -117,8 +117,8 @@ export class SaveController {
     this.d.openNote(path)
       .then((doc) => {
         if (target !== this.cur || v !== this.version || this.dirty || doc.hash === target.baseHash) return;
+        this.d.setText(doc.text); // baseHash moves only once the editor holds the disk text: a throw leaves the next save to conflict
         target.baseHash = doc.hash;
-        this.d.setText(doc.text);
       })
       .catch(() => {}); // file vanished: keep content, next save recreates it
   }
