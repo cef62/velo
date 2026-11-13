@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { Compartment, EditorSelection, EditorState, type Transaction } from "@codemirror/state";
 import { history, redo, undo } from "@codemirror/commands";
-import { frontMatterHide, middleChange, reloadSpec, replaceAll, stampSelection, undoHistory } from "./fmhide";
+import { frontMatterHide, middleChange, reloadChanges, reloadSpec, replaceAll, stampSelection, undoHistory } from "./fmhide";
 import { stampChange } from "./frontmatter";
 
 const FM = "---\ncreated: 1\n---\n"; // 19 chars
@@ -147,6 +147,81 @@ test("reloadSpec: CRLF text on an LF document is a minimal change ending in the 
   expect(r.doc.toString()).toBe("x\na\nb\nc");
   expect(r.selection.main.head).toBe(6); // moved with its text
   expect(reloadSpec(r, "x\r\na\r\nb\r\nc")).toBeNull(); // unchanged CRLF reload: nothing to do
+});
+
+test("reloadSpec: edits before and after the caret leave the caret and a selection on the same text", () => {
+  let s = mk(true, "head\nkeep caret here\ntail");
+  s = s.update({ selection: { anchor: 10, head: 15 } }).state; // "caret" on the middle line
+  s = s.update(reloadSpec(s, "HEAD\nkeep caret here\nTAIL")!).state;
+  expect(s.doc.toString()).toBe("HEAD\nkeep caret here\nTAIL");
+  expect(s.sliceDoc(s.selection.main.from, s.selection.main.to)).toBe("caret");
+  s = s.update({ selection: { anchor: 12 } }).state;
+  s = s.update(reloadSpec(s, "head2\nkeep caret here\ntail2")!).state;
+  expect(s.selection.main.head).toBe(12 + 1);
+});
+
+const lines = (n: number, f: (i: number) => string = (i) => `line ${i}`) => Array.from({ length: n }, (_, i) => f(i));
+const applyAll = (a: string, cs: { from: number; to: number; insert: string }[]) => {
+  let out = "", at = 0;
+  for (const c of cs) { expect(c.from).toBeGreaterThanOrEqual(at); expect(c.to).toBeGreaterThanOrEqual(c.from); out += a.slice(at, c.from) + c.insert; at = c.to; }
+  return out + a.slice(at);
+};
+const splitsPair = (t: string, i: number) => i > 0 && i < t.length && (t.charCodeAt(i - 1) & 0xfc00) === 0xd800 && (t.charCodeAt(i) & 0xfc00) === 0xdc00;
+const check = (a: string, raw: string) => {
+  const b = raw.replace(/\r\n?/g, "\n");
+  const cs = reloadChanges(a, b);
+  expect(applyAll(a, cs)).toBe(b);
+  for (const c of cs) { expect(splitsPair(a, c.from)).toBe(false); expect(splitsPair(a, c.to)).toBe(false); }
+  if (a === b) expect(cs).toEqual([]);
+  return cs;
+};
+
+test("reloadChanges: seeded random docs round-trip, sorted, disjoint, pair-safe; equal is empty", () => {
+  let seed = 12345;
+  const rnd = (n: number) => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return (seed >>> 8) % n; };
+  const pool = ["", "a", "b", "a", "dup", "dup", "😀", "😁x", "\ud83d", "\ude00", "line"]; // duplicates, empty lines, pairs, lone surrogates
+  const doc = () => lines(rnd(9), () => pool[rnd(pool.length)]).join(rnd(2) ? "\n" : "\r\n") + (rnd(2) ? "\n" : "");
+  for (let k = 0; k < 4000; k++) {
+    const a = doc().replace(/\r\n?/g, "\n");
+    check(a, rnd(4) ? doc() : a);
+  }
+});
+
+test("reloadChanges: duplicate-line traps, moved blocks, full replace, empty sides", () => {
+  const dups = lines(300, () => "same");
+  const a = dups.join("\n");
+  expect(check(a, [...dups.slice(0, 150), "extra", ...dups.slice(150)].join("\n")).length).toBe(1);
+  expect(check(a, dups.slice(1).join("\n")).length).toBe(1);
+  expect(check("A\nB\nC\nD", "B\nC\nD\nA").length).toBe(2); // A moved below
+  expect(check("a\nb\nc\nx\ny", "x\ny\nc\na\nb").length).toBeGreaterThan(0);
+  check("a\nb\nc", "x\ny\nz");
+  check("", "abc\n");
+  check("abc\n", "");
+  check("", "");
+  check("a\nb", "a\nb\n"); // trailing newline only
+});
+
+test("reloadChanges: a gap above the budget with no unique line is one middle change", () => {
+  const a = lines(1100, (i) => (i % 2 ? "a" : "b")).join("\n"), b = lines(1100, (i) => (i % 2 ? "b" : "a")).join("\n");
+  expect(check(a, b)).toEqual([middleChange(a, b)]);
+});
+
+test("reloadChanges: a big region with unique lines still gives separate hunks", () => {
+  const a = lines(2000);
+  const b = [...a]; b[3] = "changed top"; b[1990] = "changed bottom";
+  expect(check(a.join("\n"), b.join("\n")).length).toBe(2);
+});
+
+test("reloadChanges: 1 MB / 20k lines with two edited lines is fast", () => {
+  const a = lines(20000, (i) => `line ${i} ${"x".repeat(40)}`);
+  const b = [...a]; b[5] = "top edit"; b[19990] = "bottom edit";
+  const [x, y] = [a.join("\n"), b.join("\n")];
+  expect(x.length).toBeGreaterThan(1e6);
+  const t = performance.now();
+  const cs = reloadChanges(x, y);
+  expect(performance.now() - t).toBeLessThan(150);
+  expect(cs.length).toBe(2);
+  expect(applyAll(x, cs)).toBe(y);
 });
 
 test("reloadSpec: identical text is null", () => {
