@@ -830,9 +830,13 @@ export class Controller {
   protected confirmingEnter = false;
   /**
    * Plain Enter on the exact title or alias of an archived note the switch hides, with row 0 (or nothing) selected:
-   * open that note, not row 0. The title cache may be stale and the hit's archived flag is only known to a search, so
-   * one search with archived notes and no tags confirms it. This path never creates a note; when the title is not confirmed (no archived hit, search failed) it returns false and Enter acts as before, which creates a note only when there are no results. true = this Enter is handled or void (the query, the list or the selection moved on meanwhile).
-   * ponytail: the note must be on the confirm search's first page; upgrade: page on.
+   * open that note, not row 0. Visible beats hidden: when any non-archived note has that title or alias (a visible
+   * note, or one only a tag filter hides), Enter acts as before. The two link-target lists (all notes, non-archived
+   * notes) tell it from current index data: the paths named `q` in the first and not in the second are archived.
+   * No search, so no paging limit and no "no links" or tag filter. This path never creates a note; when the name is
+   * not confirmed (or a call failed) it returns false and Enter acts as before. true = this Enter is handled or void.
+   * The Enter is void when the user moved on meanwhile: the query changed, a row beyond 0 is selected, or another
+   * note is open (a row click). A background refresh changes none of these, so it does not void it.
    */
   protected async openHiddenArchived(): Promise<boolean> {
     if (this.confirmingEnter) return true; // a second Enter while the first confirms: one open only
@@ -840,16 +844,17 @@ export class Controller {
     const q = fold(s.query.trim());
     if (s.showArchived || s.sel > 0 || q === "" || !this.titles.has(q) || this.results.loaded.some((h) => fold(h.title) === q)) return false;
     this.confirmingEnter = true;
-    const seq = this.searchSeq;
-    const movedOn = () => seq !== this.searchSeq || this.store.get().query !== s.query || this.store.get().sel > 0; // the user went elsewhere: this Enter is void
+    const open = this.editor.currentPath();
+    const movedOn = () => this.store.get().query !== s.query || this.store.get().sel > 0 || this.editor.currentPath() !== open;
     try {
-      const [page, targets] = await Promise.all([this.api.search(s.query, s.sort, 0, [], s.noLinks, true), this.api.listLinkTargets(true)]);
+      const [all, visible] = await Promise.all([this.api.listLinkTargets(true), this.api.listLinkTargets(false)]);
       if (movedOn()) return true;
-      const paths = new Set(targets.filter((t) => fold(t.name) === q).map((t) => t.path));
-      const hit = page.hits.find((h) => h.archived && paths.has(h.path));
-      if (!hit) return false;
+      const named = (ts: typeof all) => ts.filter((t) => fold(t.name) === q).map((t) => t.path);
+      const shown = new Set(named(visible));
+      const hidden = named(all).filter((p) => !shown.has(p));
+      if (shown.size || !hidden.length) return false;
       this.confirmingEnter = false; // the confirm is over: an unlock field left up must not freeze Enter
-      if ((await this.show(hit.path)) && this.editor.currentPath() === hit.path) this.settleAfterOpen(false, "enter");
+      if ((await this.show(hidden[0])) && this.editor.currentPath() === hidden[0]) this.settleAfterOpen(false, "enter");
       return true;
     } catch (e) {
       console.warn("confirming a hidden title failed", e);
