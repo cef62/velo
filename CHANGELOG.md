@@ -1,5 +1,16 @@
 # velo
 
+## 0.18.0
+
+### Minor Changes
+
+- 3bba6d5: Added Check for Updates to the command palette.
+
+### Patch Changes
+
+- 78ae523: Fixed the search index staying stuck after a disk-full error while deleting or locking a note.
+- d90f4e9: Fixed notes saved after a disk-full error being lost when the app quit.
+
 ## 0.17.0
 
 ### Minor Changes
