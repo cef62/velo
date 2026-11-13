@@ -3580,3 +3580,18 @@ test("a held Back shortcut keeps stepping (#89)", async () => {
   c.onKeyDown({ ...key("KeyJ", { meta: true }), repeat: true }); // back's default
   expect(nav).toHaveBeenCalledWith("back");
 });
+
+test("an unlock field left up after Enter on a locked hidden archived title does not freeze Enter (#87)", async () => {
+  const { c, api, ui, store } = await withHiddenB();
+  c.setQuery("B"); await settle();
+  api.openNote.mockRejectedValueOnce("locked");
+  (ui as any).passphrase = () => new Promise(() => {}); // the field stays up
+  void c.enter();
+  await settle();
+  c.setQuery("C"); await settle();
+  const opens = api.openNote.mock.calls.length;
+  await c.enter();
+  await settle();
+  expect(api.openNote.mock.calls.length).toBeGreaterThan(opens); // Enter opens the selected row, as on main
+  expect(store.get().openPath).toBe(P("A"));
+});

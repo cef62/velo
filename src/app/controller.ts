@@ -856,6 +856,7 @@ export class Controller {
       const paths = new Set(targets.filter((t) => fold(t.name) === q).map((t) => t.path));
       const hit = page.hits.find((h) => h.archived && paths.has(h.path));
       if (!hit) return false;
+      this.confirmingEnter = false; // the confirm is over: an unlock field left up must not freeze Enter
       if ((await this.show(hit.path)) && this.editor.currentPath() === hit.path) this.settleAfterOpen(false, "enter");
       return true;
     } catch (e) {
