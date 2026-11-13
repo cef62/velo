@@ -96,6 +96,8 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       opts.complete ? writingCompletions(opts.complete) : [],
       // an open popup takes Escape itself: close it, keep focus in the editor
       keymap.of([{ key: "Escape", run: (v) => completionStatus(v.state) === null && (opts.onEscape?.(), true) }]),
+      // the top-visible line while the editor is shown: a reload while it is hidden (preview) cannot measure, so it maps this
+      EditorView.domEventHandlers({ scroll: () => { if (view.dom.offsetParent) { const n = ctrl.currentPath(), p = snap(); top = n ? { path: n, t: p.t, m: p.m } : null; } } }),
       EditorView.updateListener.of((u) => {
         if (!u.docChanged) return;
         opts.onChange?.(); // also fires on load so the preview follows note switches
@@ -106,6 +108,7 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     ],
   });
 
+  let top: { path: string; t: number; m: number } | null = null;
   let shown: string | null = null; // path whose text the editor holds: setText on that same path is a reload, not a switch
   const setText = (text: string) => {
     loading = true;
@@ -115,11 +118,20 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
           // Same note reloaded: change only the differing lines (one change per run), so CodeMirror keeps caret, selection and scroll.
           const spec = reloadSpec(view.state, text);
           // The undo reset below overwrites the scroll anchor: re-apply it mapped through the change (hidden: it would scroll to the top).
-          const snap = spec && view.dom.offsetParent ? view.scrollSnapshot() : null;
+          const visible = !!view.dom.offsetParent;
+          const snap = spec && visible ? view.scrollSnapshot() : null;
+          // Hidden: no snapshot (it would scroll to the top). Queue a scroll to the remembered top line, mapped; CodeMirror holds it until the editor is shown.
+          const hiddenTop = spec && !visible && top?.path === shown ? top : null;
           if (spec) view.dispatch(spec);
           for (const r of undo.reset) view.dispatch(r);
           const anchor = snap?.map(spec!.changes);
           if (anchor) view.dispatch({ effects: anchor });
+          if (spec && top?.path === shown) {
+            const t = spec.changes.mapPos(top.t, 1);
+            // unmoved: the pixel scroll is still right (and a re-scroll would drift by the line's partial offset)
+            if (hiddenTop && t !== top.t) view.dispatch({ effects: EditorView.scrollIntoView(t, { y: "start", yMargin: top.m }) });
+            top = { ...top, t };
+          }
         } catch (e) {
           console.error("reload diff failed, replacing the whole text:", e);
           // Whatever broke, the editor must end on the new text: replace it all, as a note switch does (only a throw here propagates).
