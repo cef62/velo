@@ -3297,6 +3297,28 @@ test("the archive action flips the store flag the palette label reads", async ()
   expect(store.get().archived).toBe(false);
 });
 
+test("the check_updates action calls the update check once", async () => {
+  const { c, api } = setup();
+  await c.start(); await settle();
+  const n = api.checkUpdate.mock.calls.length;
+  c.runAction("check_updates"); await settle();
+  expect(api.checkUpdate.mock.calls.length - n).toBe(1);
+});
+
+test("the quit action calls quitApp once", async () => {
+  const { c, api } = setup();
+  await c.start(); await settle();
+  c.runAction("quit"); await settle();
+  expect(api.quitApp).toHaveBeenCalledTimes(1);
+});
+
+test("the reset_window action calls resetWindow once", async () => {
+  const { c, api } = setup();
+  await c.start(); await settle();
+  c.runAction("reset_window"); await settle();
+  expect(api.resetWindow).toHaveBeenCalledTimes(1);
+});
+
 test("a list-write failure during openTitle is shown once", async () => {
   const { c, api, store } = setup();
   await c.start(); await settle();

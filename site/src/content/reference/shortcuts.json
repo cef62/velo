@@ -271,7 +271,7 @@
   },
   {
     "action": "check_updates",
-    "label": "Check for Updates…",
+    "label": "Check for Updates",
     "keys": "none",
     "mac": null,
     "other": null,

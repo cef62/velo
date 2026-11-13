@@ -54,7 +54,7 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | — | — | Show / hide archived notes (set in Settings) |
 | — | — | Archive / unarchive the current note (set in Settings) |
 | — | — | Quit velo (set in Settings; also in the command palette) |
-| — | — | Check for Updates… (set in Settings; also in the command palette) |
+| — | — | Check for Updates (set in Settings; also in the command palette) |
 | ⌥⇧⌘N | Ctrl+Alt+Shift+N | Quick capture (system-wide) |
 | ⇧F10 / Menu key | Shift+F10 / Menu key | Open the context menu of the highlighted row or chip (Shift+F10 can be changed in Settings; the Menu key always works) |
 
