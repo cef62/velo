@@ -111,14 +111,20 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     loading = true;
     try {
       if (shown !== null && shown === ctrl.currentPath()) {
-        // Same note reloaded: change only the differing lines (one change per run), so CodeMirror keeps caret, selection and scroll.
-        const spec = reloadSpec(view.state, text);
-        // The undo reset below overwrites the scroll anchor: re-apply it mapped through the change (hidden: it would scroll to the top).
-        const snap = spec && view.dom.offsetParent ? view.scrollSnapshot() : null;
-        if (spec) view.dispatch(spec);
-        for (const r of undo.reset) view.dispatch(r);
-        const anchor = snap?.map(spec!.changes);
-        if (anchor) view.dispatch({ effects: anchor });
+        try {
+          // Same note reloaded: change only the differing lines (one change per run), so CodeMirror keeps caret, selection and scroll.
+          const spec = reloadSpec(view.state, text);
+          // The undo reset below overwrites the scroll anchor: re-apply it mapped through the change (hidden: it would scroll to the top).
+          const snap = spec && view.dom.offsetParent ? view.scrollSnapshot() : null;
+          if (spec) view.dispatch(spec);
+          for (const r of undo.reset) view.dispatch(r);
+          const anchor = snap?.map(spec!.changes);
+          if (anchor) view.dispatch({ effects: anchor });
+        } catch {
+          // Whatever broke, the editor must end on the new text: replace it all, as a note switch does (only a throw here propagates).
+          view.dispatch(replaceAll(view.state.doc, text));
+          for (const r of undo.reset) view.dispatch(r);
+        }
       } else {
         view.dispatch(replaceAll(view.state.doc, text)); // Caret to the top; a hidden front matter moves it past the block.
         for (const r of undo.reset) view.dispatch(r);

@@ -32,6 +32,9 @@ type Hunk = { from: number; to: number; insert: string };
 
 /** Max old-lines x new-lines cells of one exact LCS table (4 MB). */
 const LCS_BUDGET = 1_000_000;
+/** Max chars (old + new) of the differing region the line diff will look at: string compares cost per char, and a region this
+ *  big is no ordinary note edit. Above it the reload is one middle change, as before the line diff. */
+const MAX_REGION_CHARS = 512 * 1024;
 /** Work units one reload may spend in all: an LCS cell costs 1, a patience scan costs 10 per line. About 15 ms worst case. */
 const WORK_BUDGET = 3_000_000;
 /** Patience recursion depth cap: a stack-overflow guard that stays whatever the budget is (the budget alone also bounds it today). */
@@ -39,7 +42,7 @@ const MAX_DEPTH = 100;
 
 /** Push hunks [a0,a1) -> [b0,b1) (line ranges, in order, never touching) turning old lines `a` into new lines `b`.
  *  Total cost is bounded by `work`; a gap that no longer fits becomes one hunk. */
-function lineDiff(a: number[], b: number[], a0: number, a1: number, b0: number, b1: number, out: number[][], work: { left: number }, depth = 0): void {
+function lineDiff(a: string[], b: string[], a0: number, a1: number, b0: number, b1: number, out: number[][], work: { left: number }, depth = 0): void {
   while (a0 < a1 && b0 < b1 && a[a0] === b[b0]) { a0++; b0++; }
   while (a0 < a1 && b0 < b1 && a[a1 - 1] === b[b1 - 1]) { a1--; b1--; }
   const n = a1 - a0, m = b1 - b0;
@@ -64,7 +67,7 @@ function lineDiff(a: number[], b: number[], a0: number, a1: number, b0: number, 
   if (depth >= MAX_DEPTH || work.left < 10 * (n + m)) { out.push([a0, a1, b0, b1]); return; }
   work.left -= 10 * (n + m);
   // Patience: lines unique on both sides, their longest increasing run as anchors, then diff each gap.
-  const seen = new Map<number, { o: number; n: number; i: number; j: number }>(); // counts and positions per line
+  const seen = new Map<string, { o: number; n: number; i: number; j: number }>(); // counts and positions per line
   for (let i = a0; i < a1; i++) { const e = seen.get(a[i]); if (e) e.o++; else seen.set(a[i], { o: 1, n: 0, i, j: -1 }); }
   for (let j = b0; j < b1; j++) { const e = seen.get(b[j]); if (e) { e.n++; e.j = j; } }
   const pairs: number[][] = []; // [old idx, new idx], by old idx
@@ -95,23 +98,17 @@ function lineDiff(a: number[], b: number[], a0: number, a1: number, b0: number, 
 export function reloadChanges(a: string, b: string): Hunk[] {
   if (a === b) return [];
   const la = a.split("\n"), lb = b.split("\n");
-  // Each distinct line gets an integer once, so every comparison below is O(1) whatever the line length. V8 hashes only the
-  // first 16383 chars of a string key, so a longer line is keyed by its length, head and tail and told apart by a full compare.
-  const ids = new Map<string, [string, number][]>();
-  let next = 0;
-  const id = (l: string) => {
-    const k = l.length > 8192 ? l.length + l.slice(0, 4096) + l.slice(-4096) : l;
-    let bucket = ids.get(k);
-    if (!bucket) ids.set(k, (bucket = []));
-    for (const e of bucket) if (e[0] === l) return e[1];
-    bucket.push([l, next]);
-    return next++;
-  };
-  const ia = la.map(id), ib = lb.map(id);
   const starts = [0]; // char offset of each old line
   for (const l of la) starts.push(starts[starts.length - 1] + l.length + 1);
   const hunks: number[][] = [];
-  lineDiff(ia, ib, 0, ia.length, 0, ib.length, hunks, { left: WORK_BUDGET });
+  let p = 0, e = 0; // common line prefix and suffix, trimmed here so the size cap sees only the differing region
+  while (p < la.length && p < lb.length && la[p] === lb[p]) p++;
+  while (e < la.length - p && e < lb.length - p && la[la.length - 1 - e] === lb[lb.length - 1 - e]) e++;
+  let chars = starts[la.length - e] - starts[p];
+  for (let i = p; i < lb.length - e && chars <= MAX_REGION_CHARS; i++) chars += lb[i].length + 1;
+  // shortcut: a region above MAX_REGION_CHARS is one middle change (a caret inside it may jump); upgrade to a char-aware diff if that bites.
+  if (chars > MAX_REGION_CHARS) return [middleChange(a, b)!];
+  lineDiff(la, lb, p, la.length - e, p, lb.length - e, hunks, { left: WORK_BUDGET });
   const out: Hunk[] = [];
   for (const [a0, a1, b0, b1] of hunks) {
     // old lines [a0,a1) -> new lines [b0,b1), keeping the "\n" of every neighbouring line

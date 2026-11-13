@@ -212,11 +212,11 @@ test("reloadChanges: a big region with unique lines still gives separate hunks",
   expect(check(a.join("\n"), b.join("\n")).length).toBe(2);
 });
 
-test("reloadChanges: 1 MB / 20k lines with two edited lines is fast", () => {
-  const a = lines(20000, (i) => `line ${i} ${"x".repeat(40)}`);
-  const b = [...a]; b[5] = "top edit"; b[19990] = "bottom edit";
+test("reloadChanges: a 10k-line note under the char cap with two edited lines is fast", () => {
+  const a = lines(10000, (i) => `line ${i} ${"x".repeat(5)}`);
+  const b = [...a]; b[5] = "top edit"; b[9990] = "bottom edit";
   const [x, y] = [a.join("\n"), b.join("\n")];
-  expect(x.length).toBeGreaterThan(1e6);
+  expect(x.length).toBeGreaterThan(1e5);
   const t = performance.now();
   const cs = reloadChanges(x, y);
   expect(performance.now() - t).toBeLessThan(150);
@@ -256,13 +256,13 @@ test("reloadChanges: the nesting shape that made patience quadratic and overflow
   expect(applyAll(x, cs)).toBe(y);
 });
 
-test("reloadChanges: 1000 changed 16 KB lines sharing a long prefix cost integer compares, not string compares", () => {
-  const P = "p".repeat(16 * 1024 - 6);
-  const x = lines(1000, (i) => P + String(i).padStart(6, "0")).join("\n"), y = lines(1000, (i) => P + String(i + 500000).padStart(6, "0")).join("\n");
-  const t = performance.now();
-  const cs = reloadChanges(x, y);
-  expect(performance.now() - t).toBeLessThan(150); // about 430 ms when lines were compared as strings
-  expect(applyAll(x, cs)).toBe(y);
+test("reloadChanges: a differing region above the char cap is exactly the single middle change, just under it is diffed", () => {
+  const mkDoc = (n: number, first: string, last: string) => [first + "a".repeat(n), "mid", "b".repeat(n) + last].join("\n");
+  // old + new region: 4 x 150k = 600k chars (> 512 KB) vs 4 x 100k = 400k (<)
+  const [bigA, bigB] = [mkDoc(150000, "1", "2"), mkDoc(150000, "3", "4")];
+  expect(reloadChanges(bigA, bigB)).toEqual([middleChange(bigA, bigB)]);
+  const [smallA, smallB] = [mkDoc(100000, "1", "2"), mkDoc(100000, "3", "4")];
+  expect(check(smallA, smallB).length).toBe(2);
 });
 
 test("reloadChanges: the nesting shape at D = 100k is bounded by the shared work budget, not just the depth cap", () => {
