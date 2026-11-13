@@ -1,5 +1,6 @@
 import { TriangleAlert, X } from "lucide-react";
 import type { ReactNode } from "react";
+import { css } from "styled-system/css";
 import { banner } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
@@ -14,7 +15,7 @@ function Banner({ role, label, onDismiss, children }: { role: "status" | "alert"
   return (
     <div className={banner({ tone: "conflict" })} role={role} data-banner="">
       <TriangleAlert size={16} aria-hidden />
-      <span>{children}</span>
+      <span className={css({ overflowWrap: "anywhere" })}>{children}</span>
       <IconButton
         variant="plain"
         size="2xs"
