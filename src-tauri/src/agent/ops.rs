@@ -47,6 +47,8 @@ pub trait NoteOps {
     fn backlinks(&self, path: &str) -> anyhow::Result<Vec<String>>;
     /// The one-hop graph around the plain note at `path`, without locked notes.
     fn connections(&self, path: &str, include_archived: bool) -> anyhow::Result<Connections>;
+    /// The failed `.velo/archived` write a note operation kept (not taken: the app reports it too).
+    fn archive_warning(&self) -> Option<String>;
 }
 
 /// An encrypted note, or the plain twin of one (`X.md` or `X.txt` beside `X.md.age`, see `plain_twin_of_locked`).
@@ -141,6 +143,12 @@ impl<V: DerefMut<Target = Vault>> VaultOps<V> {
 }
 
 impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
+    fn archive_warning(&self) -> Option<String> {
+        let m = self.vault.archive_error.take();
+        self.vault.archive_error.set(m.clone());
+        m
+    }
+
     fn find(&self, title: &str) -> anyhow::Result<Option<String>> {
         // a locked note's title must not hide a plain note's alias
         Ok(self.vault.index.find_titles(title)?.into_iter().find(|p| !locked(p)))

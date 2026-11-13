@@ -487,7 +487,8 @@ impl Vault {
             lossy(&bytes)
         };
         let meta = self.note_meta(path, &text, &stat(p)?);
-        let archived = self.index.node(path)?.is_some_and(|n| n.archived);
+        // the list, not the index: a file the index has not seen yet has no row there
+        let archived = self.archive_loaded.borrow().iter().any(|t| fold(t) == fold(&nf.title));
         Ok(NoteDoc { path: path.into(), title: nf.title, text, archived, hash: hash(&bytes), encrypted: nf.encrypted, meta })
     }
 
@@ -2426,6 +2427,14 @@ mod tests {
         std::fs::set_permissions(dir.join(".velo"), std::fs::Permissions::from_mode(0o755)).unwrap();
         assert!(r.is_ok() && dir.join("New.md").exists());
         assert!(v.archive_error.take().is_some());
+    }
+    #[test] fn open_note_reads_archived_from_the_list_for_a_file_not_indexed_yet() {
+        let (dir, db) = setup();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        std::fs::write(dir.join("Late.md"), "x").unwrap(); // created outside, no rescan yet
+        std::fs::create_dir_all(dir.join(".velo")).unwrap();
+        std::fs::write(dir.join(".velo/archived"), "Late\n").unwrap();
+        assert!(v.open_note(&s(&dir.join("Late.md")), None).unwrap().archived);
     }
     #[cfg(unix)] #[test] fn delete_merge_and_create_succeed_and_report_when_the_list_is_unwritable() {
         use std::os::unix::fs::PermissionsExt;
