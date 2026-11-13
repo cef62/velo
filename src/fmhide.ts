@@ -152,9 +152,11 @@ export function reloadSpec(state: EditorState, text: string, diff: (a: string, b
   // covering its text: start forward, end backward.
   const { doc } = state;
   const ranges = state.selection.ranges.map((r) => {
-    if (r.empty) return EditorSelection.cursor(changes.mapPos(r.head, doc.lineAt(r.head).from === r.head ? 1 : -1));
+    // goal column and bidi level survive, as with SelectionRange.map
+    const [goal, bidi] = [r.goalColumn, r.bidiLevel ?? undefined];
+    if (r.empty) return EditorSelection.cursor(changes.mapPos(r.head, doc.lineAt(r.head).from === r.head ? 1 : -1), r.assoc, bidi, goal);
     const [from, to] = [changes.mapPos(r.from, 1), changes.mapPos(r.to, -1)];
-    return r.anchor < r.head ? EditorSelection.range(from, Math.max(from, to)) : EditorSelection.range(Math.max(from, to), from);
+    return r.anchor < r.head ? EditorSelection.range(from, Math.max(from, to), goal, bidi) : EditorSelection.range(Math.max(from, to), from, goal, bidi);
   });
   return { changes, selection: EditorSelection.create(ranges, state.selection.mainIndex) };
 }

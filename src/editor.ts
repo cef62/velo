@@ -101,7 +101,8 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       EditorView.domEventHandlers({ scroll: () => { if (view.dom.offsetParent) { const n = ctrl.currentPath(), p = snap(); top = n ? { path: n, t: p.t, m: p.m } : null; } } }),
       EditorView.updateListener.of((u) => {
         if (!u.docChanged) return;
-        if (top) top = { ...top, t: u.changes.mapPos(Math.min(top.t, u.startState.doc.length), 1) };
+        // a viewport at the document start (also with a hidden front matter: its block starts at 0) stays there: assoc -1 keeps it before lines inserted at 0
+        if (top) top = { ...top, t: u.changes.mapPos(Math.min(top.t, u.startState.doc.length), top.t ? 1 : -1) };
         opts.onChange?.(); // also fires on load so the preview follows note switches
         if (loading || u.transactions.some((t) => t.annotation(stamped))) return;
         opts.onEdit?.(); // user edits only (not loads)
@@ -220,8 +221,8 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     rebind(fromPath, doc) {
       remember();
       const dirty = ctrl.isDirty(); // dirty: the text is kept as it is, so is the caret
-      if (top?.path === fromPath) top = { ...top, path: doc.path }; // restore() below reseeds it when the text reloads
       if (!ctrl.rebind(fromPath, doc)) return false;
+      if (top?.path === fromPath) top = { ...top, path: doc.path }; // restore() below reseeds it when the text reloads
       shown = doc.path;
       renamePos(fromPath, doc.path);
       if (!dirty) restore(doc.path);

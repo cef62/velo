@@ -398,3 +398,10 @@ test("reloadSpec: a reload that only inserts whole lines keeps the line text and
     expect(r.head, `${JSON.stringify(a)} -> ${JSON.stringify(nw.join("\n"))} @${pos}`).toEqual([a.slice(ls).split("\n")[0], pos - ls]);
   }
 });
+
+test("reloadSpec: a reload that only changes text below the caret keeps its goal column and bidi level", () => {
+  let s = mk(true, "abc\ndef\nghi");
+  s = s.update({ selection: EditorSelection.create([EditorSelection.cursor(5, 0, 1, 7)]) }).state;
+  const r = s.update(reloadSpec(s, "abc\ndef\nGHI")!).state.selection.main;
+  expect([r.head, r.goalColumn, r.bidiLevel]).toEqual([5, 7, 1]);
+});
