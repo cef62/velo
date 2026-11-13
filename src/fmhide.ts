@@ -147,7 +147,18 @@ export function reloadSpec(state: EditorState, text: string, diff: (a: string, b
   try { c = diff(a, b); if (applied(a, c) !== b) c = null; } catch { c = null; }
   if (!c) c = [middleChange(a, b)!];
   const changes = state.changes(c);
-  return { changes, selection: state.selection.map(changes) };
+  // Hunks insert whole lines at a line start (a line "x\n" before the line there, or "\nx" after the last one), so a caret at a
+  // line start sits at the insertion point and must go after it (assoc 1), any other caret stays before (-1). A selection keeps
+  // covering its text: start forward, end backward.
+  const { doc } = state;
+  const ranges = state.selection.ranges.map((r) => {
+    // goal column and bidi level survive, as with SelectionRange.map
+    const [goal, bidi] = [r.goalColumn, r.bidiLevel ?? undefined];
+    if (r.empty) return EditorSelection.cursor(changes.mapPos(r.head, doc.lineAt(r.head).from === r.head ? 1 : -1), r.assoc, bidi, goal);
+    const [from, to] = [changes.mapPos(r.from, 1), changes.mapPos(r.to, -1)];
+    return r.anchor < r.head ? EditorSelection.range(from, Math.max(from, to), goal, bidi) : EditorSelection.range(Math.max(from, to), from, goal, bidi);
+  });
+  return { changes, selection: EditorSelection.create(ranges, state.selection.mainIndex) };
 }
 
 /** Replace the whole doc with the caret at the top; a hidden front matter's caret guard then moves it past the block. */

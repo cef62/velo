@@ -337,3 +337,71 @@ test("hidden: a reload that grows the front matter leaves the caret after the bl
   s = s.update(reloadSpec(s, FM + "body text")!).state;
   expect(s.selection.main.head).toBeGreaterThanOrEqual(FM.length);
 });
+
+// Reload then read back where a selection landed, as [line text, column] of anchor and head.
+const reloaded = (a: string, b: string, anchor: number, head = anchor) => {
+  let s = mk(true, a);
+  s = s.update({ selection: { anchor, head } }).state;
+  s = s.update(reloadSpec(s, b)!).state;
+  expect(s.doc.toString()).toBe(b);
+  const at = (p: number) => { const l = s.doc.lineAt(p); return [l.text, p - l.from]; };
+  return { s, head: at(s.selection.main.head), sel: s.sliceDoc(s.selection.main.from, s.selection.main.to) };
+};
+
+test("reloadSpec: a caret at a line start stays on its line when lines are inserted directly above it", () => {
+  expect(reloaded("head\nkeep caret here\ntail", "head\nextra\nkeep caret here\nTAIL", 5).head).toEqual(["keep caret here", 0]);
+  expect(reloaded("head\nkeep\ntail", "head\nx\ny\nkeep\ntail", 5).head).toEqual(["keep", 0]);
+});
+
+test("reloadSpec: a caret at a line end stays there when lines are inserted directly below it", () => {
+  expect(reloaded("head\nkeep\ntail", "head\nkeep\nx\ny\ntail", 9).head).toEqual(["keep", 4]);
+  expect(reloaded("head\nkeep", "head\nkeep\nx\ny", 9).head).toEqual(["keep", 4]); // end of document, lines appended
+  expect(reloaded("head\nkeep", "HEAD\nkeep\n", 9).head).toEqual(["keep", 4]); // unterminated last line gains a newline
+});
+
+test("reloadSpec: a caret on an empty line stays on it with lines inserted above and below", () => {
+  expect(reloaded("a\n\nb", "a\nx\n\ny\nb", 2).head).toEqual(["", 0]);
+  expect(reloaded("a\n\n", "a\nx\n\ny\n", 2).head).toEqual(["", 0]);
+});
+
+test("reloadSpec: a caret at the document start stays with its line when lines are inserted at the top", () => {
+  expect(reloaded("first\nsecond", "x\ny\nfirst\nsecond", 0).head).toEqual(["first", 0]);
+});
+
+test("reloadSpec: a selection of whole lines still selects exactly those lines with lines inserted above and below", () => {
+  const fwd = reloaded("a\nb\nc\nd", "a\nX\nb\nc\nY\nd", 2, 6); // "b\nc\n"
+  expect(fwd.sel).toBe("b\nc\n");
+  const back = reloaded("a\nb\nc\nd", "a\nX\nb\nc\nY\nd", 6, 2); // dragged upward
+  expect([back.sel, back.s.selection.main.head < back.s.selection.main.anchor]).toEqual(["b\nc\n", true]);
+});
+
+test("reloadSpec: a caret inside a replaced line keeps its column", () => {
+  expect(reloaded("a\nbcd\nc", "a\nbXd\nc", 4).head).toEqual(["bXd", 2]);
+});
+
+test("reloadSpec: lines inserted above a caret at the body start keep it on the body, not in the hidden front matter", () => {
+  const s = mk(true, FM + "body").update({ selection: { anchor: FM.length } }).state;
+  const r = s.update(reloadSpec(s, FM + "x\nbody")!).state;
+  expect(r.doc.lineAt(r.selection.main.head).text).toBe("body");
+});
+
+test("reloadSpec: a reload that only inserts whole lines keeps the line text and column under the caret (seeded)", () => {
+  let seed = 7;
+  const rnd = (n: number) => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) % n;
+  for (let t = 0; t < 300; t++) {
+    const old = Array.from({ length: 1 + rnd(8) }, (_, i) => (rnd(4) ? `line ${i}` : ""));
+    old.push("last"); // an empty last line plus lines appended after it is ambiguous with the same lines inserted before it
+    const nw = [...old];
+    for (let k = rnd(4); k >= 0; k--) nw.splice(rnd(nw.length + 1), 0, ...Array.from({ length: 1 + rnd(3) }, (_, j) => `ins ${t}.${k}.${j}`));
+    const a = old.join("\n"), pos = rnd(a.length + 1), ls = pos ? a.lastIndexOf("\n", pos - 1) + 1 : 0;
+    const r = reloaded(a, nw.join("\n"), pos);
+    expect(r.head, `${JSON.stringify(a)} -> ${JSON.stringify(nw.join("\n"))} @${pos}`).toEqual([a.slice(ls).split("\n")[0], pos - ls]);
+  }
+});
+
+test("reloadSpec: a reload that only changes text below the caret keeps its goal column and bidi level", () => {
+  let s = mk(true, "abc\ndef\nghi");
+  s = s.update({ selection: EditorSelection.create([EditorSelection.cursor(5, 0, 1, 7)]) }).state;
+  const r = s.update(reloadSpec(s, "abc\ndef\nGHI")!).state.selection.main;
+  expect([r.head, r.goalColumn, r.bidiLevel]).toEqual([5, 7, 1]);
+});

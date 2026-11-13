@@ -96,8 +96,13 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       opts.complete ? writingCompletions(opts.complete) : [],
       // an open popup takes Escape itself: close it, keep focus in the editor
       keymap.of([{ key: "Escape", run: (v) => completionStatus(v.state) === null && (opts.onEscape?.(), true) }]),
+      // the top-visible line, kept while the editor is shown: a reload while it is hidden (preview) cannot measure, so it restores this.
+      // Every doc change maps it, so it never outlives the text it was measured on (load and rebind reseed or clear it).
+      EditorView.domEventHandlers({ scroll: () => { if (view.dom.offsetParent) { const n = ctrl.currentPath(), p = snap(); top = n ? { path: n, t: p.t, m: p.m } : null; } } }),
       EditorView.updateListener.of((u) => {
         if (!u.docChanged) return;
+        // a viewport at the document start (also with a hidden front matter: its block starts at 0) stays there: assoc -1 keeps it before lines inserted at 0
+        if (top) top = { ...top, t: u.changes.mapPos(Math.min(top.t, u.startState.doc.length), top.t ? 1 : -1) };
         opts.onChange?.(); // also fires on load so the preview follows note switches
         if (loading || u.transactions.some((t) => t.annotation(stamped))) return;
         opts.onEdit?.(); // user edits only (not loads)
@@ -106,6 +111,7 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     ],
   });
 
+  let top: { path: string; t: number; m: number } | null = null;
   let shown: string | null = null; // path whose text the editor holds: setText on that same path is a reload, not a switch
   const setText = (text: string) => {
     loading = true;
@@ -115,13 +121,22 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
           // Same note reloaded: change only the differing lines (one change per run), so CodeMirror keeps caret, selection and scroll.
           const spec = reloadSpec(view.state, text);
           // The undo reset below overwrites the scroll anchor: re-apply it mapped through the change (hidden: it would scroll to the top).
-          const snap = spec && view.dom.offsetParent ? view.scrollSnapshot() : null;
+          const visible = !!view.dom.offsetParent;
+          const snap = spec && visible ? view.scrollSnapshot() : null;
+          // Hidden: no snapshot (it would scroll to the top). Queue a scroll to the remembered top line, mapped; CodeMirror holds it until the editor is shown.
+          const hiddenTop = spec && !visible && top?.path === shown ? top : null;
+          const oldLine = hiddenTop && view.state.doc.lineAt(hiddenTop.t).number;
           if (spec) view.dispatch(spec);
           for (const r of undo.reset) view.dispatch(r);
           const anchor = snap?.map(spec!.changes);
           if (anchor) view.dispatch({ effects: anchor });
+          // the update listener has mapped `top`; skip only if its offset and line number both stayed (no pixel drift then)
+          if (hiddenTop && top && (top.t !== hiddenTop.t || view.state.doc.lineAt(top.t).number !== oldLine)) {
+            view.dispatch({ effects: EditorView.scrollIntoView(top.t, { y: "start", yMargin: top.m }) });
+          }
         } catch (e) {
           console.error("reload diff failed, replacing the whole text:", e);
+          top = null;
           // Whatever broke, the editor must end on the new text: replace it all, as a note switch does (only a throw here propagates).
           view.dispatch(replaceAll(view.state.doc, text));
           for (const r of undo.reset) view.dispatch(r);
@@ -178,10 +193,14 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     if (stored) {
       const p = clampPos(stored, view.state.doc.length);
       view.dispatch({ selection: EditorSelection.cursor(p.h), effects: EditorView.scrollIntoView(p.t, { y: "start", yMargin: p.m }) });
+      top = { path, t: p.t, m: p.m }; // seeded for a note opened in preview and never scrolled
       base = null;
       // after CodeMirror's own scheduled measure has applied the scroll
       requestAnimationFrame(() => { if (ctrl.currentPath() === path) base = snap(); });
-    } else base = snap();
+    } else {
+      base = snap();
+      top = { path, t: 0, m: 0 };
+    }
   };
 
   const ed: Editor = {
@@ -194,6 +213,7 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
         return false;
       }
       shown = doc.path;
+      top = null; // restore() seeds it again
       setEditable(true);
       restore(doc.path);
       return true;
@@ -202,6 +222,7 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
       remember();
       const dirty = ctrl.isDirty(); // dirty: the text is kept as it is, so is the caret
       if (!ctrl.rebind(fromPath, doc)) return false;
+      if (top?.path === fromPath) top = { ...top, path: doc.path }; // restore() below reseeds it when the text reloads
       shown = doc.path;
       renamePos(fromPath, doc.path);
       if (!dirty) restore(doc.path);
