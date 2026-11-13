@@ -120,7 +120,8 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
           for (const r of undo.reset) view.dispatch(r);
           const anchor = snap?.map(spec!.changes);
           if (anchor) view.dispatch({ effects: anchor });
-        } catch {
+        } catch (e) {
+          console.error("reload diff failed, replacing the whole text:", e);
           // Whatever broke, the editor must end on the new text: replace it all, as a note switch does (only a throw here propagates).
           view.dispatch(replaceAll(view.state.doc, text));
           for (const r of undo.reset) view.dispatch(r);

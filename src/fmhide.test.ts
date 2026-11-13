@@ -265,6 +265,28 @@ test("reloadChanges: a differing region above the char cap is exactly the single
   expect(check(smallA, smallB).length).toBe(2);
 });
 
+const nesting = (D: number) => {
+  const o = Array(1000).fill("f"), n = Array(1000).fill("g");
+  for (let d = 1; d <= D; d++) { o.push(`m${d}`); if (d > 1) o.push(`m${d - 1}`); n.push(`m${d}`); }
+  return [o.join("\n"), n.join("\n")];
+};
+
+test("reloadChanges: under the char cap, the shared work budget stops the nesting shape early (5 hunks, not 101)", () => {
+  const [x, y] = nesting(24000); // differing region about 464 KB: under MAX_REGION_CHARS, so it reaches lineDiff
+  const cs = reloadChanges(x, y);
+  expect(applyAll(x, cs)).toBe(y);
+  expect(cs.length).toBeLessThanOrEqual(10); // without the shared budget the patience recursion goes 100 levels deep: 101 hunks
+});
+
+test("reloadChanges: the outer line prefix/suffix trim keeps a big note with two small edits under the char cap", () => {
+  const same = lines(30000, (i) => `unchanged line number ${i} with some padding text`); // about 1.4 MB
+  const a = [...same.slice(0, 15000), "edit one", ...same.slice(15000, 15010), "edit two", ...same.slice(15010)];
+  const b = [...same.slice(0, 15000), "EDIT ONE", ...same.slice(15000, 15010), "EDIT TWO", ...same.slice(15010)];
+  const [x, y] = [a.join("\n"), b.join("\n")];
+  expect(x.length).toBeGreaterThan(600 * 1024);
+  expect(check(x, y).length).toBe(2); // untrimmed, the cap would count the whole note and return one change
+});
+
 test("reloadChanges: the nesting shape at D = 100k is bounded by the shared work budget, not just the depth cap", () => {
   const D = 100000, o = Array(1000).fill("f"), n = Array(1000).fill("g");
   for (let d = 1; d <= D; d++) { o.push(`m${d}`); if (d > 1) o.push(`m${d - 1}`); n.push(`m${d}`); }
