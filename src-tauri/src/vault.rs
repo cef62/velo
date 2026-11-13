@@ -373,7 +373,7 @@ impl Vault {
     /// Some file in the vault other than `except` has a title folding to `title` (a twin: `Foo.md` beside `Foo.txt`).
     fn title_on_disk(&self, title: &str, except: &Path) -> bool {
         let f = fold(title);
-        self.store.list().map_or(true, |l| l.iter().any(|(p, n, _)| p != except && fold(&n.title) == f))
+        self.store.list().map_or(true, |l| l.iter().any(|(p, n, _)| crate::names::nfc_name(p) != crate::names::nfc_name(except) && fold(&n.title) == f))
     }
 
     /// The note now at `to` moved from title `old` to `new`. A stale entry for `new` is cleared and only an archived
@@ -2477,6 +2477,43 @@ mod tests {
         assert_eq!(list_of(&dir), "Foo\n");
         assert_eq!(std::fs::read_to_string(dir.join("Foo.md")).unwrap(), "plain");
         assert!(dir.join("Foo.md.age").exists());
+    }
+    // One file, two spellings (NFC `to`, NFD from read_dir): it is not its own twin. macOS only: elsewhere NFC and NFD
+    // names are two files, and so twins.
+    #[cfg(target_os = "macos")] #[test] fn a_file_is_not_its_own_twin_across_unicode_spellings() {
+        let (dir, db) = setup();
+        let (nfc, nfd) = ("Caf\u{e9}.md", "Cafe\u{301}.md");
+        std::fs::write(dir.join(nfd), "x").unwrap();
+        let v = open(dir.clone(), &db, None).unwrap();
+        assert!(!v.title_on_disk("Café", &dir.join(nfc)));
+        assert!(!v.title_on_disk("Café", &dir.join(nfd)));
+        assert!(v.title_on_disk("Café", &dir.join("Other.md")));
+    }
+    #[cfg(target_os = "macos")] #[test] fn retitle_to_an_accented_title_keeps_the_note_archived_when_the_volume_lists_nfd() {
+        let (dir, db) = setup();
+        std::fs::write(dir.join("Cafe\u{301}.md"), "x").unwrap(); // as listed after the rename: decomposed
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        std::fs::create_dir_all(dir.join(".velo")).unwrap(); std::fs::write(dir.join(".velo/archived"), "Bar\n").unwrap();
+        v.archive_retitle("Bar", "Caf\u{e9}", &dir.join("Caf\u{e9}.md"));
+        assert_eq!(list_of(&dir), "Caf\u{e9}\n");
+    }
+    #[test] fn fold_treats_nfc_and_nfd_titles_as_one() { assert_eq!(fold("Caf\u{e9}"), fold("Cafe\u{301}")); }
+    #[test] fn unlock_with_a_trailing_dot_title_change_keeps_an_archived_twin_archived() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        std::fs::write(dir.join("Foo..md.age"), crypto::encrypt(&id, b"y").unwrap()).unwrap(); std::fs::write(dir.join("Foo.txt"), "t").unwrap();
+        let mut v = open(dir.clone(), &db, Some(&id)).unwrap();
+        v.set_archived(&s(&dir.join("Foo.txt")), true).unwrap();
+        v.unlock_note(&s(&dir.join("Foo..md.age")), &id).unwrap(); // title "Foo." -> "Foo"
+        assert_eq!(list_of(&dir), "Foo\n");
+    }
+    #[test] fn a_case_only_retitle_beside_a_twin_keeps_one_entry() {
+        let (dir, db) = setup();
+        std::fs::write(dir.join("FOO.md"), "x").unwrap(); std::fs::write(dir.join("Foo.txt"), "t").unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        v.set_archived(&s(&dir.join("Foo.txt")), true).unwrap();
+        v.archive_retitle("Foo", "FOO", &dir.join("FOO.md"));
+        assert_eq!(list_of(&dir), "FOO\n");
+        assert_eq!(archived_titles(&v), ["FOO", "Foo"]);
     }
     #[test] fn rename_onto_a_stale_entry_is_not_archived() {
         let (dir, db) = setup(); std::fs::create_dir(dir.join(".velo")).unwrap(); std::fs::write(dir.join("Foo.md"), "").unwrap();
