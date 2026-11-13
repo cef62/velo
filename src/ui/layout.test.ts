@@ -53,6 +53,32 @@ describe('v2 layout rules', () => {
     expect(dueText(100)).toBe('99+')
     expect(dueText(999)).toBe('99+')
   })
+  it('noteCount boundaries: exact below 10,000, floored compact above, never more than the real count', () => {
+    const table: [number, string][] = [
+      [0, '0'], [1, '1'], [999, '999'], [1000, '1,000'], [9999, '9,999'],
+      [10000, '10K'], [10999, '10K'], [99999, '99K'], [100000, '100K'], [999999, '999K'],
+      [1000000, '1M'], [1049999, '1M'], [1999999, '1M'], [9999999, '9M'], [10000000, '10M'],
+      [999999999, '999M'], [1000000000, '1B'], [999999999999, '999B'], [1000000000000, '1T'],
+      [999999999999999, '999T'], [1000000000000000, '1000T'], [Number.MAX_SAFE_INTEGER, '9007T'],
+    ]
+    for (const [n, label] of table) expect(noteCount(n), String(n)).toBe(label)
+  })
+  it('noteCount does not depend on Intl roundingMode (old WebKitGTK ignores it)', () => {
+    const Real = Intl.NumberFormat
+    // Wrapper that drops roundingMode, as an engine without support does; the default mode rounds half up.
+    const NoRounding = function (l?: string | string[], o?: Intl.NumberFormatOptions) {
+      const { roundingMode: _ignored, ...rest } = (o ?? {}) as Intl.NumberFormatOptions & { roundingMode?: string }
+      return new Real(l, rest)
+    } as unknown as typeof Intl.NumberFormat
+    Intl.NumberFormat = NoRounding
+    try {
+      expect(noteCount(99999)).toBe('99K')
+      expect(noteCount(999999)).toBe('999K')
+      expect(noteCount(1999999)).toBe('1M')
+    } finally {
+      Intl.NumberFormat = Real
+    }
+  })
   it('tooltip text for counts the bar hides or caps', () => {
     expect(notesText(1)).toBe('1 note')
     expect(notesText(9999)).toBe('9,999 notes')
