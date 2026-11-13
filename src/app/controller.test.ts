@@ -3439,7 +3439,7 @@ async function withHiddenB() {
   return t;
 }
 
-test("Enter on the exact title of a hidden archived note opens it, creates nothing, keeps the switch off (#87)", async () => {
+test("Enter on the exact title of a hidden archived note opens it by path, creates nothing, keeps the switch off (#87)", async () => {
   const { c, api, store, notes } = await withHiddenB();
   c.setQuery("B"); await settle();
   expect(c.row(0)?.title).toBe("A"); // row 0 is not the note typed
@@ -3447,7 +3447,82 @@ test("Enter on the exact title of a hidden archived note opens it, creates nothi
   expect(store.get().openPath).toBe(P("B"));
   expect(store.get()).toMatchObject({ archived: true, showArchived: false });
   expect(Object.keys(notes)).toEqual(["A", "B", "C"]);
-  expect(api.openOrCreate).toHaveBeenCalledWith("B");
+  expect(api.openNote).toHaveBeenLastCalledWith(P("B"));
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+});
+
+test("Enter on an exact alias of a hidden archived note opens that note (#87)", async () => {
+  const { c, api, store, notes } = await withHiddenB();
+  api.listTitles.mockResolvedValue(["A", "B", "C", "Bee"]);
+  api.listLinkTargets.mockResolvedValue(["A", "B", "C"].map((t) => ({ name: t, title: t, path: P(t), modified: 0, locked: false })).concat([{ name: "Bee", title: "B", path: P("B"), modified: 0, locked: false }]));
+  await c.refreshTitles();
+  c.setQuery("Bee"); await settle();
+  await c.enter();
+  expect(store.get().openPath).toBe(P("B"));
+  expect(Object.keys(notes)).toEqual(["A", "B", "C"]);
+});
+
+test("Enter on an exact title hidden only by a tag filter opens row 0, as before (#87)", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  api.search.mockImplementation(async (_q, _s, _o, tags) => ({ hits: (tags.length ? ["A", "C"] : ["A", "B", "C"]).map(hit), has_more: false, total: 3, hidden: 0 }));
+  store.set({ selectedTags: ["x"] });
+  c.setQuery("B"); await settle();
+  await c.enter();
+  expect(store.get().openPath).toBe(P("A"));
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+});
+
+test("a stale title-cache entry never creates a note: Enter opens row 0 (#87)", async () => {
+  const { c, api, store, notes } = await withHiddenB();
+  api.listTitles.mockResolvedValue(["A", "B", "C", "Ghost"]);
+  await c.refreshTitles();
+  c.setQuery("Ghost"); await settle();
+  await c.enter();
+  expect(store.get().openPath).toBe(P("A"));
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+  expect(Object.keys(notes)).toEqual(["A", "B", "C"]);
+});
+
+test("a row the user arrowed to beats a hidden exact title (#87)", async () => {
+  const { c, store } = await withHiddenB();
+  c.setQuery("B"); await settle();
+  await c.step(1); await settle();
+  expect(store.get().sel).toBe(1);
+  await c.enter();
+  expect(store.get().openPath).toBe(P("C"));
+});
+
+test("a locked hidden archived title goes through the normal open path (passphrase prompt) (#87)", async () => {
+  const { c, api, calls, store } = await withHiddenB();
+  c.setQuery("B"); await settle();
+  api.openNote.mockRejectedValueOnce("locked");
+  await c.enter();
+  expect(calls.some((x) => x[0] === "passphrase")).toBe(true);
+  expect(store.get().err).not.toBe("locked");
+});
+
+test("a query change during the confirming search voids that Enter; a second Enter opens once (#87)", async () => {
+  const { c, api, store } = await withHiddenB();
+  c.setQuery("B"); await settle();
+  const d = deferred<Page>();
+  api.search.mockImplementationOnce(() => d.promise);
+  const first = c.enter();
+  const second = c.enter();
+  await settle();
+  c.setQuery("zzz");
+  d.resolve({ hits: [{ ...hit("B"), archived: true }], has_more: false, total: 1, hidden: 0 });
+  await Promise.all([first, second]); await settle();
+  expect(api.openNote).not.toHaveBeenCalledWith(P("B"));
+  expect(api.openOrCreate).not.toHaveBeenCalled();
+  expect(store.get().openPath).not.toBe(P("B"));
+});
+
+test("two quick Enters on a hidden archived title open it once (#87)", async () => {
+  const { c, api } = await withHiddenB();
+  c.setQuery("B"); await settle();
+  await Promise.all([c.enter(), c.enter()]);
+  expect(api.openNote.mock.calls.filter((x) => x[0] === P("B"))).toHaveLength(1);
 });
 
 test("Shift+Enter on the exact title of a hidden archived note still opens it (#87)", async () => {

@@ -822,10 +822,8 @@ export class Controller {
       return;
     }
     await settled(() => this.searching);
-    // An exact title (or alias) no loaded row carries is a hidden archived note: Enter opens it like Shift+Enter, never row 0.
-    const q = fold(this.store.get().query.trim());
-    const hidden = q !== "" && this.titles.has(q) && !this.results.loaded.some((h) => fold(h.title) === q);
-    const a = enterAction(this.store.get().query, this.results.loaded, this.results.get(this.store.get().sel), force || hidden);
+    if (!force && (await this.openHiddenArchived())) return;
+    const a = enterAction(this.store.get().query, this.results.loaded, this.results.get(this.store.get().sel), force);
     if (!a) return;
     try {
       if (a.kind === "open") {
@@ -835,6 +833,36 @@ export class Controller {
       } else await this.openTitle(a.title, "enter", checklist);
     } catch (e) {
       this.setErr(errText(e));
+    }
+  }
+
+  protected confirmingEnter = false;
+  /**
+   * Plain Enter on the exact title or alias of an archived note the switch hides, with row 0 (or nothing) selected:
+   * open that note, not row 0. The title cache may be stale and the hit's archived flag is only known to a search, so
+   * one search with archived notes and no tags confirms it; any doubt (no archived hit, search failed, query changed) = false: Enter acts as before.
+   * ponytail: the note must be on the confirm search's first page; upgrade: page on.
+   */
+  protected async openHiddenArchived(): Promise<boolean> {
+    if (this.confirmingEnter) return true; // a second Enter while the first confirms: one open only
+    const s = this.store.get();
+    const q = fold(s.query.trim());
+    if (s.showArchived || s.sel > 0 || q === "" || !this.titles.has(q) || this.results.loaded.some((h) => fold(h.title) === q)) return false;
+    this.confirmingEnter = true;
+    const seq = this.searchSeq;
+    try {
+      const [page, targets] = await Promise.all([this.api.search(s.query, s.sort, 0, [], s.noLinks, true), this.api.listLinkTargets(true)]);
+      if (seq !== this.searchSeq || this.store.get().query !== s.query) return true; // the query moved on: this Enter is void
+      const paths = new Set(targets.filter((t) => fold(t.name) === q).map((t) => t.path));
+      const hit = page.hits.find((h) => h.archived && paths.has(h.path));
+      if (!hit) return false;
+      if ((await this.show(hit.path)) && this.editor.currentPath() === hit.path) this.settleAfterOpen(false, "enter");
+      return true;
+    } catch (e) {
+      console.warn("confirming a hidden title failed", e);
+      return false;
+    } finally {
+      this.confirmingEnter = false;
     }
   }
 
