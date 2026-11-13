@@ -1612,9 +1612,7 @@ export class Controller {
     const kept = pruneSelection(selected, [...tags, ...all]);
     const pruned = kept.length !== selected.length;
     this.tagIndex = prepare(tags, (t) => t.tag);
-    // A kept tag with no visible note stays in the panel, selected, count 0: the user can see and clear it.
-    const zero = kept.filter((k) => !tags.some((t) => fold(t.tag) === fold(k))).map((k) => ({ tag: all.find((t) => fold(t.tag) === fold(k))!.tag, count: 0 }));
-    this.store.set({ tags: [...tags, ...zero], selectedTags: kept });
+    this.store.set({ tags, selectedTags: kept }); // the panel adds zero-count chips for selected tags (chipTags)
     if (pruned) {
       this.filterChanged("highlight");
       if (this.store.get().paneMode === "notes") void this.loadTasks(); // a load started with the pruned tag must not stay

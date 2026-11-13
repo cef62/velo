@@ -6,6 +6,7 @@ import type { AppState, Store } from "../app/store";
 import { Button, Kbd } from "@/components/ui";
 import { activeFilterCount, appliedSearch } from "../saved";
 import { fold } from "../search";
+import { chipTags } from "../tags";
 import { formatBinding, NONE } from "../shortcuts";
 import { useStore } from "./useStore";
 
@@ -23,7 +24,7 @@ export function FiltersPanel({ controller, store }: { controller: Controller; st
   const keys = useStore(store, (s) => s.keys);
   const isMac = useStore(store, (s) => s.isMac);
   const noLinks = useStore(store, (s) => s.noLinks);
-  const tags = useStore(store, (s) => s.tags);
+  const visibleTags = useStore(store, (s) => s.tags);
   const query = useStore(store, (s) => s.query);
   const saved = useStore(store, (s) => s.savedSearches);
   const group = useRef<HTMLDivElement>(null);
@@ -42,6 +43,7 @@ export function FiltersPanel({ controller, store }: { controller: Controller; st
     group.current.querySelectorAll<HTMLButtonElement>("button")[to]?.focus();
   }, [k]);
   if (!tagPanelOpen) return null;
+  const tags = chipTags(visibleTags, selectedTags); // derived per render: no stale or missing chip
   const move = (to: number) => {
     const btns = group.current!.querySelectorAll<HTMLButtonElement>("button");
     const i = (to + btns.length) % btns.length;

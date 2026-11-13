@@ -57,3 +57,9 @@ export const pruneSelection = (sel: string[], available: TagCount[]): string[] =
 /** Chips for the tag bar: note tags in order, flagged when in the active filter. */
 export const tagBarItems = (tags: string[], selected: string[]): { tag: string; selected: boolean }[] =>
   tags.map((tag) => ({ tag, selected: selected.some((s) => fold(s) === fold(tag)) }));
+
+/** Panel chips: tags with visible notes, plus every selected tag (count 0 when no visible note carries it), so the active filter can always be seen and cleared. */
+export const chipTags = (tags: TagCount[], selected: string[]): TagCount[] => [
+  ...tags,
+  ...selected.filter((s) => !tags.some((t) => fold(t.tag) === fold(s))).map((tag) => ({ tag, count: 0 })),
+];

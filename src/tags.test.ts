@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { extractTags, pruneSelection, tagBarItems, toggleTag } from "./tags";
+import { chipTags, extractTags, pruneSelection, tagBarItems, toggleTag } from "./tags";
 import codeCases from "../tests/fixtures/tags-code.json";
 
 test("toggle is fold-insensitive", () => {
@@ -22,3 +22,10 @@ test("tagBarItems marks selected tags case- and accent-insensitively", () => {
   ]);
 });
 test("tagBarItems with no tags is empty", () => expect(tagBarItems([], ["x"])).toEqual([]));
+
+test("chipTags keeps visible tags and adds selected ones with count 0", () => {
+  const vis = [{ tag: "Work", count: 2 }, { tag: "home", count: 1 }];
+  expect(chipTags(vis, [])).toEqual(vis);
+  expect(chipTags(vis, ["work"])).toEqual(vis); // selected and visible: the visible count wins
+  expect(chipTags(vis, ["solo", "Old"])).toEqual([...vis, { tag: "solo", count: 0 }, { tag: "Old", count: 0 }]);
+});
