@@ -93,7 +93,7 @@ export function NoteList({ controller, store }: { controller: Controller; store:
       <>
         {h.encrypted && <span className={c.lock}><Lock aria-hidden="true" /></span>}
         <span className={c.title}><HighlightedText text={h.title} query={query} /></span>
-        {h.archived && <ArchivedBadge />}
+        {h.archived && <ArchivedBadge list="notes" />}
       </>
     );
     const date = <span className={c.date}>{ago(h.mtime)}</span>;
