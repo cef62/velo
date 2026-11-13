@@ -2,4 +2,4 @@
 "velo": patch
 ---
 
-Fixed the "archived" badge squeezing task titles in the Tasks view and Timeline titles at large font sizes: both now switch to the Archive icon at the width that suits their row.
+Fixed the "archived" mark squeezing task titles in the Tasks view: it now shows as an Archive icon when the list is narrow, and the Timeline switches to the icon at more list widths.

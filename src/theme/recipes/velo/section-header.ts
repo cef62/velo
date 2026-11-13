@@ -21,8 +21,9 @@ export const sectionHeader = defineRecipe({
     textAlign: 'left',
     borderRadius: 'l2',
     '& [data-count]': { fontWeight: '500', letterSpacing: '0' },
-    '& svg': { w: '12px', h: '12px', transition: 'transform 120ms' },
-    '&[aria-expanded=false] svg': { transform: 'rotate(-90deg)' },
+    // Only the disclosure chevron (data-chevron) is sized and turned: any other svg in a header, like the archived badge icon, stays put.
+    '& [data-chevron]': { w: '12px', h: '12px', transition: 'transform 120ms' },
+    '&[aria-expanded=false] [data-chevron]': { transform: 'rotate(-90deg)' },
     _focusVisible: { outline: '2px solid', outlineColor: 'velo.accent', outlineOffset: '-2px' },
   },
 })

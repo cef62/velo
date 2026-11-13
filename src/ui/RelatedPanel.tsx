@@ -131,7 +131,7 @@ export function RelatedPanel({ controller, store }: { controller: Controller; st
     if (r.kind === "section")
       return (
         <div key={r.id} {...common} aria-expanded={r.open} className={sectionHeader()} onClick={() => toggle(r.id, !r.open)}>
-          <ChevronDown aria-hidden /> {r.title} <span data-count>{r.count}</span>
+          <ChevronDown aria-hidden data-chevron="" /> {r.title} <span data-count>{r.count}</span>
         </div>
       );
     if (r.kind === "tag")

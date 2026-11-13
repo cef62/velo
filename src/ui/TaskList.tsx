@@ -108,7 +108,7 @@ const TaskRow = memo(function TaskRow({ t, overdue, query, controller, stop, onS
         <Checkbox.Control>
           <Checkbox.Indicator />
         </Checkbox.Control>
-        <Checkbox.HiddenInput aria-label={archivedLabel(t.text, t.archived)} tabIndex={-1} />
+        <Checkbox.HiddenInput aria-label={archivedLabel(t.text, t.archived && !showNote)} tabIndex={-1} />
       </Checkbox.Root>
       <div className={body}>
         <span className={text} aria-hidden="true" dangerouslySetInnerHTML={{ __html: html }} />
@@ -194,7 +194,7 @@ export function TaskList({ controller, store }: { controller: Controller; store:
                           e.preventDefault();
                         }}
                       >
-                        <ChevronDown aria-hidden />
+                        <ChevronDown aria-hidden data-chevron="" />
                         <span data-title=""><HighlightedText text={n.title} query={query} /></span>
                         {n.items[0].archived && <ArchivedBadge list="head" />}
                         <span data-count="" className={countBadge()}>{n.items.length}</span>
