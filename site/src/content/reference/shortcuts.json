@@ -270,6 +270,15 @@
     "group": "App"
   },
   {
+    "action": "check_updates",
+    "label": "Check for Updates…",
+    "keys": "none",
+    "mac": null,
+    "other": null,
+    "global": false,
+    "group": "App"
+  },
+  {
     "action": "quit",
     "label": "Quit velo",
     "keys": "none",

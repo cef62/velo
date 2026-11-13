@@ -54,6 +54,7 @@ All shortcuts below are remappable in Settings (click a shortcut, press the new 
 | — | — | Show / hide archived notes (set in Settings) |
 | — | — | Archive / unarchive the current note (set in Settings) |
 | — | — | Quit velo (set in Settings; also in the command palette) |
+| — | — | Check for Updates… (set in Settings; also in the command palette) |
 | ⌥⇧⌘N | Ctrl+Alt+Shift+N | Quick capture (system-wide) |
 | ⇧F10 / Menu key | Shift+F10 / Menu key | Open the context menu of the highlighted row or chip (Shift+F10 can be changed in Settings; the Menu key always works) |
 
@@ -184,7 +185,7 @@ Release builds are not notarized: on macOS they carry only an ad-hoc signature, 
 
 ## Updates
 
-velo checks GitHub for a new release 30 seconds after launch and then once a day. When one is out, a green "velo x.y is ready" pill in the header opens a popover with **What's new** and **Install and restart**: velo saves your note, installs the update and relaunches. Check by hand from **velo → Check for Updates…** (macOS) or **Settings → Updates → Check now**; turn the daily check off in Settings. Updates are verified against velo's signing key before they install. On Linux, in-app updates work for the AppImage, .deb and .rpm (the .deb and .rpm installs ask for your password); if one fails, download the new version from the Releases page. Versions before 0.6.0 have no updater: install 0.6.0 by hand once. 0.8.0 is the last build for Intel Macs: they stop getting updates (a manual check shows a "platform not found" error). If you installed the Intel (x64) build on an Apple silicon Mac, download the Apple silicon (aarch64) .dmg from the Releases page once.
+velo checks GitHub for a new release 30 seconds after launch and then once a day. When one is out, a green "velo x.y is ready" pill in the header opens a popover with **What's new** and **Install and restart**: velo saves your note, installs the update and relaunches. Check by hand from **velo → Check for Updates…** (macOS), the command palette or **Settings → Updates → Check now**; turn the daily check off in Settings. Updates are verified against velo's signing key before they install. On Linux, in-app updates work for the AppImage, .deb and .rpm (the .deb and .rpm installs ask for your password); if one fails, download the new version from the Releases page. Versions before 0.6.0 have no updater: install 0.6.0 by hand once. 0.8.0 is the last build for Intel Macs: they stop getting updates (a manual check shows a "platform not found" error). If you installed the Intel (x64) build on an Apple silicon Mac, download the Apple silicon (aarch64) .dmg from the Releases page once.
 
 velo writes each update step, and any crash, to `velo.log`: `~/Library/Logs/dev.velo.app/velo.log` on macOS, `~/.local/share/dev.velo.app/logs/velo.log` on Linux, `%LOCALAPPDATA%\dev.velo.app\logs\velo.log` on Windows. Attach it when you report an update problem.
 

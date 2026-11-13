@@ -1999,6 +1999,7 @@ export class Controller {
     archive_note: () => void this.toggleArchive(),
     quit: () => void this.api.quitApp(),
     reset_window: () => void this.api.resetWindow(),
+    check_updates: () => void this.checkUpdates(),
   };
 
   /**
