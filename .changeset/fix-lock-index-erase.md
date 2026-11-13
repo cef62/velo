@@ -2,4 +2,4 @@
 "velo": patch
 ---
 
-Locking a note now fails, leaving the note unlocked, when its text cannot be erased from the search index; before, the lock reported success and the note's plain text stayed findable in search (and its tasks and tags listed) until velo noticed the deleted file, or until the next launch if the index kept failing.
+Fixed a locked note's text staying searchable in the app when the search index could not erase it; locking now fails and leaves the note unlocked instead.

@@ -776,7 +776,10 @@ impl Vault {
             .and_then(|c| Ok(self.store.write_atomic(&to, &c)?))
             .and_then(|_| finish_move(from, &to).context("removing plaintext note"));
         if let Err(e) = moved {
-            self.reindex(from, Some(&lossy(&plain))).ok(); // still plain: back in the index (else the next launch does it)
+            // still plain: back in the index (else the next rescan does it)
+            if let Err(re) = self.reindex(from, Some(&lossy(&plain))) {
+                crate::log::warn(&format!("velo: re-indexing a note after a failed lock failed, missing from search until the next rescan: {re}"));
+            }
             return Err(e);
         }
         // The file has moved: from here on nothing may fail the lock (as in `rename_note`), or the UI keeps the old
@@ -1299,9 +1302,11 @@ mod tests {
         v.index.raw().execute_batch("CREATE TEMP TRIGGER full BEFORE DELETE ON notes WHEN OLD.path NOT LIKE '%.age' BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END;").unwrap();
         let r = v.lock_note(&d.path, &id);
         v.lock_all();
-        let leaked = !v.search("secretzebra", Sort::Modified, 0, &[]).unwrap().hits.is_empty();
-        assert!(r.is_err(), "lock reported success (plain text still searchable: {leaked})");
-        assert!(Path::new(&d.path).exists() && !dir.join("s.md.age").exists()); // nothing changed on disk
+        let hits = v.search("secretzebra", Sort::Modified, 0, &[]).unwrap().hits;
+        assert!(r.is_err(), "lock reported success (plain text still searchable: {})", !hits.is_empty());
+        assert!(Path::new(&d.path).exists() && !dir.join("s.md.age").exists()); // still plain on disk
+        assert_eq!(v.open_note(&d.path, None).unwrap().text, "- [ ] secretzebra");
+        assert_eq!(hits.iter().map(|h| h.path.as_str()).collect::<Vec<_>>(), vec![d.path.as_str()]); // still indexed
         v.index.raw().execute_batch("DROP TRIGGER full").unwrap();
         v.lock_note(&d.path, &id).unwrap();
         v.lock_all();
