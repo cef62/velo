@@ -14,7 +14,7 @@ Run before every commit that finishes a task and before opening a PR. Report the
 
 | # | Check | How |
 |---|---|---|
-| 1 | Verify | `pnpm build`, `pnpm exec tsc -p e2e --noEmit`, `pnpm test`, `cd src-tauri && cargo test` all green; new logic has a test (Vitest next to the module, inline `#[cfg(test)]` in Rust) |
+| 1 | Verify | `pnpm build`, `pnpm exec tsc -p e2e --noEmit`, `pnpm test`, `cd src-tauri && cargo test` all green; new logic has a test (Vitest next to the module, inline `#[cfg(test)]` in Rust); after a UI change, `pnpm e2e` (browser checks of the demo in Chromium and WebKit) |
 | 2 | App build | when `src-tauri/` or `tauri.conf.json` changed: `pnpm build:app` (or at least `cargo build --release`) |
 | 3 | Docs | `pnpm docs:check` green (`pnpm docs:gen` if stale; after a change to an MCP tool description, regenerate `mcp-tools.json` with `cd src-tauri && VELO_UPDATE_DOCS=1 cargo test dump_tool_specs`); README reflects new behaviour, settings and shortcuts; comments explain why, not what |
 | 4 | Staleness | no orphaned files, no unused dependencies in `package.json` or `Cargo.toml`, no docs pointing at removed code |

@@ -26,6 +26,7 @@
     "docs:build": "DEMO_BASE=/velo/demo/ pnpm demo:build && pnpm site:build && rm -rf site/dist/demo && cp -R dist-demo site/dist/demo",
     "docs:preview": "pnpm docs:build && pnpm site:preview",
     "docs:capture": "playwright install ffmpeg && playwright test -c e2e/capture.config.ts && node scripts/encode-media.mjs",
+    "e2e": "playwright test -c e2e/e2e.config.ts",
     "prepare": "panda codegen"
   },
   "pnpm": {
