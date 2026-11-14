@@ -504,6 +504,12 @@ mod tests {
     /// Every fixed message logs as itself; anything else copies none of its text.
     #[test] fn error_class_copies_only_literals() {
         for m in ERRORS { assert_eq!(&error_class(m), m); }
+        for c in ERROR_CLASSES {
+            for e in [format!("{c}zqmarker"), format!("{c}: zqmarker"), format!("{c} zqmarker\nzqmarker")] {
+                let got = error_class(&e);
+                assert!(!got.contains("zq"), "{e:?} -> {got:?}");
+            }
+        }
         assert_eq!(error_class("invalid tag: secret"), "invalid tag …");
         assert_eq!(error_class("missing text"), "missing …");
         assert_eq!(error_class("not found\nThe archived-notes list (.velo/archived) was not updated either: secret"), "not found +archive list");

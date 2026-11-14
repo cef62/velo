@@ -28,10 +28,33 @@ export function errorText(e: unknown): string {
   if (typeof e === "string") return CODES.has(e) ? e : `other (${e.length}c)`;
   if (e instanceof Error) {
     const name = /^\w{1,40}$/.test(e.name) ? e.name : "Error";
-    const at = /(?:https?|tauri|file):\/\/[\w./%:-]+:\d+:\d+/.exec(e.stack ?? "")?.[0];
+    const at = throwSite(e);
     return `${name} (message ${e.message.length}c)${at ? ` at ${at}` : ""}`;
   }
   return e === undefined ? "undefined" : typeof e;
+}
+
+/** `url` when it is one of the app's own scripts (same origin as the window), else null. */
+export const ownScript = (url: string) => {
+  const origin = globalThis.location?.origin;
+  return origin && origin !== "null" && url.startsWith(`${origin}/`) && /^[\w./%:-]+$/.test(url) ? url : null;
+};
+
+/**
+ * `url:line:col` of the first stack frame, only from frame lines and only for the app's own script. V8 (WebView2)
+ * starts the stack with `Name: message`, which may span lines and hold anything, so its frames are what follows that
+ * exact header; a stack whose first line starts with the name but not the whole header (message changed after the
+ * throw) gives no location. WebKit (macOS, Linux) and Gecko stacks hold frames only.
+ */
+function throwSite(e: Error): string | null {
+  const stack = e.stack ?? "";
+  const head = e.message ? `${e.name}: ${e.message}` : e.name;
+  let frames: string[];
+  if (stack.startsWith(`${head}\n`)) frames = stack.slice(head.length + 1).split("\n");
+  else if (stack.startsWith(e.name)) return null;
+  else frames = stack.split("\n");
+  const m = /^\s+at (?:.*\()?(\S+):(\d+):(\d+)\)?$/.exec(frames[0] ?? "") ?? /^[^@\s]*(?: code)?@(\S+):(\d+):(\d+)$/.exec(frames[0] ?? "");
+  return m && ownScript(m[1]) ? `${m[1]}:${m[2]}:${m[3]}` : null;
 }
 
 let windowStart = 0;
@@ -79,7 +102,7 @@ export function logDebug(text: () => string) {
 
 /** Uncaught errors and unhandled rejections in the window go to velo.log too. */
 export function installWindowHandlers(w: Pick<Window, "addEventListener">) {
-  w.addEventListener("error", (ev) => send("error", () => `uncaught ${errorText(ev.error ?? ev.message)} at ${/^(?:https?|tauri|file):\/\/[\w./%:-]+$/.test(ev.filename) ? ev.filename : "?"}:${ev.lineno}:${ev.colno}`));
+  w.addEventListener("error", (ev) => send("error", () => `uncaught ${errorText(ev.error ?? ev.message)} at ${ownScript(ev.filename) ?? "?"}:${ev.lineno}:${ev.colno}`));
   w.addEventListener("unhandledrejection", (ev) => send("error", () => `unhandled rejection: ${errorText(ev.reason)}`));
 }
 

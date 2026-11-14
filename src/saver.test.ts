@@ -439,6 +439,18 @@ test("debug records name the note and sizes, never its text", async () => {
   ]);
 });
 
+test("the save-failed record names the note, never its text or the error's", async () => {
+  setDebugLog(true);
+  invoke.mockClear();
+  const { c } = mk({ saveNote: vi.fn(async () => { throw new Error("disk full writing zqmarker body"); }) });
+  type(c, "zqmarker secret body");
+  await c.flush();
+  setDebugLog(false);
+  const rec = (invoke.mock.calls[0][1] as { text: string }).text;
+  expect(rec).toMatch(/^saver: save of a\.md failed, retry in 1000ms: Error \(message 31c\)/);
+  expect(rec).not.toMatch(/zq/i);
+});
+
 test("the conflict record says the editor kept the text when a keystroke lands while the disk text loads", async () => {
   setDebugLog(true);
   invoke.mockClear();

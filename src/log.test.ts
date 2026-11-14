@@ -8,22 +8,45 @@ let now = 1e12;
 beforeEach(() => {
   now += 1e9; // every test starts a fresh rate-limit window
   vi.spyOn(Date, "now").mockImplementation(() => now);
+  vi.stubGlobal("location", { origin: "tauri://localhost" });
 });
 afterEach(() => {
   invoke.mockReset();
   invoke.mockImplementation(async () => {});
   setDebugLog(false);
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 const texts = () => invoke.mock.calls.map((c) => (c[1] as { text: string }).text);
 
 test("logError keeps console.error and forwards the error's class and sizes, never its message", () => {
   const con = vi.spyOn(console, "error").mockImplementation(() => {});
   const e = new TypeError(`bad zqmarker \\"zqmarker\\" 'zq`);
-  e.stack = `TypeError: bad zqmarker\n    at f (tauri://localhost/assets/index-a1.js:10:5)`;
+  e.stack = `TypeError: ${e.message}\n    at f (tauri://localhost/assets/index-a1.js:10:5)`;
   logError("search failed", e);
   expect(con).toHaveBeenCalledWith("search failed", e);
   expect(invoke.mock.calls[0][1]).toEqual({ level: "error", text: `search failed: TypeError (message ${e.message.length}c) at tauri://localhost/assets/index-a1.js:10:5` });
+});
+
+test("the location comes only from a frame line of the app's own script, never from the message", () => {
+  const withStack = (message: string, stack: string) => Object.assign(new Error(message), { stack });
+  const app = "tauri://localhost/assets/index-a1.js";
+  // V8: a URL in the message is not a frame
+  const url = "cannot open https://zqmarker.example/x:1:2 now";
+  expect(errorText(withStack(url, `Error: ${url}\n    at f (${app}:3:4)`))).toBe(`Error (message ${url.length}c) at ${app}:3:4`);
+  // V8: a multi-line message with a line shaped like a frame
+  const multi = `first\n    at zq (tauri://localhost/zqmarker.js:9:9)`;
+  expect(errorText(withStack(multi, `Error: ${multi}\n    at g (${app}:5:6)`))).toBe(`Error (message ${multi.length}c) at ${app}:5:6`);
+  // the message changed after the throw: the header no longer matches, so no location
+  expect(errorText(withStack("now different", `Error: ${multi}\n    at g (${app}:5:6)`))).toBe("Error (message 13c)");
+  // WebKit / Gecko: frames only
+  expect(errorText(withStack("zqmarker", `f@${app}:7:8\nglobal code@${app}:1:1`))).toBe(`Error (message 8c) at ${app}:7:8`);
+  // a script of another origin, or a native first frame: no location
+  expect(errorText(withStack("x", `f@https://zqmarker.example/a.js:1:2`))).toBe("Error (message 1c)");
+  expect(errorText(withStack("x", `Error: x\n    at Array.map (<anonymous>)\n    at f (${app}:1:2)`))).toBe("Error (message 1c)");
+  // thrown non-Errors
+  expect(errorText("zqmarker https://zqmarker.example/a.js:1:2")).toBe("other (42c)");
+  expect(errorText({ stack: `f@${app}:1:2`, message: "zqmarker" })).toBe("object");
 });
 
 test("strings: known backend codes as they are, anything else only as its size", () => {
