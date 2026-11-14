@@ -17,6 +17,7 @@ const num = (n: number) => n.toLocaleString("en-US");
 const rename = css({
   flex: "1",
   minW: "min(160px, 100%)", // neighbours (hint, actions) never shrink: without a floor the input collapsed to a sliver; never wider than the lead
+  "[data-err] > &": { minW: "min(160px, 100% - 28px)" }, // leaves the error's icon (14 px) and a gap on the line
   h: "control",
   ml: "-2",
   px: "2",
@@ -112,7 +113,8 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
 
   return (
     <div ref={el} className={bar.root} data-titlebar="">
-      <div className={bar.lead}>
+      {/* the error comes right after the title or input: nothing before it can push it to the clipped line (recipe) */}
+      <div className={bar.lead} data-err={s.err ? "" : undefined}>
         {s.renaming ? (
           <>
             <input
@@ -133,19 +135,19 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
             />
             {/* the keys, as a sentence for assistive technology; always rendered (the input points at it), the visual hint only when there is room */}
             <span id={hintId} className={css({ srOnly: true })}>Press Enter to rename, Escape to cancel.</span>
-            {mode.renameHint && (
-              <span className={hint} aria-hidden>
-                <Kbd>↩</Kbd> Rename <Kbd>Esc</Kbd> Cancel
-              </span>
-            )}
           </>
         ) : (
           <h2 className={bar.title} data-note-title="" title={s.title} onDoubleClick={() => controller.startRename()}>
             {s.title}
           </h2>
         )}
-        {s.archived && !s.renaming && <ArchivedBadge list="bar" />}
         {s.err && status("error", "alert", <TriangleAlert size={14} aria-hidden className={css({ flex: "none" })} />, withCode(s.err), s.err.replace(/`/g, ""), undefined, true)}
+        {s.renaming && mode.renameHint && (
+          <span className={hint} aria-hidden>
+            <Kbd>↩</Kbd> Rename <Kbd>Esc</Kbd> Cancel
+          </span>
+        )}
+        {s.archived && !s.renaming && <ArchivedBadge list="bar" />}
         {s.indexing
           ? status(
               undefined,
@@ -160,7 +162,8 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
           : showSaving && status(undefined, "status", <Spinner size="sm" className={css({ flex: "none" })} />, "Saving…", "Saving…")}
       </div>
       {s.err && s.errFromSave && (
-        <Button variant="outline" size="sm" flex="none" onClick={() => controller.retrySave()}>
+        <Button variant="outline" size="sm" flex="none" mx="-1.5" onClick={() => controller.retrySave()}>
+          {/* mx: 6 px gaps either side, so the error keeps 18 px of lead at the narrowest bar (300, Preview) */}
           Retry
         </Button>
       )}
