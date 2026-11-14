@@ -2217,10 +2217,12 @@ export class Controller {
     if (!ok) return unapplied("refused");
     // applied: from here no failure may invite a retry, which would apply it twice
     try {
-      const { clean, copy } = await this.editor.flushOutcome();
-      if (!clean) return "unsaved"; // the edit stays in the editor; its save error or conflict banner shows
-      // its save went to a conflict copy and the editor reloaded the disk text: the note does not hold the change
+      const { clean, copy, saved } = await this.editor.flushOutcome();
+      // its save went to a conflict copy: the note does not hold the change (the editor reloaded the disk text, or
+      // keeps the user's newer typing on top of it, which goes to a copy of its own)
       if (copy !== null) return unapplied({ conflict: copy });
+      // the user typed during the save: the note holds the change, the newer typing is still to be saved
+      if (!clean && !saved) return "unsaved"; // the edit stays in the editor; its save error or conflict banner shows
       return { hash: (await this.api.openNote(req.path)).hash };
     } catch {
       return "unsaved";

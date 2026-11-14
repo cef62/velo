@@ -140,8 +140,8 @@ export class FakeEditor implements Editor {
   currentPath = () => this.path;
   onExternalChange = vi.fn();
   flush = vi.fn(async () => this.flushResult);
-  /** `copy`: the conflict copy the flushed text went to. */
-  flushOutcome = vi.fn(async () => ({ clean: await this.flush(), copy: null as string | null }));
+  /** `copy`: the conflict copy the flushed text went to; `saved`: the note holds it although newer typing is unsaved. */
+  flushOutcome = vi.fn(async () => ({ clean: await this.flush(), copy: null as string | null, saved: false }));
   focus() { this.focused++; }
   getText = () => this.text;
   setRich(on: boolean) { this.rich = on; }

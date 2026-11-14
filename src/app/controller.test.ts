@@ -1592,7 +1592,7 @@ const agentSaveConflicts = (c: Controller, editor: FakeEditor, copy: string) =>
     c.editorOpts().onConflict(copy);
     editor.text = "changed on disk";
     editor.dirty = false;
-    return { clean: true, copy };
+    return { clean: true, copy, saved: false };
   });
 
 test("an agent write whose save lands in a conflict copy replies with the copy, not a hash (#114)", async () => {
@@ -1624,7 +1624,7 @@ test("an agent write saved cleanly while the user dismisses an earlier conflict 
   c.editorOpts().onConflict(P("A (conflict 0)"));
   editor.flushOutcome.mockImplementationOnce(async () => {
     c.dismissConflict();
-    return { clean: true, copy: null };
+    return { clean: true, copy: null, saved: true };
   });
   await c.onAgentWrite({ id: 9, path: P("A"), kind: "append", insert: "- [ ] x", summary: "s" });
   expect(api.agentWriteDone).toHaveBeenCalledWith(9, { hash: "h" });
@@ -1632,11 +1632,13 @@ test("an agent write saved cleanly while the user dismisses an earlier conflict 
 
 /** FakeEditor behind the real SaveController and a backend that, like `Store::save`, conflicts iff the base hash is
  * not the disk's. `onSave(n, ctx)` runs as the n-th save starts. */
-function setupRealSaver(onSave: (n: number, ctx: ReturnType<typeof setup> & { be: { disk: string; hash: string; copies: string[] } }) => void) {
+function setupRealSaver(onSave: (n: number, ctx: ReturnType<typeof setup> & { be: { disk: string; hash: string; copies: string[] }; type: (t: string) => void }) => void) {
   const s = setup({ A: "a", B: "b" });
   const { c, api, editor } = s;
   const be = { disk: "a", hash: "h", copies: [] as string[], saves: 0 };
-  const ctx = { ...s, be };
+  // a user keystroke: the editor text changes and the saver marks it dirty
+  const type = (t: string) => { editor.text = t; saver.edit(); };
+  const ctx = { ...s, be, type };
   const doc = () => ({ path: P("A"), title: "A", text: be.disk, hash: be.hash, encrypted: false, meta: noMeta, archived: false });
   const saver = new SaveController({
     saveNote: async (_p, t, base) => {
@@ -1683,6 +1685,38 @@ test("a blur during the agent's conflicting save neither writes the change over 
   expect(be.copies).toEqual(["a\n- [ ] x"]);
   expect(api.agentWriteDone).toHaveBeenCalledWith(1, { conflict: P("A (conflict 1)") });
   expect(editor.text).toBe("other");
+});
+
+test("the user typing during the agent's save gets the agent the hash of its saved change, not 'velo did not answer' (#134)", async () => {
+  const { c, api, be, editor } = setupRealSaver((n, ctx) => {
+    if (n === 1) ctx.type(ctx.editor.text + " typed");
+  });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 1, path: P("A"), kind: "append", insert: "- [ ] x", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(1, { hash: "h:a\n- [ ] x" }); // main: "unsaved"
+  expect(editor.text).toBe("a\n- [ ] x typed");
+  expect(await editor.flush()).toBe(true);
+  expect(be.disk).toBe("a\n- [ ] x typed"); // the keystroke is saved after it
+});
+
+test("the user typing during the agent's save that went to a conflict copy gets the agent the conflict error (#134)", async () => {
+  const { c, api, be, editor } = setupRealSaver((n, ctx) => {
+    if (n === 1) {
+      ctx.be.disk = "other";
+      ctx.be.hash = "hX";
+      ctx.type(ctx.editor.text + " typed");
+    }
+  });
+  await c.show(P("A"));
+  api.snapshotAgent.mockResolvedValueOnce("3.md");
+  await c.onAgentWrite({ id: 1, path: P("A"), kind: "append", insert: "- [ ] x", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(1, { conflict: P("A (conflict 1)") }); // main: "unsaved"
+  expect(api.dropAgentSnapshot).toHaveBeenCalledWith(P("A"), "3.md");
+  expect(editor.text).toBe("a\n- [ ] x typed"); // the keystroke stays, and goes to a copy of its own
+  await settle();
+  expect(await editor.flush()).toBe(true);
+  expect(be.disk).toBe("other");
+  expect(be.copies).toEqual(["a\n- [ ] x", "a\n- [ ] x typed"]);
 });
 
 test("an agent save into a copy named like the banner already shown is still reported as a conflict (#114)", async () => {
@@ -2024,7 +2058,7 @@ test("capture into the open Inbox whose save lands in a conflict copy says so (#
   c.setQuery("buy milk");
   editor.flushOutcome.mockImplementationOnce(async () => {
     c.editorOpts().onConflict("/n/Inbox (conflict).md"); // the saver wrote the text to a conflict copy and reloaded the disk text
-    return { clean: true, copy: "/n/Inbox (conflict).md" };
+    return { clean: true, copy: "/n/Inbox (conflict).md", saved: false };
   });
   await c.submitCapture("buy milk");
   expect(store.get().err).toBe("Saved to a conflict copy — check Inbox");
