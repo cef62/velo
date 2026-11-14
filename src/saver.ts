@@ -33,6 +33,8 @@ export class SaveController {
   private queue: Promise<void> = Promise.resolve();
   private retryMs = 1000;
   private suspended = false;
+  /** The conflict copy the save of version `v` went to; the editor was reloaded with the disk text. */
+  private copied: { v: number; path: string } | null = null;
 
   constructor(private d: SaverDeps, private delay = 500) {}
 
@@ -109,6 +111,16 @@ export class SaveController {
     return !this.dirty;
   }
 
+  /** flush(), plus the conflict copy the text current at the call went to (null: not a copy, e.g. the note holds it). */
+  async flushOutcome(): Promise<{ clean: boolean; copy: string | null }> {
+    // only text still unsaved at the call can go to a copy now; dirty at version v also means the editor holds v's
+    // text of the current note (any load, rebind or reload since a copy of v needed a clean editor and no edit)
+    const [v, pending] = [this.version, this.dirty];
+    const clean = await this.flush();
+    const c = this.copied;
+    return { clean, copy: pending && c?.v === v ? c.path : null };
+  }
+
   external(path: string) {
     if (path !== this.cur.path || this.suspended) return;
     if (this.dirty) return void this.flush();
@@ -132,6 +144,9 @@ export class SaveController {
   private enqueue(target: typeof this.cur, text: string, v: number) {
     this.queue = this.queue.then(async () => {
       if (!target.path) return;
+      // an earlier save already settled this text (in the note or a conflict copy): sending it again with the
+      // base hash that save left would write it over the note's disk version
+      if (target === this.cur && v === this.version && !this.dirty) return;
       try {
         this.d.onSaving?.(true);
         const r = await this.d.saveNote(target.path, text, target.baseHash).finally(() => this.d.onSaving?.(false));
@@ -153,6 +168,7 @@ export class SaveController {
               target.baseHash = disk.hash;
               this.d.setText(disk.text);
               this.dirty = false;
+              this.copied = { v, path: r.conflict_path };
             }
           }
           this.d.onConflict(r.conflict_path);

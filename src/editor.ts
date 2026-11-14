@@ -30,6 +30,8 @@ export interface Editor {
   onExternalChange(path: string): void;
   /** Save pending edits now; resolves true when clean afterwards. */
   flush(): Promise<boolean>;
+  /** flush(), plus the conflict copy the text current at the call went to (null: not a copy). */
+  flushOutcome(): Promise<{ clean: boolean; copy: string | null }>;
   focus(): void;
   getText(): string;
   /** Rich edit (marks hidden off the cursor line) or plain markdown. */
@@ -257,6 +259,10 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     flush() {
       remember();
       return ctrl.flush();
+    },
+    flushOutcome() {
+      remember();
+      return ctrl.flushOutcome();
     },
     focus: () => view.focus(),
     getText: () => view.state.doc.toString(),

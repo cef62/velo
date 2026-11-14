@@ -88,7 +88,8 @@ export type AgentWrite = {
   title?: string;
   error?: string;
 };
-export type AgentReply = { hash: string } | "not-open" | "refused" | "conflict" | "unsaved" | "closed" | "ready" | "flushed" | "ok";
+/** `{ conflict }`: the edit was applied, but its save went to that conflict copy and the editor reloaded the note. */
+export type AgentReply = { hash: string } | { conflict: string } | "not-open" | "refused" | "conflict" | "unsaved" | "closed" | "ready" | "flushed" | "ok";
 /** Called right before applying `id`: false once the backend stopped waiting (then leave everything as it is). */
 export const agentWriteClaim = (id: number) => invoke<boolean>("agent_write_claim", { id });
 export const agentWriteDone = (id: number, result: AgentReply) => invoke<void>("agent_write_done", { id, result });

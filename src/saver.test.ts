@@ -55,7 +55,7 @@ test("conflict with late edit: no keystroke lost", async () => {
 test("conflict without late edit loads disk version", async () => {
   const { c, d } = mk({ saveNote: vi.fn(async () => ({ kind: "conflict" as const, conflict_path: "c.md", disk_hash: "hd" })) });
   type(c, "mine");
-  await c.flush();
+  expect(await c.flush()).toBe(true); // clean: only onConflict, called before flush resolves, tells it was a conflict copy (#114)
   expect(text).toBe("disk");
   expect(c.isDirty()).toBe(false);
   expect(d.onConflict).toHaveBeenCalledWith("c.md");
@@ -313,4 +313,103 @@ test("stamp application doesn't mark dirty or trigger another save", async () =>
   type(c, FM + "xy");
   await vi.advanceTimersByTimeAsync(500);
   expect(saveNote).toHaveBeenLastCalledWith("a.md", FM + "xy", "h1"); // base hash from the save result
+});
+
+/** A backend like `Store::save`: a save whose base hash is not the disk's goes to a new conflict copy. */
+const backend = () => {
+  const be = { disk: "base", hash: "h0", copies: [] as string[] };
+  const saveNote = vi.fn(async (_p: string, t: string, base: string) => {
+    await Promise.resolve();
+    if (base !== be.hash) {
+      be.copies.push(t);
+      return { kind: "conflict" as const, conflict_path: `a (conflict ${be.copies.length}).md`, disk_hash: be.hash };
+    }
+    be.disk = t;
+    be.hash = `h:${t}`;
+    return { kind: "saved" as const, hash: be.hash, front_matter: null, meta: noMeta, archived: false };
+  });
+  const openNote = vi.fn(async () => ({ ...doc, text: be.disk, hash: be.hash }));
+  return { be, saveNote, openNote };
+};
+
+test("a save queued behind one that ended in a conflict copy is not sent: the outside change stays (#114)", async () => {
+  const { be, saveNote, openNote } = backend();
+  const { c, d } = mk({ saveNote, openNote });
+  type(c, "mine");
+  be.disk = "outside";
+  be.hash = "hX";
+  c.external("a.md"); // the watcher: dirty, so it flushes
+  expect(await c.flush()).toBe(true); // a second flush of the same text (blur, agent write, show)
+  await vi.runAllTimersAsync();
+  expect(be.disk).toBe("outside"); // main: "mine", written over the outside change
+  expect(be.copies).toEqual(["mine"]);
+  expect(text).toBe("outside");
+  expect(saveNote).toHaveBeenCalledTimes(1);
+  expect(d.onConflict).toHaveBeenCalledTimes(1);
+});
+
+test("two overlapping flushes of the same text send one save, and both resolve after it (#114)", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const saveNote = vi.fn(async () => { await gate; return { kind: "saved" as const, hash: "h1", front_matter: null, meta: noMeta, archived: false }; });
+  const { c } = mk({ saveNote });
+  type(c, "x");
+  const done: boolean[] = [];
+  const a = c.flush().then((r) => done.push(r));
+  const b = c.flush().then((r) => done.push(r));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(done).toEqual([]); // neither settles before the save it waits for
+  release();
+  await Promise.all([a, b]);
+  expect(done).toEqual([true, true]);
+  expect(saveNote).toHaveBeenCalledTimes(1);
+});
+
+test("typing during a save that conflicts, with a second flush queued: every text ends in the note or a copy (#114)", async () => {
+  const { be, saveNote, openNote } = backend();
+  const { c } = mk({ saveNote, openNote });
+  type(c, "one");
+  const first = c.flush();
+  be.disk = "outside";
+  be.hash = "hX";
+  type(c, "one two"); // typed while "one" is in flight
+  const second = c.flush();
+  await first;
+  await second;
+  await vi.runAllTimersAsync();
+  expect(be.disk).toBe("outside");
+  expect(be.copies).toEqual(["one", "one two"]);
+  expect(text).toBe("outside");
+  expect(c.isDirty()).toBe(false);
+});
+
+test("flushOutcome reports the conflict copy its own text went to, and null once the note holds it (#114)", async () => {
+  const { be, saveNote, openNote } = backend();
+  const { c } = mk({ saveNote, openNote });
+  type(c, "mine");
+  be.hash = "hX";
+  expect(await c.flushOutcome()).toEqual({ clean: true, copy: "a (conflict 1).md" });
+  type(c, "again");
+  expect(await c.flushOutcome()).toEqual({ clean: true, copy: null });
+  expect(be.disk).toBe("again");
+});
+
+test("flushOutcome after a conflict reload, with nothing new to save, reports no copy (#114)", async () => {
+  const { be, saveNote, openNote } = backend();
+  const { c } = mk({ saveNote, openNote });
+  type(c, "mine");
+  be.hash = "hX";
+  expect((await c.flushOutcome()).copy).toBe("a (conflict 1).md");
+  expect(await c.flushOutcome()).toEqual({ clean: true, copy: null }); // 87ffb42: the old copy again
+  expect(saveNote).toHaveBeenCalledTimes(1);
+});
+
+test("a conflict copy of one note is not reported for a flush of another note at the same version (#114)", async () => {
+  const { be, saveNote, openNote } = backend();
+  const { c } = mk({ saveNote, openNote });
+  type(c, "mine");
+  be.hash = "hX";
+  expect((await c.flushOutcome()).copy).toBe("a (conflict 1).md");
+  expect(c.load({ ...doc, path: "b.md", text: "B", hash: "hb" })).toBe(true); // the version number stays
+  expect(await c.flushOutcome()).toEqual({ clean: true, copy: null });
 });
