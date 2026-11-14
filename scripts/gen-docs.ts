@@ -10,7 +10,7 @@ const GROUPS: Record<string, Action[]> = {
   "Search & filters": ["save_search"],
   "Tasks & timeline": ["toggle_tasks", "toggle_timeline"],
   Security: ["toggle_lock", "lock_all"],
-  App: ["settings", "toggle_window", "reset_window", "check_updates", "quit"],
+  App: ["settings", "toggle_window", "reset_window", "check_updates", "toggle_debug_log", "show_log", "quit"],
 };
 
 const actions = Object.keys(DEFAULTS) as Action[];

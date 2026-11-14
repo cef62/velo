@@ -3,6 +3,7 @@ import { css } from "styled-system/css";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { useStore } from "./useStore";
+import { logError } from "../log";
 import { Header } from "./Header";
 import { EditorHost } from "./EditorHost";
 import { PreviewHost } from "./PreviewHost";
@@ -60,7 +61,7 @@ export function App({ controller, store }: { controller: Controller; store: Stor
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    controller.start().catch((e) => console.error("start failed", e));
+    controller.start().catch((e) => logError("start failed", e));
   }, [controller]);
 
   return (

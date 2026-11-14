@@ -279,6 +279,24 @@
     "group": "App"
   },
   {
+    "action": "toggle_debug_log",
+    "label": "Toggle debug logging",
+    "keys": "none",
+    "mac": null,
+    "other": null,
+    "global": false,
+    "group": "App"
+  },
+  {
+    "action": "show_log",
+    "label": "Show log file",
+    "keys": "none",
+    "mac": null,
+    "other": null,
+    "global": false,
+    "group": "App"
+  },
+  {
     "action": "quit",
     "label": "Quit velo",
     "keys": "none",

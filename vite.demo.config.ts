@@ -10,6 +10,7 @@ const src = (p: string) => fileURLToPath(new URL(`./src/${p}`, import.meta.url))
 
 // Every @tauri-apps module the app imports, mapped to a browser shim; an unmapped one fails the build.
 const shims: Record<string, string> = {
+  "@tauri-apps/api/core": src("demo/shims/core.ts"),
   "@tauri-apps/api/event": src("demo/shims/event.ts"),
   "@tauri-apps/api/window": src("demo/shims/window.ts"),
   "@tauri-apps/api/menu": src("demo/shims/menu.ts"),
