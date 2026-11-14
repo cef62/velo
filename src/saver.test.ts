@@ -55,7 +55,7 @@ test("conflict with late edit: no keystroke lost", async () => {
 test("conflict without late edit loads disk version", async () => {
   const { c, d } = mk({ saveNote: vi.fn(async () => ({ kind: "conflict" as const, conflict_path: "c.md", disk_hash: "hd" })) });
   type(c, "mine");
-  await c.flush();
+  expect(await c.flush()).toBe(true); // clean: only onConflict, called before flush resolves, tells it was a conflict copy (#114)
   expect(text).toBe("disk");
   expect(c.isDirty()).toBe(false);
   expect(d.onConflict).toHaveBeenCalledWith("c.md");

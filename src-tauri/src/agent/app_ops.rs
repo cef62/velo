@@ -2,7 +2,7 @@
 //! filtering as direct mode, never with the app's identity. A write to a note the editor may have open is first offered
 //! to the webview (`agent-write`), which applies it as a user edit or answers `not-open`.
 use super::client::NO_ANSWER;
-use super::ops::{NoteOps, VaultOps, locked, plain};
+use super::ops::{NoteOps, VaultOps, conflict_copy, locked, plain};
 use crate::names::parse_note_file;
 use crate::commands::AppState;
 use crate::index::{Page, TagCount};
@@ -175,6 +175,9 @@ impl<'a> AppOps<'a> {
     /// The webview's reply to `req`, which must be one of `ok` (`conflict` and `refused` become errors).
     fn ask_editor(&self, req: Value, ok: &[&str]) -> anyhow::Result<Value> {
         let r = (self.route)(req)?;
+        if let Some(copy) = r.get("conflict").and_then(Value::as_str) {
+            return Err(conflict_copy(copy)); // applied in the editor, but its save went to a conflict copy, not the note
+        }
         match r.as_str() {
             Some("conflict") => Err(anyhow!("note changed since you read it")),
             Some("refused") => Err(anyhow!("the note is open in velo and can't be edited right now, retry")),
@@ -537,7 +540,7 @@ mod tests {
         let r = crate::agent::listener::run_call(&st, &editors, &emit, "replace_note", json!({"title": "P", "text": "mine", "expected_hash": hash, "summary": "s"}));
         std::fs::set_permissions(dir.join(".velo"), std::fs::Permissions::from_mode(0o755)).unwrap();
         let e = r.unwrap_err();
-        assert!(e.starts_with("conflict: saved to P (conflict ") && e.contains("archived-notes list") && e.contains(".velo/archived"), "{e}");
+        assert!(e.starts_with("conflict: the note changed on disk while your change was being saved, so velo saved it to the conflict copy \"P (conflict ") && e.contains("archived-notes list") && e.contains(".velo/archived"), "{e}");
         assert_eq!(events.lock().unwrap().iter().filter(|e| *e == "archive-error").count(), 1);
     }
 
@@ -654,6 +657,39 @@ mod tests {
     #[test] fn claimed_write_without_answer_may_have_applied() {
         let r = round_trip(true, |_, _, asked| asked.recv().unwrap()); // claimed, then no answer within the claimed wait
         assert_eq!(r.unwrap_err().to_string(), crate::agent::client::NO_ANSWER);
+    }
+
+    /// #114: every write the editor applies to the open note, whose save then went to a conflict copy, fails with the
+    /// copy's title, as a backend write's conflict does; the call itself emits no app event (the editor's save did).
+    #[test] fn an_editor_save_into_a_conflict_copy_fails_the_call() {
+        let (st, dir) = state();
+        let copy = dir.join("P (conflict 2026-11-14 0100).md").to_string_lossy().into_owned();
+        let editors = Editors::default();
+        let events = Mutex::new(Vec::<String>::new());
+        let emit = |e: &str, v: Value| {
+            if e == "agent-write" {
+                editors.done(v["id"].as_u64().unwrap(), json!({ "conflict": copy }));
+            }
+            events.lock().unwrap().push(e.to_string());
+        };
+        let call = |name: &str, args: Value| crate::agent::listener::run_call(&st, &editors, &emit, name, args);
+        let hash = crate::store::hash(&std::fs::read(dir.join("P.md")).unwrap());
+        let want = "conflict: the note changed on disk while your change was being saved, so velo saved it to the conflict copy \"P (conflict 2026-11-14 0100)\" instead; the note does not have your change. Read the note again and retry.";
+        for (name, args) in [
+            ("edit_note", json!({"title": "P", "old_text": "plain", "new_text": "PLAIN", "summary": "s"})),
+            ("replace_note", json!({"title": "P", "text": "new", "expected_hash": hash, "summary": "s"})),
+            ("append_to_note", json!({"title": "P", "text": "more", "summary": "s"})),
+            ("add_task", json!({"title": "P", "text": "milk", "summary": "s"})),
+            ("set_task_done", json!({"title": "P", "line": 1, "line_text": "- [ ] open task", "done": true, "summary": "s"})),
+        ] {
+            assert_eq!(call(name, args), Err(want.to_string()), "{name}");
+        }
+        for name in ["add_tags", "remove_tags"] {
+            let r = call(name, json!({"titles": ["P"], "tags": [if name == "add_tags" { "new" } else { "shared" }], "summary": "s"})).unwrap();
+            assert_eq!((r["results"][0]["status"].as_str(), r["results"][0]["reason"].as_str()), (Some("failed"), Some(want)), "{name}: {r}");
+        }
+        assert!(events.lock().unwrap().iter().all(|e| e == "agent-write"), "{:?}", events.lock().unwrap());
+        assert_eq!(std::fs::read_to_string(dir.join("P.md")).unwrap(), "plain zebra #shared\n- [ ] open task\n[[L]]\n", "the backend never writes it");
     }
 
     #[test] fn unsaved_reply_may_have_applied() {

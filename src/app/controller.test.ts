@@ -1583,6 +1583,39 @@ test("agent append to the open note uses appendLine", async () => {
   expect(api.agentWriteDone).toHaveBeenCalledWith(1, { hash: "h" });
 });
 
+/** The agent's flush (the second one: the first saves the user's own edits) lands in a conflict copy: the saver
+ * writes the editor text there, reloads the disk text and resolves true, as `SaveController` does. */
+const agentSaveConflicts = (c: Controller, editor: FakeEditor, copy: string) =>
+  editor.flush.mockImplementationOnce(async () => true).mockImplementationOnce(async () => {
+    c.editorOpts().onConflict(copy);
+    editor.text = "changed on disk";
+    editor.dirty = false;
+    return true;
+  });
+
+test("an agent write whose save lands in a conflict copy replies with the copy, not a hash (#114)", async () => {
+  for (const kind of ["replace", "append"] as const) {
+    const { c, api, editor, store } = setup({ A: "hello world" });
+    await c.show(P("A"));
+    api.snapshotAgent.mockResolvedValueOnce("3.md");
+    agentSaveConflicts(c, editor, P("A (conflict 1)"));
+    await c.onAgentWrite({ id: 7, path: P("A"), kind, insert: "hello there world", base: "h", summary: "s" });
+    expect(api.agentWriteDone).toHaveBeenCalledWith(7, { conflict: P("A (conflict 1)") });
+    expect(store.get().conflict).toBe(P("A (conflict 1)")); // the banner shows as before
+    expect(api.dropAgentSnapshot).toHaveBeenCalledWith(P("A"), "3.md"); // the note never got the change: no revision for it
+  }
+});
+
+test("an agent write saved cleanly replies with the hash although an earlier conflict banner still shows (#114)", async () => {
+  const { c, api, editor, store } = setup({ A: "a" });
+  await c.show(P("A"));
+  c.editorOpts().onConflict(P("A (conflict 0)")); // the user's own earlier save conflicted
+  await c.onAgentWrite({ id: 8, path: P("A"), kind: "append", insert: "- [ ] x", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(8, { hash: "h" });
+  expect(store.get().conflict).toBe(P("A (conflict 0)"));
+  expect(editor.appended).toEqual(["- [ ] x"]);
+});
+
 test("agent write refused when the editor is read-only", async () => {
   const { c, api, editor } = setup({ A: "a" });
   await c.show(P("A"));

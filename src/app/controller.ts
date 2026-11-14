@@ -2178,7 +2178,11 @@ export class Controller {
     if (!ok) return unapplied("refused");
     // applied: from here no failure may invite a retry, which would apply it twice
     try {
+      const banner = this.store.get().conflict;
       if (!(await this.editor.flush())) return "unsaved"; // the edit stays in the editor; its save error or conflict banner shows
+      // this save went to a conflict copy and the editor reloaded the disk text: the note does not hold the change
+      const copy = this.store.get().conflict;
+      if (copy !== banner && copy !== null) return unapplied({ conflict: copy });
       return { hash: (await this.api.openNote(req.path)).hash };
     } catch {
       return "unsaved";

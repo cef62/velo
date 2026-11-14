@@ -71,6 +71,14 @@ fn title_of(path: &str) -> String {
     parse_note_file(Path::new(path)).map(|n| n.title).unwrap_or_else(|| path.to_string())
 }
 
+/// A write whose save found the note changed on disk: the text went to the conflict copy at `copy`, not the note.
+pub(crate) fn conflict_copy(copy: &str) -> anyhow::Error {
+    anyhow!(
+        "conflict: the note changed on disk while your change was being saved, so velo saved it to the conflict copy \"{}\" instead; the note does not have your change. Read the note again and retry.",
+        title_of(copy)
+    )
+}
+
 /// Refuses a locked path with the same error as a missing note, so the lock is not revealed.
 pub(crate) fn plain(path: &str) -> anyhow::Result<&str> {
     if locked(path) { Err(anyhow!("not found")) } else { Ok(path) }
@@ -110,7 +118,7 @@ impl<V: DerefMut<Target = Vault>> VaultOps<V> {
         let before = hash_of(Path::new(path));
         match landed(self.vault.save_note(path, text, base_hash, None, wfm), Path::new(path), before.as_deref())? {
             SaveResult::Saved { hash, .. } => Ok(hash),
-            SaveResult::Conflict { conflict_path, .. } => Err(anyhow!("conflict: saved to {}", title_of(&conflict_path))),
+            SaveResult::Conflict { conflict_path, .. } => Err(conflict_copy(&conflict_path)),
         }
     }
 
