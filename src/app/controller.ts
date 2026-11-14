@@ -738,7 +738,10 @@ export class Controller {
         if (keepOpen && r.indexOf(this.editor.currentPath() ?? "") >= 0) this.selectOpen();
         else if (keepOpen === "highlight") {
           this.store.set({ sel: r.count ? 0 : -1 }); // highlight row 0, don't open it
-        } else void this.select(r.count ? 0 : -1, "auto");
+        } else {
+          const target = (this.autoTarget = r.get(0)?.path ?? null);
+          void this.select(r.count ? 0 : -1, "auto").finally(() => this.autoTarget === target && (this.autoTarget = null));
+        }
       } else this.reselect(highlighted);
     } catch (e) {
       if (e === "no-folder") this.store.set({ phase: "setup" });
@@ -841,6 +844,7 @@ export class Controller {
     }
   }
 
+  protected autoTarget: string | null = null; // the note the search's automatic open of row 0 is heading for, until it settles
   protected confirmingEnter = false;
   /**
    * Plain Enter on the exact title or alias of an archived note the switch hides, with row 0 (or nothing) selected:
@@ -849,8 +853,11 @@ export class Controller {
    * notes) tell it from current index data: the paths named `q` in the first and not in the second are archived.
    * No search, so no paging limit and no "no links" or tag filter. This path never creates a note; when the name is
    * not confirmed (or a call failed) it returns false and Enter acts as before. true = this Enter is handled or void.
-   * The Enter is void when the user moved on meanwhile: the query changed, a row beyond 0 is selected, or another
-   * note is open (a row click). A background refresh changes none of these, so it does not void it.
+   * The Enter is void when the query changed, another row was selected, or another note was opened meanwhile. The
+   * automatic open of row 0 that the search itself started (its target path is `autoTarget`) does not count as
+   * another note; nothing is awaited. A user open of that very note is indistinguishable and does not void the
+   * Enter: the note typed replaces it, within milliseconds. A background refresh changes none of these, so it does not void it. Other actions in that window (a tag
+   * chip, the sort, the pane) do not void it: the Enter still opens the note typed and creates nothing.
    */
   protected async openHiddenArchived(): Promise<boolean> {
     if (this.confirmingEnter) return true; // a second Enter while the first confirms: one open only
@@ -859,7 +866,11 @@ export class Controller {
     if (s.showArchived || s.sel > 0 || q === "" || !this.titles.has(q) || this.results.loaded.some((h) => fold(h.title) === q)) return false;
     this.confirmingEnter = true;
     const open = this.editor.currentPath();
-    const movedOn = () => this.store.get().query !== s.query || this.store.get().sel > 0 || this.editor.currentPath() !== open;
+    const auto = this.autoTarget; // taken now: the auto-open may settle (and clear it) while the lists load
+    const movedOn = () => {
+      const now = this.editor.currentPath();
+      return this.store.get().query !== s.query || this.store.get().sel > 0 || (now !== open && now !== auto);
+    };
     try {
       const [all, visible] = await Promise.all([this.api.listLinkTargets(true), this.api.listLinkTargets(false)]);
       if (movedOn()) return true;
