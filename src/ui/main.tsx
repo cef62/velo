@@ -10,6 +10,9 @@ import { Controller } from "../app/controller";
 import { createStore, initialState } from "../app/store";
 import { isSearchInput, platform } from "./platform";
 import { App } from "./App";
+import { installWindowHandlers } from "../log";
+
+installWindowHandlers(window); // before the controller starts: an error while starting up reaches velo.log too
 
 const isMac = navigator.platform.startsWith("Mac");
 const store = createStore(initialState(isMac));

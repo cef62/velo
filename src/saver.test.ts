@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+const invoke = vi.hoisted(() => vi.fn(async (_cmd: string, _args?: unknown) => {}));
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+import { setDebugLog } from "./log";
 import { SaveController } from "./saver";
 import { latest } from "./latest";
 import { noMeta } from "./app/fakes";
@@ -412,4 +416,25 @@ test("a conflict copy of one note is not reported for a flush of another note at
   expect((await c.flushOutcome()).copy).toBe("a (conflict 1).md");
   expect(c.load({ ...doc, path: "b.md", text: "B", hash: "hb" })).toBe(true); // the version number stays
   expect(await c.flushOutcome()).toEqual({ clean: true, copy: null });
+});
+
+test("debug records name the note and sizes, never its text", async () => {
+  setDebugLog(true);
+  const saveNote = vi.fn()
+    .mockResolvedValueOnce({ kind: "saved", hash: "h1", front_matter: null, meta: noMeta })
+    .mockResolvedValueOnce({ kind: "conflict", conflict_path: "/n/a (conflict).md", disk_hash: "hd" });
+  const openNote = vi.fn().mockResolvedValueOnce({ ...doc, text: "disk", hash: "hd" }).mockResolvedValueOnce({ ...doc, text: "newer", hash: "h2" });
+  const { c } = mk({ saveNote, openNote });
+  type(c, "secret body");
+  await c.flush();
+  type(c, "secret body 2");
+  await c.flush();
+  c.external("a.md"); // clean: reloads the disk text
+  await vi.advanceTimersByTimeAsync(0);
+  setDebugLog(false);
+  expect(invoke.mock.calls.map((x) => (x[1] as { text: string }).text)).toEqual([
+    "saver: saved a.md (11 chars)",
+    "saver: conflict on a.md: edits went to a (conflict).md, reloading from disk",
+    "saver: a.md changed on disk: reloaded (5 chars)",
+  ]);
 });

@@ -16,6 +16,74 @@ use std::sync::Mutex;
 
 pub(crate) const OFF: &str = "Agent access is off — turn it on in velo Settings → General";
 
+/// Arguments logged as they are: note titles and the daily note's date. Every other string is logged as its size.
+const TITLE_KEYS: [&str; 5] = ["title", "new_title", "source", "target", "date"];
+
+/// Runs one tool call (`f`) and, when `on`, writes its debug record: route, tool, titles, the size of every other
+/// argument, outcome and duration. Never argument text (bodies, search queries, old/new text, tags, summaries): an
+/// error that quotes one has it cut out.
+pub(crate) fn logged(on: bool, route: &str, name: &str, args: Value, f: impl FnOnce(Value) -> Result<Value, String>) -> Result<Value, String> {
+    if !on {
+        return f(args);
+    }
+    let spec = tools::TOOL_SPECS.iter().find(|t| t.name == name);
+    let (desc, mut texts) = (describe(spec.map_or("", |s| s.input_schema), &args), vec![]);
+    collect_texts(&args, false, &mut texts);
+    let t = std::time::Instant::now();
+    let r = f(args);
+    let outcome = match &r {
+        Ok(_) => "ok".to_string(),
+        Err(e) => format!("err {:?}", redact(e, texts)),
+    };
+    let name = spec.map_or("(unknown tool)", |s| s.name); // a name outside the specs may itself be text
+    crate::log::debug_when(true, &format!("agent {route} {name}{desc} -> {outcome} in {}ms", t.elapsed().as_millis()));
+    r
+}
+
+fn describe(schema: &str, a: &Value) -> String {
+    let Some(o) = a.as_object() else { return " (no arguments object)".into() };
+    let mut out = vec![];
+    let mut unknown = 0;
+    for (k, v) in o {
+        if !schema.contains(&format!("\"{k}\":")) {
+            unknown += 1; // a key outside the schema may itself be text
+            continue;
+        }
+        out.push(match v {
+            Value::String(s) if TITLE_KEYS.contains(&k.as_str()) => format!("{k}={:?}", s.chars().take(255).collect::<String>()),
+            Value::String(s) => format!("{k}={}c", s.chars().count()),
+            Value::Array(x) => format!("{k}=[{}]", x.len()),
+            Value::Bool(_) | Value::Number(_) => format!("{k}={v}"),
+            _ => format!("{k}=?"),
+        });
+    }
+    if unknown > 0 {
+        out.push(format!("+{unknown} unknown"));
+    }
+    out.iter().map(|s| format!(" {s}")).collect()
+}
+
+/// Every string value in the arguments except titles.
+fn collect_texts(v: &Value, title: bool, out: &mut Vec<String>) {
+    match v {
+        Value::String(s) if !title => out.push(s.clone()),
+        Value::Array(a) => a.iter().for_each(|x| collect_texts(x, title, out)),
+        Value::Object(o) => o.iter().for_each(|(k, x)| collect_texts(x, TITLE_KEYS.contains(&k.as_str()), out)),
+        _ => {}
+    }
+}
+
+/// `e` with every argument text cut out (longest first), on one line, at most 300 chars.
+fn redact(e: &str, mut texts: Vec<String>) -> String {
+    texts.retain(|t| t.chars().count() >= 2); // a 1-char cut would garble the message and hide nothing
+    texts.sort_by_key(|t| std::cmp::Reverse(t.len()));
+    let mut e = e.to_string();
+    for t in &texts {
+        e = e.replace(t.as_str(), "…");
+    }
+    e.chars().take(300).collect()
+}
+
 /// Entry point for `velo --mcp`; returns the process exit code. No Tauri app is built on this path.
 pub fn run_headless() -> i32 {
     if cfg!(windows) {
@@ -26,6 +94,10 @@ pub fn run_headless() -> i32 {
         eprintln!("velo --mcp: no home directory (set HOME)");
         return 1;
     };
+    // the app's velo.log: warnings, panics and (Debug logging on) direct-mode tool calls land beside the app's lines
+    if let Some(dir) = paths::log_dir() {
+        crate::log::init(&dir, "--mcp".into());
+    }
     match server::run_stdio(gate(config.join("settings.json"), data)) {
         Ok(()) => 0,
         Err(e) => {
@@ -72,7 +144,7 @@ fn gate(settings_path: PathBuf, data_dir: PathBuf) -> impl Fn(&str, Value) -> Re
         if let Err(e) = ops.rescan() {
             eprintln!("velo --mcp: rescan of the notes folder failed: {e}"); // the call goes on with the index as it is
         }
-        let r = tools::call(ops, name, args);
+        let r = logged(s.debug_log, "direct", name, args, |args| tools::call(ops, name, args));
         ops.vault.archive_error.take(); // reported in the reply; the next call starts clean
         r
     }
@@ -90,6 +162,7 @@ mod tests {
         {
             assert!(data.ends_with("Library/Application Support/dev.velo.app"));
             assert_eq!(config, data);
+            assert!(paths::log_dir().unwrap().ends_with("Library/Logs/dev.velo.app"));
         }
         // Linux: the XDG rules are the `dirs` crate's, the same calls Tauri's path resolver makes
         #[cfg(target_os = "linux")]
@@ -322,5 +395,51 @@ mod tests {
             std::fs::write(data.join("agent.json"), bad).unwrap();
             assert_eq!(gate(p, data)("list_tags", serde_json::json!({})), Err("velo is busy, retry".to_string()), "{bad}");
         }
+    }
+
+    /// #138 privacy rule: with Debug logging on, every tool call is recorded with titles and sizes, never the text
+    /// of an argument (bodies, queries, old/new text, task lines, tags, summaries), also when an error quotes it.
+    #[test] fn debug_records_never_carry_argument_text() {
+        use serde_json::json;
+        const M: &str = "zqmarker";
+        let (_t, p, data, notes) = setup(true);
+        std::fs::write(&p, json!({"agent_access": true, "notes_dir": notes, "debug_log": true}).to_string()).unwrap();
+        std::fs::write(notes.join("a.md"), "- [ ] task\n").unwrap();
+        let calls = [
+            ("search_notes", json!({"query": M, "tags": [M]})),
+            ("list_tags", json!({})),
+            ("read_note", json!({"title": "a", M: M})), // a key outside the schema
+            ("create_note", json!({"title": "c", "text": M, "summary": M})),
+            ("append_to_note", json!({"title": "a", "text": M, "summary": M})),
+            ("edit_note", json!({"title": "a", "old_text": M, "new_text": format!("{M}2"), "summary": M})),
+            ("edit_note", json!({"title": "a", "old_text": "absent", "new_text": M, "summary": M})),
+            ("replace_note", json!({"title": "c", "text": M, "expected_hash": "stale", "summary": M})),
+            ("add_tags", json!({"titles": ["a"], "tags": [M, format!("bad {M}")], "summary": M})), // "invalid tag: …" quotes it
+            ("add_tags", json!({"titles": ["a"], "tags": [M], "summary": M})),
+            ("remove_tags", json!({"titles": ["a"], "tags": [M], "summary": M})),
+            ("list_tasks", json!({"query": M, "tags": [M]})),
+            ("add_task", json!({"title": "a", "text": M, "due": "2030-01-01", "summary": M})),
+            ("set_task_done", json!({"title": "a", "line": 0, "line_text": M, "done": true, "summary": M})),
+            ("rename_note", json!({"title": "c", "new_title": "c2", "rewrite_links": false, "summary": M})),
+            ("move_to_trash", json!({"title": "nope", "summary": M})),
+            ("merge_notes", json!({"source": "nope", "target": "a", "summary": M})),
+            ("get_connections", json!({"title": "a"})),
+            ("daily_note", json!({"date": "2030-01-02", "summary": M})),
+        ];
+        let call = gate(p, data);
+        let lines = crate::log::tests::capture(|| for (name, args) in &calls { call(name, args.clone()).ok(); });
+        assert_eq!(lines.len(), calls.len(), "{lines:#?}");
+        for (l, (name, _)) in lines.iter().zip(&calls) {
+            assert!(l.starts_with(&format!("debug: agent direct {name} ")), "{l}");
+            assert!(!l.to_lowercase().contains(M), "{l}");
+        }
+        assert!(lines[3].contains(r#"create_note summary=8c text=8c title="c" -> ok in "#), "{}", lines[3]);
+        assert!(lines[8].contains("err \"invalid tag: …\""), "{}", lines[8]);
+        assert!(lines[2].contains("+1 unknown"), "{}", lines[2]);
+        // an app-forwarded call names no tool it does not know, and cuts the text out of any error
+        let l = crate::log::tests::capture(|| { logged(true, "app", M, json!({"text": M}), |_| Err(format!("boom {M}\nend"))).ok(); });
+        assert_eq!(l.len(), 1);
+        assert!(l[0].starts_with("debug: agent app (unknown tool) ") && l[0].contains(r#"err "boom …\nend""#) && !l[0].contains(M), "{}", l[0]);
+        assert!(crate::log::tests::capture(|| { logged(false, "app", "list_tags", json!({}), |_| Ok(json!({}))).ok(); }).is_empty());
     }
 }

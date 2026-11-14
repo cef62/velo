@@ -12,3 +12,12 @@ pub fn data_dir() -> Option<PathBuf> {
 pub fn config_dir() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join(IDENTIFIER))
 }
+
+/// Tauri's `app_log_dir()`: where the app keeps velo.log.
+pub fn log_dir() -> Option<PathBuf> {
+    if cfg!(target_os = "macos") {
+        dirs::home_dir().map(|d| d.join("Library/Logs").join(IDENTIFIER))
+    } else {
+        dirs::data_local_dir().map(|d| d.join(IDENTIFIER).join("logs"))
+    }
+}

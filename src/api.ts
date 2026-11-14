@@ -1,5 +1,22 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke as tauriInvoke, type InvokeArgs } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
+import { appLogDir, join } from "@tauri-apps/api/path";
+import { debugLogOn, errorText, logDebug } from "./log";
+
+/** Every velo command goes through here: with Debug logging on, one record per call (name, outcome, duration; never its arguments). */
+async function invoke<T>(cmd: string, args?: InvokeArgs): Promise<T> {
+  if (!debugLogOn()) return tauriInvoke<T>(cmd, args);
+  const t = performance.now();
+  const took = () => `${Math.round(performance.now() - t)}ms`;
+  try {
+    const r = await tauriInvoke<T>(cmd, args);
+    logDebug(() => `command ${cmd} ok in ${took()}`);
+    return r;
+  } catch (e) {
+    logDebug(() => `command ${cmd} err ${errorText(e)} in ${took()}`);
+    throw e;
+  }
+}
 
 export type Hit = { path: string; title: string; snippet: string; mtime: number; encrypted: boolean; archived: boolean };
 export type NoteMeta = { created: number; created_src: "frontmatter" | "file"; modified: number; modified_src: "frontmatter" | "file"; tags: string[]; aliases: string[] };
@@ -10,7 +27,7 @@ export type TaskView = { overdue: TaskItem[]; today: TaskItem[]; upcoming: TaskI
 export type RenameResult = { path: string; rewritten: number };
 export type MergeResult = { path: string; rewritten: number; trash_error: string | null };
 export type SavedSearch = { name: string; query: string; tags: string[]; no_links: boolean };
-export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean; capture_target: "inbox" | "daily"; inbox_title: string; agent_access: boolean; saved_searches: SavedSearch[]; timeline_sort: "updated" | "created"; palette: string; app_icon: "dock" | "tray" | "none"; tasks_by_note: boolean; show_archived: boolean };
+export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean; capture_target: "inbox" | "daily"; inbox_title: string; agent_access: boolean; saved_searches: SavedSearch[]; timeline_sort: "updated" | "created"; palette: string; app_icon: "dock" | "tray" | "none"; tasks_by_note: boolean; show_archived: boolean; debug_log: boolean };
 
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<void>("set_settings", { settings });
@@ -108,3 +125,5 @@ export const checkUpdate = () => invoke<{ version: string } | null>("check_updat
 /** Downloads, installs and relaunches; resolves only on failure paths (rejects with the reason). */
 export const installUpdate = () => invoke<void>("install_update");
 export const appVersion = getVersion;
+/** velo.log's path (Tauri's app log dir; src-tauri/src/log.rs writes it). */
+export const logFile = async () => join(await appLogDir(), "velo.log");

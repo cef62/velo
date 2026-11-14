@@ -133,7 +133,11 @@ fn open_vault_inner(app: &AppHandle, st: &AppState, dir: &Path, me: u64) -> anyh
     let base = dir.to_path_buf();
     let w = watch::spawn(dir.to_path_buf(), move |batch| {
         let st = handle.state::<AppState>();
-        notify_changed(&handle, apply_watch(&st, &base, batch));
+        let event = batch.as_ref().map_or("rescan".to_string(), |b| format!("{} paths", b.len()));
+        let t = std::time::Instant::now();
+        let changed = apply_watch(&st, &base, batch);
+        crate::log::debug(&format!("watcher: {event} -> {} notes changed in {}ms", changed.len(), t.elapsed().as_millis()));
+        notify_changed(&handle, changed);
     })?;
     if !current() {
         w.stop();
@@ -514,6 +518,12 @@ fn restore(changed: &[(GlobalAction, String, String)], reg: &mut Reg) {
     }
 }
 
+/// One record from the window: errors and warnings always, "debug" only while Debug logging is on.
+#[tauri::command]
+pub fn log_line(level: String, text: String) {
+    crate::log::window(&level, &text);
+}
+
 #[tauri::command]
 pub fn get_settings(st: State<AppState>) -> Settings {
     st.settings.lock().unwrap().clone()
@@ -566,6 +576,7 @@ pub fn set_settings(app: AppHandle, st: State<'_, AppState>, mut settings: Setti
         }
         return Err(err(e));
     }
+    crate::log::set_debug(settings.debug_log);
     let on = settings.agent_access;
     let icon = (old.app_icon != settings.app_icon).then(|| settings.app_icon.clone());
     *st.settings.lock().unwrap() = settings;

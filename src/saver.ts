@@ -1,5 +1,6 @@
 import type { NoteDoc, NoteMeta, SaveResult } from "./api";
 import { frontMatterRange } from "./frontmatter";
+import { errorText, fileName, logDebug } from "./log";
 
 export interface SaverDeps {
   saveNote(path: string, text: string, baseHash: string): Promise<SaveResult>;
@@ -123,12 +124,16 @@ export class SaveController {
 
   external(path: string) {
     if (path !== this.cur.path || this.suspended) return;
-    if (this.dirty) return void this.flush();
+    if (this.dirty) {
+      logDebug(() => `saver: ${fileName(path)} changed on disk with unsaved edits: saving (a conflict copy if they differ)`);
+      return void this.flush();
+    }
     const target = this.cur;
     const v = this.version;
     this.d.openNote(path)
       .then((doc) => {
         if (target !== this.cur || v !== this.version || this.dirty || doc.hash === target.baseHash) return;
+        logDebug(() => `saver: ${fileName(path)} changed on disk: reloaded (${doc.text.length} chars)`);
         this.d.setText(doc.text); // baseHash moves only once the editor holds the disk text: a throw leaves the next save to conflict
         target.baseHash = doc.hash;
       })
@@ -158,7 +163,9 @@ export class SaveController {
           }
           target.baseHash = r.hash;
           if (target === this.cur && v === this.version) this.dirty = false;
+          logDebug(() => `saver: saved ${fileName(target.path!)} (${text.length} chars)`);
         } else if (target === this.cur) {
+          logDebug(() => `saver: conflict on ${fileName(target.path!)}: edits went to ${fileName(r.conflict_path)}, ${v === this.version ? "reloading from disk" : "kept typing, saving again"}`);
           // The conflict note holds `text`. If the user typed since, keep the editor text and the
           // stale baseHash: it stays dirty, and the next save conflicts again into a newer
           // conflict note holding the latest text. No keystroke is discarded.
@@ -178,6 +185,7 @@ export class SaveController {
         this.d.onError(null);
         this.d.onSaved?.();
       } catch (e) {
+        logDebug(() => `saver: save of ${fileName(target.path ?? "")} failed, retry in ${this.retryMs}ms: ${errorText(e)}`);
         this.d.onError(`Save failed: ${e}`);
         this.schedule(this.retryMs);
         this.retryMs = Math.min(this.retryMs * 2, RETRY_MAX_MS);

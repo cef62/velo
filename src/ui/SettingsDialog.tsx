@@ -59,6 +59,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
     tasksByNote: cur.tasks_by_note !== false,
     autoUpdateCheck: cur.auto_update_check !== false,
     agentAccess: cur.agent_access === true,
+    debugLog: cur.debug_log === true,
     captureTarget: cur.capture_target === "daily" ? "daily" : "inbox",
     inboxTitle: cur.inbox_title ?? "Inbox",
     shortcuts: resolve(cur.shortcuts, isMac),
@@ -225,6 +226,20 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
                 <span className={help} role="status">{d.agentAccess && cur.agent_access !== true ? "Save to turn it on, then copy the setup command here." : copyMsg}</span>
               </div>
               <span className={help}>Lets Claude Code read and edit your notes. Locked notes are never shared; deletes go to the Trash; every change is saved as a revision you can restore.</span>
+            </div>
+          </div>
+          <div className={frow}>
+            <span className={flab}>Log</span>
+            <div className={css({ display: "flex", flexDirection: "column", gap: "1.5" })}>
+              <div className={css({ display: "flex", alignItems: "center", gap: "3" })}>
+                <Checkbox.Root checked={d.debugLog} onCheckedChange={(x) => set({ debugLog: x.checked === true })} size="sm">
+                  <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                  <Checkbox.Label>Debug logging</Checkbox.Label>
+                  <Checkbox.HiddenInput />
+                </Checkbox.Root>
+                <Button variant="outline" size="xs" onClick={() => void controller.showLog()}>Show log file</Button>
+              </div>
+              <span className={help}>Adds agent calls, commands and saves to velo.log. Titles and sizes only, never note text.</span>
             </div>
           </div>
         </Tabs.Content>
