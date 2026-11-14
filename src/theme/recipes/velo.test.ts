@@ -34,7 +34,7 @@ describe("velo recipes", () => {
         nonEmpty(c.count);
       }
     const t = titleBar();
-    for (const slot of ["root", "title", "status", "actions"] as const) nonEmpty(t[slot]);
+    for (const slot of ["root", "lead", "title", "status", "actions"] as const) nonEmpty(t[slot]);
   });
 });
 

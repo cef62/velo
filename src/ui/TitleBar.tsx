@@ -4,8 +4,9 @@ import { css } from "styled-system/css";
 import { menuButton, titleBar } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
-import { Badge, Button, IconButton, Kbd, Menu, SegmentGroup, Spinner, Tooltip } from "@/components/ui";
+import { Button, IconButton, Kbd, Menu, SegmentGroup, Spinner, Tooltip } from "@/components/ui";
 import { formatBinding, NONE, type Action } from "../shortcuts";
+import { ArchivedBadge } from "./ArchivedBadge";
 import { titleBarMode } from "./layout";
 import { useStore } from "./useStore";
 
@@ -15,7 +16,8 @@ const c = titleBar();
 const num = (n: number) => n.toLocaleString("en-US");
 const rename = css({
   flex: "1",
-  minW: "160px", // neighbours (hint, actions) never shrink: without a floor the input collapsed to a sliver
+  minW: "min(160px, 100%)", // neighbours (hint, actions) never shrink: without a floor the input collapsed to a sliver; never wider than the lead
+  "[data-err] > &": { minW: "min(160px, 100% - 28px)" }, // leaves the error's icon (14 px) and a gap on the line
   h: "control",
   ml: "-2",
   px: "2",
@@ -30,7 +32,7 @@ const rename = css({
   letterSpacing: "-0.01em",
   outline: "0",
 });
-const hint = css({ display: "inline-flex", alignItems: "center", gap: "1.5", fontSize: "uiSm", color: "velo.fgMuted", whiteSpace: "nowrap", flex: "none" });
+const hint = css({ display: "inline-flex", alignItems: "center", gap: "1.5", fontSize: "uiSm", color: "velo.fgMuted", whiteSpace: "nowrap", flex: "none", "@container (max-width: 400px)": { display: "none" } }); // the lead keeps room for the input (160 px) and a status
 const track = css({ w: "64px", h: "1", borderRadius: "2px", bg: "velo.muted", overflow: "hidden", display: "inline-block" });
 const root = css({ "[data-layout=vertical] &": { cursor: "row-resize" }, "& [data-note-title]": { cursor: "default" } });
 const pressed = css({ "&[aria-pressed=true], &[aria-expanded=true]": { bg: "velo.accentSubtleHover", color: "velo.accentText", boxShadow: "inset 0 0 0 1px {colors.velo.hairline}, inset 0 1px 0 {colors.velo.highlight}" } });
@@ -65,8 +67,35 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
     return () => ro.disconnect();
   }, []);
   const mode = titleBarMode(w, s.renaming);
+  const showSaving = !s.err && !s.indexing && s.saving;
+  const errFocused = useRef(false);
+  useEffect(() => {
+    // the focused error went away: focus would fall to <body>; the editor takes it, as after the other title-bar actions
+    if (s.err || !errFocused.current) return;
+    errFocused.current = false;
+    if (document.activeElement === document.body) controller.focusEditor();
+  }, [s.err, controller]);
   const [canExtract, setCanExtract] = useState(false); // read when the ⋯ menu opens
   const bar = { ...c, root: `${c.root} ${root}` };
+  // A status: icon, then its text truncated (the text leaves when a few characters do not fit); hover and focus show the full
+  // text in a tooltip. The status's own text names it, so the tooltip is hidden from assistive technology and does not describe it
+  // (no double read). While renaming, Escape belongs to the input: an open tooltip would swallow it. Focusable only when it lasts (an error): Saving… unmounts.
+  const status = (tone: "error" | undefined, role: "alert" | "status", icon: ReactNode, text: ReactNode, full: string, tail?: ReactNode, focusable = false) => (
+    <Tooltip content={full} openDelay={300} closeOnEscape={!s.renaming} contentProps={{ "aria-hidden": true, className: css({ overflowWrap: "anywhere" }) }}>
+      <span
+        className={bar.status}
+        data-tone={tone}
+        role={role}
+        aria-describedby=""
+        tabIndex={focusable ? 0 : undefined}
+        onFocus={focusable ? () => (errFocused.current = true) : undefined}
+        onBlur={focusable ? () => (errFocused.current = false) : undefined}
+      >
+        {icon}
+        <span className={css({ truncate: true, flex: "1 1 0", minW: "4ch" })}>{text}{tail}</span>
+      </span>
+    </Tooltip>
+  );
   const view: View = s.previewOn ? "preview" : s.editorStyle;
   const setView = (v: View) => {
     if (v === "preview") return controller.setPreview(true);
@@ -84,65 +113,60 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
 
   return (
     <div ref={el} className={bar.root} data-titlebar="">
-      {s.renaming ? (
-        <>
-          <input
-            ref={input}
-            className={rename}
-            data-rename=""
-            aria-label="Note title"
-            aria-describedby={hintId}
-            defaultValue={s.title}
-            autoFocus
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void controller.commitRename(e.currentTarget.value);
-              else if (e.key === "Escape") void controller.commitRename(null);
-              else return;
-              e.preventDefault();
-            }}
-            onBlur={() => void controller.commitRename(null)}
-          />
-          {/* the keys, as a sentence for assistive technology; always rendered (the input points at it), the visual hint only when there is room */}
-          <span id={hintId} className={css({ srOnly: true })}>Press Enter to rename, Escape to cancel.</span>
-          {mode.renameHint && (
-            <span className={hint} aria-hidden>
-              <Kbd>↩</Kbd> Rename <Kbd>Esc</Kbd> Cancel
-            </span>
-          )}
-        </>
-      ) : (
-        <h2 className={bar.title} data-note-title="" title={s.title} onDoubleClick={() => controller.startRename()}>
-          {s.title}
-        </h2>
+      {/* the error comes right after the title or input: nothing before it can push it to the clipped line (recipe) */}
+      <div className={bar.lead} data-err={s.err ? "" : undefined}>
+        {s.renaming ? (
+          <>
+            <input
+              ref={input}
+              className={rename}
+              data-rename=""
+              aria-label="Note title"
+              aria-describedby={hintId}
+              defaultValue={s.title}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void controller.commitRename(e.currentTarget.value);
+                else if (e.key === "Escape") void controller.commitRename(null);
+                else return;
+                e.preventDefault();
+              }}
+              onBlur={() => void controller.commitRename(null)}
+            />
+            {/* the keys, as a sentence for assistive technology; always rendered (the input points at it), the visual hint only when there is room */}
+            <span id={hintId} className={css({ srOnly: true })}>Press Enter to rename, Escape to cancel.</span>
+          </>
+        ) : (
+          <h2 className={bar.title} data-note-title="" title={s.title} onDoubleClick={() => controller.startRename()}>
+            {s.title}
+          </h2>
+        )}
+        {s.err && status("error", "alert", <TriangleAlert size={14} aria-hidden className={css({ flex: "none" })} />, withCode(s.err), s.err.replace(/`/g, ""), undefined, true)}
+        {s.renaming && mode.renameHint && (
+          <span className={hint} aria-hidden>
+            <Kbd>↩</Kbd> Rename <Kbd>Esc</Kbd> Cancel
+          </span>
+        )}
+        {s.archived && !s.renaming && <ArchivedBadge list="bar" />}
+        {s.indexing
+          ? status(
+              undefined,
+              "status",
+              <Spinner size="sm" className={css({ flex: "none" })} />,
+              `Indexing… ${num(s.indexing.done)} / ${num(s.indexing.total)}`,
+              `Indexing… ${num(s.indexing.done)} / ${num(s.indexing.total)}`,
+              <span className={track} aria-hidden>
+                <i className={css({ display: "block", h: "full", bg: "velo.accent" })} style={{ width: `${s.indexing.total ? Math.min(100, (100 * s.indexing.done) / s.indexing.total) : 0}%` }} />
+              </span>,
+            )
+          : showSaving && status(undefined, "status", <Spinner size="sm" className={css({ flex: "none" })} />, "Saving…", "Saving…")}
+      </div>
+      {s.err && s.errFromSave && (
+        <Button variant="outline" size="sm" flex="none" mx="-1.5" onClick={() => controller.retrySave()}>
+          {/* mx: 6 px gaps either side, so the error keeps 18 px of lead at the narrowest bar (300, Preview) */}
+          Retry
+        </Button>
       )}
-      {s.archived && !s.renaming && <Badge size="sm" variant="subtle" flex="none">archived</Badge>}
-      {s.err ? (
-        <>
-          <span className={bar.status} data-tone="error" role="alert">
-            <TriangleAlert size={14} aria-hidden />
-            {withCode(s.err)}
-          </span>
-          {s.errFromSave && (
-            <Button variant="outline" size="sm" onClick={() => controller.retrySave()}>
-              Retry
-            </Button>
-          )}
-        </>
-      ) : null}
-      {s.indexing ? (
-        <span className={bar.status} role="status">
-          <Spinner size="sm" />
-          Indexing… {num(s.indexing.done)} / {num(s.indexing.total)}
-          <span className={track} aria-hidden>
-            <i className={css({ display: "block", h: "full", bg: "velo.accent" })} style={{ width: `${s.indexing.total ? Math.min(100, (100 * s.indexing.done) / s.indexing.total) : 0}%` }} />
-          </span>
-        </span>
-      ) : !s.err && s.saving ? (
-        <span className={bar.status} role="status">
-          <Spinner size="sm" />
-          Saving…
-        </span>
-      ) : null}
       {s.openPath && !mode.hideActions && (
         <div className={bar.actions}>
           {mode.viewSwitch === "segments" ? (
