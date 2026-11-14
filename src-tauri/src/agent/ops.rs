@@ -34,8 +34,9 @@ pub trait NoteOps {
     fn merge(&mut self, source: &str, target: &str, summary: &str) -> anyhow::Result<MergeResult>;
     /// Flips the task at `line` (checked against `expected`); snapshots first.
     fn toggle_task(&mut self, path: &str, line: usize, expected: &str, summary: &str) -> anyhow::Result<Toggled>;
-    /// Appends `- [ ] text` to the plain note `title` (created if missing); returns its path.
-    fn capture_task(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<String>;
+    /// Appends `- [ ] text` to the plain note `title` (created if missing); returns its path and the hash that save
+    /// left (never a later read: newer typing saved since must not be covered by it).
+    fn capture_task(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<(String, String)>;
     /// The plain note `title`; a missing one is created from no template (only the stamped front matter).
     fn open_or_create(&mut self, title: &str) -> anyhow::Result<NoteDoc>;
     /// Agent snapshot of the note's current text (for a note just created).
@@ -290,7 +291,7 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
         r
     }
 
-    fn capture_task(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<String> {
+    fn capture_task(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<(String, String)> {
         let wfm = self.settings().write_front_matter;
         let found = self.find(title)?;
         if found.is_none() && self.vault.find_note(title)?.is_some() {
@@ -304,10 +305,10 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
         let Some(p) = found else {
             // an empty file first, stamped by the append's save: a front-matter stub would get a revision of its own
             let doc = landed(self.vault.open_or_create(title, None, false), &target, before.as_deref())?;
-            let path = landed(self.vault.append_task(&doc.path, text, None, wfm), &target, None)?;
+            let r = landed(self.vault.append_task(&doc.path, text, None, wfm), &target, None)?;
             // a created note's first revision is its created text
-            self.vault.agent_snapshot(&path, summary).map_err(|_| anyhow!(NO_ANSWER))?;
-            return Ok(path);
+            self.vault.agent_snapshot(&r.0, summary).map_err(|_| anyhow!(NO_ANSWER))?;
+            return Ok(r);
         };
         let snap = self.vault.agent_snapshot(&p, summary)?;
         let r = landed(self.vault.append_task(&p, text, None, wfm), &target, before.as_deref());
@@ -451,7 +452,7 @@ mod tests {
         let bar = dir.join("Bar.md").to_string_lossy().into_owned();
         assert_eq!(o.find("foo").unwrap(), Some(bar.clone()));
         assert_eq!(o.open_or_create("Foo").unwrap().path, bar);
-        assert_eq!(o.capture_task("Foo", "t", "s").unwrap(), bar);
+        assert_eq!(o.capture_task("Foo", "t", "s").unwrap().0, bar);
         assert!(std::fs::read_to_string(&bar).unwrap().ends_with("bar\n- [ ] t\n"));
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2, "nothing created");
         // only a locked note has the title: still not found, and nothing is created beside it
@@ -462,7 +463,8 @@ mod tests {
     }
     #[test] fn task_into_new_note_has_no_stub_revision() {
         let (mut o, _) = ops();
-        let p = o.capture_task("New", "t", "s").unwrap();
+        let (p, h) = o.capture_task("New", "t", "s").unwrap();
+        assert_eq!(h, o.read(&p).unwrap().hash, "the hash its save left");
         assert_eq!(o.vault.list_revisions(&p).unwrap().len(), 1, "only the agent's created text");
     }
     #[test] fn rescan_failure_is_reported() {

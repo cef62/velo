@@ -73,6 +73,9 @@ pub fn fm_lines(t: &str) -> usize {
 pub struct Toggled {
     pub line: usize,
     pub line_text: String,
+    /// The note's hash as this save left it: what an agent is told, never a later read that may cover newer typing.
+    #[serde(skip)]
+    pub hash: String,
 }
 
 #[derive(Serialize)]
@@ -538,7 +541,7 @@ impl Vault {
         let (text, line_text) = toggled_text(&doc.text, line, expected)?;
         match self.save_note(&doc.path, &text, &doc.hash, identity, write_fm)? {
             // stamping may replace or prepend the front-matter block: shift the line by its change in height
-            SaveResult::Saved { front_matter, .. } => Ok(Toggled { line: line - fm_lines(&text) + front_matter.as_deref().map_or(fm_lines(&text), fm_lines), line_text }),
+            SaveResult::Saved { front_matter, hash, .. } => Ok(Toggled { line: line - fm_lines(&text) + front_matter.as_deref().map_or(fm_lines(&text), fm_lines), line_text, hash }),
             SaveResult::Conflict { .. } => Err(anyhow!("task-moved")), // disk changed since we read it
         }
     }
@@ -547,22 +550,22 @@ impl Vault {
     pub fn capture_task(&mut self, title: &str, text: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<String> {
         if text.trim().is_empty() { return Err(anyhow!("empty")); }
         let path = self.open_or_create(title, identity, write_fm)?.path;
-        self.append_task(&path, text, identity, write_fm)
+        self.append_task(&path, text, identity, write_fm).map(|(p, _)| p)
     }
 
-    /// Append `- [ ] text` to the note at `path`; returns the path.
-    pub fn append_task(&mut self, path: &str, text: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<String> {
+    /// Append `- [ ] text` to the note at `path`; returns the path and the hash its save left.
+    pub fn append_task(&mut self, path: &str, text: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<(String, String)> {
         let text = text.trim().replace(['\r', '\n'], " ");
         if text.is_empty() { return Err(anyhow!("empty")); }
         let doc = self.open_note(path, identity)?;
         self.append_in(doc, &text, identity, write_fm)
     }
 
-    fn append_in(&mut self, doc: NoteDoc, text: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<String> {
+    fn append_in(&mut self, doc: NoteDoc, text: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<(String, String)> {
         let eol = if doc.text.contains("\r\n") { "\r\n" } else { "\n" };
         let sep = if doc.text.is_empty() || doc.text.ends_with('\n') { "" } else { eol };
         match self.save_note(&doc.path, &format!("{}{sep}- [ ] {text}{eol}", doc.text), &doc.hash, identity, write_fm)? {
-            SaveResult::Saved { .. } => Ok(doc.path),
+            SaveResult::Saved { hash, .. } => Ok((doc.path, hash)),
             SaveResult::Conflict { .. } => Err(anyhow!("conflict")),
         }
     }
@@ -1560,7 +1563,8 @@ mod tests {
         assert_eq!(saved.split('\n').nth(t.line).unwrap(), t.line_text);
         assert_eq!(t.line_text, format!("- [x] a @done({})", local_today()));
         let back = v.toggle_task(&p, t.line, &t.line_text, None, true).unwrap();
-        assert_eq!(back, Toggled { line: t.line, line_text: "- [ ] a".into() });
+        assert_eq!((back.line, back.line_text.as_str()), (t.line, "- [ ] a"));
+        assert_eq!(back.hash, hash(&std::fs::read(&p).unwrap()));
         assert!(std::fs::read_to_string(&p).unwrap().ends_with("x\n- [ ] a\n"));
     }
     #[test] fn toggle_task_refuses_moved_line() {

@@ -332,25 +332,26 @@ impl NoteOps for AppOps<'_> {
     fn toggle_task(&mut self, path: &str, line: usize, expected: &str, summary: &str) -> anyhow::Result<Toggled> {
         let doc = self.read(path)?;
         let (text, line_text) = toggled_text(&doc.text, line, expected)?;
-        self.write(path, &text, &doc.hash, summary)?;
-        // stamping may replace or prepend the front-matter block: shift the line by its change in height
+        let hash = self.write(path, &text, &doc.hash, summary)?;
+        // stamping may replace or prepend the front-matter block: shift the line by its change in height (a read
+        // after the save, used for the line only: `line_text` checks it on the next toggle)
         let saved = self.read(path)?.text;
-        Ok(Toggled { line: line - fm_lines(&text) + fm_lines(&saved), line_text })
+        Ok(Toggled { line: line - fm_lines(&text) + fm_lines(&saved), line_text, hash })
     }
 
-    fn capture_task(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<String> {
+    fn capture_task(&mut self, title: &str, text: &str, summary: &str) -> anyhow::Result<(String, String)> {
         let line = format!("- [ ] {}", text.trim().replace(['\r', '\n'], " "));
         let found = self.find(title)?;
         if let Some(path) = &found
             && !text.trim().is_empty()
-            && self.via_editor(json!({"path": path, "kind": "append", "insert": line, "summary": summary}))?.is_some()
+            && let Some(hash) = self.via_editor(json!({"path": path, "kind": "append", "insert": line, "summary": summary}))?
         {
-            return Ok(path.clone());
+            return Ok((path.clone(), hash));
         }
         // a locked match, a missing note (created here) or one not open in the editor
         let r = self.with(|o| o.capture_task(title, text, summary));
         found.iter().for_each(|p| (self.release)(p));
-        self.touched.extend(r.as_ref().ok().cloned());
+        self.touched.extend(r.as_ref().ok().map(|(p, _)| p.clone()));
         r
     }
 
@@ -579,6 +580,28 @@ mod tests {
         assert!(editors.pending.lock().unwrap().is_empty());
     }
 
+    /// The owner's typing is saved right after the editor saved the agent's change, before the tool's later read: the
+    /// tool replies with the hash of the agent's own save, never one covering typing the agent never read (#134).
+    #[test] fn task_tools_reply_with_the_editor_save_hash_not_a_later_read() {
+        let (st, dir) = state();
+        let p = dir.join("P.md").to_string_lossy().into_owned();
+        let route = |req: Value| {
+            if req["kind"] == "append" || req["kind"] == "replace" {
+                std::fs::write(&p, "typed by the owner\n- [x] open task\n").unwrap();
+                return Ok(json!({"hash": "agent-save"}));
+            }
+            Ok(json!("not-open"))
+        };
+        let mut ops = AppOps::new(&st, &route);
+        let typed = crate::store::hash(b"typed by the owner\n- [x] open task\n");
+        let r = crate::agent::tools::call(&mut ops, "add_task", json!({"title": "P", "text": "milk", "summary": "s"})).unwrap();
+        assert_eq!(r["hash"], "agent-save", "{r}");
+        assert_ne!(r["hash"], json!(typed));
+        std::fs::write(&p, "plain zebra #shared\n- [ ] open task\n[[L]]\n").unwrap();
+        let r = crate::agent::tools::call(&mut ops, "set_task_done", json!({"title": "P", "line": 1, "line_text": "- [ ] open task", "done": true, "summary": "s"})).unwrap();
+        assert_eq!((r["status"].as_str(), r["hash"].as_str()), (Some("changed"), Some("agent-save")), "{r}");
+    }
+
     #[test] fn editor_replies_route_the_write() {
         let (st, dir) = state();
         let p = dir.join("P.md").to_string_lossy().into_owned();
@@ -603,10 +626,10 @@ mod tests {
         std::fs::write(&p, "- [ ] a\n").unwrap();
         st.vault.lock().unwrap().as_mut().unwrap().rescan(None);
         *reply.lock().unwrap() = json!({"hash": "x"});
-        assert_eq!(ops.capture_task("P", " buy milk\n", "s3").unwrap(), p);
+        assert_eq!(ops.capture_task("P", " buy milk\n", "s3").unwrap(), (p.clone(), "x".to_string()));
         assert_eq!(seen.lock().unwrap().last().unwrap(), &json!({"path": p, "kind": "append", "insert": "- [ ] buy milk", "summary": "s3"}));
         let t = ops.toggle_task(&p, 0, "- [ ] a", "s4").unwrap();
-        assert_eq!((t.line, t.line_text.starts_with("- [x] a")), (0, true));
+        assert_eq!((t.line, t.line_text.starts_with("- [x] a"), t.hash.as_str()), (0, true, "x")); // the editor's save hash
         let last = seen.lock().unwrap().last().unwrap().clone();
         assert_eq!((last["kind"].as_str(), last["insert"].as_str().unwrap().starts_with("- [x] a")), (Some("replace"), true));
     }
