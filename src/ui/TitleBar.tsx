@@ -6,7 +6,7 @@ import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { Badge, Button, IconButton, Kbd, Menu, SegmentGroup, Spinner, Tooltip } from "@/components/ui";
 import { formatBinding, NONE, type Action } from "../shortcuts";
-import { titleBarMode } from "./layout";
+import { titleBarFit, titleBarMode } from "./layout";
 import { useStore } from "./useStore";
 
 // v2 title bar (design/park-ui/v2/README.md §2, §3 #5–#7): the note's own controls live here —
@@ -65,8 +65,20 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
     return () => ro.disconnect();
   }, []);
   const mode = titleBarMode(w, s.renaming);
+  const showSaving = !s.err && !s.indexing && s.saving;
+  const fit = titleBarFit(w, { status: ((s.err ? 1 : 0) + (s.indexing || showSaving ? 1 : 0)) as 0 | 1 | 2, retry: !!s.err && s.errFromSave, archived: s.archived, renaming: s.renaming });
+  const hideActions = mode.hideActions || fit.hideActions;
   const [canExtract, setCanExtract] = useState(false); // read when the ⋯ menu opens
   const bar = { ...c, root: `${c.root} ${root}` };
+  // A status: icon always, text truncated, or (no room) visually hidden; hover and focus show the full text in a tooltip. Focusable only when it lasts (an error): Saving… unmounts.
+  const status = (tone: "error" | undefined, role: "alert" | "status", icon: ReactNode, text: ReactNode, full: string, tail?: ReactNode, focusable = false) => (
+    <Tooltip content={full} openDelay={300} contentProps={{ "aria-hidden": true }}>
+      <span className={bar.status} data-tone={tone} role={role} data-text={fit.statusText || undefined} tabIndex={focusable ? 0 : undefined}>
+        {icon}
+        <span className={fit.statusText ? css({ truncate: true }) : css({ srOnly: true })}>{text}{tail}</span>
+      </span>
+    </Tooltip>
+  );
   const view: View = s.previewOn ? "preview" : s.editorStyle;
   const setView = (v: View) => {
     if (v === "preview") return controller.setPreview(true);
@@ -83,7 +95,7 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
   );
 
   return (
-    <div ref={el} className={bar.root} data-titlebar="">
+    <div ref={el} className={bar.root} data-titlebar="" data-compact={fit.compact || undefined}>
       {s.renaming ? (
         <>
           <input
@@ -115,13 +127,16 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
           {s.title}
         </h2>
       )}
-      {s.archived && !s.renaming && <Badge size="sm" variant="subtle" flex="none">archived</Badge>}
+      {s.archived && !s.renaming && (fit.badge === "none" ? (
+        <span className={css({ srOnly: true })}>archived</span>
+      ) : (
+        <Badge size="sm" variant="subtle" flex="none">
+          {fit.badge === "text" ? "archived" : <><Archive size={12} aria-hidden /><span className={css({ srOnly: true })}>archived</span></>}
+        </Badge>
+      ))}
       {s.err ? (
         <>
-          <span className={bar.status} data-tone="error" role="alert" title={s.err}>
-            <TriangleAlert size={14} aria-hidden className={css({ flex: "none" })} />
-            <span className={css({ truncate: true })}>{withCode(s.err)}</span>
-          </span>
+          {status("error", "alert", <TriangleAlert size={14} aria-hidden className={css({ flex: "none" })} />, withCode(s.err), s.err.replace(/`/g, ""), undefined, true)}
           {s.errFromSave && (
             <Button variant="outline" size="sm" flex="none" onClick={() => controller.retrySave()}>
               Retry
@@ -129,21 +144,20 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
           )}
         </>
       ) : null}
-      {s.indexing ? (
-        <span className={bar.status} role="status">
-          <Spinner size="sm" />
-          Indexing… {num(s.indexing.done)} / {num(s.indexing.total)}
-          <span className={track} aria-hidden>
-            <i className={css({ display: "block", h: "full", bg: "velo.accent" })} style={{ width: `${s.indexing.total ? Math.min(100, (100 * s.indexing.done) / s.indexing.total) : 0}%` }} />
-          </span>
-        </span>
-      ) : !s.err && s.saving ? (
-        <span className={bar.status} role="status">
-          <Spinner size="sm" />
-          Saving…
-        </span>
-      ) : null}
-      {s.openPath && !mode.hideActions && (
+      {s.indexing
+        ? !fit.dropIndexing &&
+          status(
+            undefined,
+            "status",
+            <Spinner size="sm" className={css({ flex: "none" })} />,
+            `Indexing… ${num(s.indexing.done)} / ${num(s.indexing.total)}`,
+            `Indexing… ${num(s.indexing.done)} / ${num(s.indexing.total)}`,
+            <span className={track} aria-hidden>
+              <i className={css({ display: "block", h: "full", bg: "velo.accent" })} style={{ width: `${s.indexing.total ? Math.min(100, (100 * s.indexing.done) / s.indexing.total) : 0}%` }} />
+            </span>,
+          )
+        : showSaving && status(undefined, "status", <Spinner size="sm" className={css({ flex: "none" })} />, "Saving…", "Saving…")}
+      {s.openPath && !hideActions && (
         <div className={bar.actions}>
           {mode.viewSwitch === "segments" ? (
             <SegmentGroup.Root size="2xs" value={view} onValueChange={(d) => d.value && d.value !== view && setView(d.value as View)} aria-label="View">

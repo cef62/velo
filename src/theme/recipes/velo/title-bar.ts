@@ -17,6 +17,7 @@ export const titleBar = defineSlotRecipe({
       bg: 'velo.canvas',
       minW: '0',
       flex: 'none',
+      '&[data-compact]': { pl: '3', gap: '2' }, // a status on a narrow bar: titleBarFit budgets with these
     },
     title: {
       fontSize: 'var(--velo-title-fs)',
@@ -25,8 +26,8 @@ export const titleBar = defineSlotRecipe({
       lineHeight: '1.2',
       color: 'velo.fg',
       truncate: true,
-      flex: '1',
-      minW: 'min(12ch, 25%)', // the title yields second: the message cannot squeeze it below 12 characters or a quarter of the bar; a fixed floor pushed the actions out at the 600 px window and the largest font
+      flex: '1 1 auto', // natural width, so the message (shrink 1000, below) gives way first; it grows to push the actions right
+      minW: '36px', // the title yields after the message and the archived badge, down to this (width budget: titleBarFit in ui/layout.ts)
     },
     status: {
       display: 'inline-flex',
@@ -36,8 +37,9 @@ export const titleBar = defineSlotRecipe({
       fontSize: 'uiSm',
       whiteSpace: 'nowrap',
       fontVariantNumeric: 'tabular-nums',
-      flex: '0 1 auto', // the message yields first (title is flex 1 1 0): it shrinks, its text truncates
-      minW: '0',
+      flex: '0 1000 auto', // the message yields first: it shrinks (1000x the title's rate) down to its floor, its text truncates
+      minW: '16px', // icon only (titleBarFit)
+      '&[data-text]': { minW: '50px' }, // icon, a few characters and an ellipsis
       overflow: 'hidden',
       '&[data-tone=error]': { color: 'velo.danger' },
     },
