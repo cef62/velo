@@ -9,6 +9,7 @@ import { getPos, setPos } from "../positions";
 import { chipTags } from "../tags";
 import { SaveController } from "../saver";
 import { debugLogOn } from "../log";
+import { NOTE_ACTIONS } from "../palette";
 
 const lsStore = new Map<string, string>();
 (globalThis as any).localStorage = { getItem: (k: string) => lsStore.get(k) ?? null, setItem: (k: string, v: string) => void lsStore.set(k, v) };
@@ -4213,6 +4214,7 @@ test("after a successful unlock, note shortcuts act on the unlocked note (#126)"
   await shown; await settle();
   expect(store.get().unlocking).toBe(false);
   expect(shownPath(store.get())).toBe(P("L"));
+  expect(store.get().sel).toBe(1); // highlight and shown note agree: L
   c.runAction("archive_note"); await settle();
   expect(api.setArchived).toHaveBeenCalledWith(P("L"), true);
 });
@@ -4369,6 +4371,100 @@ test("arrowing onto a locked row, Escape, and arrowing on moves past it in both 
   await arrow(-1);
   expect(t.store.get().openPath).toBe(P("A")); // the row before L
   expect(t.store.get().sel).toBe(0);
+});
+
+// #131: after Escape the highlight stays on the locked row on purpose (it is the arrow keys' cursor, as for a locked row 0
+// that a search auto-shows without asking). Moving it back to the shown note's row trapped the arrows (#129 round 3).
+/** Arrow from the highlight; a lock screen it brings up is Escaped. Returns the note shown after it. */
+const walker = (t: Awaited<ReturnType<typeof lockedSetup>>) => async (d: 1 | -1) => {
+  const stepped = t.c.step(d); await settle();
+  const asked = t.lockScreen();
+  if (asked) t.answer(false); // Escape
+  await stepped; await settle();
+  return `${asked ? "locked " : ""}${t.store.get().openPath?.slice(3, -3)}@${t.store.get().sel}`;
+};
+
+test("Down and Up across a locked row twice, Escape each time: the arrows always move past it (#131)", async () => {
+  const t = await lockedSetup({ A: "a", L: "s", C: "c", D: "d" }); // A open, row 0
+  const arrow = walker(t);
+  const seen: string[] = [];
+  for (const d of [1, 1, 1, -1, -1, -1, 1, 1, 1, -1, -1, -1] as const) seen.push(await arrow(d));
+  // "locked A@1": L's unlock was Escaped, A is still shown, the highlight is on L's row (1)
+  expect(seen).toEqual(["locked A@1", "C@2", "D@3", "C@2", "locked C@1", "A@0", "locked A@1", "C@2", "D@3", "C@2", "locked C@1", "A@0"]);
+  expect(t.api.openOrCreate).not.toHaveBeenCalled();
+});
+
+test("two locked rows side by side: Escape on each, the arrows still move past both, in both directions (#131)", async () => {
+  const t = await lockedSetup({ A: "a", L1: "s1", L2: "s2", C: "c" });
+  const arrow = walker(t);
+  const seen: string[] = [];
+  for (const d of [1, 1, 1, -1, -1, -1, 1, 1, 1] as const) seen.push(await arrow(d));
+  expect(seen).toEqual(["locked A@1", "locked A@2", "C@3", "locked C@2", "locked C@1", "A@0", "locked A@1", "locked A@2", "C@3"]);
+});
+
+test("after Escape, Enter on the highlighted locked row asks again and creates nothing; an arrow then moves on (#131)", async () => {
+  const t = await lockedSetup();
+  const arrow = walker(t);
+  expect(await arrow(1)).toBe("locked A@1");
+  const entered = t.c.enter(); await settle();
+  expect(t.lockScreen()).toBe(true);
+  t.answer(false); await entered; await settle();
+  expect(t.store.get().sel).toBe(1);
+  expect(t.api.openOrCreate).not.toHaveBeenCalled();
+  expect(await arrow(1)).toBe("C@2");
+});
+
+test("after Escape, Back and Forward move the highlight to the note they show (#131)", async () => {
+  const t = await lockedSetup(); // rows A, L, C
+  const arrow = walker(t);
+  await arrow(1); await arrow(1); // past L to C
+  await t.c.select(0); await settle(); // history: A, C, A
+  expect(await arrow(1)).toBe("locked A@1");
+  await t.c.navigate("back"); await settle();
+  expect([t.store.get().openPath, t.store.get().sel]).toEqual([P("C"), 2]);
+  await t.c.navigate("forward"); await settle();
+  expect([t.store.get().openPath, t.store.get().sel]).toEqual([P("A"), 0]); // L was never shown, so it is not in the history
+});
+
+test("Escape with no note open keeps the highlight on the locked row; Enter asks again, an arrow moves on (#131)", async () => {
+  const t = await lockedSetup();
+  t.editor.unload(); (t.c as any).closedDoc(); // A was deleted: the editor is empty
+  expect(await walker(t)(1)).toBe("locked undefined@1");
+  expect(t.store.get().openPath).toBeNull();
+  const entered = t.c.enter(); await settle();
+  expect(t.lockScreen()).toBe(true);
+  t.answer(false); await entered; await settle();
+  expect(t.api.openOrCreate).not.toHaveBeenCalled();
+  expect(await walker(t)(1)).toBe("C@2");
+});
+
+test("a list refresh after Escape (a file changed on disk) moves the highlight to the shown note's row; no loop follows (#131)", async () => {
+  const t = await lockedSetup();
+  const arrow = walker(t);
+  expect(await arrow(1)).toBe("locked A@1");
+  await t.c.onNotesChanged([P("C")]); await settle();
+  expect(t.store.get().sel).toBe(0); // reselect: the open note's row wins when it is listed
+  expect(await arrow(1)).toBe("locked A@1"); // one more ask, then the highlight stays on L
+  expect(await arrow(1)).toBe("C@2");
+});
+
+test("a locked note deleted on disk while its unlock is up: Escape leaves the highlight on the shown note's row (#131)", async () => {
+  const t = await behindUnlock();
+  delete t.notes.L;
+  await t.c.onNotesChanged([P("L")]); await settle();
+  t.answer(false); await t.shown; await settle();
+  expect([t.store.get().openPath, t.store.get().sel]).toEqual([P("A"), 0]);
+});
+
+test("while the unlock is up, every note action is dropped and every other action still runs (#126, #131)", async () => {
+  const t = await behindUnlock();
+  const actions = (t.c as any).actions as Record<string, () => void>;
+  const guarded = new Set<string>([...NOTE_ACTIONS, "toggle_preview"]);
+  const ran: string[] = [];
+  for (const a of Object.keys(actions)) actions[a] = () => void ran.push(a);
+  for (const a of Object.keys(actions)) t.c.runAction(a);
+  expect(ran).toEqual(Object.keys(actions).filter((a) => !guarded.has(a)));
+  expect(t.store.get().unlocking).toBe(true);
 });
 
 // Issue #94: every action runs through runAction (the one dispatch point of shortcuts, palette and tray) and does its one direct effect.
