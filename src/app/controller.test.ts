@@ -1698,6 +1698,22 @@ test("an agent save into a copy named like the banner already shown is still rep
   expect(be.disk).toBe("other");
 });
 
+test("a no-op agent write right after a conflict reload replies with the hash, not the old copy (#114)", async () => {
+  const { c, api, be } = setupRealSaver((n, ctx) => {
+    if (n === 1) {
+      ctx.be.disk = "other";
+      ctx.be.hash = "hX";
+    }
+  });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 1, path: P("A"), kind: "append", insert: "- [ ] x", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(1, { conflict: P("A (conflict 1)") });
+  // the agent re-reads and replaces the note with the text it already holds: nothing to save
+  await c.onAgentWrite({ id: 2, path: P("A"), kind: "replace", insert: "other", base: "hX", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(2, { hash: "hX" }); // 87ffb42: { conflict: "/n/A (conflict 1).md" }
+  expect(be.saves).toBe(1);
+});
+
 test("agent write refused when the editor is read-only", async () => {
   const { c, api, editor } = setup({ A: "a" });
   await c.show(P("A"));

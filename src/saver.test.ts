@@ -393,3 +393,23 @@ test("flushOutcome reports the conflict copy its own text went to, and null once
   expect(await c.flushOutcome()).toEqual({ clean: true, copy: null });
   expect(be.disk).toBe("again");
 });
+
+test("flushOutcome after a conflict reload, with nothing new to save, reports no copy (#114)", async () => {
+  const { be, saveNote, openNote } = backend();
+  const { c } = mk({ saveNote, openNote });
+  type(c, "mine");
+  be.hash = "hX";
+  expect((await c.flushOutcome()).copy).toBe("a (conflict 1).md");
+  expect(await c.flushOutcome()).toEqual({ clean: true, copy: null }); // 87ffb42: the old copy again
+  expect(saveNote).toHaveBeenCalledTimes(1);
+});
+
+test("a conflict copy of one note is not reported for a flush of another note at the same version (#114)", async () => {
+  const { be, saveNote, openNote } = backend();
+  const { c } = mk({ saveNote, openNote });
+  type(c, "mine");
+  be.hash = "hX";
+  expect((await c.flushOutcome()).copy).toBe("a (conflict 1).md");
+  expect(c.load({ ...doc, path: "b.md", text: "B", hash: "hb" })).toBe(true); // the version number stays
+  expect(await c.flushOutcome()).toEqual({ clean: true, copy: null });
+});

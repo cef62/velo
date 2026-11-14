@@ -33,8 +33,8 @@ export class SaveController {
   private queue: Promise<void> = Promise.resolve();
   private retryMs = 1000;
   private suspended = false;
-  /** The conflict copy the save of `v` (of the note `target`) went to; the editor was reloaded with the disk text. */
-  private copied: { target: object; v: number; path: string } | null = null;
+  /** The conflict copy the save of version `v` went to; the editor was reloaded with the disk text. */
+  private copied: { v: number; path: string } | null = null;
 
   constructor(private d: SaverDeps, private delay = 500) {}
 
@@ -113,10 +113,12 @@ export class SaveController {
 
   /** flush(), plus the conflict copy the text current at the call went to (null: not a copy, e.g. the note holds it). */
   async flushOutcome(): Promise<{ clean: boolean; copy: string | null }> {
-    const [target, v] = [this.cur, this.version];
+    // only text still unsaved at the call can go to a copy now; dirty at version v also means the editor holds v's
+    // text of the current note (any load, rebind or reload since a copy of v needed a clean editor and no edit)
+    const [v, pending] = [this.version, this.dirty];
     const clean = await this.flush();
     const c = this.copied;
-    return { clean, copy: c && c.target === target && c.v === v ? c.path : null };
+    return { clean, copy: pending && c?.v === v ? c.path : null };
   }
 
   external(path: string) {
@@ -166,7 +168,7 @@ export class SaveController {
               target.baseHash = disk.hash;
               this.d.setText(disk.text);
               this.dirty = false;
-              this.copied = { target, v, path: r.conflict_path };
+              this.copied = { v, path: r.conflict_path };
             }
           }
           this.d.onConflict(r.conflict_path);
