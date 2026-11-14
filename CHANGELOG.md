@@ -1,5 +1,14 @@
 # velo
 
+## 0.18.2
+
+### Patch Changes
+
+- 95b49ff: Fixed an agent edit to the note open in velo reporting success when the note changed on disk meanwhile and the edit went to a conflict copy: the agent now gets an error that names the copy.
+- 401f70f: Fixed Enter sometimes doing nothing on the exact title of a hidden archived note when the first result finished opening at the same moment.
+- 401f70f: Fixed which of two same-titled notes opens (Enter on a hidden archived title, or a link to that title): it is now always the same one, the first by path.
+- 95b49ff: Fixed a second save of the same edits (for example when the window lost focus while a save was running) overwriting a change made to the note outside velo after the first save had already moved the edits to a conflict copy.
+
 ## 0.18.1
 
 ### Patch Changes
