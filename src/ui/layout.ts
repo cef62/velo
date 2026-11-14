@@ -67,37 +67,3 @@ export const sidePanelMode = (noteWidthWithoutPanel: number, panelWidth = 300): 
 
 /** Header: one row always; only the ⌘L hint drops on narrow windows. */
 export const showSearchHint = (windowWidth: number) => windowWidth >= W.headerHideHint
-
-// Title bar width budget. The bar is one flex row: [title or rename input] [archived badge] [error] [Retry] [indexing or saving] [actions]; error and indexing can show together.
-// Never shrink, never leave the bar: the actions and Retry, at the widths measured in the demo. Everything else yields, in this order:
-//   1. the status text truncates (flex shrink) down to `statusText`; 2. the archived badge becomes its icon; 3. the title truncates down to `title`;
-//   4. the status text hides, only its icon stays (the text stays in the DOM, visually hidden); 5. the badge hides (Archive/Unarchive stays in the ⋯ menu);
-//   6. while renaming, the actions hide (the input keeps its floor).
-// titleBarFit() takes the first step whose floors fit the bar, so the floors never sum to more than the bar (layout.test.ts checks every width from 320 up).
-const TB = { pad: 30, padCompact: 22, gap: 12, gapCompact: 8, title: 36, rename: 160, badgeText: 62, badgeIcon: 34, statusIcon: 16, statusText: 50, retry: 62, compactBelow: 380 } as const
-const actionsWidth = (w: number) => (w >= W.noteViewMenu ? 332 : w >= W.noteLockInMenu ? 195 : 155)
-export type TitleBarItems = { status: 0 | 1 | 2; retry: boolean; archived: boolean; renaming: boolean }
-export type TitleBarFit = { badge: 'text' | 'icon' | 'none'; statusText: boolean; compact: boolean; hideActions: boolean; dropIndexing: boolean; need: number }
-
-const steps_ = (w: number, it: TitleBarItems): TitleBarFit => {
-  const compact = it.status > 0 && w < TB.compactBelow
-  const need = (badge: TitleBarFit['badge'], text: boolean, actions: boolean) => {
-    const children = 1 + +(badge !== 'none') + + it.status + +it.retry + +actions
-    return (
-      (compact ? TB.padCompact : TB.pad) + (actions ? actionsWidth(w) : 0) + (children - 1) * (compact ? TB.gapCompact : TB.gap) + (it.renaming ? TB.rename : TB.title) +
-      (badge === 'text' ? TB.badgeText : badge === 'icon' ? TB.badgeIcon : 0) + it.status * (text ? TB.statusText : TB.statusIcon) + (it.retry ? TB.retry : 0)
-    )
-  }
-  const steps: [TitleBarFit['badge'], boolean][] = it.archived && !it.renaming ? [['text', true], ['icon', true], ['icon', false], ['none', false]] : [['none', true], ['none', false]]
-  const hide = it.renaming && w < W.noteLockInMenu // the existing rule: a narrow bar drops the actions for the input
-  for (const [badge, text] of steps) if (need(badge, text, !hide) <= w) return { badge, statusText: text, compact, hideActions: hide, dropIndexing: false, need: need(badge, text, !hide) }
-  if (it.renaming) for (const [badge, text] of steps) if (need(badge, text, false) <= w) return { badge, statusText: text, compact, hideActions: true, dropIndexing: false, need: need(badge, text, false) } // the rename gives up its actions
-  const [badge, text] = steps[steps.length - 1]
-  return { badge, statusText: text, compact, hideActions: false, dropIndexing: false, need: need(badge, text, true) }
-}
-
-/** With an error and the indexing progress both showing and no step fitting, the indexing progress (transient) goes (7). */
-export const titleBarFit = (w: number, it: TitleBarItems): TitleBarFit => {
-  const f = steps_(w, it)
-  return f.need <= w || it.status < 2 ? f : { ...steps_(w, { ...it, status: 1 }), dropIndexing: true }
-}

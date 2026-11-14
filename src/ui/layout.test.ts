@@ -1,26 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dueExtra, dueText, notesExtra, notesText, noteCount, paneBarMode, showSearchHint, sidePanelMode, titleBarFit, titleBarMode } from './layout'
-
-describe('title bar width budget', () => {
-  const bools = [false, true]
-  const states = ([0, 1, 2] as const).flatMap((status) => bools.flatMap((retry) => bools.flatMap((archived) => bools.map((renaming) => ({ status, retry: status > 0 && retry, archived, renaming })))))
-  it('the floors fit every bar from the 320 px minimum to 2000 px, for every state', () => {
-    for (const it of states) for (let w = 320; w <= 2000; w++) expect(titleBarFit(w, it).need, `${JSON.stringify(it)} at ${w}`).toBeLessThanOrEqual(w)
-  })
-  it('roomy bar: everything shows in full', () => {
-    expect(titleBarFit(1000, { status: 1, retry: true, archived: true, renaming: false })).toMatchObject({ badge: 'text', statusText: true, compact: false, hideActions: false })
-  })
-  it('yields in order: badge icon, then the status text, then the badge', () => {
-    const it = { status: 1 as const, retry: true, archived: true, renaming: false }
-    const seq = [1000, 600, 570, 400, 320].map((w) => titleBarFit(w, it)).map((f) => `${f.badge}/${f.statusText}`)
-    expect(seq).toEqual(['text/true', 'icon/true', 'icon/false', 'icon/false', 'none/false'])
-  })
-  it('only a rename hides the actions, and not before it must', () => {
-    expect(titleBarFit(1000, { status: 1, retry: true, archived: false, renaming: true }).hideActions).toBe(false)
-    expect(titleBarFit(450, { status: 1, retry: true, archived: false, renaming: true }).hideActions).toBe(true)
-    expect(titleBarFit(450, { status: 1, retry: true, archived: false, renaming: false }).hideActions).toBe(false)
-  })
-})
+import { dueExtra, dueText, notesExtra, notesText, noteCount, paneBarMode, showSearchHint, sidePanelMode, titleBarMode } from './layout'
 
 // The sizes the v2 mocks are drawn at (design/park-ui/v2/reference/V2Small, V2Wide, V2Main*).
 describe('v2 layout rules', () => {

@@ -1,9 +1,14 @@
 import { defineSlotRecipe } from '@pandacss/dev'
 
-// Note title bar: title (or inline rename input in its place), save status, right-hand actions.
+// Note title bar: [lead: title (or inline rename input in its place), archived badge, statuses] [Retry] [actions].
+// Fail-safe by construction (#115): Retry and the actions never shrink; the lead takes what is left and clips its own
+// content, so nothing inside it can push a control. The lead wraps: an item that does not fit at its floor moves to a
+// second, clipped line and disappears whole (never half an icon). The title takes the free space first, up to its full
+// text; the statuses get the rest.
+const line = { content: '""', h: 'full', w: '0' } // a full-height first item: the first line is as tall as its box, so its items centre in it
 export const titleBar = defineSlotRecipe({
   className: 'titleBar',
-  slots: ['root', 'title', 'status', 'actions'],
+  slots: ['root', 'lead', 'title', 'status', 'actions'],
   base: {
     root: {
       display: 'flex',
@@ -17,7 +22,20 @@ export const titleBar = defineSlotRecipe({
       bg: 'velo.canvas',
       minW: '0',
       flex: 'none',
-      '&[data-compact]': { pl: '3', gap: '2' }, // a status on a narrow bar: titleBarFit budgets with these
+    },
+    lead: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      alignContent: 'flex-start',
+      gap: '3',
+      flex: '1 1 0',
+      minW: '0',
+      alignSelf: 'stretch',
+      overflow: 'hidden',
+      containerType: 'inline-size', // the archived badge and the rename hint query it
+      fontSize: 'var(--velo-title-fs)', // em in those queries = the title font
+      '&::before': { ...line, mr: '-3' }, // cancels its own gap
     },
     title: {
       fontSize: 'var(--velo-title-fs)',
@@ -26,21 +44,26 @@ export const titleBar = defineSlotRecipe({
       lineHeight: '1.2',
       color: 'velo.fg',
       truncate: true,
-      flex: '1 1 auto', // natural width, so the message (shrink 1000, below) gives way first; it grows to push the actions right
-      minW: '36px', // the title yields after the message and the archived badge, down to this (width budget: titleBarFit in ui/layout.ts)
+      flex: '1000 1 0',
+      minW: 'min(2.5em, 100%)', // about two characters and the ellipsis at every font size
+      maxW: 'max-content',
     },
     status: {
       display: 'inline-flex',
+      flexWrap: 'wrap', // the text moves to the clipped second line when a few characters do not fit: icon only
       alignItems: 'center',
-      gap: '1.5',
+      alignContent: 'flex-start',
+      columnGap: '1.5',
+      h: '5',
+      overflow: 'hidden',
       color: 'velo.fgMuted',
       fontSize: 'uiSm',
       whiteSpace: 'nowrap',
       fontVariantNumeric: 'tabular-nums',
-      flex: '0 1000 auto', // the message yields first: it shrinks (1000x the title's rate) down to its floor, its text truncates
-      minW: '16px', // icon only (titleBarFit)
-      '&[data-text]': { minW: '50px' }, // icon, a few characters and an ellipsis
-      overflow: 'hidden',
+      flex: '1 1 0',
+      minW: '4', // its icon (14 px) or spinner (16 px); with less room it leaves the line
+      maxW: 'max-content',
+      '&::before': { ...line, mr: '-1.5' },
       '&[data-tone=error]': { color: 'velo.danger' },
     },
     actions: { display: 'inline-flex', alignItems: 'center', gap: '1', flex: 'none' },

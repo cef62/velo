@@ -20,6 +20,8 @@ const at = {
   timeline: css({ "@container (max-width: calc(113px + 10.5em))": { "& svg": { display: "block" }, "& span": { srOnly: true } } }),
   task: css({ "@container (max-width: calc(219px + 8em))": { "& svg": { display: "block" }, "& span": { srOnly: true } } }),
   head: css({ "@container (max-width: 231px)": { "& svg": { display: "block" }, "& span": { srOnly: true } } }),
+  // note title bar: its lead is the container, em = the title font; the text badge shows while the title keeps about 8em and a status a few characters
+  bar: css({ "@container (max-width: calc(8em + 140px))": { "& svg": { display: "block" }, "& span": { srOnly: true } } }),
 };
 
 export const ArchivedBadge = ({ list }: { list: keyof typeof at }) => (
