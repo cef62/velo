@@ -27,8 +27,11 @@ const RETRY_MAX_MS = 30000;
 
 /** Autosave/conflict/reload state machine, free of CodeMirror and Tauri. */
 export class SaveController {
-  /** `settled`: the last version whose save to this note ended, in the note (copy null) or in that conflict copy. */
-  private cur: { path: string | null; baseHash: string; settled?: { v: number; copy: string | null } } = { path: null, baseHash: "" };
+  /**
+   * `settled`: the last version whose save to this note ended, in the note (copy null, `hash` the note's hash that
+   * save left) or in that conflict copy (hash null).
+   */
+  private cur: { path: string | null; baseHash: string; settled?: { v: number; copy: string | null; hash: string | null } } = { path: null, baseHash: "" };
   private dirty = false;
   private version = 0; // bumps on every user edit
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -115,16 +118,18 @@ export class SaveController {
 
   /**
    * flush(), plus the conflict copy the text current at the call went to (null: not a copy, e.g. the note holds it),
-   * and `saved`: the note holds that text, even if newer typing keeps the editor dirty (`clean` false).
+   * and `hash`: the note's hash as the save of that text left it (or, nothing to save, as the editor holds it), even
+   * if newer typing keeps the editor dirty (`clean` false) or was saved on top since. null: not known to be saved.
    */
-  async flushOutcome(): Promise<{ clean: boolean; copy: string | null; saved: boolean }> {
+  async flushOutcome(): Promise<{ clean: boolean; copy: string | null; hash: string | null }> {
     // only text still unsaved at the call can go to a copy now; dirty at version v also means the editor holds v's
     // text of the current note (any load, rebind or reload since a copy of v needed a clean editor and no edit)
     const [v, pending, target] = [this.version, this.dirty, this.cur];
     const clean = await this.flush();
     const c = this.copied;
     const s = pending && target.settled?.v === v ? target.settled : null;
-    return { clean, copy: pending && c?.v === v ? c.path : (s?.copy ?? null), saved: s?.copy === null };
+    const hash = pending ? (s?.hash ?? null) : clean ? target.baseHash : null;
+    return { clean, copy: pending && c?.v === v ? c.path : (s?.copy ?? null), hash };
   }
 
   external(path: string) {
@@ -155,9 +160,9 @@ export class SaveController {
     this.queue = this.queue.then(async () => {
       if (!target.path) return;
       // an earlier save already settled this text (in the note or a conflict copy): sending it again with the
-      // base hash that save left would write it over the note's disk version. `settled` also covers a note no
-      // longer open (#134); versions only grow along the queue, so an equal one is the same text.
-      if (target.settled?.v === v || (target === this.cur && v === this.version && !this.dirty)) return;
+      // base hash that save left would write it over the note's disk version. Kept on the note's target, so it also
+      // holds for a note no longer open (#134); versions only grow along the queue, so an equal one is the same text.
+      if (target.settled?.v === v) return;
       try {
         this.d.onSaving?.(true);
         const r = await this.d.saveNote(target.path, text, target.baseHash).finally(() => this.d.onSaving?.(false));
@@ -168,7 +173,7 @@ export class SaveController {
             this.d.onMeta?.(r.meta);
           }
           target.baseHash = r.hash;
-          target.settled = { v, copy: null };
+          target.settled = { v, copy: null, hash: r.hash };
           if (target === this.cur && v === this.version) this.dirty = false;
           logDebug(() => `saver: saved ${fileName(target.path!)} (${text.length} chars)`);
         } else if (target === this.cur) {
@@ -185,13 +190,13 @@ export class SaveController {
             }
           }
           // after the reload: if it throws, the retry must send v again, or the editor would stay dirty for good
-          target.settled = { v, copy: r.conflict_path };
+          target.settled = { v, copy: r.conflict_path, hash: null };
           const reloaded = this.copied?.v === v && this.copied.path === r.conflict_path;
           logDebug(() => `saver: conflict on ${fileName(target.path!)}: edits went to ${fileName(r.conflict_path)}, ${reloaded ? "reloaded from disk" : "kept typing, saving again"}`);
           this.d.onConflict(r.conflict_path);
           if (this.dirty) this.schedule(0);
         } else {
-          target.settled = { v, copy: r.conflict_path };
+          target.settled = { v, copy: r.conflict_path, hash: null };
           logDebug(() => `saver: conflict on ${fileName(target.path!)} (no longer open): edits went to ${fileName(r.conflict_path)}`);
         }
         this.retryMs = 1000;

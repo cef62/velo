@@ -392,9 +392,9 @@ test("flushOutcome reports the conflict copy its own text went to, and null once
   const { c } = mk({ saveNote, openNote });
   type(c, "mine");
   be.hash = "hX";
-  expect(await c.flushOutcome()).toEqual({ clean: true, copy: "a (conflict 1).md", saved: false });
+  expect(await c.flushOutcome()).toEqual({ clean: true, copy: "a (conflict 1).md", hash: null });
   type(c, "again");
-  expect(await c.flushOutcome()).toEqual({ clean: true, copy: null, saved: true });
+  expect(await c.flushOutcome()).toEqual({ clean: true, copy: null, hash: "h:again" });
   expect(be.disk).toBe("again");
 });
 
@@ -404,7 +404,7 @@ test("flushOutcome after a conflict reload, with nothing new to save, reports no
   type(c, "mine");
   be.hash = "hX";
   expect((await c.flushOutcome()).copy).toBe("a (conflict 1).md");
-  expect(await c.flushOutcome()).toEqual({ clean: true, copy: null, saved: false }); // 87ffb42: the old copy again
+  expect(await c.flushOutcome()).toEqual({ clean: true, copy: null, hash: "hX" }); // 87ffb42: the old copy again
   expect(saveNote).toHaveBeenCalledTimes(1);
 });
 
@@ -415,7 +415,7 @@ test("a conflict copy of one note is not reported for a flush of another note at
   be.hash = "hX";
   expect((await c.flushOutcome()).copy).toBe("a (conflict 1).md");
   expect(c.load({ ...doc, path: "b.md", text: "B", hash: "hb" })).toBe(true); // the version number stays
-  expect(await c.flushOutcome()).toEqual({ clean: true, copy: null, saved: false });
+  expect(await c.flushOutcome()).toEqual({ clean: true, copy: null, hash: "hb" });
 });
 
 test("debug records name the note and sizes, never its text", async () => {
@@ -494,7 +494,7 @@ test("a conflict whose reload fails is not marked settled: the retry saves the t
   be.hash = "hX";
   expect(await c.flush()).toBe(false); // in a copy, but the editor could not load the disk text
   await vi.advanceTimersByTimeAsync(1000); // the retry
-  expect(be.copies).toEqual(["mine", "mine"]);
+  expect(be.copies).toEqual(["mine", "mine"]); // a second identical copy, as on main: accepted so the editor can't stay dirty (#134)
   expect(c.isDirty()).toBe(false);
   expect(text).toBe("base");
 });
@@ -515,7 +515,7 @@ test("flushOutcome reports its own text saved, or its copy, although the user ty
     type(c, "agent");
     const r = await c.flushOutcome();
     expect(r.clean).toBe(false); // the user's newer text is still unsaved
-    expect(r.saved).toBe(!outside);
+    expect(r.hash).toBe(outside ? null : "h:agent"); // the hash its own save left
     expect(r.copy).toBe(outside ? "a (conflict 1).md" : null);
     expect(text).toBe("agent+user"); // no keystroke lost
     await vi.runAllTimersAsync();
