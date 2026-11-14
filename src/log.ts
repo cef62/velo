@@ -19,43 +19,37 @@ export const clean = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, MAX);
 /** Error codes velo's backend returns (src-tauri `Err("…")`, `err()`): logged as they are. */
 const CODES = new Set(["already-exists", "conflict", "empty", "indexing", "invalid-title", "locked", "locked-sibling", "mention-moved", "no-folder", "no-identity", "not-found", "same-note", "task-moved", "wrong-passphrase"]);
 
+/** Built-in error class names, logged as they are; any other `name` (user-settable) logs as `Error`. */
+const NAMES = new Set(["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError", "AggregateError"]);
+
 /**
- * The logged form of an error. Safe by construction: only a known backend code, an Error's class name, the
- * script location it was thrown at (an app URL) and sizes. A message may quote anything (a query, a line of a note),
- * so it is only measured; the full error stays in the console.
+ * The logged form of an error. Safe by construction: the result is a literal from CODES or NAMES, `Error`,
+ * `other`/`non-error` with a type name from typeof, and a size. It never copies text from the error: the message is
+ * only measured (it may quote a query or a line of a note), `name` is only compared with NAMES, and `stack` is never
+ * read. A total function: getters that throw, a Proxy or odd field types give `non-error (unreadable)` or no size.
+ * The location of a caught error is the static context its caller passes to `logError`.
  */
 export function errorText(e: unknown): string {
-  if (typeof e === "string") return CODES.has(e) ? e : `other (${e.length}c)`;
-  if (e instanceof Error) {
-    const name = /^\w{1,40}$/.test(e.name) ? e.name : "Error";
-    const at = throwSite(e);
-    return `${name} (message ${e.message.length}c)${at ? ` at ${at}` : ""}`;
+  try {
+    if (typeof e === "string") return CODES.has(e) ? e : `other (${e.length}c)`;
+    if (e instanceof Error) {
+      const name: unknown = e.name;
+      const message: unknown = e.message;
+      const n = typeof name === "string" && NAMES.has(name) ? name : "Error";
+      return typeof message === "string" ? `${n} (message ${message.length}c)` : n;
+    }
+    return `non-error (${e === null ? "null" : typeof e})`;
+  } catch {
+    return "non-error (unreadable)";
   }
-  return e === undefined ? "undefined" : typeof e;
 }
 
 /** `url` when it is one of the app's own scripts (same origin as the window), else null. */
-export const ownScript = (url: string) => {
+export const ownScript = (url: unknown) => {
   const origin = globalThis.location?.origin;
-  return origin && origin !== "null" && url.startsWith(`${origin}/`) && /^[\w./%:-]+$/.test(url) ? url : null;
+  return typeof url === "string" && origin && origin !== "null" && url.startsWith(`${origin}/`) && /^[\w./%:-]+$/.test(url) ? url : null;
 };
-
-/**
- * `url:line:col` of the first stack frame, only from frame lines and only for the app's own script. V8 (WebView2)
- * starts the stack with `Name: message`, which may span lines and hold anything, so its frames are what follows that
- * exact header; a stack whose first line starts with the name but not the whole header (message changed after the
- * throw) gives no location. WebKit (macOS, Linux) and Gecko stacks hold frames only.
- */
-function throwSite(e: Error): string | null {
-  const stack = e.stack ?? "";
-  const head = e.message ? `${e.name}: ${e.message}` : e.name;
-  let frames: string[];
-  if (stack.startsWith(`${head}\n`)) frames = stack.slice(head.length + 1).split("\n");
-  else if (stack.startsWith(e.name)) return null;
-  else frames = stack.split("\n");
-  const m = /^\s+at (?:.*\()?(\S+):(\d+):(\d+)\)?$/.exec(frames[0] ?? "") ?? /^[^@\s]*(?: code)?@(\S+):(\d+):(\d+)$/.exec(frames[0] ?? "");
-  return m && ownScript(m[1]) ? `${m[1]}:${m[2]}:${m[3]}` : null;
-}
+const lineNo = (n: unknown) => (Number.isInteger(n) ? n : 0);
 
 let windowStart = 0;
 let sent = 0;
@@ -102,7 +96,7 @@ export function logDebug(text: () => string) {
 
 /** Uncaught errors and unhandled rejections in the window go to velo.log too. */
 export function installWindowHandlers(w: Pick<Window, "addEventListener">) {
-  w.addEventListener("error", (ev) => send("error", () => `uncaught ${errorText(ev.error ?? ev.message)} at ${ownScript(ev.filename) ?? "?"}:${ev.lineno}:${ev.colno}`));
+  w.addEventListener("error", (ev) => send("error", () => `uncaught ${errorText(ev.error ?? ev.message)} at ${ownScript(ev.filename) ?? "?"}:${lineNo(ev.lineno)}:${lineNo(ev.colno)}`));
   w.addEventListener("unhandledrejection", (ev) => send("error", () => `unhandled rejection: ${errorText(ev.reason)}`));
 }
 
