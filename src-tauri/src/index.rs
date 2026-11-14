@@ -611,9 +611,9 @@ impl Index {
         Ok(self.find_titles(title)?.into_iter().next())
     }
 
-    /// Every note `title` names: title matches first, then aliases.
+    /// Every note `title` names: title matches first, then aliases; each group by path, so twins resolve the same way every time.
     pub fn find_titles(&self, title: &str) -> anyhow::Result<Vec<String>> {
-        let mut st = self.db.prepare("SELECT path FROM notes WHERE title_folded=?1 UNION ALL SELECT path FROM aliases WHERE alias_folded=?1")?;
+        let mut st = self.db.prepare("SELECT path, 0 FROM notes WHERE title_folded=?1 UNION ALL SELECT path, 1 FROM aliases WHERE alias_folded=?1 ORDER BY 2, 1")?;
         Ok(st.query_map([fold(title)], |r| r.get(0))?.collect::<Result<_, _>>()?)
     }
 
@@ -622,11 +622,11 @@ impl Index {
         Ok(st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?)
     }
 
-    /// Every title and indexed alias with its note; `name == title` marks a title row.
+    /// Every title and indexed alias with its note; `name == title` marks a title row. Title rows first, then by path: the same order as `find_titles`.
     pub fn link_targets(&self, include_archived: bool) -> anyhow::Result<Vec<LinkTarget>> {
         let (n, a) = if include_archived { (String::new(), String::new()) } else { (format!(" WHERE path NOT IN ({ARCHIVED_PATHS})"), format!(" WHERE n.path NOT IN ({ARCHIVED_PATHS})")) };
         let mut st = self.db.prepare(&format!(
-            "SELECT title, title, path, modified, encrypted FROM notes{n} UNION ALL SELECT a.alias_display, n.title, n.path, n.modified, n.encrypted FROM aliases a JOIN notes n ON n.path = a.path{a}"
+            "SELECT title, title, path, modified, encrypted, 0 FROM notes{n} UNION ALL SELECT a.alias_display, n.title, n.path, n.modified, n.encrypted, 1 FROM aliases a JOIN notes n ON n.path = a.path{a} ORDER BY 6, 3"
         ))?;
         let rows = st.query_map([], |r| Ok(LinkTarget { name: r.get(0)?, title: r.get(1)?, path: r.get(2)?, modified: r.get(3)?, locked: r.get(4)? }))?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -1002,6 +1002,15 @@ mod tests {
     #[test] fn frontmatter_tags_merge() {
         let i = idx(&[("a.md", &format!("{FM}#work #more"), 1)]);
         assert_eq!(i.tags(true).unwrap().iter().map(|t| t.tag.as_str()).collect::<Vec<_>>(), vec!["Idea", "more", "work"]);
+    }
+    #[test] fn same_title_twins_resolve_in_path_order_whatever_the_insertion_order() {
+        for order in [["a.txt", "b.md"], ["b.md", "a.txt"]] {
+            let mut i = Index::open(std::path::Path::new(":memory:")).unwrap();
+            for p in order { i.upsert(p, &NoteFile { title: "T".into(), encrypted: false }, &Meta { mtime: 1, size: 1, birth: 0 }, Some("x")).unwrap(); }
+            assert_eq!(i.find_titles("t").unwrap(), vec!["a.txt", "b.md"]);
+            assert_eq!(i.find_title("T").unwrap().as_deref(), Some("a.txt"));
+            assert_eq!(i.link_targets(true).unwrap().into_iter().map(|t| t.path).collect::<Vec<_>>(), vec!["a.txt", "b.md"]);
+        }
     }
     #[test] fn aliases_count_as_titles() {
         let i = idx(&[("a.md", FM, 1), ("b.md", "x", 2)]);

@@ -3913,6 +3913,23 @@ test("another note opened during the confirm voids that Enter, sel unchanged (#1
   expect(t.store.get().openPath).toBe(P("C"));
 });
 
+test("row 0's automatic open landing during the confirm does not eat the Enter (#127)", async () => {
+  const t = await withHiddenB();
+  await t.c.openTitle("C", "wikilink");
+  const open = t.api.openNote.getMockImplementation()!;
+  const a = deferred<Awaited<ReturnType<typeof open>>>();
+  t.api.openNote.mockImplementationOnce(() => a.promise); // the auto-open of row 0 (A) is slow
+  t.c.setQuery("B"); await settle();
+  const d = deferred<LinkTarget[]>();
+  t.api.listLinkTargets.mockImplementationOnce(() => d.promise);
+  const entered = t.c.enter();
+  await settle();
+  a.resolve(await open(P("A"))); await settle();
+  d.resolve(await t.api.listLinkTargets(true));
+  await entered; await settle();
+  expect(t.store.get().openPath).toBe(P("B"));
+});
+
 test("a row selected past 0 during the confirm voids that Enter, query and open note unchanged (#107)", async () => {
   const t = await withHiddenB();
   t.c.setQuery("B"); await settle();

@@ -738,7 +738,7 @@ export class Controller {
         if (keepOpen && r.indexOf(this.editor.currentPath() ?? "") >= 0) this.selectOpen();
         else if (keepOpen === "highlight") {
           this.store.set({ sel: r.count ? 0 : -1 }); // highlight row 0, don't open it
-        } else void this.select(r.count ? 0 : -1, "auto");
+        } else void (this.autoOpen = this.select(r.count ? 0 : -1, "auto"));
       } else this.reselect(highlighted);
     } catch (e) {
       if (e === "no-folder") this.store.set({ phase: "setup" });
@@ -841,6 +841,7 @@ export class Controller {
     }
   }
 
+  protected autoOpen: Promise<unknown> = Promise.resolve(); // the open of row 0 that the last search started
   protected confirmingEnter = false;
   /**
    * Plain Enter on the exact title or alias of an archived note the switch hides, with row 0 (or nothing) selected:
@@ -849,8 +850,10 @@ export class Controller {
    * notes) tell it from current index data: the paths named `q` in the first and not in the second are archived.
    * No search, so no paging limit and no "no links" or tag filter. This path never creates a note; when the name is
    * not confirmed (or a call failed) it returns false and Enter acts as before. true = this Enter is handled or void.
-   * The Enter is void when the user moved on meanwhile: the query changed, a row beyond 0 is selected, or another
-   * note is open (a row click). A background refresh changes none of these, so it does not void it.
+   * The Enter is void when the query changed, another row was selected, or another note was opened meanwhile. The
+   * automatic open of row 0 that the search itself started is awaited first, so it is not mistaken for the user's
+   * open. A background refresh changes none of these, so it does not void it. Other actions in that window (a tag
+   * chip, the sort, the pane) do not void it: the Enter still opens the note typed and creates nothing.
    */
   protected async openHiddenArchived(): Promise<boolean> {
     if (this.confirmingEnter) return true; // a second Enter while the first confirms: one open only
@@ -858,9 +861,11 @@ export class Controller {
     const q = fold(s.query.trim());
     if (s.showArchived || s.sel > 0 || q === "" || !this.titles.has(q) || this.results.loaded.some((h) => fold(h.title) === q)) return false;
     this.confirmingEnter = true;
-    const open = this.editor.currentPath();
+    let open: string | null = null;
     const movedOn = () => this.store.get().query !== s.query || this.store.get().sel > 0 || this.editor.currentPath() !== open;
     try {
+      await this.autoOpen; // the search's own open of row 0 lands before the path is recorded: only an open after it is the user's
+      open = this.editor.currentPath();
       const [all, visible] = await Promise.all([this.api.listLinkTargets(true), this.api.listLinkTargets(false)]);
       if (movedOn()) return true;
       const named = (ts: typeof all) => ts.filter((t) => fold(t.name) === q).map((t) => t.path);
