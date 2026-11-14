@@ -23,7 +23,7 @@ import { prepare, rank, type Ranked } from "../fuzzy";
 import { extractTitle } from "../writing";
 import { appliedSearch, cleanName, defaultName, removeFrom, renameIn, sameFilters, upsert, type Filters } from "../saved";
 import { chipsFor, type Chip } from "../searchChips";
-import { pushRecent } from "../palette";
+import { NOTE_ACTIONS, pushRecent } from "../palette";
 import { dropPos } from "../positions";
 import type { MenuSpec, UiPort } from "./ports";
 import { noInfo, type AppState, type Store } from "./store";
@@ -68,6 +68,7 @@ export class Controller {
   protected linkIndex: Ranked<LinkTarget>[] = []; // [[ autocomplete
   protected tagIndex: Ranked<TagCount>[] = []; // # autocomplete
   protected readonly newShow = latest();
+  protected prompt: Promise<boolean> | null = null; // the passphrase request the UI shows now (the newest one)
   protected searchSeq = 0;
   protected searching: Promise<void> = Promise.resolve(); // latest list reset, awaited by Enter so it never acts on stale rows
   protected settingsQueue: Promise<unknown> = Promise.resolve();
@@ -639,7 +640,7 @@ export class Controller {
     } catch (e) {
       if (how === "nav" && e === "not-found") return "missing";
       if (e === "locked" && !retried && how !== "auto") { // never pop the dialog up while typing in search
-        const ok = await this.promptPassphrase({ trigger: "open", context: null, inline: true });
+        const ok = await this.promptPassphrase({ trigger: "open", context: null, inline: true, wanted: current });
         if (!current()) return true; // a newer note was opened while the field was up: leave it alone
         if (ok) {
           const r = await this.show(path, how, true);
@@ -658,15 +659,17 @@ export class Controller {
    * Passphrase dialog; true once the identity is available. Wording depends on identity.age existing.
    * null = opening a locked note with no key anywhere: a new key couldn't decrypt it, so no dialog, just the copy-identity error.
    * context: the note title when locking, for the create dialog's subtitle.
+   * wanted: false once a newer open superseded the one asking (checked after the identity awaits): no prompt then.
    */
-  protected async promptPassphrase(req: { trigger: "open" | "lock"; context: string | null; inline?: boolean }): Promise<boolean | null> {
+  protected async promptPassphrase(req: { trigger: "open" | "lock"; context: string | null; inline?: boolean; wanted?: () => boolean }): Promise<boolean | null> {
     try {
       if (req.trigger === "open" && !(await this.api.hasIdentity()) && !(await this.api.identityFileExists())) {
         this.setErr(NO_KEY_MSG);
         return null;
       }
       const exists = await this.api.identityFileExists();
-      return await this.ui.passphrase({
+      if (req.wanted && !req.wanted()) return false;
+      const p = this.ui.passphrase({
         mode: exists ? "unlock" : "create",
         context: req.context,
         inline: req.inline,
@@ -677,6 +680,17 @@ export class Controller {
           }
         },
       });
+      // `unlocking` is true exactly while this prompt is the inline lock screen: any newer request (inline or a
+      // dialog) replaces it in the UI, so only the latest one may clear the flag.
+      this.prompt = p;
+      this.store.set({ unlocking: exists && !!req.inline });
+      const settled = () => {
+        if (this.prompt !== p) return;
+        this.prompt = null;
+        this.store.set({ unlocking: false });
+      };
+      p.then(settled, settled);
+      return await p;
     } catch (e) {
       this.setErr(errText(e));
       return false;
@@ -871,6 +885,7 @@ export class Controller {
       return false;
     }
     const current = this.newShow(); // a pending auto-show must not replace this note when its reply lands later
+    this.ui.cancelPassphrase(); // as in show(): this note replaces a locked one still waiting for its passphrase
     try {
       const doc = await this.loading(() => this.api.openOrCreate(title));
       if (!doc) return false;
@@ -1995,12 +2010,17 @@ export class Controller {
   runPaletteAction(a: Action) {
     if (!(a in this.actions)) return;
     this.store.set((s) => ({ palette: false, recentActions: pushRecent(s.recentActions, a) }));
-    void this.ui.nextFrame().then(() => this.actions[a as keyof typeof this.actions]());
+    void this.ui.nextFrame().then(() => this.runAction(a));
   }
 
-  /** An action sent by the backend (tray menu); unknown names are ignored. */
+  /**
+   * Every bound action runs here: shortcuts, the palette and the backend (tray menu); unknown names are ignored.
+   * While a locked note's unlock is up, the editor still holds the previous note: actions on "the open note" are dropped.
+   */
   runAction(a: string) {
-    if (a in this.actions) this.actions[a as keyof typeof this.actions]();
+    if (!(a in this.actions)) return;
+    if (this.store.get().unlocking && (a === "toggle_preview" || NOTE_ACTIONS.includes(a as Action))) return;
+    this.actions[a as keyof typeof this.actions]();
   }
 
   // context_menu is not a global command: each focused list or chip opens its own menu through isMenuKey
@@ -2058,11 +2078,11 @@ export class Controller {
       this.stepTimeline(arrow);
       return true;
     }
-    for (const [action, run] of Object.entries(this.actions)) {
+    for (const action of Object.keys(this.actions)) {
       if (!matches(e, keys[action as Action], this.opts.isMac)) continue;
       // Backspace combos keep their editing meaning in the editor and in a non-empty search box
       if (keys[action as Action].endsWith("+Backspace") && (e.inEditor || e.inSearchWithText)) continue;
-      if (!e.repeat || REPEATABLE.has(action as Action)) run(); // a held key fires toggles and one-shot commands once
+      if (!e.repeat || REPEATABLE.has(action as Action)) this.runAction(action); // a held key fires toggles and one-shot commands once
       return true;
     }
     return false;

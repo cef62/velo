@@ -3,7 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import { css } from "styled-system/css";
 import { commandPalette, sectionHeader } from "styled-system/recipes";
 import type { Controller } from "../app/controller";
-import type { AppState, Store } from "../app/store";
+import { shownPath, type AppState, type Store } from "../app/store";
 import { Dialog, Kbd } from "@/components/ui";
 import { paletteGroups, paletteSearch, type PaletteItem } from "../palette";
 import { formatBinding } from "../shortcuts";
@@ -32,7 +32,7 @@ export function CommandPalette({ controller, store }: { controller: Controller; 
 function Body({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const keys = useStore(store, (s) => s.keys);
   const isMac = useStore(store, (s) => s.isMac);
-  const openPath = useStore(store, (s) => s.openPath);
+  const openPath = useStore(store, shownPath);
   const title = useStore(store, (s) => s.title);
   const encrypted = useStore(store, (s) => s.encrypted);
   const recent = useStore(store, (s) => s.recentActions);

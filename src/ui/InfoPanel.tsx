@@ -1,7 +1,7 @@
 import { css } from "styled-system/css";
 import type { Controller } from "../app/controller";
 import type { RevisionInfo } from "../api";
-import type { AppState, Store } from "../app/store";
+import { shownPath, type AppState, type Store } from "../app/store";
 import { Badge, Button, Tooltip } from "@/components/ui";
 import { useStore } from "./useStore";
 
@@ -26,7 +26,7 @@ function rel(ms: number): string {
 }
 
 export function InfoTab({ controller, store }: { controller: Controller; store: Store<AppState> }) {
-  const openPath = useStore(store, (s) => s.openPath);
+  const openPath = useStore(store, shownPath);
   const info = useStore(store, (s) => s.info);
   const m = info.meta;
   const date = (label: string, ms: number, src: string) => (

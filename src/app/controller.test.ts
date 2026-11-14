@@ -3,7 +3,7 @@ import type { LinkTarget, Page, RenameResult, TaskItem, TaskView, TimelineRow } 
 import { Controller, INVALID_TITLE, type KeyEventLike } from "./controller";
 import { chipsFor } from "../searchChips";
 import { emptyConnections, FakeEditor, FakePreview, deferred, fakeApi, fakeUi, hit, noMeta, settle } from "./fakes";
-import { createStore, initialState } from "./store";
+import { createStore, initialState, shownPath } from "./store";
 import { localToday, toggleTaskLine } from "../tasks";
 import { getPos, setPos } from "../positions";
 import { chipTags } from "../tags";
@@ -3833,4 +3833,259 @@ test("a rejected link-target lookup after the query changed voids that Enter (#1
   await entered; await settle();
   expect(t.api.openNote).not.toHaveBeenCalledWith(P("B"));
   expect(t.api.openOrCreate).not.toHaveBeenCalled();
+});
+
+// #126: notes whose title starts with "L" are locked until a passphrase is accepted. The passphrase port mirrors
+// PassphraseDialog: a newer request supersedes the pending one (false), cancel drops only an inline one, and the
+// inline lock screen is shown for an inline "unlock" request.
+async function lockedSetup(notes: Record<string, string> = { A: "a", L: "secret", C: "c" }) {
+  const s = setup(notes);
+  const { c, api, ui, editor } = s;
+  const preview = new FakePreview();
+  c.attachPreview(preview);
+  await c.runSearch(true); await settle(); // row 0 (A) auto-opens
+  await c.select(0);
+  editor.flush.mockImplementation(async () => ((editor.dirty = false), true)); // a flush saves
+  let unlocked = false;
+  const real = api.openNote.getMockImplementation()!;
+  api.openNote.mockImplementation(async (p: string) => {
+    if (p.startsWith("/n/L") && !unlocked) throw "locked";
+    return real(p);
+  });
+  type Req = { inline: boolean; mode: string; done: (ok: boolean) => void };
+  const dlg = { cur: null as Req | null, requests: 0 };
+  (ui as any).passphrase = (r: { inline?: boolean; mode: string }) => new Promise<boolean>((res) => {
+    dlg.cur?.done(false);
+    const me: Req = { inline: !!r.inline, mode: r.mode, done: (ok) => { if (dlg.cur === me) dlg.cur = null; res(ok); } };
+    dlg.cur = me;
+    dlg.requests++;
+  });
+  (ui as any).cancelPassphrase = () => dlg.cur?.inline && dlg.cur.done(false);
+  const lockScreen = () => !!dlg.cur && dlg.cur.inline && dlg.cur.mode === "unlock";
+  /** The shown prompt is answered: true = right passphrase, false = Escape. */
+  const answer = (ok: boolean) => {
+    if (ok) unlocked = true;
+    dlg.cur!.done(ok);
+  };
+  return { ...s, preview, dlg, lockScreen, answer };
+}
+
+/** A is open with an unsaved edit, then L is selected: its unlock stays up, the editor still holds A behind it. */
+async function behindUnlock() {
+  const t = await lockedSetup();
+  t.editor.applyChange({ from: 1, to: 1, insert: "!" });
+  const shown = t.c.select(1);
+  await settle();
+  return { ...t, shown };
+}
+
+type Behind = Awaited<ReturnType<typeof behindUnlock>>;
+const hiddenNoteCases: [string, (t: Behind) => unknown, (t: Behind, previewWas: boolean) => boolean][] = [
+  ["⌘⌫ delete", (t) => t.c.onKeyDown(key("Backspace", { meta: true })), (t) => t.api.deleteNote.mock.calls.length > 0 || !("A" in t.notes)],
+  ["palette delete", (t) => t.c.runPaletteAction("delete_note"), (t) => t.api.deleteNote.mock.calls.length > 0],
+  ["⌘R rename", (t) => t.c.onKeyDown(key("KeyR", { meta: true })), (t) => t.store.get().renaming],
+  ["⌘⇧P preview", (t) => t.c.onKeyDown(key("KeyP", { meta: true, shift: true })), (t, was) => t.preview.on !== was],
+  ["⌘⇧E lock", (t) => t.c.onKeyDown(key("KeyE", { meta: true, shift: true })), (t) => t.api.lockNote.mock.calls.length > 0],
+  ["⌘⇧N extract", (t) => t.c.onKeyDown(key("KeyN", { meta: true, shift: true })), (t) => t.store.get().extract !== null],
+  ["palette merge", (t) => t.c.runPaletteAction("merge_note"), (t) => t.store.get().merge !== null],
+  ["tray/backend archive", (t) => t.c.runAction("archive_note"), (t) => t.api.setArchived.mock.calls.length > 0],
+];
+test.each(hiddenNoteCases)("while a locked note's unlock is up, %s does not act on the note hidden behind it (#126)", async (_name, run, acted) => {
+  const t = await behindUnlock();
+  expect(t.editor.currentPath()).toBe(P("A")); // the hidden note
+  t.editor.selection = { from: 0, to: 1 };
+  const was = t.preview.on;
+  const handled = run(t);
+  if (typeof handled === "boolean") expect(handled).toBe(true); // a key stays handled: ⌘R must not reload the webview
+  await settle();
+  expect(acted(t, was)).toBe(false);
+  expect(t.notes).toHaveProperty("A");
+  expect(t.store.get().unlocking).toBe(true);
+  expect(shownPath(t.store.get())).toBeNull(); // side panel and palette: no note is open
+});
+
+test("while a locked note's unlock is up, app-wide shortcuts still work (#126)", async () => {
+  const { c, calls, store } = await behindUnlock();
+  c.onKeyDown(key("KeyL", { meta: true }));
+  expect(calls.some(([m]) => m === "focusSearch")).toBe(true);
+  c.onKeyDown(key("KeyX", { meta: true, shift: true }));
+  expect(store.get().paneMode).toBe("tasks");
+  c.onKeyDown(key("Comma", { meta: true }));
+  await settle();
+  expect(store.get().settings).not.toBeNull();
+});
+
+test("selecting another note dismisses the unlock; note shortcuts then act on that note (#126)", async () => {
+  const { c, api, store } = await behindUnlock();
+  await c.show(P("C")); // a click on C's row (past the fake's first page), a Related link, a task
+  await settle();
+  expect(store.get().unlocking).toBe(false);
+  expect(shownPath(store.get())).toBe(P("C"));
+  c.onKeyDown(key("Backspace", { meta: true }));
+  await settle();
+  expect(api.deleteNote).toHaveBeenCalledWith(P("C"));
+});
+
+test("after a successful unlock, note shortcuts act on the unlocked note (#126)", async () => {
+  const { c, api, store, answer, shown } = await behindUnlock();
+  answer(true);
+  await shown; await settle();
+  expect(store.get().unlocking).toBe(false);
+  expect(shownPath(store.get())).toBe(P("L"));
+  c.runAction("archive_note"); await settle();
+  expect(api.setArchived).toHaveBeenCalledWith(P("L"), true);
+});
+
+test("after the unlock is cancelled, the note shown again is the current one and shortcuts act on it (#126)", async () => {
+  const { c, api, store, answer, shown } = await behindUnlock();
+  answer(false); // Escape
+  await shown; await settle();
+  expect(store.get().unlocking).toBe(false);
+  expect(shownPath(store.get())).toBe(P("A")); // the lock screen is gone: A is visible again
+  expect(store.get().sel).toBe(1); // as on main: the highlight stays on L's row (the next arrow moves on from it)
+  c.runAction("archive_note"); await settle();
+  expect(api.setArchived).toHaveBeenCalledWith(P("A"), true);
+});
+
+test("an edit made just before a locked note is selected is saved before the unlock is asked for (#126)", async () => {
+  const { api, editor } = await behindUnlock();
+  expect(editor.dirty).toBe(false);
+  const lastFlush = Math.max(...editor.flush.mock.invocationCallOrder);
+  const openL = api.openNote.mock.calls.findIndex(([p]) => p === P("L"));
+  expect(lastFlush).toBeLessThan(api.openNote.mock.invocationCallOrder[openL]);
+});
+
+test("a locked note superseded during its identity check never shows its unlock over the newer one (#126)", async () => {
+  const t = await lockedSetup({ A: "a", L1: "s1", L2: "s2" });
+  const slow = deferred<boolean>();
+  t.api.hasIdentity.mockImplementationOnce(() => slow.promise);
+  const first = t.c.select(1); await settle(); // L1 waits on the keychain
+  const second = t.c.show(P("L2")); await settle(); // the user moved on: L2's unlock is up
+  expect(t.lockScreen()).toBe(true);
+  slow.resolve(true); await settle(); await first;
+  expect(t.dlg.requests).toBe(1); // L1 never asked: the screen on show is still L2's
+  expect(t.store.get().unlocking).toBe(true);
+  t.c.onKeyDown(key("Backspace", { meta: true })); await settle();
+  expect(t.api.deleteNote).not.toHaveBeenCalled();
+  t.answer(true); await second; await settle();
+  expect(t.store.get().openPath).toBe(P("L2"));
+  expect(t.store.get().unlocking).toBe(false);
+});
+
+test("unlocking follows the prompt on screen when locked opens settle out of order (#126)", async () => {
+  const t = await lockedSetup({ A: "a", L1: "s1", L2: "s2", C: "c" });
+  const same = () => expect(t.store.get().unlocking).toBe(t.lockScreen());
+  const slow = deferred<boolean>();
+  void t.c.show(P("L1")); await settle(); // L1's unlock is up
+  same();
+  t.api.hasIdentity.mockImplementationOnce(() => slow.promise);
+  void t.c.show(P("L2")); await settle(); // L2 waits on the keychain
+  same();
+  void t.c.show(P("L1")); await settle(); // L1 again: its unlock is up
+  same();
+  expect(t.lockScreen()).toBe(true);
+  void t.c.show(P("C")); await settle(); // a plain note: no unlock
+  same();
+  slow.resolve(true); await settle(); // L2's late reply must not bring a screen back over C
+  same();
+  expect(t.lockScreen()).toBe(false);
+  expect(t.store.get().openPath).toBe(P("C"));
+});
+
+test("today's daily note opened from behind the unlock dismisses it and is the note shown (#126)", async () => {
+  const { c, store, lockScreen, shown, editor } = await behindUnlock();
+  c.onKeyDown(key("KeyD", { meta: true, shift: true }));
+  await settle(); await shown; await settle();
+  expect(lockScreen()).toBe(false);
+  expect(store.get().unlocking).toBe(false);
+  expect(store.get().openPath).toBe(P(localToday()));
+  expect(editor.dirty).toBe(false); // A's edit was saved on the way
+});
+
+test("random opens, answers and late identity checks: unlocking always equals the lock screen being shown (#126)", async () => {
+  let seed = 126;
+  const rnd = (n: number) => ((seed = (seed * 1103515245 + 12345) % 2147483648), seed % n);
+  // the fakes settle on microtasks: draining them per step avoids ~700 setTimeout(0) rounds (slow on Windows timers)
+  const drain = async () => { for (let k = 0; k < 40; k++) await Promise.resolve(); };
+  for (let run = 0; run < 25; run++) {
+    const t = await lockedSetup({ A: "a", L1: "s1", L2: "s2", C: "c" });
+    const checks: ReturnType<typeof deferred<boolean>>[] = [];
+    t.api.hasIdentity.mockImplementation(() => {
+      const d = deferred<boolean>();
+      checks.push(d);
+      return d.promise;
+    });
+    for (let step = 0; step < 20; step++) {
+      const op = rnd(5);
+      if (op === 0) void t.c.show(P(["A", "C"][rnd(2)]));
+      else if (op === 1) void t.c.show(P(["L1", "L2"][rnd(2)]));
+      else if (op === 2 && checks.length) checks.splice(rnd(checks.length), 1)[0].resolve(true);
+      else if (op === 3 && t.dlg.cur) t.answer(rnd(3) === 0); // a right passphrase or Escape; a wrong one leaves it pending
+      await drain();
+      expect(t.store.get().unlocking).toBe(t.lockScreen());
+      if (t.store.get().unlocking) {
+        t.c.runAction("delete_note");
+        t.c.runAction("archive_note");
+        await drain();
+        expect(t.api.deleteNote).not.toHaveBeenCalled();
+        expect(t.api.setArchived).not.toHaveBeenCalled();
+      }
+    }
+  }
+}, 30_000);
+
+test("an inline unlock replacing a pending passphrase dialog keeps unlocking on (#126)", async () => {
+  const t = await lockedSetup({ A: "a", L1: "- [ ] x", L2: "s2" });
+  t.api.toggleTask.mockRejectedValueOnce("locked");
+  void (t.c as any).flipTask(P("L1"), 0, "- [ ] x"); await settle(); // a task tick asks in a dialog
+  expect(t.dlg.cur?.inline).toBe(false);
+  expect(t.store.get().unlocking).toBe(false); // a modal dialog, not the lock screen: the note area stays live under it
+  void t.c.show(P("L2")); await settle(); // its inline unlock replaces the dialog (the dialog's request settles false)
+  expect(t.lockScreen()).toBe(true);
+  expect(t.store.get().unlocking).toBe(true);
+});
+
+test("Escape on an unlock opened from search results that do not list the open note keeps the highlight: Enter does not create a note (#126)", async () => {
+  const t = await lockedSetup();
+  t.api.search.mockImplementation(async () => ({ hits: [hit("L")], has_more: false, total: 1, hidden: 0 }));
+  t.c.setQuery("L"); await settle(); // row 0 (L) is auto-shown: locked, so no prompt; A stays open, unlisted
+  expect(t.store.get().openPath).toBe(P("A"));
+  const first = t.c.enter(); await settle();
+  expect(t.lockScreen()).toBe(true);
+  t.answer(false); // Escape
+  await first; await settle();
+  expect(t.store.get().sel).toBe(0); // as on main: L's row stays highlighted
+  void t.c.enter(); await settle();
+  expect(t.api.openOrCreate).not.toHaveBeenCalled();
+  expect(t.lockScreen()).toBe(true); // Enter asks for L again
+});
+
+test("Escape on an unlock opened from the timeline leaves its selection on the locked row, as on main (#126)", async () => {
+  const t = await lockedSetup();
+  const row = (title: string) => ({ path: P(title), title }) as unknown as TimelineRow;
+  t.store.set((s) => ({ paneMode: "timeline", timeline: { ...s.timeline, rows: [row("A"), row("L")], sel: P("L") } }));
+  const shown = t.c.show(P("L")); await settle(); // a click on L's timeline row
+  t.answer(false);
+  await shown; await settle();
+  expect(t.store.get().timeline.sel).toBe(P("L")); // its focus stays there too: arrows move on from L
+});
+
+test("arrowing onto a locked row, Escape, and arrowing on moves past it in both directions, as on main (#126)", async () => {
+  const t = await lockedSetup(); // rows A, L, C; A open
+  const arrow = async (d: 1 | -1) => {
+    const stepped = t.c.step(d); await settle();
+    if (t.lockScreen()) t.answer(false); // Escape
+    await stepped; await settle();
+  };
+  await arrow(1); // onto L: its unlock, then Escape
+  expect(t.store.get().sel).toBe(1);
+  expect(t.store.get().openPath).toBe(P("A"));
+  await arrow(1);
+  expect(t.store.get().openPath).toBe(P("C")); // the row after L, not L again
+  expect(t.store.get().sel).toBe(2);
+  await arrow(-1); // back onto L, Escape
+  expect(t.store.get().sel).toBe(1);
+  await arrow(-1);
+  expect(t.store.get().openPath).toBe(P("A")); // the row before L
+  expect(t.store.get().sel).toBe(0);
 });

@@ -5,7 +5,7 @@ import { formatBinding, GLOBAL_ACTIONS, LABELS, NONE, type Action } from "./shor
 export type PaletteItem = { action: Action; label: string; binding: string; context?: string; disabled?: string };
 export type PaletteGroup = { title: string; items: PaletteItem[] };
 
-const NOTE_ACTIONS: Action[] = ["rename", "extract_note", "merge_note", "toggle_front_matter", "toggle_lock", "archive_note", "delete_note"];
+export const NOTE_ACTIONS: Action[] = ["rename", "extract_note", "merge_note", "toggle_front_matter", "toggle_lock", "archive_note", "delete_note"];
 const HIDDEN = new Set<Action>([...GLOBAL_ACTIONS, "context_menu", "command_palette"]); // OS-level keys and the palette itself
 export const RECENT_MAX = 5;
 
@@ -29,7 +29,7 @@ export function paletteItem(a: Action, s: PaletteState): PaletteItem {
     else if ((a === "extract_note" || a === "merge_note") && s.encrypted) it.disabled = "locked note";
     else it.context = s.title;
     if (a === "archive_note") it.label = s.archived ? "Unarchive note" : "Archive note";
-  }
+  } else if (a === "toggle_preview" && !s.noteOpen) it.disabled = "open a note first";
   return it;
 }
 

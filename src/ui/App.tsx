@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { css } from "styled-system/css";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
@@ -53,7 +53,7 @@ export function App({ controller, store }: { controller: Controller; store: Stor
   const previewOn = useStore(store, (s) => s.previewOn);
   const paneMode = useStore(store, (s) => s.paneMode);
   const setup = useStore(store, (s) => s.phase === "setup");
-  const [locked, setLocked] = useState(false); // the inline unlock is showing
+  const locked = useStore(store, (s) => s.unlocking); // the inline unlock is showing (set with the request it renders)
   // The hosts' layout effects (attachEditor/attachPreview) run before this effect, so start() sees them; once only under StrictMode.
   const started = useRef(false);
   const root = useRef<HTMLDivElement>(null);
@@ -85,7 +85,7 @@ export function App({ controller, store }: { controller: Controller; store: Stor
           <EditorHost controller={controller} />
           <PreviewHost controller={controller} />
         </div>
-        <PassphraseDialog onLock={setLocked} />
+        <PassphraseDialog />
         <FirstRun controller={controller} store={store} />
       </section>
       <SidePanel controller={controller} store={store} />
