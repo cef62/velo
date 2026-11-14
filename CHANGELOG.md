@@ -1,5 +1,30 @@
 # velo
 
+## 0.18.1
+
+### Patch Changes
+
+- 5491546: Fixed keyboard focus being lost when the list pane is resized across the icon-only width, and the rename field now tells screen readers which keys commit and cancel.
+- ef95955: Fixed an agent call being told about an archived-notes list failure caused by another call, and a failing agent call not being told about its own.
+- 8bfed9f: Fixed agents not being told when velo could not update the archived-notes list after changing a note.
+- ef95955: Fixed a failure to update the archived-notes list being hidden by a save's status or by the operation's own error; it now shows in a banner until you dismiss it.
+- 77dda53: Fixed the "archived" badge squeezing note titles in a narrow list or at a large font size: it now shows as an Archive icon (still read as "archived" by screen readers) when the row is too narrow.
+- 1688fd5: Fixed the "archived" mark squeezing task titles in the Tasks view: it now shows as an Archive icon when the list is narrow, and the Timeline switches to the icon at more list widths.
+- 067abc2: Fixed Enter on the exact title of an archived note: it no longer opens over a note you clicked meanwhile, no longer does nothing when the list refreshes at that moment, no longer overrides a visible note with the same title or alias, and no longer depends on the "no links" filter.
+- 08661ce: Fixed Enter opening the first row instead of an archived note whose exact title or alias you typed while archived notes are hidden.
+- bf562ed: Fixed the note count above the list reading "100K" instead of "99K" on some Linux systems.
+- d502273: Fixed a locked note's text staying searchable in the app when the search index could not erase it; locking now fails and leaves the note unlocked instead.
+- 08661ce: Fixed a held shortcut repeating its action: only Back and Forward keep repeating, everything else runs once per key press.
+- c97233f: Fixed the title bar, banners and editor staying reachable by keyboard behind the lock screen and the first-run screen, and long unbroken words in banners hiding the Dismiss button.
+- 8bfed9f: Fixed a note created outside velo showing as not archived when it opened before velo had indexed it.
+- db97220: Fixed a reload of the open note moving a caret at the start of a line onto lines added above it, and the top visible line shifting when a note changed on disk while the preview was on.
+- 25268c3: Kept the caret and scroll position when the open note reloads after an outside change.
+- 9778378: Fixed the caret jumping when a note reloads after an outside edit that changes text both above and below it (unless the changes are more than about 256 KB apart).
+- e23a2ef: Fixed renaming a note to a title that differs only in accents or case being refused on volumes that store accented file names in decomposed form.
+- 5c03460: Fixed tag chips: a filter on a tag that only archived notes carry now always shows its chip, and a deselected empty chip disappears at once.
+- 5cb105c: Fixed shortcuts and the command palette acting on the note hidden behind a locked note's unlock screen, which could delete or rename it, and the side panel showing that hidden note; opening today's note or a link now dismisses the unlock screen.
+- 34aa0a3: Fixed locking or unlocking a note changing whether another note with the same name shows as archived.
+
 ## 0.18.0
 
 ### Minor Changes

@@ -1,4 +1,4 @@
-import { expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import type { LinkTarget, Page, RenameResult, TaskItem, TaskView, TimelineRow } from "../api";
 import { Controller, INVALID_TITLE, type KeyEventLike } from "./controller";
 import { chipsFor } from "../searchChips";
@@ -3426,15 +3426,17 @@ test("the check_updates action calls the update check once", async () => {
 test("the quit action calls quitApp once", async () => {
   const { c, api } = setup();
   await c.start(); await settle();
+  const n = api.quitApp.mock.calls.length;
   c.runAction("quit"); await settle();
-  expect(api.quitApp).toHaveBeenCalledTimes(1);
+  expect(api.quitApp.mock.calls.length - n).toBe(1);
 });
 
 test("the reset_window action calls resetWindow once", async () => {
   const { c, api } = setup();
   await c.start(); await settle();
+  const n = api.resetWindow.mock.calls.length;
   c.runAction("reset_window"); await settle();
-  expect(api.resetWindow).toHaveBeenCalledTimes(1);
+  expect(api.resetWindow.mock.calls.length - n).toBe(1);
 });
 
 test("a list-write failure during openTitle stays after the next open", async () => {
@@ -4121,4 +4123,39 @@ test("arrowing onto a locked row, Escape, and arrowing on moves past it in both 
   await arrow(-1);
   expect(t.store.get().openPath).toBe(P("A")); // the row before L
   expect(t.store.get().sel).toBe(0);
+});
+
+// Issue #94: every action runs through runAction (the one dispatch point of shortcuts, palette and tray) and does its one direct effect.
+type Rig = ReturnType<typeof setup> & { preview: FakePreview };
+describe("runAction wiring", () => {
+  const open = async (notes?: Record<string, string>): Promise<Rig> => {
+    const t = setup(notes);
+    const preview = new FakePreview();
+    t.c.attachPreview(preview);
+    await t.c.start(); await settle();
+    await t.c.openTitle("A", "enter"); await settle();
+    return { ...t, preview };
+  };
+  // [action, arrange, act+assert]
+  const rows: [string, (t: Rig) => unknown, (t: Rig) => Promise<void>][] = [
+    ["toggle_info", () => {}, async (t) => { const b = t.store.get().infoOpen; t.c.runAction("toggle_info"); await settle(); expect(t.store.get().infoOpen).toBe(!b); }],
+    ["toggle_preview", () => {}, async (t) => { t.c.runAction("toggle_preview"); expect(t.preview.on).toBe(true); }],
+    ["rename", () => {}, async (t) => { t.c.runAction("rename"); expect(t.store.get().renaming).toBe(true); }],
+    ["toggle_lock", (t) => t.api.lockNote.mockResolvedValueOnce(P("A")), async (t) => { const n = t.api.lockNote.mock.calls.length; t.c.runAction("toggle_lock"); await settle(); expect(t.api.lockNote.mock.calls.length - n).toBe(1); }],
+    ["lock_all", () => {}, async (t) => { const n = t.api.lockAll.mock.calls.length; t.c.runAction("lock_all"); await settle(); expect(t.api.lockAll.mock.calls.length - n).toBe(1); }],
+    ["forward", async (t) => { await t.c.openTitle("B", "enter"); await settle(); await t.c.navigate("back"); await settle(); }, async (t) => { expect(t.store.get().openPath).toBe(P("A")); t.c.runAction("forward"); await settle(); expect(t.store.get().openPath).toBe(P("B")); }],
+    ["toggle_tags", () => {}, async (t) => { const b = t.store.get().tagPanelOpen; t.c.runAction("toggle_tags"); expect(t.store.get().tagPanelOpen).toBe(!b); }],
+    ["toggle_rich", () => {}, async (t) => { const b = t.store.get().editorStyle; t.c.runAction("toggle_rich"); await settle(); expect(t.store.get().editorStyle).toBe(b === "rich" ? "plain" : "rich"); }],
+    ["toggle_layout", () => {}, async (t) => { const n = t.api.setSettings.mock.calls.length; t.c.runAction("toggle_layout"); await settle(); expect(t.api.setSettings.mock.calls.length - n).toBe(1); expect(t.api.setSettings.mock.lastCall![0].layout).toBe("horizontal"); }],
+    ["extract_note", (t) => { t.editor.selection = { from: 0, to: 1 }; }, async (t) => { t.c.runAction("extract_note"); expect(t.store.get().extract).not.toBeNull(); }],
+    ["merge_note", () => {}, async (t) => { t.c.runAction("merge_note"); await settle(); expect(t.store.get().merge?.source).toBe(P("A")); }],
+    ["toggle_timeline", () => {}, async (t) => { t.c.runAction("toggle_timeline"); expect(t.store.get().paneMode).toBe("timeline"); }],
+    ["save_search", (t) => t.c.setQuery("x"), async (t) => { t.c.runAction("save_search"); expect(t.store.get().saveSearch).not.toBeNull(); }],
+    ["toggle_archived", () => {}, async (t) => { const b = t.store.get().showArchived; t.c.runAction("toggle_archived"); await settle(); expect(t.store.get().showArchived).toBe(!b); }],
+  ];
+  test.each(rows)("%s", async (_id, arrange, run) => {
+    const t = await open();
+    await arrange(t);
+    await run(t);
+  });
 });
