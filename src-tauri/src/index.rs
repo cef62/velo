@@ -241,7 +241,7 @@ impl Index {
         if self.bulk_off() && let Err(e) = self.end_bulk() {
             let msg = format!("velo: erasing deleted text from the search index failed, retried at the next lock: {e}");
             crate::log::line(&msg);
-            eprintln!("{msg}"); // `velo --mcp` direct mode has no velo.log
+            eprintln!("{msg}"); // the MCP client keeps a `velo --mcp` server's stderr
         }
     }
 

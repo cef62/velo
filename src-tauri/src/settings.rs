@@ -48,11 +48,13 @@ pub struct Settings {
     pub tasks_by_note: bool,
     /// show archived notes in every listing; only the UI reads it
     pub show_archived: bool,
+    /// write `log::debug` records to velo.log (agent calls, commands, watcher, saver); `velo --mcp` reads it per call
+    pub debug_log: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into(), agent_access: false, saved_searches: vec![], timeline_sort: "updated".into(), palette: "clear".into(), app_icon: "dock".into(), tasks_by_note: true, show_archived: false }
+        Settings { notes_dir: None, layout: "vertical".into(), font_size: 14, sort: "modified".into(), editor_style: "rich".into(), theme: "system".into(), shortcuts: BTreeMap::new(), write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox".into(), inbox_title: "Inbox".into(), agent_access: false, saved_searches: vec![], timeline_sort: "updated".into(), palette: "clear".into(), app_icon: "dock".into(), tasks_by_note: true, show_archived: false, debug_log: false }
     }
 }
 
@@ -65,11 +67,11 @@ pub const PALETTES: [&str; 6] = ["clear", "mist", "paper", "electric", "reef", "
 const DEFAULT_TOGGLE: &str = "Mod+Shift+Space";
 const DEFAULT_CAPTURE: &str = "Mod+Alt+Shift+KeyN"; // canonical modifier order, as the UI's DEFAULTS
 /// Every action id in the UI's `DEFAULTS` (src/shortcuts.ts); a saved id outside it (e.g. the old `next_note`) is ignored there.
-pub const ACTIONS: [&str; 32] = [
+pub const ACTIONS: [&str; 34] = [
     "focus_search", "toggle_preview", "rename", "toggle_lock", "lock_all", "settings", "toggle_sort", "back", "forward", "delete_note",
     "toggle_tags", "toggle_rich", "toggle_layout", "toggle_window", "toggle_info", "toggle_front_matter", "toggle_tasks", "toggle_connections", "capture", "daily_note", "extract_note",
     "merge_note", "toggle_timeline", "export", "save_search", "context_menu", "command_palette", "quit", "reset_window",
-    "toggle_archived", "archive_note", "check_updates",
+    "toggle_archived", "archive_note", "check_updates", "toggle_debug_log", "show_log",
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -211,6 +213,12 @@ mod tests {
         assert!(!load(&p).show_archived);
         save(&p, &Settings { show_archived: true, ..Settings::default() }).unwrap();
         assert!(load(&p).show_archived);
+    }
+    #[test] fn debug_log_defaults_off_and_round_trips() {
+        let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");
+        std::fs::write(&p, r#"{"font_size":16}"#).unwrap(); assert!(!load(&p).debug_log, "files from before the setting load with it off");
+        save(&p, &Settings { debug_log: true, ..Settings::default() }).unwrap();
+        assert!(load(&p).debug_log);
     }
     #[test] fn settings_defaults_and_roundtrip() {
         let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("s.json");

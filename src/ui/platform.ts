@@ -4,6 +4,7 @@ import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { LogicalPosition } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { applyFontScale } from "../app/fontscale";
+import { logError } from "../log";
 import { applyPalette } from "../theme/palettes/apply";
 export { applyPalette };
 import type { UiPort } from "../app/ports";
@@ -78,7 +79,7 @@ export const platform: UiPort = {
   setWindowTheme(t) {
     void getCurrentWindow()
       .setTheme(t)
-      .catch((e) => console.error("setTheme failed", e));
+      .catch((e) => logError("setTheme failed", e));
   },
   applyLook(s) {
     theme = s.theme;

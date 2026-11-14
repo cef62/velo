@@ -30,7 +30,7 @@ export function fakeApi(notes: Record<string, string> = {}) {
     if (!(title in notes)) throw "not-found";
     return { path, title, text: notes[title], hash: "h", encrypted: false, meta: noMeta, archived: archived.has(title) };
   };
-  const settings: Settings = { notes_dir: "/n", layout: "vertical", font_size: 14, sort: "modified", editor_style: "rich", theme: "system", shortcuts: {}, write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox", inbox_title: "Inbox", agent_access: false, saved_searches: [], timeline_sort: "updated", palette: "clear", app_icon: "dock", tasks_by_note: true, show_archived: false };
+  const settings: Settings = { notes_dir: "/n", layout: "vertical", font_size: 14, sort: "modified", editor_style: "rich", theme: "system", shortcuts: {}, write_front_matter: true, show_front_matter: false, info_panel: false, auto_update_check: true, capture_target: "inbox", inbox_title: "Inbox", agent_access: false, saved_searches: [], timeline_sort: "updated", palette: "clear", app_icon: "dock", tasks_by_note: true, show_archived: false, debug_log: false };
   const api = {
     getSettings: vi.fn(async () => ({ ...settings })),
     setSettings: vi.fn(async (_s: Settings) => {}),
@@ -93,6 +93,7 @@ export function fakeApi(notes: Record<string, string> = {}) {
     checkUpdate: vi.fn(async (): Promise<{ version: string } | null> => null),
     installUpdate: vi.fn(async () => {}),
     appVersion: vi.fn(async () => "0.6.0"),
+    logFile: vi.fn(async () => "/logs/velo.log"),
   };
   return { api: api as unknown as Api & typeof api, notes };
 }

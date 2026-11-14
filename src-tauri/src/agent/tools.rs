@@ -144,7 +144,7 @@ fn path_of(ops: &dyn NoteOps, a: &Value) -> Result<String, String> {
 }
 
 /// `d` if it is a real `YYYY-MM-DD` date.
-fn valid_date(d: &str) -> Result<&str, String> {
+pub(crate) fn valid_date(d: &str) -> Result<&str, String> {
     match chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d") {
         Ok(n) if n.format("%Y-%m-%d").to_string() == d => Ok(d),
         _ => Err(format!("invalid date: {d} (expected YYYY-MM-DD)")),

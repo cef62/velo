@@ -10,6 +10,7 @@ import { shouldClose } from "../close";
 import { latest } from "../latest";
 import { History } from "../history";
 import { errText } from "../errtext";
+import { logError, setDebugLog } from "../log";
 import { enterAction, fold, moveSelection } from "../search";
 import { extractTags, pruneSelection, toggleTag } from "../tags";
 import { frontMatterRange, stripFrontMatter, wordCount } from "../frontmatter";
@@ -196,6 +197,7 @@ export class Controller {
 
   async start() {
     const s = await this.api.getSettings();
+    setDebugLog(s.debug_log === true);
     this.applyLook(s); // first, so the saved palette and theme don't wait on the index
     const st = await this.api.indexStatus();
     if (st) this.setIndexing(true, st[0], st[1]);
@@ -234,7 +236,7 @@ export class Controller {
       this.preview?.refresh();
       this.editor?.refreshLinks();
     } catch (e) {
-      console.error("title cache refresh failed", e);
+      logError("title cache refresh failed", e);
     }
   }
 
@@ -245,7 +247,7 @@ export class Controller {
       const targets = await this.api.listLinkTargets(this.store.get().showArchived);
       if (fresh()) this.linkIndex = prepare(targets, (t) => t.name);
     } catch (e) {
-      console.error("link target refresh failed", e);
+      logError("link target refresh failed", e);
     }
   }
 
@@ -446,7 +448,7 @@ export class Controller {
     try {
       target = (await this.api.captureTargetTitle()).title;
     } catch (e) {
-      console.error("capture target failed", e);
+      logError("capture target failed", e);
     }
     const s = this.store.get();
     if (!s.capture) this.captureQuery = s.query;
@@ -546,7 +548,7 @@ export class Controller {
     if (mode === "tasks" || mode === "timeline") this.filterChanged(false);
     else if (keep) void this.runSearch(true, "highlight");
     else if (captured !== undefined) void this.runSearch(false); // the target's row moved; the list is otherwise unchanged
-    void this.api.captureDone(hide).catch((e) => console.error("capture done failed", e)); // ends the backend's session even when velo stays shown
+    void this.api.captureDone(hide).catch((e) => logError("capture done failed", e)); // ends the backend's session even when velo stays shown
   }
 
   /** The note is now in the editor: title, path and lock state follow it; the conflict banner belongs to the previous note. */
@@ -577,7 +579,7 @@ export class Controller {
       const revisions = await this.api.listRevisions(openPath);
       if (fresh() && this.store.get().openPath === openPath) this.store.set((s) => ({ info: { ...s.info, revisions } }));
     } catch (e) {
-      if (e !== "locked") console.error("info load failed", e);
+      if (e !== "locked") logError("info load failed", e);
     }
   }
 
@@ -745,7 +747,7 @@ export class Controller {
       } else this.reselect(highlighted);
     } catch (e) {
       if (e === "no-folder") this.store.set({ phase: "setup" });
-      else if (e !== "indexing") console.error("search failed", e);
+      else if (e !== "indexing") logError("search failed", e);
     }
   }
 
@@ -762,7 +764,7 @@ export class Controller {
       this.listChanged(true);
       this.reselect(highlighted);
     } catch (e) {
-      if (e !== "indexing") console.error("search failed", e);
+      if (e !== "indexing") logError("search failed", e);
     }
   }
 
@@ -787,7 +789,7 @@ export class Controller {
     try {
       await this.results.ensure(index);
     } catch (e) {
-      console.error("load more failed", e);
+      logError("load more failed", e);
       return;
     }
     if (this.results.count !== had) this.listChanged();
@@ -882,7 +884,7 @@ export class Controller {
       if ((await this.show(hidden[0])) && this.editor.currentPath() === hidden[0]) this.settleAfterOpen(false, "enter");
       return true;
     } catch (e) {
-      console.warn("confirming a hidden title failed", e);
+      logError("confirming a hidden title failed", e, "warn");
       return movedOn();
     } finally {
       this.confirmingEnter = false;
@@ -938,7 +940,7 @@ export class Controller {
     try {
       await this.results.ensure(this.store.get().sel + d); // may page in more rows past the loaded end
     } catch (e) {
-      console.error("load more failed", e);
+      logError("load more failed", e);
     }
     this.listChanged();
     await this.select(moveSelection(this.store.get().sel, d, this.results.count));
@@ -1532,7 +1534,7 @@ export class Controller {
       await this.api.setBadge(due);
     } catch (e) {
       if (fresh()) this.tasksFailed = true;
-      if (e !== "indexing") console.error("tasks refresh failed", e);
+      if (e !== "indexing") logError("tasks refresh failed", e);
     }
   }
 
@@ -1623,7 +1625,7 @@ export class Controller {
       // A tag an archived note still carries exists: the filter stays (its list is empty, the hidden line says why).
       if (!incl && this.store.get().selectedTags.length) all = await this.api.listTags(true);
     } catch (e) {
-      if (e !== "indexing") console.error("tag refresh failed", e);
+      if (e !== "indexing") logError("tag refresh failed", e);
       return;
     }
     if (!fresh()) return; // a newer refresh superseded this response
@@ -1715,6 +1717,29 @@ export class Controller {
     if (this.store.get().paneMode === "notes") await this.refreshKeepingEditor();
     else this.listStale = true; // the hidden Notes list reloads when shown
     this.reloadAround();
+  }
+
+  /** Palette "Toggle debug logging": flips the saved switch inside the queued update, as toggleShowArchived does. */
+  async toggleDebugLog() {
+    try {
+      await this.updateSettings(async (cur) => {
+        const next = cur.debug_log !== true;
+        await this.api.setSettings({ ...cur, debug_log: next });
+        setDebugLog(next);
+        this.setErr(next ? "Debug logging on" : "Debug logging off");
+      });
+    } catch (e) {
+      this.setErr(errText(e));
+    }
+  }
+
+  /** Reveals velo.log in the file manager. */
+  async showLog() {
+    try {
+      await this.ui.reveal(await this.api.logFile());
+    } catch (e) {
+      this.setErr(errText(e));
+    }
   }
 
   /** Reload a first page without moving the editor: a plain refresh would inherit a pending first page's rule and could open row 0. */
@@ -1842,6 +1867,7 @@ export class Controller {
       return err === "not-found" ? "Folder not found" : String(err);
     }
     this.applyLook(next);
+    setDebugLog(next.debug_log === true);
     this.store.set({ keys: resolve(next.shortcuts, this.opts.isMac), sort: next.sort, writeFrontMatter: next.write_front_matter, showArchived: next.show_archived === true, tasksByNote: next.tasks_by_note !== false, showFrontMatter: next.show_front_matter, infoOpen: next.info_panel, savedSearches: next.saved_searches ?? [], settings: null });
     this.preview?.refresh(); // watermark shows the binding
     this.syncStyle();
@@ -2065,6 +2091,8 @@ export class Controller {
     quit: () => void this.api.quitApp(),
     reset_window: () => void this.api.resetWindow(),
     check_updates: () => void this.checkUpdates(),
+    toggle_debug_log: () => void this.toggleDebugLog(),
+    show_log: () => void this.showLog(),
   };
 
   /**
@@ -2110,7 +2138,7 @@ export class Controller {
     // during an agent rename the editor is frozen on the old path: agentRenamed reloads it
     if (open && paths.includes(open) && this.agentRenaming !== open) {
       // The reload replaces the editor text: keep the old one as a revision (a dirty editor conflicts instead).
-      if (!this.editor.isDirty()) await this.api.snapshotText(open, this.editor.getText()).catch((e) => console.warn("snapshot before reload failed:", e));
+      if (!this.editor.isDirty()) await this.api.snapshotText(open, this.editor.getText()).catch((e) => logError("snapshot before reload failed", e, "warn"));
       this.editor.onExternalChange(open);
     }
   }
@@ -2180,7 +2208,7 @@ export class Controller {
     const snap = await this.api.snapshotAgent(req.path, req.summary ?? "");
     // not applied after all (a keystroke landed during the snapshot): its revision would record a write that never happened
     const unapplied = async (r: AgentReply) => {
-      if (snap) await this.api.dropAgentSnapshot(req.path, snap).catch((e) => console.warn("dropping the agent snapshot failed:", e));
+      if (snap) await this.api.dropAgentSnapshot(req.path, snap).catch((e) => logError("dropping the agent snapshot failed", e, "warn"));
       return r;
     };
     if ((bad = check())) return unapplied(bad);

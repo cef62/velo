@@ -81,7 +81,7 @@ pub fn start(app: AppHandle) -> anyhow::Result<ListenerHandle> {
 
 /// One MCP call on the app's state; `emit` sends the app events `agent-write`, `archive-error` and `notes-changed`.
 pub(super) fn run_call(st: &AppState, editors: &Editors, emit: &dyn Fn(&str, Value), name: &str, args: Value) -> Result<Value, String> {
-    with_route(editors, &|r| emit("agent-write", r), |route, release| {
+    super::logged(crate::log::debug_on(), "app", name, args, |args| with_route(editors, &|r| emit("agent-write", r), |route, release| {
         let mut ops = AppOps::new(st, route);
         ops.release = release;
         let r = super::tools::call(&mut ops, name, args);
@@ -91,7 +91,7 @@ pub(super) fn run_call(st: &AppState, editors: &Editors, emit: &dyn Fn(&str, Val
             emit("notes-changed", json!({ "paths": ops.touched }));
         }
         r
-    })
+    }))
 }
 
 /// Starts or stops the listener in `slot` to match `on`; `start` runs only when turning it on.

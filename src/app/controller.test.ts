@@ -8,6 +8,7 @@ import { localToday, toggleTaskLine } from "../tasks";
 import { getPos, setPos } from "../positions";
 import { chipTags } from "../tags";
 import { SaveController } from "../saver";
+import { debugLogOn } from "../log";
 
 const lsStore = new Map<string, string>();
 (globalThis as any).localStorage = { getItem: (k: string) => lsStore.get(k) ?? null, setItem: (k: string, v: string) => void lsStore.set(k, v) };
@@ -3535,6 +3536,27 @@ test("the reset_window action calls resetWindow once", async () => {
   const n = api.resetWindow.mock.calls.length;
   c.runAction("reset_window"); await settle();
   expect(api.resetWindow.mock.calls.length - n).toBe(1);
+});
+
+test("the toggle_debug_log action flips the saved switch and the window's debug records", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  expect(debugLogOn()).toBe(false);
+  c.runAction("toggle_debug_log"); await settle();
+  expect(api.setSettings).toHaveBeenLastCalledWith(expect.objectContaining({ debug_log: true }));
+  expect(debugLogOn()).toBe(true);
+  expect(store.get().err).toBe("Debug logging on");
+  api.getSettings.mockResolvedValue({ ...(await api.getSettings()), debug_log: true });
+  c.runAction("toggle_debug_log"); await settle();
+  expect(api.setSettings).toHaveBeenLastCalledWith(expect.objectContaining({ debug_log: false }));
+  expect(debugLogOn()).toBe(false);
+});
+
+test("the show_log action reveals velo.log", async () => {
+  const { c, calls } = setup();
+  await c.start(); await settle();
+  c.runAction("show_log"); await settle();
+  expect(calls).toContainEqual(["reveal", "/logs/velo.log"]);
 });
 
 test("a list-write failure during openTitle stays after the next open", async () => {

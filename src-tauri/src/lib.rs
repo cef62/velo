@@ -87,6 +87,7 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)?;
             let settings_path = config_dir.join("settings.json");
             let settings = settings::load(&settings_path);
+            log::set_debug(settings.debug_log);
             let (dir, globals, icon) = (settings.notes_dir.clone(), settings.global_bindings(), settings.app_icon.clone());
             app.manage(commands::AppState {
                 settings: Mutex::new(settings),
@@ -205,6 +206,7 @@ pub fn run() {
             commands::close_requested,
             commands::quit_app,
             commands::reset_window_cmd,
+            commands::log_line,
             update::check_update,
             update::install_update,
         ])

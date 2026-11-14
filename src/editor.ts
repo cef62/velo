@@ -10,6 +10,7 @@ import { frontMatterHide, ISOLATED, reloadSpec, replaceAll, stampSelection, undo
 import { stampChange } from "./frontmatter";
 import { clampPos, getPos, renamePos, setPos, type Pos } from "./positions";
 import { openNote, saveNote, type NoteDoc, type NoteMeta } from "./api";
+import { logError } from "./log";
 
 export interface Editor {
   /** false = refused because of unsaved edits. */
@@ -137,7 +138,7 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
             view.dispatch({ effects: EditorView.scrollIntoView(top.t, { y: "start", yMargin: top.m }) });
           }
         } catch (e) {
-          console.error("reload diff failed, replacing the whole text:", e);
+          logError("reload diff failed, replacing the whole text", e);
           top = null;
           // Whatever broke, the editor must end on the new text: replace it all, as a note switch does (only a throw here propagates).
           view.dispatch(replaceAll(view.state.doc, text));
