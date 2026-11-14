@@ -46,8 +46,8 @@ export function mountDivider(divider: HTMLElement, app: HTMLElement, titlebar?: 
   };
   divider.addEventListener("pointerdown", (e) => drag(divider, e), { signal });
   titlebar?.addEventListener("pointerdown", (e) => {
-    // the title itself keeps double-click rename and the rename field its text selection
-    if (horizontal() || e.button !== 0 || (e.target as HTMLElement).closest("#title, [data-note-title], input, button, a")) return;
+    // the title itself keeps double-click rename and the rename field its text selection; controls and focusable spans (the error) keep their click
+    if (horizontal() || e.button !== 0 || (e.target as HTMLElement).closest("#title, [data-note-title], input, button, a, [tabindex]")) return;
     drag(titlebar, e);
   }, { signal });
   divider.addEventListener("keydown", (e) => {
