@@ -118,12 +118,12 @@ export function TitleBar({ controller, store }: { controller: Controller; store:
       {s.archived && !s.renaming && <Badge size="sm" variant="subtle" flex="none">archived</Badge>}
       {s.err ? (
         <>
-          <span className={bar.status} data-tone="error" role="alert">
-            <TriangleAlert size={14} aria-hidden />
-            {withCode(s.err)}
+          <span className={bar.status} data-tone="error" role="alert" title={s.err}>
+            <TriangleAlert size={14} aria-hidden className={css({ flex: "none" })} />
+            <span className={css({ truncate: true })}>{withCode(s.err)}</span>
           </span>
           {s.errFromSave && (
-            <Button variant="outline" size="sm" onClick={() => controller.retrySave()}>
+            <Button variant="outline" size="sm" flex="none" onClick={() => controller.retrySave()}>
               Retry
             </Button>
           )}

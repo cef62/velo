@@ -26,7 +26,7 @@ export const titleBar = defineSlotRecipe({
       color: 'velo.fg',
       truncate: true,
       flex: '1',
-      minW: '0',
+      minW: 'min(12ch, 25%)', // the title yields second: the message cannot squeeze it below 12 characters or a quarter of the bar; a fixed floor pushed the actions out at the 600 px window and the largest font
     },
     status: {
       display: 'inline-flex',
@@ -36,7 +36,9 @@ export const titleBar = defineSlotRecipe({
       fontSize: 'uiSm',
       whiteSpace: 'nowrap',
       fontVariantNumeric: 'tabular-nums',
-      flex: 'none',
+      flex: '0 1 auto', // the message yields first (title is flex 1 1 0): it shrinks, its text truncates
+      minW: '0',
+      overflow: 'hidden',
       '&[data-tone=error]': { color: 'velo.danger' },
     },
     actions: { display: 'inline-flex', alignItems: 'center', gap: '1', flex: 'none' },
