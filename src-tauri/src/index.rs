@@ -1012,6 +1012,11 @@ mod tests {
             assert_eq!(i.link_targets(true).unwrap().into_iter().map(|t| t.path).collect::<Vec<_>>(), vec!["a.txt", "b.md"]);
         }
     }
+    #[test] fn a_title_owner_sorts_before_an_alias_owner_of_the_same_name() {
+        let i = idx(&[("Aaa.md", FM, 1), ("Nick.md", "x", 2)]); // Aaa.md carries the alias Nick and sorts first by path
+        assert_eq!(i.find_titles("nick").unwrap(), vec!["Nick.md", "Aaa.md"]);
+        assert_eq!(i.link_targets(true).unwrap().into_iter().filter(|t| t.name == "Nick").map(|t| t.path).collect::<Vec<_>>(), vec!["Nick.md", "Aaa.md"]);
+    }
     #[test] fn aliases_count_as_titles() {
         let i = idx(&[("a.md", FM, 1), ("b.md", "x", 2)]);
         assert_eq!(i.find_title("NICK").unwrap().as_deref(), Some("a.md"));

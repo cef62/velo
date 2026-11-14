@@ -3930,6 +3930,38 @@ test("row 0's automatic open landing during the confirm does not eat the Enter (
   expect(t.store.get().openPath).toBe(P("B"));
 });
 
+test("a note opened by the user while row 0's auto-open is pending voids that Enter (#127)", async () => {
+  const t = await withHiddenB();
+  await t.c.show(P("A")); // the open note differs from the one the user opens meanwhile (C)
+  const open = t.api.openNote.getMockImplementation()!;
+  const a = deferred<Awaited<ReturnType<typeof open>>>();
+  t.api.openNote.mockImplementationOnce(() => a.promise); // the auto-open of row 0 (A) is slow
+  t.api.search.mockImplementation(async () => ({ hits: [hit("A")], has_more: false, total: 1, hidden: 0 })); // C is not listed: opening it leaves sel at 0
+  t.c.setQuery("B"); await settle();
+  const base = t.api.listLinkTargets.getMockImplementation()!;
+  const d = deferred<LinkTarget[]>();
+  t.api.listLinkTargets.mockImplementationOnce(() => d.promise);
+  const entered = t.c.enter();
+  await settle();
+  await t.c.openTitle("C", "wikilink");
+  a.resolve(await open(P("A")));
+  d.resolve(await base(true)); await entered; await settle();
+  expect(t.api.openNote).not.toHaveBeenCalledWith(P("B"));
+  expect(t.store.get().openPath).toBe(P("C"));
+});
+
+test("an auto-open that never settles neither delays Enter nor swallows the next one (#127)", async () => {
+  const t = await withHiddenB();
+  t.api.openNote.mockImplementationOnce(() => new Promise(() => {}));
+  t.c.setQuery("B"); await settle();
+  await t.c.enter();
+  expect(t.store.get().openPath).toBe(P("B"));
+  t.api.search.mockImplementation(noHits);
+  t.c.setQuery("Fresh"); await settle();
+  await t.c.enter();
+  expect(t.api.openOrCreate).toHaveBeenCalledWith("Fresh");
+});
+
 test("a row selected past 0 during the confirm voids that Enter, query and open note unchanged (#107)", async () => {
   const t = await withHiddenB();
   t.c.setQuery("B"); await settle();
