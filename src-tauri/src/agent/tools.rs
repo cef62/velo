@@ -298,9 +298,10 @@ fn dispatch(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
                 Some(t) => t.to_string(),
                 None => crate::settings::capture_title(&ops.settings(), &crate::tasks::local_today()),
             };
-            let path = ops.capture_task(&title, &text, summary).map_err(err)?;
+            // the hash the save left, not the read's: newer typing saved since must not be covered by it (#134)
+            let (path, hash) = ops.capture_task(&title, &text, summary).map_err(err)?;
             let doc = ops.read(&path).map_err(err)?;
-            Ok(json!({"title": doc.title, "hash": doc.hash}))
+            Ok(json!({"title": doc.title, "hash": hash}))
         }
         "set_task_done" => {
             let line = a.get("line").and_then(Value::as_u64).ok_or("line is required")? as usize;
@@ -312,8 +313,7 @@ fn dispatch(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
                 return Ok(json!({"title": doc.title, "status": "unchanged", "hash": doc.hash, "line": line, "line_text": t.line_text}));
             }
             let r = ops.toggle_task(&path, line, expected, summary).map_err(err)?;
-            let hash = ops.read(&path).map_err(err)?.hash;
-            Ok(json!({"title": doc.title, "status": "changed", "hash": hash, "line": r.line, "line_text": r.line_text}))
+            Ok(json!({"title": doc.title, "status": "changed", "hash": r.hash, "line": r.line, "line_text": r.line_text}))
         }
         "rename_note" => {
             let rewrite = a.get("rewrite_links").and_then(Value::as_bool).ok_or("missing rewrite_links")?;

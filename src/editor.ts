@@ -32,7 +32,7 @@ export interface Editor {
   /** Save pending edits now; resolves true when clean afterwards. */
   flush(): Promise<boolean>;
   /** flush(), plus the conflict copy the text current at the call went to (null: not a copy). */
-  flushOutcome(): Promise<{ clean: boolean; copy: string | null }>;
+  flushOutcome(): Promise<{ clean: boolean; copy: string | null; hash: string | null }>;
   focus(): void;
   getText(): string;
   /** Rich edit (marks hidden off the cursor line) or plain markdown. */

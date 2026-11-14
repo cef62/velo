@@ -485,14 +485,18 @@ export class Controller {
         const u = this.captureUnsaved?.path === openPath && this.captureUnsaved.text === t ? this.captureUnsaved : null;
         const before = u?.before ?? copies(this.editor.getText(), line);
         if (copies(this.editor.getText(), line) <= before && !this.editor.appendLine(line)) return this.failCapture(indexing ? errText("indexing") : `${target} can't be edited right now`);
-        const { clean, copy } = await this.editor.flushOutcome();
-        if (!clean) {
+        // `hash`: the line's own save landed, even if typing since keeps the editor dirty
+        const { copy, hash } = await this.editor.flushOutcome();
+        // the saver put the text in a conflict copy: same outcome as the backend's "conflict"
+        if (copy !== null) {
+          this.captureUnsaved = null;
+          return this.capturedToConflict(live(), text, target);
+        }
+        if (hash === null) {
           this.captureUnsaved = { path: openPath, text: t, before };
           return live() ? this.failCapture(`${target} wasn't saved — Enter retries the save`) : undefined;
         }
         this.captureUnsaved = null;
-        // the saver put the text in a conflict copy and reloaded the note without the line: same outcome as the backend's "conflict"
-        if (copy !== null) return this.capturedToConflict(live(), text, target);
         return live() ? this.endCapture(true, text) : undefined;
       }
       try {
@@ -2217,11 +2221,14 @@ export class Controller {
     if (!ok) return unapplied("refused");
     // applied: from here no failure may invite a retry, which would apply it twice
     try {
-      const { clean, copy } = await this.editor.flushOutcome();
-      if (!clean) return "unsaved"; // the edit stays in the editor; its save error or conflict banner shows
-      // its save went to a conflict copy and the editor reloaded the disk text: the note does not hold the change
+      const { copy, hash } = await this.editor.flushOutcome();
+      // its save went to a conflict copy: the note does not hold the change (the editor reloaded the disk text, or
+      // keeps the user's newer typing on top of it, which goes to a copy of its own)
       if (copy !== null) return unapplied({ conflict: copy });
-      return { hash: (await this.api.openNote(req.path)).hash };
+      // The hash its own save left, never a re-read: typing saved on top since must not get a hash for text the agent
+      // never read, so its next hash-guarded write is refused instead of overwriting that typing (#134).
+      if (hash !== null) return { hash };
+      return "unsaved"; // the edit stays in the editor; its save error or conflict banner shows
     } catch {
       return "unsaved";
     }

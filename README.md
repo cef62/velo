@@ -145,6 +145,7 @@ velo can act as an MCP server, so Claude Code can search, read, create and edit 
 - Edits are anchored (`old_text` must match once) or hash-guarded (`replace_note` fails if the note changed since you read it).
 - A note open in velo is edited through the editor, so nothing is overwritten behind it. If velo does not take the change within 5 seconds the call fails with "velo is busy, retry" and nothing changes. Once velo has taken it, the call waits up to 60 seconds; if no answer comes back, it fails with "velo did not answer; the change may have been applied — read the note before retrying".
 - If a note open in velo changes on disk while the editor saves an agent's change, the change goes to a `(conflict ...)` copy (velo shows its conflict banner) and the call fails with an error that starts with "conflict:" and names the copy. The note keeps the other version: read it again and retry.
+- If you type in the note while velo saves an agent's change, the agent still gets the hash its own save left (or the conflict error), and your typing is saved after it. A later `replace_note` with that hash then fails as "changed since you read it", so it can't overwrite your typing.
 - Off by default. The running app listens on 127.0.0.1 only, and every request needs a random token.
 
 **Seeing and undoing changes.** Every write needs a summary (for `daily_note` it is optional). Before it, velo saves a revision of the note with that summary, marked as an agent change in the info panel (⌘I). Select it and press Restore.

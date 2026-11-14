@@ -392,9 +392,9 @@ test("flushOutcome reports the conflict copy its own text went to, and null once
   const { c } = mk({ saveNote, openNote });
   type(c, "mine");
   be.hash = "hX";
-  expect(await c.flushOutcome()).toEqual({ clean: true, copy: "a (conflict 1).md" });
+  expect(await c.flushOutcome()).toEqual({ clean: true, copy: "a (conflict 1).md", hash: null });
   type(c, "again");
-  expect(await c.flushOutcome()).toEqual({ clean: true, copy: null });
+  expect(await c.flushOutcome()).toEqual({ clean: true, copy: null, hash: "h:again" });
   expect(be.disk).toBe("again");
 });
 
@@ -404,7 +404,7 @@ test("flushOutcome after a conflict reload, with nothing new to save, reports no
   type(c, "mine");
   be.hash = "hX";
   expect((await c.flushOutcome()).copy).toBe("a (conflict 1).md");
-  expect(await c.flushOutcome()).toEqual({ clean: true, copy: null }); // 87ffb42: the old copy again
+  expect(await c.flushOutcome()).toEqual({ clean: true, copy: null, hash: "hX" }); // 87ffb42: the old copy again
   expect(saveNote).toHaveBeenCalledTimes(1);
 });
 
@@ -415,7 +415,7 @@ test("a conflict copy of one note is not reported for a flush of another note at
   be.hash = "hX";
   expect((await c.flushOutcome()).copy).toBe("a (conflict 1).md");
   expect(c.load({ ...doc, path: "b.md", text: "B", hash: "hb" })).toBe(true); // the version number stays
-  expect(await c.flushOutcome()).toEqual({ clean: true, copy: null });
+  expect(await c.flushOutcome()).toEqual({ clean: true, copy: null, hash: "hb" });
 });
 
 test("debug records name the note and sizes, never its text", async () => {
@@ -465,4 +465,61 @@ test("the conflict record says the editor kept the text when a keystroke lands w
   await p;
   setDebugLog(false);
   expect((invoke.mock.calls[0][1] as { text: string }).text).toBe("saver: conflict on a.md: edits went to a (conflict).md, kept typing, saving again");
+});
+
+test("a duplicate save queued for a note that is no longer open is not sent: the outside change stays (#134)", async () => {
+  const { be, saveNote, openNote } = backend();
+  let c!: SaveController;
+  // the switch lands right after the first save settles, before the queued duplicate runs
+  ({ c } = mk({ saveNote, openNote, onConflict: () => void c.load({ ...doc, path: "b.md", text: "B", hash: "hb" }) }));
+  type(c, "mine");
+  be.disk = "outside";
+  be.hash = "hX";
+  const first = c.flush();
+  const dup = c.flush(); // the same text again (blur, watcher), queued behind the first
+  await first;
+  await dup;
+  await vi.runAllTimersAsync();
+  expect(c.currentPath()).toBe("b.md");
+  expect(be.disk).toBe("outside"); // main: "mine", sent with the base hash the reload left
+  expect(be.copies).toEqual(["mine"]);
+  expect(saveNote).toHaveBeenCalledTimes(1);
+});
+
+test("a conflict whose reload fails is not marked settled: the retry saves the text again and the editor ends clean (#134)", async () => {
+  const { be, saveNote, openNote } = backend();
+  openNote.mockRejectedValueOnce(new Error("io"));
+  const { c } = mk({ saveNote, openNote });
+  type(c, "mine");
+  be.hash = "hX";
+  expect(await c.flush()).toBe(false); // in a copy, but the editor could not load the disk text
+  await vi.advanceTimersByTimeAsync(1000); // the retry
+  expect(be.copies).toEqual(["mine", "mine"]); // a second identical copy, as on main: accepted so the editor can't stay dirty (#134)
+  expect(c.isDirty()).toBe(false);
+  expect(text).toBe("base");
+});
+
+test("flushOutcome reports its own text saved, or its copy, although the user typed during the save (#134)", async () => {
+  for (const outside of [false, true]) {
+    const { be, saveNote, openNote } = backend();
+    let typed = false;
+    let c!: SaveController;
+    ({ c } = mk({
+      openNote,
+      saveNote: vi.fn(async (p: string, t: string, b: string) => {
+        if (!typed) { typed = true; type(c, "agent+user"); } // a keystroke while the agent's save is in flight
+        return saveNote(p, t, b);
+      }),
+    }));
+    if (outside) be.hash = "hX";
+    type(c, "agent");
+    const r = await c.flushOutcome();
+    expect(r.clean).toBe(false); // the user's newer text is still unsaved
+    expect(r.hash).toBe(outside ? null : "h:agent"); // the hash its own save left
+    expect(r.copy).toBe(outside ? "a (conflict 1).md" : null);
+    expect(text).toBe("agent+user"); // no keystroke lost
+    await vi.runAllTimersAsync();
+    if (outside) expect(be.copies).toEqual(["agent", "agent+user"]);
+    else expect(be.disk).toBe("agent+user");
+  }
 });

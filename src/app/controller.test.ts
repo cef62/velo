@@ -1592,7 +1592,7 @@ const agentSaveConflicts = (c: Controller, editor: FakeEditor, copy: string) =>
     c.editorOpts().onConflict(copy);
     editor.text = "changed on disk";
     editor.dirty = false;
-    return { clean: true, copy };
+    return { clean: true, copy, hash: null };
   });
 
 test("an agent write whose save lands in a conflict copy replies with the copy, not a hash (#114)", async () => {
@@ -1624,7 +1624,7 @@ test("an agent write saved cleanly while the user dismisses an earlier conflict 
   c.editorOpts().onConflict(P("A (conflict 0)"));
   editor.flushOutcome.mockImplementationOnce(async () => {
     c.dismissConflict();
-    return { clean: true, copy: null };
+    return { clean: true, copy: null, hash: "h" };
   });
   await c.onAgentWrite({ id: 9, path: P("A"), kind: "append", insert: "- [ ] x", summary: "s" });
   expect(api.agentWriteDone).toHaveBeenCalledWith(9, { hash: "h" });
@@ -1632,11 +1632,13 @@ test("an agent write saved cleanly while the user dismisses an earlier conflict 
 
 /** FakeEditor behind the real SaveController and a backend that, like `Store::save`, conflicts iff the base hash is
  * not the disk's. `onSave(n, ctx)` runs as the n-th save starts. */
-function setupRealSaver(onSave: (n: number, ctx: ReturnType<typeof setup> & { be: { disk: string; hash: string; copies: string[] } }) => void) {
+function setupRealSaver(onSave: (n: number, ctx: ReturnType<typeof setup> & { be: { disk: string; hash: string; copies: string[] }; type: (t: string) => void }) => void) {
   const s = setup({ A: "a", B: "b" });
   const { c, api, editor } = s;
   const be = { disk: "a", hash: "h", copies: [] as string[], saves: 0 };
-  const ctx = { ...s, be };
+  // a user keystroke: the editor text changes and the saver marks it dirty
+  const type = (t: string) => { editor.text = t; saver.edit(); };
+  const ctx = { ...s, be, type };
   const doc = () => ({ path: P("A"), title: "A", text: be.disk, hash: be.hash, encrypted: false, meta: noMeta, archived: false });
   const saver = new SaveController({
     saveNote: async (_p, t, base) => {
@@ -1683,6 +1685,70 @@ test("a blur during the agent's conflicting save neither writes the change over 
   expect(be.copies).toEqual(["a\n- [ ] x"]);
   expect(api.agentWriteDone).toHaveBeenCalledWith(1, { conflict: P("A (conflict 1)") });
   expect(editor.text).toBe("other");
+});
+
+test("the user typing during the agent's save gets the agent the hash of its saved change, not 'velo did not answer' (#134)", async () => {
+  const { c, api, be, editor } = setupRealSaver((n, ctx) => {
+    if (n === 1) ctx.type(ctx.editor.text + " typed");
+  });
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 1, path: P("A"), kind: "append", insert: "- [ ] x", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(1, { hash: "h:a\n- [ ] x" }); // main: "unsaved"
+  expect(editor.text).toBe("a\n- [ ] x typed");
+  expect(await editor.flush()).toBe(true);
+  expect(be.disk).toBe("a\n- [ ] x typed"); // the keystroke is saved after it
+});
+
+/** The user's edit during the agent's save, flushed by a blur that queues behind it; then the agent chains a
+ * hash-guarded replace on the hash it got, with the text it believes the note holds. */
+async function agentChainsAfterUserFlush(userText: (agentText: string) => string) {
+  const ctx = setupRealSaver((n, ctx) => {
+    if (n === 1) {
+      ctx.type(userText(ctx.editor.text));
+      ctx.c.onBlur();
+    }
+  });
+  const { c, api } = ctx;
+  await c.show(P("A"));
+  await c.onAgentWrite({ id: 1, path: P("A"), kind: "append", insert: "- [ ] x", summary: "s" });
+  await settle();
+  const first = api.agentWriteDone.mock.calls[0][1];
+  await c.onAgentWrite({ id: 2, path: P("A"), kind: "replace", insert: "a\n- [ ] x\n- [ ] y", base: (first as { hash: string }).hash, summary: "s" });
+  return { ...ctx, first, second: api.agentWriteDone.mock.calls[1][1] };
+}
+
+test("typing saved on top of the agent's save mid-flight: the agent gets its own save's hash, and its chained replace can't overwrite the typing (#134)", async () => {
+  const { first, second, be } = await agentChainsAfterUserFlush((t) => t + " typed");
+  expect(first).toEqual({ hash: "h:a\n- [ ] x" }); // review round 1: "h:a\n- [ ] x typed", a state the agent never read
+  expect(second).toBe("conflict");
+  expect(be.disk).toBe("a\n- [ ] x typed");
+});
+
+test("the user removing the agent's line mid-save: the agent still gets the hash its write landed at, and its chained replace is refused (#134)", async () => {
+  const { first, second, be } = await agentChainsAfterUserFlush(() => "a");
+  expect(first).toEqual({ hash: "h:a\n- [ ] x" }); // review round 1: "h:a", a file without its change
+  expect(second).toBe("conflict");
+  expect(be.disk).toBe("a");
+});
+
+test("the user typing during the agent's save that went to a conflict copy gets the agent the conflict error (#134)", async () => {
+  const { c, api, be, editor } = setupRealSaver((n, ctx) => {
+    if (n === 1) {
+      ctx.be.disk = "other";
+      ctx.be.hash = "hX";
+      ctx.type(ctx.editor.text + " typed");
+    }
+  });
+  await c.show(P("A"));
+  api.snapshotAgent.mockResolvedValueOnce("3.md");
+  await c.onAgentWrite({ id: 1, path: P("A"), kind: "append", insert: "- [ ] x", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(1, { conflict: P("A (conflict 1)") }); // main: "unsaved"
+  expect(api.dropAgentSnapshot).toHaveBeenCalledWith(P("A"), "3.md");
+  expect(editor.text).toBe("a\n- [ ] x typed"); // the keystroke stays, and goes to a copy of its own
+  await settle();
+  expect(await editor.flush()).toBe(true);
+  expect(be.disk).toBe("other");
+  expect(be.copies).toEqual(["a\n- [ ] x", "a\n- [ ] x typed"]);
 });
 
 test("an agent save into a copy named like the banner already shown is still reported as a conflict (#114)", async () => {
@@ -1834,6 +1900,7 @@ test("two interleaved agent writes: the second, based on the old text, conflicts
   await c.show(P("A"));
   api.openNote.mockImplementation(async (path: string) => ({ path, title: "A", text: notes.A, hash: `h:${notes.A}`, encrypted: false, meta: noMeta, archived: false }));
   editor.flush.mockImplementation(async () => ((notes.A = editor.text), (editor.dirty = false), true));
+  editor.flushOutcome.mockImplementation(async () => ({ clean: await editor.flush(), copy: null, hash: `h:${notes.A}` }));
   const one = c.onAgentWrite({ id: 1, path: P("A"), kind: "replace", insert: "hello there world", base: "h:hello world", summary: "s" });
   const two = c.onAgentWrite({ id: 2, path: P("A"), kind: "replace", insert: "hello world!", base: "h:hello world", summary: "s" });
   await Promise.all([one, two]);
@@ -1961,11 +2028,10 @@ test("agent write applied but not saved replies unsaved, never a retryable statu
   expect(api.agentWriteDone).toHaveBeenCalledWith(10, "unsaved");
 });
 
-test("agent write applied, then the hash read fails: unsaved, not refused", async () => {
+test("agent write applied, then its save outcome throws: unsaved, not refused", async () => {
   const { c, api, editor } = setup({ A: "a" });
   await c.show(P("A"));
-  const open = api.openNote.getMockImplementation()!;
-  api.openNote.mockImplementationOnce(open).mockRejectedValueOnce(new Error("io"));
+  editor.flushOutcome.mockRejectedValueOnce(new Error("io"));
   await c.onAgentWrite({ id: 11, path: P("A"), kind: "append", insert: "- [ ] once", summary: "s" });
   expect(editor.appended).toEqual(["- [ ] once"]);
   expect(api.agentWriteDone).toHaveBeenCalledWith(11, "unsaved");
@@ -2024,10 +2090,21 @@ test("capture into the open Inbox whose save lands in a conflict copy says so (#
   c.setQuery("buy milk");
   editor.flushOutcome.mockImplementationOnce(async () => {
     c.editorOpts().onConflict("/n/Inbox (conflict).md"); // the saver wrote the text to a conflict copy and reloaded the disk text
-    return { clean: true, copy: "/n/Inbox (conflict).md" };
+    return { clean: true, copy: "/n/Inbox (conflict).md", hash: null };
   });
   await c.submitCapture("buy milk");
   expect(store.get().err).toBe("Saved to a conflict copy — check Inbox");
+});
+
+test("capture into the open Inbox whose line was saved while newer typing is still unsaved ends as captured (#134)", async () => {
+  const { c, editor, store } = setup({ Inbox: "", B: "b" });
+  await c.show(P("Inbox"));
+  await c.startCapture();
+  c.setQuery("buy milk");
+  editor.flushOutcome.mockImplementationOnce(async () => ({ clean: false, copy: null, hash: "h" }));
+  await c.submitCapture("buy milk");
+  expect(store.get().capture).toBeNull(); // main: "Inbox wasn't saved — Enter retries the save"
+  expect(store.get().err).toBe("");
 });
 
 test("Enter in Tasks mode waits for the task load in flight (#8)", async () => {
