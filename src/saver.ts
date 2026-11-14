@@ -165,7 +165,6 @@ export class SaveController {
           if (target === this.cur && v === this.version) this.dirty = false;
           logDebug(() => `saver: saved ${fileName(target.path!)} (${text.length} chars)`);
         } else if (target === this.cur) {
-          logDebug(() => `saver: conflict on ${fileName(target.path!)}: edits went to ${fileName(r.conflict_path)}, ${v === this.version ? "reloading from disk" : "kept typing, saving again"}`);
           // The conflict note holds `text`. If the user typed since, keep the editor text and the
           // stale baseHash: it stays dirty, and the next save conflicts again into a newer
           // conflict note holding the latest text. No keystroke is discarded.
@@ -178,8 +177,12 @@ export class SaveController {
               this.copied = { v, path: r.conflict_path };
             }
           }
+          const reloaded = this.copied?.v === v && this.copied.path === r.conflict_path;
+          logDebug(() => `saver: conflict on ${fileName(target.path!)}: edits went to ${fileName(r.conflict_path)}, ${reloaded ? "reloaded from disk" : "kept typing, saving again"}`);
           this.d.onConflict(r.conflict_path);
           if (this.dirty) this.schedule(0);
+        } else {
+          logDebug(() => `saver: conflict on ${fileName(target.path!)} (no longer open): edits went to ${fileName(r.conflict_path)}`);
         }
         this.retryMs = 1000;
         this.d.onError(null);

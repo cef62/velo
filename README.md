@@ -192,7 +192,7 @@ velo checks GitHub for a new release 30 seconds after launch and then once a day
 
 velo writes each update step, any crash and any error in its window to `velo.log`: `~/Library/Logs/dev.velo.app/velo.log` on macOS, `~/.local/share/dev.velo.app/logs/velo.log` on Linux, `%LOCALAPPDATA%\dev.velo.app\logs\velo.log` on Windows. **Settings → General → Show log file** (or **Show log file** in the command palette) opens its folder. Attach it when you report a problem.
 
-Turn on **Settings → General → Debug logging** (or **Toggle debug logging** in the command palette) to also record every agent (MCP) call, whether it ran through the open app or directly, every command the window sends, file-watcher events and the editor's save, conflict and reload decisions, each with its outcome and duration. The log holds titles and sizes, never text: no note body, no search text and no passphrase reaches it at any level, also for locked notes, so it stays safe to attach to an issue. Debug logging is off by default.
+Turn on **Settings → General → Debug logging** (or **Toggle debug logging** in the command palette) to also record every agent (MCP) call, whether it ran through the open app or directly, every command the window sends, file-watcher events and the editor's save, conflict and reload decisions, each with its outcome and duration. The log holds titles and sizes, never text (an error is logged by its kind, not its message): no note body, no search text and no passphrase reaches it at any level, also for locked notes, so it stays safe to attach to an issue. Debug logging is off by default.
 
 ## Known limitations
 

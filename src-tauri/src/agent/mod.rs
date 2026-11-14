@@ -16,41 +16,81 @@ use std::sync::Mutex;
 
 pub(crate) const OFF: &str = "Agent access is off — turn it on in velo Settings → General";
 
-/// Arguments logged as they are: note titles and the daily note's date. Every other string is logged as its size.
-const TITLE_KEYS: [&str; 5] = ["title", "new_title", "source", "target", "date"];
+/// Arguments logged as they are: note titles. `date` too, but only when it is a valid YYYY-MM-DD date.
+/// Every other string is logged as its size.
+const TITLE_KEYS: [&str; 4] = ["title", "new_title", "source", "target"];
 
-/// Runs one tool call (`f`) and, when `on`, writes its debug record: route, tool, titles, the size of every other
-/// argument, outcome and duration. Never argument text (bodies, search queries, old/new text, tags, summaries): an
-/// error that quotes one has it cut out.
+/// Tool errors logged verbatim: velo's own fixed messages, which carry no input.
+const ERRORS: &[&str] = &[
+    OFF, client::BUSY, client::NO_ANSWER, "unknown tool", "not found", "title is empty", "text is empty", "titles is required",
+    "tags is required", "line is required", "summary is required: one line describing the change", "note changed since you read it",
+    "tag only appears in code or a link", "task-moved", "same-note", "a note with that title already exists",
+    "No notes folder set in velo", "the note is open in velo and can't be edited right now, retry",
+    "note is open in velo with unsaved changes", "locked", "conflict", "empty", "invalid-title", "already-exists",
+    "locked-sibling", "already encrypted", "not encrypted", "not a note in the notes folder",
+];
+/// Tool errors whose fixed opening words are followed by input (a tag, a date, a title, a count, a reply): only
+/// these words are logged.
+const ERROR_CLASSES: &[&str] = &[
+    "invalid title", "invalid date", "invalid tag", "too many notes", "too many tags", "old_text must occur exactly once",
+    "missing", "bad reply from velo's editor", "conflict: the note changed on disk", "not a note file",
+];
+
+/// The logged form of a tool error. Safe by construction: the result is a string literal from `ERRORS` or
+/// `ERROR_CLASSES`, or `other (Nc)`. No part of the error text itself is copied, so an argument that a message quotes
+/// (trimmed, case-folded, normalised, escaped, cut) can never reach the log. A new message logs as `other` until
+/// it is listed. The archived-notes sentence `tools::call` appends on a second line is reported as `+archive list`.
+fn error_class(e: &str) -> String {
+    let (first, more) = e.split_once('\n').map_or((e, false), |(f, _)| (f, true));
+    let more = if more { " +archive list" } else { "" };
+    if let Some(m) = ERRORS.iter().find(|m| **m == first) {
+        return format!("{m}{more}");
+    }
+    if let Some(c) = ERROR_CLASSES.iter().find(|c| first.starts_with(**c)) {
+        return format!("{c} …{more}");
+    }
+    format!("other ({}c)", e.chars().count())
+}
+
+/// Runs one tool call (`f`) and, when `on`, writes its debug record (`record`).
 pub(crate) fn logged(on: bool, route: &str, name: &str, args: Value, f: impl FnOnce(Value) -> Result<Value, String>) -> Result<Value, String> {
     if !on {
         return f(args);
     }
-    let spec = tools::TOOL_SPECS.iter().find(|t| t.name == name);
-    let (desc, mut texts) = (describe(spec.map_or("", |s| s.input_schema), &args), vec![]);
-    collect_texts(&args, false, &mut texts);
-    let t = std::time::Instant::now();
+    let (desc, t) = (describe(name, &args), std::time::Instant::now());
     let r = f(args);
-    let outcome = match &r {
-        Ok(_) => "ok".to_string(),
-        Err(e) => format!("err {:?}", redact(e, texts)),
-    };
-    let name = spec.map_or("(unknown tool)", |s| s.name); // a name outside the specs may itself be text
-    crate::log::debug_when(true, &format!("agent {route} {name}{desc} -> {outcome} in {}ms", t.elapsed().as_millis()));
+    record(route, &desc, &r, t);
     r
 }
 
-fn describe(schema: &str, a: &Value) -> String {
-    let Some(o) = a.as_object() else { return " (no arguments object)".into() };
-    let mut out = vec![];
+/// One debug record: route, tool, titles, the size of every other argument (bodies, queries, old/new text, task
+/// lines, tags, summaries), outcome and duration. Never argument text: titles are the only argument strings printed,
+/// and an error is printed only as its `error_class`.
+fn record(route: &str, desc: &str, r: &Result<Value, String>, t: std::time::Instant) {
+    let outcome = match r {
+        Ok(_) => "ok".to_string(),
+        Err(e) => format!("err {}", error_class(e)),
+    };
+    crate::log::debug_when(true, &format!("agent {route} {desc} -> {outcome} in {}ms", t.elapsed().as_millis()));
+}
+
+/// The tool name (when it is a known tool: an unknown name may itself be text) and its arguments as titles and sizes.
+fn describe(name: &str, a: &Value) -> String {
+    let Some(spec) = tools::TOOL_SPECS.iter().find(|t| t.name == name) else { return "(unknown tool)".into() };
+    let schema: Value = serde_json::from_str(spec.input_schema).unwrap_or_default();
+    let known = schema["properties"].as_object();
+    let Some(o) = a.as_object() else { return format!("{} (no arguments object)", spec.name) };
+    let mut out = vec![spec.name.to_string()];
     let mut unknown = 0;
     for (k, v) in o {
-        if !schema.contains(&format!("\"{k}\":")) {
-            unknown += 1; // a key outside the schema may itself be text
+        // a key outside the schema may itself be text: printed only as a count
+        let Some((k, _)) = known.and_then(|p| p.get_key_value(k)) else {
+            unknown += 1;
             continue;
-        }
+        };
         out.push(match v {
             Value::String(s) if TITLE_KEYS.contains(&k.as_str()) => format!("{k}={:?}", s.chars().take(255).collect::<String>()),
+            Value::String(s) if k == "date" && tools::valid_date(s).is_ok() => format!("{k}={s}"),
             Value::String(s) => format!("{k}={}c", s.chars().count()),
             Value::Array(x) => format!("{k}=[{}]", x.len()),
             Value::Bool(_) | Value::Number(_) => format!("{k}={v}"),
@@ -60,28 +100,7 @@ fn describe(schema: &str, a: &Value) -> String {
     if unknown > 0 {
         out.push(format!("+{unknown} unknown"));
     }
-    out.iter().map(|s| format!(" {s}")).collect()
-}
-
-/// Every string value in the arguments except titles.
-fn collect_texts(v: &Value, title: bool, out: &mut Vec<String>) {
-    match v {
-        Value::String(s) if !title => out.push(s.clone()),
-        Value::Array(a) => a.iter().for_each(|x| collect_texts(x, title, out)),
-        Value::Object(o) => o.iter().for_each(|(k, x)| collect_texts(x, TITLE_KEYS.contains(&k.as_str()), out)),
-        _ => {}
-    }
-}
-
-/// `e` with every argument text cut out (longest first), on one line, at most 300 chars.
-fn redact(e: &str, mut texts: Vec<String>) -> String {
-    texts.retain(|t| t.chars().count() >= 2); // a 1-char cut would garble the message and hide nothing
-    texts.sort_by_key(|t| std::cmp::Reverse(t.len()));
-    let mut e = e.to_string();
-    for t in &texts {
-        e = e.replace(t.as_str(), "…");
-    }
-    e.chars().take(300).collect()
+    out.join(" ")
 }
 
 /// Entry point for `velo --mcp`; returns the process exit code. No Tauri app is built on this path.
@@ -121,31 +140,45 @@ fn gate(settings_path: PathBuf, data_dir: PathBuf) -> impl Fn(&str, Value) -> Re
         if !tools::TOOL_SPECS.iter().any(|t| t.name == name) {
             return Err("unknown tool".into());
         }
+        let (desc, t) = (s.debug_log.then(|| describe(name, &args)), std::time::Instant::now());
         if let Some(r) = client::forward(&data_dir, name, &args) {
             *ops.lock().unwrap_or_else(|e| e.into_inner()) = None; // the app owns the index while it runs
+            // the app records each call it answered; one it never answered is recorded here
+            if let (Some(d), Err(e)) = (&desc, &r)
+                && (e == client::BUSY || e == client::NO_ANSWER)
+            {
+                record("app-unanswered", d, &r, t);
+            }
             return r;
         }
-        // the app may have quit, or access gone off, since the check above: read the switch again before writing
-        let s = crate::settings::load(&settings_path);
-        if !s.agent_access {
-            *ops.lock().unwrap_or_else(|e| e.into_inner()) = None;
-            return Err(OFF.into());
+        let r = (|| -> Result<Value, String> {
+            // the app may have quit, or access gone off, since the check above: read the switch again before writing
+            let s = crate::settings::load(&settings_path);
+            if !s.agent_access {
+                *ops.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                return Err(OFF.into());
+            }
+            let dir = s.notes_dir.ok_or("No notes folder set in velo")?;
+            let mut ops = ops.lock().unwrap_or_else(|e| e.into_inner());
+            if ops.as_ref().is_none_or(|o| o.dir() != dir) {
+                *ops = None;
+                std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+                // same index file as commands::open_vault_inner
+                let db = data_dir.join(format!("index-{}.sqlite", crate::store::hash(dir.to_string_lossy().as_bytes())));
+                *ops = Some(DirectOps::open(dir, &db, settings_path.clone()).map_err(|e| e.to_string())?);
+            }
+            let ops = ops.as_mut().expect("opened above");
+            if let Err(e) = ops.rescan() {
+                eprintln!("velo --mcp: rescan of the notes folder failed: {e}"); // the call goes on with the index as it is
+            }
+            let r = tools::call(ops, name, args);
+            ops.vault.archive_error.take(); // reported in the reply; the next call starts clean
+            r
+        })();
+        // setup failures (no folder, the vault would not open) are recorded too, and the duration includes setup
+        if let Some(d) = &desc {
+            record("direct", d, &r, t);
         }
-        let dir = s.notes_dir.ok_or("No notes folder set in velo")?;
-        let mut ops = ops.lock().unwrap_or_else(|e| e.into_inner());
-        if ops.as_ref().is_none_or(|o| o.dir() != dir) {
-            *ops = None;
-            std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-            // same index file as commands::open_vault_inner
-            let db = data_dir.join(format!("index-{}.sqlite", crate::store::hash(dir.to_string_lossy().as_bytes())));
-            *ops = Some(DirectOps::open(dir, &db, settings_path.clone()).map_err(|e| e.to_string())?);
-        }
-        let ops = ops.as_mut().expect("opened above");
-        if let Err(e) = ops.rescan() {
-            eprintln!("velo --mcp: rescan of the notes folder failed: {e}"); // the call goes on with the index as it is
-        }
-        let r = logged(s.debug_log, "direct", name, args, |args| tools::call(ops, name, args));
-        ops.vault.archive_error.take(); // reported in the reply; the next call starts clean
         r
     }
 }
@@ -425,21 +458,57 @@ mod tests {
             ("merge_notes", json!({"source": "nope", "target": "a", "summary": M})),
             ("get_connections", json!({"title": "a"})),
             ("daily_note", json!({"date": "2030-01-02", "summary": M})),
+            // round 1, M1: the error quotes a transformed tag (trimmed, `#` stripped), never the argument as given
+            ("add_tags", json!({"titles": ["a"], "tags": [format!("#{M} diagnosis")], "summary": "s"})),
+            ("add_tags", json!({"titles": ["a"], "tags": [format!("  {M} diagnosis  ")], "summary": "s"})),
+            ("remove_tags", json!({"titles": ["a"], "tags": [format!(" #ZQ{} x ", &M[2..].to_uppercase())], "summary": "s"})),
+            ("search_notes", json!({"query": format!("\"{M} NEAR( * -\" OR"), "tags": []})), // FTS5 metacharacters
+            ("edit_note", json!({"title": "a", "old_text": "zqma\u{308}rker\r\n", "new_text": " zqmarker ", "summary": "s"})), // NFD, not found
+            ("daily_note", json!({"date": format!("{M} body"), "summary": "s"})), // an invalid date is a size, not a title
+            ("search_notes", json!({"type": M, "properties": M})), // JSON Schema words are not argument names
+            ("add_tags", json!({"titles": ["a"], "tags": ["x", "1 "], "summary": "s"})), // one-character values
         ];
         let call = gate(p, data);
         let lines = crate::log::tests::capture(|| for (name, args) in &calls { call(name, args.clone()).ok(); });
         assert_eq!(lines.len(), calls.len(), "{lines:#?}");
         for (l, (name, _)) in lines.iter().zip(&calls) {
             assert!(l.starts_with(&format!("debug: agent direct {name} ")), "{l}");
-            assert!(!l.to_lowercase().contains(M), "{l}");
+            assert!(!l.to_lowercase().contains("zq"), "{l}"); // every variant of the marker starts with zq
         }
         assert!(lines[3].contains(r#"create_note summary=8c text=8c title="c" -> ok in "#), "{}", lines[3]);
-        assert!(lines[8].contains("err \"invalid tag: …\""), "{}", lines[8]);
+        assert!(lines[8].contains("-> err invalid tag … in "), "{}", lines[8]);
         assert!(lines[2].contains("+1 unknown"), "{}", lines[2]);
-        // an app-forwarded call names no tool it does not know, and cuts the text out of any error
+        assert!(lines[6].contains("-> err old_text must occur exactly once … in "), "{}", lines[6]);
+        assert!(lines[7].contains("-> err note changed since you read it in "), "{}", lines[7]);
+        assert!(lines[18].contains("date=2030-01-02 "), "{}", lines[18]);
+        assert!(lines[24].contains("date=13c ") && lines[24].contains("err invalid date …"), "{}", lines[24]);
+        assert!(lines[25].contains("+2 unknown") && !lines[25].contains("type="), "{}", lines[25]);
+        assert!(lines[26].contains("-> err invalid tag … in "), "{}", lines[26]);
+        // an app-forwarded call names no tool it does not know, and copies no error text
         let l = crate::log::tests::capture(|| { logged(true, "app", M, json!({"text": M}), |_| Err(format!("boom {M}\nend"))).ok(); });
         assert_eq!(l.len(), 1);
-        assert!(l[0].starts_with("debug: agent app (unknown tool) ") && l[0].contains(r#"err "boom …\nend""#) && !l[0].contains(M), "{}", l[0]);
+        assert!(l[0].starts_with("debug: agent app (unknown tool) -> err other (") && !l[0].contains(M), "{}", l[0]);
         assert!(crate::log::tests::capture(|| { logged(false, "app", "list_tags", json!({}), |_| Ok(json!({}))).ok(); }).is_empty());
+    }
+
+    /// A setup failure in direct mode (no notes folder) is recorded too.
+    #[test] fn debug_records_direct_setup_failures() {
+        let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("settings.json");
+        std::fs::write(&p, r#"{"agent_access":true,"debug_log":true}"#).unwrap();
+        let call = gate(p, tmp.path().join("data"));
+        let l = crate::log::tests::capture(|| { call("read_note", serde_json::json!({"title": "a"})).ok(); });
+        assert_eq!(l.len(), 1, "{l:?}");
+        assert!(l[0].starts_with(r#"debug: agent direct read_note title="a" -> err No notes folder set in velo in "#), "{}", l[0]);
+    }
+
+    /// Every fixed message logs as itself; anything else copies none of its text.
+    #[test] fn error_class_copies_only_literals() {
+        for m in ERRORS { assert_eq!(&error_class(m), m); }
+        assert_eq!(error_class("invalid tag: secret"), "invalid tag …");
+        assert_eq!(error_class("missing text"), "missing …");
+        assert_eq!(error_class("not found\nThe archived-notes list (.velo/archived) was not updated either: secret"), "not found +archive list");
+        assert_eq!(error_class(&ops::conflict_copy("/n/secret (conflict).md").to_string()), "conflict: the note changed on disk …");
+        assert_eq!(error_class("fts5: syntax error near \"secret\""), "other (32c)");
+        assert_eq!(error_class("notfound"), "other (8c)");
     }
 }

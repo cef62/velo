@@ -71,10 +71,10 @@ pub fn debug_when(on: bool, msg: &str) {
 /// Longest window record kept (the window cuts its text shorter already).
 const WINDOW_MAX: usize = 1000;
 
-/// A record from the window (`log_line`): one line, control characters blanked, at most `WINDOW_MAX` chars.
+/// A record from the window (`log_line`): one line (control and whitespace characters, U+2028 included, blanked), at most `WINDOW_MAX` chars.
 /// "debug" follows the switch; anything else is an always-on error or warning.
 pub fn window(level: &str, text: &str) {
-    let t: String = text.chars().take(WINDOW_MAX).map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let t: String = text.chars().take(WINDOW_MAX).map(|c| if c.is_control() || c.is_whitespace() { ' ' } else { c }).collect();
     match level {
         "debug" => debug(&format!("window: {t}")),
         "warn" => line(&format!("window warn: {t}")),
@@ -127,7 +127,7 @@ pub(crate) mod tests {
         let long = "a\nb\r\u{2028}".to_string() + &"x".repeat(5000);
         let got = capture(|| window("error", &long));
         assert_eq!(got.len(), 1);
-        assert!(got[0].starts_with("window error: a b ") && !got[0].contains('\n') && !got[0].contains('\r'), "{:?}", &got[0][..30]);
+        assert!(got[0].starts_with("window error: a b  x"), "{:?}", &got[0][..30]);
         assert_eq!(got[0].chars().count(), "window error: ".len() + WINDOW_MAX);
         assert_eq!(capture(|| window("warn", "w")), vec!["window warn: w"]);
         assert_eq!(capture(|| window("nonsense", "w")), vec!["window error: w"]);

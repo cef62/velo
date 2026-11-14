@@ -434,7 +434,23 @@ test("debug records name the note and sizes, never its text", async () => {
   setDebugLog(false);
   expect(invoke.mock.calls.map((x) => (x[1] as { text: string }).text)).toEqual([
     "saver: saved a.md (11 chars)",
-    "saver: conflict on a.md: edits went to a (conflict).md, reloading from disk",
+    "saver: conflict on a.md: edits went to a (conflict).md, reloaded from disk",
     "saver: a.md changed on disk: reloaded (5 chars)",
   ]);
+});
+
+test("the conflict record says the editor kept the text when a keystroke lands while the disk text loads", async () => {
+  setDebugLog(true);
+  invoke.mockClear();
+  let release!: () => void;
+  const openNote = vi.fn(() => new Promise<typeof doc>((r) => (release = () => r({ ...doc, text: "disk", hash: "hd" }))));
+  const { c } = mk({ saveNote: vi.fn(async () => ({ kind: "conflict" as const, conflict_path: "a (conflict).md", disk_hash: "hd" })), openNote });
+  type(c, "mine");
+  const p = c.flush();
+  await vi.advanceTimersByTimeAsync(0);
+  type(c, "mine+late"); // during the reload's await
+  release();
+  await p;
+  setDebugLog(false);
+  expect((invoke.mock.calls[0][1] as { text: string }).text).toBe("saver: conflict on a.md: edits went to a (conflict).md, kept typing, saving again");
 });
