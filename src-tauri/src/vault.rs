@@ -1981,6 +1981,36 @@ mod tests {
             }
         }
     }
+    /// #156 scoped check m4: a link `s.md.age -> /dev/null` reads and stats, and its event writes a (stray) locked row,
+    /// but it is no regular file: the history of `s` is neither deleted nor encrypted, with or without a key.
+    #[cfg(unix)]
+    #[test] fn a_locked_name_linked_to_a_device_keeps_the_history() {
+        for with_id in [false, true] {
+            for how in ["event", "rescan"] {
+                let (dir, db) = setup(); let id = crypto::new_identity();
+                let ident = with_id.then_some(id.as_str());
+                std::fs::write(dir.join("s.md"), BACK).unwrap();
+                let mut v = open(dir.clone(), &db, ident).unwrap();
+                for (i, h) in ["history one", "history two"].iter().enumerate() {
+                    v.revisions.snapshot_bytes("s", h.as_bytes(), false, now_ms() - 10_000 + i as i64 * 1_000, false).unwrap();
+                }
+                let age = dir.join("s.md.age");
+                std::os::unix::fs::symlink("/dev/null", &age).unwrap();
+                v.apply_fs_changes(std::slice::from_ref(&age), ident);
+                let case = format!("id={with_id} {how}");
+                assert!(rows(&v).contains(&s(&age)), "{case}: the event writes a locked row");
+                if how == "rescan" {
+                    v.rescan(ident);
+                }
+                let revs = v.revisions.list("s");
+                assert_eq!(revs.len(), 2, "{case}");
+                for r in &revs {
+                    let (bytes, enc) = v.revisions.read("s", &r.id).unwrap();
+                    assert!(!enc && bytes.starts_with(b"history"), "{case}");
+                }
+            }
+        }
+    }
     /// The mirror image: a folder (or a link to one) named `s.md` or `s.txt` beside a real `s.md.age` is no plain twin.
     #[test] fn a_folder_named_like_a_plain_twin_is_not_one() {
         for &link in SPECIAL {
