@@ -33,6 +33,8 @@ export interface Editor {
   flush(): Promise<boolean>;
   /** flush(), plus the conflict copy the text current at the call went to (null: not a copy). */
   flushOutcome(): Promise<{ clean: boolean; copy: string | null; hash: string | null }>;
+  /** The clean editor's text is the note's at disk hash `hash` (see SaveController.adopt). */
+  adopt(hash: string): void;
   focus(): void;
   getText(): string;
   /** Rich edit (marks hidden off the cursor line) or plain markdown. */
@@ -257,6 +259,7 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     isDirty: ctrl.isDirty,
     currentPath: ctrl.currentPath,
     onExternalChange: (p) => ctrl.external(p),
+    adopt: (h) => ctrl.adopt(h),
     flush() {
       remember();
       return ctrl.flush();

@@ -52,6 +52,22 @@ fn error_class(e: &str) -> String {
     format!("other ({}c)", e.chars().count())
 }
 
+/// The static name of the `io::ErrorKind` or rusqlite `ErrorCode` in an error and its sources, for the log. Never the
+/// message: an OS error can quote a path, a SQLite error a statement.
+fn kind_of(e: &(dyn std::error::Error + 'static)) -> Option<String> {
+    let mut cur = Some(e);
+    while let Some(c) = cur {
+        if let Some(io) = c.downcast_ref::<std::io::Error>() {
+            return Some(format!("io {:?}", io.kind()));
+        }
+        if let Some(code) = c.downcast_ref::<rusqlite::Error>().and_then(|r| r.sqlite_error_code()) {
+            return Some(format!("sqlite {code:?}"));
+        }
+        cur = c.source();
+    }
+    None
+}
+
 /// Runs one tool call (`f`) and, when `on`, writes its debug record (`record`).
 pub(crate) fn logged(on: bool, route: &str, name: &str, args: Value, f: impl FnOnce(Value) -> Result<Value, String>) -> Result<Value, String> {
     if !on {
@@ -59,17 +75,18 @@ pub(crate) fn logged(on: bool, route: &str, name: &str, args: Value, f: impl FnO
     }
     let (desc, t) = (describe(name, &args), std::time::Instant::now());
     let r = f(args);
-    record(route, &desc, &r, t);
+    record(route, &desc, &r, None, t);
     r
 }
 
 /// One debug record: route, tool, titles, the size of every other argument (bodies, queries, old/new text, task
 /// lines, tags, summaries), outcome and duration. Never argument text: titles are the only argument strings printed,
-/// and an error is printed only as its `error_class`.
-fn record(route: &str, desc: &str, r: &Result<Value, String>, t: std::time::Instant) {
-    let outcome = match r {
-        Ok(_) => "ok".to_string(),
-        Err(e) => format!("err {}", error_class(e)),
+/// and an error is printed only as its `error_class`, plus `kind_of` when the caller has one.
+fn record(route: &str, desc: &str, r: &Result<Value, String>, kind: Option<String>, t: std::time::Instant) {
+    let outcome = match (r, kind) {
+        (Ok(_), _) => "ok".to_string(),
+        (Err(e), None) => format!("err {}", error_class(e)),
+        (Err(e), Some(k)) => format!("err {}, {k}", error_class(e)),
     };
     crate::log::debug_when(true, &format!("agent {route} {desc} -> {outcome} in {}ms", t.elapsed().as_millis()));
 }
@@ -147,10 +164,11 @@ fn gate(settings_path: PathBuf, data_dir: PathBuf) -> impl Fn(&str, Value) -> Re
             if let (Some(d), Err(e)) = (&desc, &r)
                 && (e == client::BUSY || e == client::NO_ANSWER)
             {
-                record("app-unanswered", d, &r, t);
+                record("app-unanswered", d, &r, None, t);
             }
             return r;
         }
+        let mut kind = None;
         let r = (|| -> Result<Value, String> {
             // the app may have quit, or access gone off, since the check above: read the switch again before writing
             let s = crate::settings::load(&settings_path);
@@ -162,10 +180,16 @@ fn gate(settings_path: PathBuf, data_dir: PathBuf) -> impl Fn(&str, Value) -> Re
             let mut ops = ops.lock().unwrap_or_else(|e| e.into_inner());
             if ops.as_ref().is_none_or(|o| o.dir() != dir) {
                 *ops = None;
-                std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+                std::fs::create_dir_all(&data_dir).map_err(|e| {
+                    kind = kind_of(&e);
+                    e.to_string()
+                })?;
                 // same index file as commands::open_vault_inner
                 let db = data_dir.join(format!("index-{}.sqlite", crate::store::hash(dir.to_string_lossy().as_bytes())));
-                *ops = Some(DirectOps::open(dir, &db, settings_path.clone()).map_err(|e| e.to_string())?);
+                *ops = Some(DirectOps::open(dir, &db, settings_path.clone()).map_err(|e| {
+                    kind = kind_of(e.as_ref());
+                    e.to_string()
+                })?);
             }
             let ops = ops.as_mut().expect("opened above");
             if let Err(e) = ops.rescan() {
@@ -177,7 +201,7 @@ fn gate(settings_path: PathBuf, data_dir: PathBuf) -> impl Fn(&str, Value) -> Re
         })();
         // setup failures (no folder, the vault would not open) are recorded too, and the duration includes setup
         if let Some(d) = &desc {
-            record("direct", d, &r, t);
+            record("direct", d, &r, kind, t);
         }
         r
     }
@@ -499,6 +523,25 @@ mod tests {
         let l = crate::log::tests::capture(|| { call("read_note", serde_json::json!({"title": "a"})).ok(); });
         assert_eq!(l.len(), 1, "{l:?}");
         assert!(l[0].starts_with(r#"debug: agent direct read_note title="a" -> err No notes folder set in velo in "#), "{}", l[0]);
+    }
+
+    /// A direct-mode setup failure logs the static io kind or sqlite code, never the OS message (it quotes the path).
+    #[test] fn debug_records_setup_failure_kinds() {
+        let tmp = tempfile::tempdir().unwrap(); let p = tmp.path().join("settings.json");
+        let (notes, data) = (tmp.path().join("notes"), tmp.path().join("zqmarker"));
+        std::fs::create_dir_all(&notes).unwrap(); std::os::unix::fs::symlink(tmp.path().join("gone"), &data).unwrap();
+        std::fs::write(&p, format!(r#"{{"agent_access":true,"debug_log":true,"notes_dir":{:?}}}"#, notes)).unwrap();
+        // the data dir is a dangling symlink: agent.json reads as not found, create_dir_all fails
+        let call = gate(p, data);
+        let l = crate::log::tests::capture(|| { call("list_tags", serde_json::json!({})).ok(); });
+        assert_eq!(l.len(), 1, "{l:?}");
+        assert!(l[0].contains("-> err other (") && l[0].contains("c), io AlreadyExists in "), "{}", l[0]);
+        assert!(!l[0].contains("zq"), "{}", l[0]);
+        // a rusqlite error under anyhow context, as `DirectOps::open` returns it
+        let busy = rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY), Some("zqmarker".into()));
+        let e = anyhow::Error::new(busy).context("zqmarker");
+        assert_eq!(kind_of(e.as_ref()).as_deref(), Some("sqlite DatabaseBusy"));
+        assert_eq!(kind_of(anyhow::anyhow!("zqmarker").as_ref()), None);
     }
 
     /// Every fixed message logs as itself; anything else copies none of its text.

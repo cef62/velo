@@ -523,3 +523,17 @@ test("flushOutcome reports its own text saved, or its copy, although the user ty
     else expect(be.disk).toBe("agent+user");
   }
 });
+
+test("adopt moves the base hash of a clean editor only: the watcher reload of that hash is a no-op, typing keeps its base (#134)", async () => {
+  const setText = vi.fn((t: string) => void (text = t));
+  const { c, d } = mk({ openNote: vi.fn(async () => ({ ...doc, text: "base", hash: "h2" })), setText });
+  setText.mockClear();
+  c.adopt("h2"); // clean: the same text on disk with other bytes
+  c.external("a.md"); // the watcher catches up with h2: nothing to reload
+  await vi.advanceTimersByTimeAsync(0);
+  expect(setText).not.toHaveBeenCalled();
+  type(c, "typed");
+  c.adopt("h3"); // dirty: ignored
+  await c.flush();
+  expect(d.saveNote).toHaveBeenLastCalledWith("a.md", "typed", "h2");
+});

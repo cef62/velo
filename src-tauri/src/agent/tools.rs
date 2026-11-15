@@ -317,9 +317,12 @@ fn dispatch(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
         }
         "rename_note" => {
             let rewrite = a.get("rewrite_links").and_then(Value::as_bool).ok_or("missing rewrite_links")?;
-            let new = ops.rename(&path_of(ops, &a)?, title_arg(&a, "new_title")?, rewrite, summary).map_err(err)?;
+            // the hash read under the rename's lock: the editor unfreezes before a read here, and typing it saves then
+            // must not be covered by the reply (#134). Unreadable: it moved, but no hash can vouch for it.
+            let (new, hash) = ops.rename(&path_of(ops, &a)?, title_arg(&a, "new_title")?, rewrite, summary).map_err(err)?;
+            let hash = hash.ok_or(super::client::NO_ANSWER)?;
             let doc = ops.read(&new).map_err(err)?;
-            Ok(json!({"title": doc.title, "hash": doc.hash}))
+            Ok(json!({"title": doc.title, "hash": hash}))
         }
         "move_to_trash" => {
             let path = path_of(ops, &a)?;

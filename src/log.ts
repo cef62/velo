@@ -55,16 +55,23 @@ let windowStart = 0;
 let sent = 0;
 let suppressed = 0;
 
-/** false once BURST error/warning records went out in this window; the first record of the next window reports how many were dropped. */
+let report: ReturnType<typeof setTimeout> | undefined;
+
+/** Reports the dropped count and opens a new window. */
+function flush(now: number) {
+  clearTimeout(report);
+  const dropped = suppressed;
+  windowStart = now;
+  sent = 0;
+  suppressed = 0;
+  if (dropped) post("warn", `${dropped} more window errors suppressed`);
+}
+
+/** false once BURST error/warning records went out in this window; the count of dropped ones is reported when the window ends, by the next record or, if none comes, by a timer. */
 function allow(now = Date.now()): boolean {
-  if (now - windowStart >= WINDOW_MS) {
-    if (suppressed) post("warn", `${suppressed} more window errors suppressed`);
-    windowStart = now;
-    sent = 0;
-    suppressed = 0;
-  }
+  if (now - windowStart >= WINDOW_MS) flush(now);
   if (sent >= BURST) {
-    suppressed++;
+    if (!suppressed++) report = setTimeout(() => flush(Date.now()), windowStart + WINDOW_MS - now);
     return false;
   }
   sent++;
@@ -72,7 +79,9 @@ function allow(now = Date.now()): boolean {
 }
 
 function post(level: "error" | "warn" | "debug", text: string) {
-  invoke("log_line", { level, text: clean(text) }).catch(() => {});
+  try {
+    invoke("log_line", { level, text: clean(text) }).catch(() => {});
+  } catch {} // a synchronous failure must not escape a timer, where window.onerror would log it again
 }
 
 /** Never throws and never logs its own failure: a broken `log_line` must not loop through the error handlers. */

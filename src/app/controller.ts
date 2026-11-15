@@ -2292,6 +2292,9 @@ export class Controller {
       return r;
     };
     if ((bad = check())) return unapplied(bad);
+    // check() found the clean editor holding the note's text at `saved.hash`: base the save (and a no-op's reply) on it,
+    // not on a base that lags a byte-only change on disk (line endings) check() normalizes away (#134)
+    this.editor.adopt(saved.hash);
     const insert = req.insert ?? "";
     const ok = req.kind === "append" ? this.editor.appendLine(insert) : this.editor.applyChange(changedSpan(this.editor.getText(), insert));
     if (!ok) return unapplied("refused");
