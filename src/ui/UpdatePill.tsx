@@ -43,6 +43,7 @@ export function UpdatePill({ controller, store }: { controller: Controller; stor
   if (!update) return <span className={srOnly} role="status" />;
   const icon = status === "installing" ? <Spinner size="xs" /> : status === "current" ? <CircleCheck aria-hidden /> : status === "failed" ? <CircleAlert aria-hidden /> : <Download aria-hidden />;
   const dismiss = () => {
+    setOpen(false); // the pill stays mounted: the next update must not come back with its popover open
     controller.dismissUpdate(); // the pill unmounts: focus must not fall to <body>
     platform.focusSearch();
   };
