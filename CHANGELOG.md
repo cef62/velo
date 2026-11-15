@@ -1,5 +1,14 @@
 # velo
 
+## 0.19.1
+
+### Patch Changes
+
+- 4bb6a04: Fixed `rename_note` replying with a hash that could cover your typing saved right after the rename, and fixed an agent write to the open note, after an outside tool changed only its line endings, replying with an out-of-date hash or going to a conflict copy: the agent now gets the hash of the note as its own call left it.
+- 39575ff: Fixed Enter on the exact title of a hidden archived note doing nothing when two searches in a row opened the same note, and opening the archived note after the open note was deleted while Enter checked.
+- b193057: Fixed the "more window errors suppressed" count reaching velo.log when an error flood was the last thing that happened, once its 10 seconds had passed, and made agent setup failures in velo.log name their kind (for example `io NotFound`) instead of only a size.
+- b28964e: Fixed a sliver of the note title showing beside the error icon in a narrow title bar, and the focus ring of the error losing its right edge.
+
 ## 0.19.0
 
 ### Minor Changes
