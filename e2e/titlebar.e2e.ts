@@ -44,7 +44,7 @@ for (const archived of [false, true]) {
             hidden: getComputedStyle(title).position === "absolute", // srOnly: out of the layout, still read
             titleW: title.getBoundingClientRect().width,
             floor: 2.5 * parseFloat(getComputedStyle(lead).fontSize),
-            iconInside: icon.left >= l.left && icon.right <= l.right,
+            iconInside: icon.left >= l.left && icon.right <= l.right && icon.top >= l.top && icon.bottom <= l.bottom, // also vertically: a wrapped icon sits on the clipped second line
             pr: getComputedStyle(lead).paddingRight,
             overflow: bar.scrollWidth - bar.clientWidth,
             retry: [...bar.querySelectorAll("button")].some((b) => b.textContent === "Retry"),
