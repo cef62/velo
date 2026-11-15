@@ -8,7 +8,7 @@ const PAGE: usize = 200;
 // "All rows" for search_page_where: it binds limit into SQL text, so stay far from i64 overflow.
 const ALL: usize = 1_000_000;
 use crate::revisions::{RevisionInfo, Revisions, fnv64};
-use crate::names::{NoteFile, note_path, title_ok, title_to_stem, parse_note_file};
+use crate::names::{NoteFile, note_path, title_ok, parse_note_file};
 use crate::store::{SaveResult, Store, hash, meta_of};
 use crate::text::{fold, link_mention_text, rewrite_links};
 use anyhow::{Context, anyhow};
@@ -131,6 +131,8 @@ pub struct Vault {
     /// deleted notes whose index removal failed (a plain twin's text stays searchable until then): the next
     /// `apply_fs_changes` (any watcher event, rescan or agent call) tries them again
     retry: Vec<PathBuf>,
+    /// inside `apply_paths`: a locked note that came or went, so its end re-syncs twins once for the whole batch
+    resync_deferred: Option<Option<PathBuf>>,
 }
 
 fn s(p: &Path) -> String {
@@ -160,17 +162,16 @@ fn note_meta(text: &str, m: &Meta) -> NoteMeta {
 /// A plain note (`X.md` or `X.txt`) with the locked note `X.md.age` beside it: a lock synced in before the delete,
 /// or a lock that failed to remove the plaintext. It counts as locked: never saved, snapshotted as plaintext,
 /// rewritten or shown to the agent.
-/// The disk resolves the name (a case-insensitive one pairs `Meeting.md` with `meeting.md.age`), and only a regular
-/// file counts, as in the folder listing (`Store::list`): a folder or symlink named `X.md.age` is not a note.
+/// The disk resolves the name (a case-insensitive one pairs `Meeting.md` with `meeting.md.age`, with its own case
+/// folding) and follows links. Only a folder or nothing at that name means no locked copy: any other stat error
+/// (permission, I/O, a dangling link) counts as one, so a doubt never makes the plain text searchable.
 pub fn plain_twin_of_locked(path: &Path) -> bool {
-    parse_note_file(path).is_some_and(|n| !n.encrypted && path.parent().is_some_and(|d| note_path(d, &n.title, true).symlink_metadata().is_ok_and(|m| m.is_file())))
-}
-
-/// What a locked note and its plain twins share in the folder listing: the locked file's title, or the stem a plain
-/// note's locked copy gets (`note_path`: `What?.md` pairs with `What-.md.age`), folded so a case-insensitive disk's
-/// pair shares it too. It may pair files that are not twins (on a case-sensitive disk): `plain_twin_of_locked` decides.
-fn twin_key(nf: &NoteFile) -> String {
-    fold(&if nf.encrypted { nf.title.clone() } else { title_to_stem(&nf.title) })
+    let Some(locked) = parse_note_file(path).filter(|n| !n.encrypted).and_then(|n| Some(note_path(path.parent()?, &n.title, true))) else { return false };
+    match std::fs::metadata(&locked) {
+        Ok(m) => !m.is_dir(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => locked.symlink_metadata().is_ok(),
+        Err(_) => true,
+    }
 }
 
 /// Lock/unlock's last step once `to` is written: remove `from`. Already gone (a sync or Finder deleted it) is success:
@@ -219,7 +220,7 @@ impl Vault {
     pub fn open_with_progress(dir: PathBuf, db_path: &Path, identity: Option<&str>, progress: &mut dyn FnMut(usize, usize)) -> anyhow::Result<Vault> {
         // revisions live next to the index db (the app data dir), keyed by vault dir
         let root = db_path.parent().unwrap_or(Path::new(".")).join("revisions").join(fnv64(&dir.to_string_lossy()));
-        let mut v = Vault { store: Store::new(dir), index: Index::open(db_path)?, unlocked: HashMap::new(), revisions: Revisions::new(root), archive_loaded: Default::default(), archive_error: Default::default(), archive_read_logged: Default::default(), retry: Vec::new() };
+        let mut v = Vault { store: Store::new(dir), index: Index::open(db_path)?, unlocked: HashMap::new(), revisions: Revisions::new(root), archive_loaded: Default::default(), archive_error: Default::default(), archive_read_logged: Default::default(), retry: Vec::new(), resync_deferred: None };
         v.revisions.maybe_prune(now_ms());
         v.store.clean_leftovers();
         let files = v.store.list()?;
@@ -232,9 +233,9 @@ impl Vault {
         // One transaction per chunk: a crash loses at most a chunk, which isn't in `known()`, so the next open redoes it.
         v.index.begin()?;
         for (i, (path, nf, meta)) in stale.into_iter().enumerate() {
-            if let Ok(bytes) = v.store.read(path) {
+            if let Ok(bytes) = v.read_for_index(path) {
                 let twin = plain_twin_of_locked(path); // see `reindex`
-                let body = (!nf.encrypted && !twin).then(|| lossy(&bytes));
+                let body = bytes.filter(|_| !nf.encrypted && !twin).map(|b| lossy(&b));
                 let meta = Meta { size: if twin { TWIN_SIZE } else { meta.size }, ..*meta };
                 v.index.upsert(&s(path), nf, &meta, body.as_deref())?;
             }
@@ -343,24 +344,38 @@ impl Vault {
     /// A locked note appeared or went away: re-index its plain twins (`X.md`, `X.txt`) from disk, so `reindex` drops
     /// their text while it exists and restores it once it is gone (its file keeps its mtime and size, so nothing else
     /// would). A failure is retried at the next change.
-    /// The twins are found by their names in the folder listing (`twin_key`), never by a name built here: that
-    /// would miss `What?.md` for `What-.md.age`, and on a case-insensitive disk index `Meeting.md` a second time.
-    /// shortcut: one folder read per locked note indexed or removed, so a sync of many locked notes pays O(notes)
-    /// each; collect the keys per `apply_paths` and read the folder once if that shows up.
+    /// The twins are the plain rows whose `TWIN_SIZE` mark disagrees with `plain_twin_of_locked`: the disk decides,
+    /// never a name built or folded here (`What?.md` pairs with `What-.md.age`, `Straße.md` with `STRASSE.md.age`).
+    /// One stat per listed note (about 40 ms at 10k notes); inside `apply_paths` it runs once at its end, not once per
+    /// locked note.
     fn resync_twins(&mut self, locked: &Path) {
-        let Some(nf) = parse_note_file(locked).filter(|n| n.encrypted) else { return };
-        let Ok(rd) = std::fs::read_dir(&self.store.dir) else {
+        if !parse_note_file(locked).is_some_and(|n| n.encrypted) {
+            return;
+        }
+        if let Some(d) = &mut self.resync_deferred {
+            *d = Some(locked.to_path_buf());
+            return;
+        }
+        let (Ok(files), Ok(known)) = (self.store.list(), self.index.known()) else {
             self.retry.push(locked.to_path_buf()); // applying it again re-syncs its twins
             return;
         };
-        let key = twin_key(&nf);
-        let twins: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| parse_note_file(p).is_some_and(|n| !n.encrypted && twin_key(&n) == key)).collect();
-        for p in twins {
-            if let Ok(bytes) = self.store.read(&p)
-                && self.reindex(&p, Some(&lossy(&bytes))).is_err()
-            {
-                self.retry.push(p);
+        for (p, nf, _) in files {
+            if !nf.encrypted && known.get(&s(&p)).is_some_and(|k| (k.size == TWIN_SIZE) != plain_twin_of_locked(&p)) {
+                let r = self.read_for_index(&p).map_err(anyhow::Error::from).and_then(|b| self.reindex(&p, b.map(|b| lossy(&b)).as_deref()));
+                if r.is_err() {
+                    self.retry.push(p);
+                }
             }
+        }
+    }
+
+    /// `p`'s bytes for the index, or `None` for a plain twin that can't be read (evicted by iCloud, held by a sync):
+    /// it is indexed without its text anyway, so it needs none.
+    fn read_for_index(&self, p: &Path) -> std::io::Result<Option<Vec<u8>>> {
+        match self.store.read(p) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound && plain_twin_of_locked(p) => Ok(None),
+            r => r.map(Some),
         }
     }
 
@@ -841,12 +856,17 @@ impl Vault {
         let created = self.index.created_from_file(path)?; // the erase drops it; a failed lock's re-index restores it
         // The locked copy first: a failed write (disk full, folder not writable) leaves the index untouched. From here
         // the plain file is a plain twin, which no re-index stores with its text (see `reindex`), in any process.
-        self.store.write_atomic(&to, &crypto::encrypt(identity, &plain)?)?;
+        let locked = crypto::encrypt(identity, &plain)?;
+        self.store.write_atomic(&to, &locked)?;
         // Erase before the move: a failure here fails the lock with the note still plain and indexed, never a lock
         // that reports success while the plain row stays searchable.
         if let Err(e) = self.index.remove_erasing(path) {
             if let Err(re) = std::fs::remove_file(&to) {
-                self.reindex(&to, None).ok(); // the watcher skips it as our own write: list it now
+                // list it now, and let the watcher (or the retry) apply it: it would skip it as our own write
+                self.store.take_self_write(&to, &locked);
+                if self.reindex(&to, None).is_err() {
+                    self.retry.push(to.clone());
+                }
                 // the user must know: the stray locked copy makes the plain note refuse saves
                 return Err(anyhow!("{e}; the locked copy {} could not be removed ({re}): move it to the Trash to edit the note again", to.display()));
             }
@@ -1011,6 +1031,10 @@ impl Vault {
         }
         let mut changed = Vec::new();
         let mut lost_plain = false;
+        let outer = self.resync_deferred.is_none();
+        if outer {
+            self.resync_deferred = Some(None);
+        }
         // Plain notes being locked elsewhere are deleted securely, in a batch of their own after the rest: a bulk is
         // ended just before it (a rebuild inside a batch could fail the whole batch on a low disk), so those deletes are
         // cheap and the rest still runs fast.
@@ -1030,6 +1054,9 @@ impl Vault {
                 changed.truncate(mark);
                 self.apply_chunk(chunk, identity, false, &mut changed, &mut lost_plain);
             }
+        }
+        if outer && let Some(Some(locked)) = self.resync_deferred.take() {
+            self.resync_twins(&locked);
         }
         // Inside a bulk the delete itself was secure; older versions wait for the bulk's one finish, not one per chunk.
         if lost_plain && !bulk {
@@ -1068,12 +1095,12 @@ impl Vault {
         for p in paths {
             let Some(nf) = parse_note_file(p) else { continue };
             let key = s(p);
-            match self.store.read(p) {
+            match self.read_for_index(p) {
                 Ok(bytes) => {
-                    if self.store.take_self_write(p, &bytes) {
+                    if bytes.as_ref().is_some_and(|b| self.store.take_self_write(p, b)) {
                         continue;
                     }
-                    let body = (!nf.encrypted).then(|| lossy(&bytes));
+                    let body = bytes.filter(|_| !nf.encrypted).map(|b| lossy(&b));
                     // locked elsewhere and new here: its plain twin may have been deleted mid-bulk in an earlier batch
                     *lost_plain |= nf.encrypted && self.index.bulk_off() && self.index.title_modified(&key).ok().flatten().is_none();
                     if self.reindex(p, body.as_deref()).is_err() {
@@ -1661,23 +1688,27 @@ mod tests {
     }
     /// #148: a disk that folds case (macOS, Windows) makes `meeting.md.age` the locked copy of `Meeting.md`; one that
     /// doesn't (Linux) keeps them two notes. Either way the index follows the disk: no second row for `Meeting.md`,
-    /// and no row a rescan finds stale.
+    /// and no row a rescan finds stale. Also for pairs only full case folding makes (APFS: `µ`/`μ`, `ß`/`ss`).
     #[test] fn a_case_only_twin_is_paired_as_the_disk_pairs_it() {
-        let (dir, db) = setup(); let id = crypto::new_identity();
-        std::fs::write(dir.join("Meeting.md"), BACK).unwrap();
-        let mut v = open(dir.clone(), &db, None).unwrap();
-        let locked = dir.join("meeting.md.age");
-        std::fs::write(&locked, crypto::encrypt(&id, b"x").unwrap()).unwrap();
-        let folds = dir.join("Meeting.md.age").exists();
-        let paired = if folds { (0, 0, 0, 0) } else { (1, 1, 1, 1) };
-        v.apply_fs_changes(std::slice::from_ref(&locked), None);
-        let both = vec![s(&dir.join("Meeting.md")), s(&locked)];
-        assert_eq!((twin_text(&v), rows(&v)), (paired, both.clone()));
-        assert!(v.rescan(None).is_empty(), "no churn");
-        std::fs::remove_file(&locked).unwrap();
-        v.apply_fs_changes(std::slice::from_ref(&locked), None);
-        assert_eq!((twin_text(&v), rows(&v)), ((1, 1, 1, 1), vec![s(&dir.join("Meeting.md"))]));
-        assert!(v.rescan(None).is_empty(), "no churn");
+        for (plain, other) in [("Meeting", "meeting"), ("µq", "μq"), ("Straße", "STRASSE")] {
+            let (dir, db) = setup(); let id = crypto::new_identity();
+            let plain = dir.join(format!("{plain}.md"));
+            std::fs::write(&plain, BACK).unwrap();
+            let mut v = open(dir.clone(), &db, None).unwrap();
+            let locked = dir.join(format!("{other}.md.age"));
+            std::fs::write(&locked, crypto::encrypt(&id, b"x").unwrap()).unwrap();
+            let folds = plain.with_extension("md.age").exists();
+            let paired = if folds { (0, 0, 0, 0) } else { (1, 1, 1, 1) };
+            v.apply_fs_changes(std::slice::from_ref(&locked), None);
+            let mut both = vec![s(&plain), s(&locked)];
+            both.sort();
+            assert_eq!((twin_text(&v), rows(&v)), (paired, both), "{plain:?}");
+            assert!(v.rescan(None).is_empty(), "no churn");
+            std::fs::remove_file(&locked).unwrap();
+            v.apply_fs_changes(std::slice::from_ref(&locked), None);
+            assert_eq!((twin_text(&v), rows(&v)), ((1, 1, 1, 1), vec![s(&plain)]), "{plain:?}");
+            assert!(v.rescan(None).is_empty(), "no churn");
+        }
     }
     /// #148 (Copilot on #147): the case-only locked copy appeared while Velo was closed, `Meeting.md` unchanged.
     #[test] fn a_case_only_twin_is_paired_at_a_warm_open() {
@@ -1717,18 +1748,77 @@ mod tests {
         assert_eq!(twin_text(&v), (1, 1, 1, 1));
         assert!(v.rescan(None).is_empty(), "no churn");
         assert!(!plain_twin_of_locked(&dir.join("s.md")));
+        #[cfg(unix)] // a link to a folder neither
+        {
+            std::fs::write(dir.join("t.md"), "t").unwrap();
+            std::os::unix::fs::symlink(dir.join("s.md.age"), dir.join("t.md.age")).unwrap();
+            assert!(!plain_twin_of_locked(&dir.join("t.md")));
+        }
     }
-    /// #148: same for a symlink named like a locked copy, even to a real one.
+    /// #156 review M1: a symlink named like a locked copy (git-annex keeps `.md.age` files as links) is one when it
+    /// leads to a file, and so is a dangling one: in doubt, the plain note is locked.
     #[cfg(unix)]
-    #[test] fn a_symlink_named_like_a_locked_copy_is_not_one() {
-        let (dir, db) = setup(); let id = crypto::new_identity();
-        let real = tempfile::tempdir().unwrap().keep().join("s.md.age");
-        std::fs::write(&real, crypto::encrypt(&id, b"x").unwrap()).unwrap();
-        std::fs::write(dir.join("s.md"), BACK).unwrap();
-        std::os::unix::fs::symlink(&real, dir.join("s.md.age")).unwrap();
-        let mut v = open(dir.clone(), &db, None).unwrap();
-        assert_eq!(twin_text(&v), (1, 1, 1, 1));
-        assert!(v.rescan(None).is_empty(), "no churn");
+    #[test] fn a_symlinked_locked_copy_counts_even_dangling() {
+        for dangling in [false, true] {
+            let (dir, db) = setup(); let id = crypto::new_identity();
+            let real = tempfile::tempdir().unwrap().keep().join("s.md.age");
+            if !dangling {
+                std::fs::write(&real, crypto::encrypt(&id, b"x").unwrap()).unwrap();
+            }
+            std::fs::write(dir.join("s.md"), BACK).unwrap();
+            std::os::unix::fs::symlink(&real, dir.join("s.md.age")).unwrap();
+            let mut v = open(dir.clone(), &db, None).unwrap();
+            assert_eq!(twin_text(&v), (0, 0, 0, 0), "dangling: {dangling}");
+            assert!(v.rescan(None).is_empty(), "no churn");
+            let p = s(&dir.join("s.md"));
+            let d = v.open_note(&p, None).unwrap();
+            assert!(v.save_note(&p, "edited", &d.hash, None, false).is_err());
+            assert!(v.snapshot_text(&p, "edited", None).is_err() && v.agent_snapshot(&p, "x").is_err());
+        }
+    }
+    /// #156 review M1: a locked copy the disk can't tell about (a folder without search permission) counts as one.
+    #[cfg(unix)]
+    #[test] fn a_locked_copy_that_cannot_be_checked_counts() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap().keep();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let twin = plain_twin_of_locked(&dir.join("s.md"));
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(twin);
+        assert!(!plain_twin_of_locked(&dir.join("s.md")), "nothing there: no locked copy");
+    }
+    /// #156 review M2: a plain twin that can't be read (evicted by iCloud, held by a sync) loses its text all the same:
+    /// a twin's row needs no bytes. Through the watcher, a warm open and a rescan.
+    #[cfg(unix)]
+    #[test] fn an_unreadable_twin_loses_its_text() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path, m| std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap();
+        for path in ["watcher", "warm open", "rescan", "plain event"] {
+            let (dir, db) = setup(); let id = crypto::new_identity();
+            let plain = dir.join("s.md");
+            std::fs::write(&plain, BACK).unwrap();
+            let mut v = open(dir.clone(), &db, None).unwrap();
+            let locked = dir.join("s.md.age");
+            std::fs::write(&locked, crypto::encrypt(&id, b"x").unwrap()).unwrap();
+            mode(&plain, 0o000);
+            match path {
+                "watcher" => { v.apply_fs_changes(std::slice::from_ref(&locked), None); }
+                "warm open" => { drop(v); v = open(dir.clone(), &db, None).unwrap(); }
+                "rescan" => { v.rescan(None); }
+                _ => { // a twin row with its text (an older build, a late writer in another process), then an event for it
+                    v.apply_fs_changes(std::slice::from_ref(&locked), None);
+                    v.index.upsert(&s(&plain), &parse_note_file(&plain).unwrap(), &stat(&plain).unwrap(), Some(BACK)).unwrap();
+                    v.apply_fs_changes(std::slice::from_ref(&plain), None);
+                }
+            }
+            let hidden = twin_text(&v);
+            mode(&plain, 0o644);
+            assert_eq!(hidden, (0, 0, 0, 0), "{path}");
+            std::fs::write(dir.join("other.md"), "o").unwrap();
+            v.apply_fs_changes(&[dir.join("other.md")], None);
+            assert_eq!(twin_text(&v), (0, 0, 0, 0), "{path}: readable again");
+            assert!(v.rescan(None).is_empty(), "{path}: no churn");
+        }
     }
     /// #148: a twin whose re-index fails as its locked copy appears keeps its text only until the next change.
     #[test] fn a_twin_whose_resync_fails_is_retried_by_the_next_change() {
@@ -1784,21 +1874,25 @@ mod tests {
         let (dir, db) = setup(); let id = crypto::new_identity();
         let mut v = open(dir.clone(), &db, None).unwrap();
         let d = v.open_or_create("s", None, false).unwrap();
+        let _r = v.save_note(&d.path, BACK, &d.hash, None, false).unwrap();
         let ro = dir.clone();
         v.index.raw().create_scalar_function("readonly", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8, move |_| {
             std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).ok();
             Ok(0)
         }).unwrap();
-        v.index.raw().execute_batch("CREATE TEMP TRIGGER full BEFORE DELETE ON notes WHEN OLD.path NOT LIKE '%.age' BEGIN SELECT readonly(); SELECT RAISE(ABORT, 'disk I/O error'); END;").unwrap();
+        v.index.raw().execute_batch("CREATE TEMP TRIGGER full BEFORE DELETE ON notes WHEN OLD.path NOT LIKE '%.age' BEGIN SELECT readonly(); SELECT RAISE(ABORT, 'disk I/O error'); END;
+            CREATE TEMP TRIGGER full_age BEFORE INSERT ON notes WHEN NEW.path LIKE '%.age' BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END;").unwrap();
         let r = v.lock_note(&d.path, &id);
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
         let e = r.unwrap_err().to_string();
         assert!(e.contains("disk I/O error") && e.contains("s.md.age") && e.contains("Trash"), "{e}");
         assert!(Path::new(&d.path).exists()); // nothing lost
-        // #148: the watcher skips the stray copy as Velo's own write; it is listed all the same
-        v.index.raw().execute_batch("DROP TRIGGER full").unwrap();
-        v.apply_fs_changes(&[dir.join("s.md.age")], None);
+        // #148: the stray copy is indexed at once (here that fails too, so the next change retries it, though no watcher
+        // event comes: it would be skipped as Velo's own write), and its plain twin loses its text
+        v.index.raw().execute_batch("DROP TRIGGER full; DROP TRIGGER full_age").unwrap();
+        v.apply_fs_changes(&[], None);
         assert!(v.index.title_modified(&s(&dir.join("s.md.age"))).unwrap().is_some(), "the stray locked copy is not listed");
+        assert_eq!(twin_text(&v), (0, 0, 0, 0));
     }
     /// #93 (b): a note locked on another machine whose plain row can't be erased by the watcher is erased by the next
     /// change in the session, not only at the next rescan or launch.
