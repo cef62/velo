@@ -4348,6 +4348,33 @@ test("an auto-open that never settles neither delays Enter nor swallows the next
   expect(t.api.openOrCreate).toHaveBeenCalledWith("Fresh");
 });
 
+test("an older search's auto-open settling does not clear a newer pending one for the same path (#137)", async () => {
+  const t = await withHiddenB();
+  await t.c.openTitle("C", "wikilink");
+  const open = t.api.openNote.getMockImplementation()!;
+  const a1 = deferred<Awaited<ReturnType<typeof open>>>();
+  const a2 = deferred<Awaited<ReturnType<typeof open>>>();
+  t.api.openNote.mockImplementationOnce(() => a1.promise).mockImplementationOnce(() => a2.promise); // two auto-opens of row 0 (A), both slow
+  t.c.setQuery("B"); await settle();
+  await t.c.runSearch(true); await settle();
+  a1.resolve(await open(P("A"))); await settle(); // the older one settles first
+  const d = deferred<LinkTarget[]>();
+  t.api.listLinkTargets.mockImplementationOnce(() => d.promise);
+  const entered = t.c.enter();
+  await settle();
+  a2.resolve(await open(P("A"))); await settle(); // the newer one lands during the confirm
+  d.resolve(await t.api.listLinkTargets(true));
+  await entered; await settle();
+  expect(t.store.get().openPath).toBe(P("B"));
+});
+
+test("the open note going away during the confirm voids that Enter when no auto-open is pending (#137)", async () => {
+  const t = await withHiddenB();
+  t.c.setQuery("B"); await settle();
+  await confirmWith(t, () => { t.editor.path = null; });
+  expect(t.api.openNote).not.toHaveBeenCalledWith(P("B"));
+});
+
 test("a row selected past 0 during the confirm voids that Enter, query and open note unchanged (#107)", async () => {
   const t = await withHiddenB();
   t.c.setQuery("B"); await settle();
