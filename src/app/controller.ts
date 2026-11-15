@@ -783,7 +783,7 @@ export class Controller {
         else if (keepOpen === "highlight") {
           this.store.set({ sel: r.count ? 0 : -1 }); // highlight row 0, don't open it
         } else {
-          const target = (this.autoTarget = r.get(0)?.path ?? null);
+          const target = (this.autoTarget = { path: r.get(0)?.path ?? null }); // by identity: an older search's finalizer must not clear a newer pending open of the same path
           void this.select(r.count ? 0 : -1, "auto").finally(() => this.autoTarget === target && (this.autoTarget = null));
         }
       } else this.reselect(highlighted);
@@ -888,7 +888,7 @@ export class Controller {
     }
   }
 
-  protected autoTarget: string | null = null; // the note the search's automatic open of row 0 is heading for, until it settles
+  protected autoTarget: { path: string | null } | null = null; // the note the search's automatic open of row 0 is heading for, until it settles
   protected confirmingEnter = false;
   /**
    * Plain Enter on the exact title or alias of an archived note the switch hides, with row 0 (or nothing) selected:
@@ -910,10 +910,10 @@ export class Controller {
     if (s.showArchived || s.sel > 0 || q === "" || !this.titles.has(q) || this.results.loaded.some((h) => fold(h.title) === q)) return false;
     this.confirmingEnter = true;
     const open = this.editor.currentPath();
-    const auto = this.autoTarget; // taken now: the auto-open may settle (and clear it) while the lists load
+    const auto = this.autoTarget?.path ?? null; // taken now: the auto-open may settle (and clear it) while the lists load
     const movedOn = () => {
       const now = this.editor.currentPath();
-      return this.store.get().query !== s.query || this.store.get().sel > 0 || (now !== open && now !== auto);
+      return this.store.get().query !== s.query || this.store.get().sel > 0 || (now !== open && (auto === null || now !== auto));
     };
     try {
       const [all, visible] = await Promise.all([this.api.listLinkTargets(true), this.api.listLinkTargets(false)]);
