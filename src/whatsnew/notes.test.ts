@@ -50,14 +50,21 @@ test("reads what the release script writes", () => {
   expect(n.text).toBe("### Patch Changes\n\n- Fixed a. More about a.\n- Fixed b.");
 });
 
-test("every real CHANGELOG section round-trips with a short headline", () => {
-  const changelog = readFileSync(new URL("../../CHANGELOG.md", import.meta.url), "utf8");
+// LF and CRLF alike: Windows checkouts (core.autocrlf) give CHANGELOG.md CRLF line endings
+const realChangelog = readFileSync(new URL("../../CHANGELOG.md", import.meta.url), "utf8");
+test.each([
+  ["LF", realChangelog.replace(/\r\n/g, "\n")],
+  ["CRLF", realChangelog.replace(/\r?\n/g, "\r\n")],
+])("every real CHANGELOG section round-trips with a short headline (%s)", (_eol, changelog) => {
   const versions = [...changelog.matchAll(/^## (\S+)$/gm)].map((m) => m[1]);
   expect(versions.length).toBeGreaterThan(20);
   for (const v of versions) {
-    const section = changelog.split(`## ${v}\n`)[1].split(/^## /m)[0];
-    const bullets = section.split("\n").filter((l) => l.startsWith("- ")).length;
-    const n = parseReleaseNotes(releaseNotes(changelog, v));
+    const section = changelog.split(/^## .*\r?\n/m)[versions.indexOf(v) + 1];
+    const bullets = section.split(/\r?\n/).filter((l) => l.startsWith("- ")).length;
+    const notes = releaseNotes(changelog, v);
+    expect(notes, v).toBe(releaseNotes(realChangelog.replace(/\r\n/g, "\n"), v)); // the script reads CRLF as LF
+    const n = parseReleaseNotes(notes);
+    expect(parseReleaseNotes(notes.replace(/\n/g, "\r\n")), v).toEqual(n); // and so does the window's parser
     expect(n.count.highlights + n.count.fixes + n.count.other, v).toBe(bullets || 1); // 1: the fallback line
     expect(headline(n)!.length, v).toBeLessThanOrEqual(MAX_TITLE + 1);
     for (const it of n.highlights) expect(it.title.length, v).toBeLessThanOrEqual(MAX_TITLE + 1);

@@ -57,4 +57,11 @@ test("the What's new install goes through main's listener: refused under a modal
   await tab.getByRole("button", { name: "Try again" }).click();
   await expect(page.getByRole("button", { name: /^Installing…/ })).toBeVisible(); // main saved, froze and installed
   await expect(tab.getByText(/Downloading velo 0\.19\.0/).first()).toBeVisible();
+
+  // the demo's install then fails: main lets go of it, so Try again starts a new one
+  await expect(tab.getByText("Update failed: This is a demo: nothing was installed.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Update failed/ })).toBeVisible();
+  await tab.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByRole("button", { name: /^Installing…/ })).toBeVisible();
+  await expect(tab.getByText(/Downloading velo 0\.19\.0/).first()).toBeVisible();
 });

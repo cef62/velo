@@ -14,8 +14,7 @@ let channel: (p: Phase) => void = () => {};
 function play() {
   const total = 12e6;
   for (let done = 0; done <= total; done += 1.5e6) setTimeout(() => channel({ kind: "downloading", downloaded: done, total }), 300 + done / 1e4);
-  setTimeout(() => channel({ kind: "installing" }), 1800);
-  setTimeout(() => channel({ kind: "failed", message: "This is a demo: nothing was installed.", retry: true }), 4000);
+  setTimeout(() => channel({ kind: "installing" }), 1800); // then main's install fails and posts `{ failed }`
 }
 
 relay().onmessage = (m) => {
