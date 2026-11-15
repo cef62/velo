@@ -45,10 +45,13 @@ strip = true
 
 [dev-dependencies]
 tempfile = "3.27.0"
-# tests only: the mock runtime drives the window guard through real IPC requests
-tauri = { version = "2", features = ["tray-icon", "image-png", "test"] }
 # tests only: an authorizer makes a nested RELEASE fail, a scalar function signals a thread from a trigger
 rusqlite = { version = "0.41.1", features = ["bundled", "hooks", "functions"] }
+
+# tests only: the mock runtime drives the window guard through real IPC requests. Not on Windows: a test binary that
+# builds a Tauri app has no application manifest (Common Controls v6) and fails to start (STATUS_ENTRYPOINT_NOT_FOUND).
+[target.'cfg(not(windows))'.dev-dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png", "test"] }
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 tauri-plugin-single-instance = "2.5.5"

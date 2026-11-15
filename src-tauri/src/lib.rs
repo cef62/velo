@@ -273,6 +273,28 @@ pub fn run() {
 #[cfg(test)]
 mod guard_tests {
     use super::*;
+
+    #[test]
+    fn every_registered_command_but_the_allow_list_is_denied_to_other_windows() {
+        for c in whatsnew::COMMANDS {
+            assert!(APP_COMMANDS.contains(c), "{c} is not registered");
+        }
+        let denied: Vec<_> = APP_COMMANDS.iter().filter(|c| !whatsnew::allowed(whatsnew::LABEL, c)).collect();
+        assert_eq!(denied.len(), APP_COMMANDS.len() - whatsnew::COMMANDS.len());
+        assert!(APP_COMMANDS.iter().all(|c| whatsnew::allowed("main", c)));
+        for c in ["save_note", "open_note", "get_settings", "whatsnew_failed", "open_whatsnew", "install_update"] {
+            assert!(denied.contains(&&c), "{c}");
+        }
+    }
+}
+
+/// The wrapper's wiring through real IPC on the mock runtime. Not on Windows: a test binary that builds a Tauri app links
+/// Tauri's window and menu code, which imports `TaskDialogIndirect` from Common Controls v6; tauri-build embeds the
+/// manifest that selects v6 only into binaries (embed-resource `rustc-link-arg-bins`), so the test binary cannot start
+/// (STATUS_ENTRYPOINT_NOT_FOUND). macOS and Linux CI run it; the guard's rule itself is tested on every OS.
+#[cfg(all(test, not(windows)))]
+mod guard_ipc_tests {
+    use super::*;
     use tauri::test::{INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder, mock_context, noop_assets};
 
     #[tauri::command]
@@ -306,18 +328,5 @@ mod guard_tests {
         assert_eq!(call(&main, "whatsnew_info").unwrap(), "info");
         assert_eq!(call(&other, "whatsnew_info").unwrap(), "info");
         assert_eq!(call(&other, "open_note").unwrap_err(), serde_json::json!("not allowed from this window"));
-    }
-
-    #[test]
-    fn every_registered_command_but_the_allow_list_is_denied_to_other_windows() {
-        for c in whatsnew::COMMANDS {
-            assert!(APP_COMMANDS.contains(c), "{c} is not registered");
-        }
-        let denied: Vec<_> = APP_COMMANDS.iter().filter(|c| !whatsnew::allowed(whatsnew::LABEL, c)).collect();
-        assert_eq!(denied.len(), APP_COMMANDS.len() - whatsnew::COMMANDS.len());
-        assert!(APP_COMMANDS.iter().all(|c| whatsnew::allowed("main", c)));
-        for c in ["save_note", "open_note", "get_settings", "whatsnew_failed", "open_whatsnew", "install_update"] {
-            assert!(denied.contains(&&c), "{c}");
-        }
     }
 }
