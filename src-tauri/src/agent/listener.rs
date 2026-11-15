@@ -75,7 +75,7 @@ pub fn start(app: AppHandle) -> anyhow::Result<ListenerHandle> {
         if !st.settings.lock().unwrap().agent_access {
             return Err(super::OFF.into());
         }
-        run_call(&st, &app.state::<AgentState>().editors, &|e, p| { app.emit(e, p).ok(); }, name, args)
+        run_call(&st, &app.state::<AgentState>().editors, &|e, p| { app.emit_to("main", e, p).ok(); }, name, args)
     }))
 }
 

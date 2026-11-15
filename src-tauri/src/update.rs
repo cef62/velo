@@ -39,6 +39,17 @@ pub struct UpdateState {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct UpdateInfo {
     pub version: String,
+    /// The running version, as the updater compared it.
+    pub current_version: String,
+    /// The release notes from the feed (`latest.json` `notes`), empty if none. Untrusted text: the What's new window
+    /// renders it without HTML.
+    pub notes: String,
+}
+
+impl From<&Update> for UpdateInfo {
+    fn from(u: &Update) -> Self {
+        Self { version: u.version.clone(), current_version: u.current_version.clone(), notes: u.body.clone().unwrap_or_default() }
+    }
 }
 
 /// Payload of `update-progress`; `total` is the Content-Length, when the server sent one.
@@ -61,7 +72,7 @@ pub fn should_notify(version: &str, notified: Option<&str>) -> bool {
     notified != Some(version)
 }
 
-fn state(app: &AppHandle) -> MutexGuard<'_, UpdateState> {
+pub(crate) fn state(app: &AppHandle) -> MutexGuard<'_, UpdateState> {
     app.state::<Mutex<UpdateState>>().inner().lock().unwrap_or_else(|p| p.into_inner())
 }
 
@@ -120,7 +131,7 @@ pub async fn check(app: &AppHandle, manual: bool) -> Result<Option<UpdateInfo>, 
         log::line(&format!("update check error: {e}"));
         e.to_string()
     })?;
-    let info = update.as_ref().map(|u| UpdateInfo { version: u.version.clone() });
+    let info = update.as_ref().map(UpdateInfo::from);
     log::line(&match &info {
         Some(i) => format!("update check result: {} available", i.version),
         None => "update check result: up to date".into(),

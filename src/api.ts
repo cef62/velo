@@ -122,6 +122,8 @@ export const identityFileExists = () => invoke<boolean>("identity_file_exists");
 export const indexStatus = () => invoke<[number, number] | null>("index_status");
 /** null = up to date. */
 export const checkUpdate = () => invoke<{ version: string } | null>("check_update");
+/** Opens (or focuses) the What's new window for the stored update. */
+export const openWhatsNew = () => invoke<void>("open_whatsnew");
 /** Downloads, installs and relaunches; resolves only on failure paths (rejects with the reason). */
 export const installUpdate = () => invoke<void>("install_update");
 export const appVersion = getVersion;

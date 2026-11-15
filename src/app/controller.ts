@@ -2023,8 +2023,25 @@ export class Controller {
     if (this.store.get().update?.status !== "installing") this.store.set({ update: null });
   }
 
+  /** The What's new window; the GitHub release page if the window cannot open. */
   openReleaseNotes(version: string) {
-    void this.ui.openUrl(`https://github.com/cef62/velo/releases/tag/v${version}`).catch((e) => this.setErr(String(e)));
+    void this.api
+      .openWhatsNew()
+      .catch((e) => {
+        logError("What's new window not opened", e, "warn");
+        return this.ui.openUrl(`https://github.com/cef62/velo/releases/tag/v${version}`);
+      })
+      .catch((e) => this.setErr(String(e)));
+  }
+
+  /** "Install and restart" in the What's new window: the same install as the pill's. Resolves with the reason the install
+   *  did not start or failed (for that window), or never while velo restarts. */
+  async installFromWhatsNew(version: string): Promise<string | null> {
+    this.onUpdateAvailable(version); // the pill may have been dismissed meanwhile
+    await this.installUpdate();
+    const u = this.store.get().update;
+    if (u?.status === "installing") return null; // a repeat click while the install runs
+    return u?.status === "failed" && u.message ? u.message : "The update did not start. The velo window says why.";
   }
 
   /** Title-bar Retry after a save error. */

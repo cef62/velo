@@ -3,7 +3,7 @@ import "@fontsource-variable/jetbrains-mono";
 import "./index.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { listen } from "@tauri-apps/api/event";
+import { emitTo, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as api from "../api";
 import { Controller } from "../app/controller";
@@ -74,6 +74,11 @@ void listen<{ version: string }>("update-available", (ev) => controller.onUpdate
 void listen<{ downloaded: number; total: number | null }>("update-progress", (ev) => controller.onUpdateProgress(ev.payload.downloaded, ev.payload.total));
 void listen("update-installing", () => controller.onUpdateInstalling());
 void listen("check-updates", () => void controller.checkUpdates());
+// the What's new window's Install and restart (src-tauri/src/whatsnew.rs): this window saves first, then installs
+void listen<string>("whatsnew-install", async (ev) => {
+  const failed = await controller.installFromWhatsNew(ev.payload);
+  if (failed) void emitTo("whatsnew", "whatsnew-install-failed", failed);
+});
 // tray menu: Today's daily note, Settings…; ignored while a modal is open, as their shortcuts are
 void listen<string>("run-action", (e) => !modalOpen() && controller.runAction(e.payload));
 void listen<api.AgentWrite>("agent-write", (ev) => void controller.onAgentWrite(ev.payload));

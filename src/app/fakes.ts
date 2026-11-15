@@ -91,6 +91,7 @@ export function fakeApi(notes: Record<string, string> = {}) {
     readRevision: vi.fn(async (_p: string, _id: string): Promise<string> => { throw "unset"; }),
     agentSetupCommand: vi.fn(async () => "claude mcp add velo -- /velo --mcp"),
     checkUpdate: vi.fn(async (): Promise<{ version: string } | null> => null),
+    openWhatsNew: vi.fn(async () => {}),
     installUpdate: vi.fn(async () => {}),
     appVersion: vi.fn(async () => "0.6.0"),
     logFile: vi.fn(async () => "/logs/velo.log"),

@@ -16,6 +16,7 @@ pub mod text;
 pub mod update;
 pub mod vault;
 pub mod watch;
+pub mod whatsnew;
 
 use std::sync::Mutex;
 use tauri::Manager;
@@ -42,6 +43,18 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
     ])
 }
 
+/// Custom commands are open to every window (no app ACL manifest in build.rs): a window other than main reaches only
+/// the commands `whatsnew::allowed` names.
+fn with_window_guard<R: tauri::Runtime>(handler: impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    move |invoke| {
+        if !whatsnew::allowed(invoke.message.webview_ref().label(), invoke.message.command()) {
+            invoke.resolver.reject("not allowed from this window");
+            return true;
+        }
+        handler(invoke)
+    }
+}
+
 pub fn run() {
     let builder = tauri::Builder::default();
     // first plugin, as its docs ask: launching velo again (common once the close button only hides it) shows the
@@ -56,7 +69,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_window_state::Builder::new().with_state_flags(commands::WINDOW_STATE).build())
+        .plugin(tauri_plugin_window_state::Builder::new().with_state_flags(commands::WINDOW_STATE).with_denylist(&[whatsnew::LABEL]).build())
         .setup(|app| {
             // First thing in setup: the log dir needs the app handle. A panic before this point keeps only the default hook.
             if let Ok(dir) = app.path().app_log_dir() {
@@ -159,7 +172,7 @@ pub fn run() {
             update::spawn_checker(h.clone());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(with_window_guard(tauri::generate_handler![
             commands::get_settings,
             commands::set_settings,
             commands::index_status,
@@ -209,7 +222,10 @@ pub fn run() {
             commands::log_line,
             update::check_update,
             update::install_update,
-        ])
+            whatsnew::open_whatsnew,
+            whatsnew::whatsnew_info,
+            whatsnew::whatsnew_install,
+        ]))
         .build(tauri::generate_context!())
         .expect("error while running velo")
         .run(|app, ev| {
@@ -217,6 +233,11 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = ev {
                 commands::show_main(app);
+            }
+            if let tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } = &ev
+                && label == "main"
+            {
+                whatsnew::close(app); // quitting: the What's new window must not keep velo running
             }
             if let tauri::RunEvent::Exit = ev {
                 // the process exits without dropping state: drop the vault so an interrupted bulk re-index ends here

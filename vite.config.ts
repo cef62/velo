@@ -13,6 +13,8 @@ export default defineConfig(() => ({
       "styled-system": fileURLToPath(new URL("./styled-system", import.meta.url)),
     },
   },
+  // two pages: the app, and the What's new window (src-tauri/src/whatsnew.rs opens it)
+  build: { rollupOptions: { input: { main: fileURLToPath(new URL("./index.html", import.meta.url)), whatsnew: fileURLToPath(new URL("./whatsnew.html", import.meta.url)) } } },
   clearScreen: false,
   server: {
     port: 1420,

@@ -471,6 +471,36 @@ test("a failed update install gives the editor back and says why", async () => {
   expect(store.get().update).toBeNull();
 });
 
+test("What's new opens its window, and the GitHub page when the window cannot open", async () => {
+  const { c, api, calls } = setup();
+  c.openReleaseNotes("0.6.1");
+  await settle();
+  expect(api.openWhatsNew).toHaveBeenCalledTimes(1);
+  expect(calls.filter((x) => x[0] === "openUrl")).toEqual([]);
+  api.openWhatsNew.mockRejectedValueOnce("no window");
+  c.openReleaseNotes("0.6.1");
+  await settle();
+  expect(calls.filter((x) => x[0] === "openUrl")).toEqual([["openUrl", "https://github.com/cef62/velo/releases/tag/v0.6.1"]]);
+});
+
+test("install from the What's new window: the pill's install, and the reason when it does not run", async () => {
+  const { c, api, store, editor } = setup();
+  api.installUpdate.mockImplementationOnce(() => new Promise(() => {})); // relaunching
+  void c.installFromWhatsNew("0.6.1"); // the pill was dismissed: still installs
+  await settle();
+  expect(editor.flush).toHaveBeenCalled();
+  expect(store.get().update?.status).toBe("installing");
+  expect(await c.installFromWhatsNew("0.6.1")).toBeNull(); // a repeat click while installing
+
+  const t = setup();
+  t.editor.flushResult = false;
+  expect(await t.c.installFromWhatsNew("0.6.1")).toBe("The update did not start. The velo window says why.");
+  expect(t.api.installUpdate).not.toHaveBeenCalled();
+  t.editor.flushResult = true;
+  t.api.installUpdate.mockRejectedValueOnce("signature mismatch");
+  expect(await t.c.installFromWhatsNew("0.6.1")).toBe("Update failed: signature mismatch");
+});
+
 test("manual update check: up to date names the current version", async () => {
   const { c, api, store } = setup();
   await c.checkUpdates();
