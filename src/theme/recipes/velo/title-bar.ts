@@ -36,7 +36,7 @@ export const titleBar = defineSlotRecipe({
       minW: '0',
       alignSelf: 'stretch',
       pl: '2.5', // the rename input's -8 px margin and its ring sit in the padding, which the clip keeps
-      pr: '0.5',
+      pr: '1', // 4 px: keeps the focused error's 3 px outline whole on its right (WebKit's outline: auto)
       // clip: not a scroll container, so focus or a selection drag cannot scroll the second line in; hidden where clip is unknown
       overflow: 'hidden',
       '@supports (overflow: clip)': { overflow: 'clip' },
@@ -54,7 +54,8 @@ export const titleBar = defineSlotRecipe({
       flex: '1000 1 0',
       minW: 'min(2.5em, 100%)', // about two characters and the ellipsis at every font size
       maxW: 'max-content',
-      '[data-err] > &': { minW: '0' }, // an error outranks the title's floor
+      // an error outranks the title's floor; when the lead cannot hold the floor, the gap and the 14 px icon, the title leaves whole (no sliver)
+      '[data-err] > &': { minW: '0', '@container (max-width: calc(2.5em + 26px))': { display: 'none' } },
     },
     status: {
       display: 'inline-flex',
