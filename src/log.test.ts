@@ -92,6 +92,20 @@ test("an error flood sends BURST lines per window, then one line with the count"
   expect(texts().slice(BURST)).toEqual(["30 more window errors suppressed", "loop: locked"]);
 });
 
+test("a flood with no later error still reports its count once, when the window ends", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  for (let i = 0; i < BURST + 30; i++) logError("loop", "locked");
+  expect(invoke).toHaveBeenCalledTimes(BURST);
+  now += WINDOW_MS;
+  vi.advanceTimersByTime(WINDOW_MS);
+  expect(texts().slice(BURST)).toEqual(["30 more window errors suppressed"]);
+  vi.advanceTimersByTime(5 * WINDOW_MS);
+  logError("loop", "locked"); // a later error neither repeats the count nor loses its slot
+  expect(texts().slice(BURST)).toEqual(["30 more window errors suppressed", "loop: locked"]);
+  vi.useRealTimers();
+});
+
 test("debug records only while the switch is on, titles intact", () => {
   logDebug(() => "saver: saved Alice's and Bob's notes.md");
   expect(invoke).not.toHaveBeenCalled();
