@@ -166,20 +166,41 @@ fn note_meta(text: &str, m: &Meta) -> NoteMeta {
 /// or a lock that failed to remove the plaintext. It counts as locked: never saved, snapshotted as plaintext,
 /// rewritten or shown to the agent.
 /// The disk resolves the name (a case-insensitive one pairs `Meeting.md` with `meeting.md.age`, with its own case
-/// folding) and follows links. Only a folder or nothing at that name means no locked copy: any other stat error
-/// (permission, I/O, a dangling link) counts as one, so a doubt never makes the plain text searchable.
+/// folding) and follows links. Only a regular file or a dangling link at that name is a locked copy; any other stat
+/// error (permission, I/O) counts as one too, so a doubt never makes the plain text searchable.
 pub fn plain_twin_of_locked(path: &Path) -> bool {
-    parse_note_file(path).filter(|n| !n.encrypted).and_then(|n| Some(note_path(path.parent()?, &n.title, true))).is_some_and(|locked| file_on_disk(&locked))
+    twin_state(path) != Some(false)
 }
 
-/// Whether `p` is a note file on disk, as the twin rule sees one: anything but a folder (or a link to one) after
-/// following links. A dangling link and any stat error other than "not found" count (fail closed).
-fn file_on_disk(p: &Path) -> bool {
-    match std::fs::metadata(p) {
-        Ok(m) => !m.is_dir(),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => p.symlink_metadata().is_ok(),
-        Err(_) => true,
+/// `plain_twin_of_locked`, with `None` where the disk can't tell (a stat error): a note decided on its own fails
+/// closed, a scan over every row leaves the row as it is.
+fn twin_state(path: &Path) -> Option<bool> {
+    match parse_note_file(path).filter(|n| !n.encrypted).and_then(|n| Some(note_path(path.parent()?, &n.title, true))) {
+        Some(locked) => note_file_at(&locked),
+        None => Some(false),
     }
+}
+
+/// Whether `p` is a note file on disk, as the twin rule sees one: a regular file after following links, or a
+/// dangling link (fail closed). Not one: nothing, a folder, a socket or device, a name too long to exist. `None`: a
+/// stat error says nothing either way.
+fn note_file_at(p: &Path) -> Option<bool> {
+    #[cfg(test)]
+    let injected = tests::STAT_FAIL.with(|f| f.get()).filter(|_| s(p).ends_with(".md.age"));
+    #[cfg(not(test))]
+    let injected: Option<std::io::ErrorKind> = None;
+    match injected.map_or_else(|| std::fs::metadata(p), |k| Err(k.into())) {
+        Ok(m) => Some(m.is_file()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(p.symlink_metadata().is_ok()),
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidFilename => Some(false),
+        Err(_) => None,
+    }
+}
+
+/// `note_file_at`, failing closed: for a note decided on its own (reversible: what its row may hold, whether it is
+/// indexed). Never for an irreversible step, which needs `metadata().is_file()`.
+fn file_on_disk(p: &Path) -> bool {
+    note_file_at(p) != Some(false)
 }
 
 /// The text `path`'s row may hold: none for a plain twin of a locked note, whose row is marked with `TWIN_SIZE` so
@@ -294,7 +315,10 @@ impl Vault {
         // A plain twin's row matches only with `TWIN_SIZE`: a twin indexed with its text (an index from an older build,
         // a crash mid-lock) or a former twin indexed without it is stale, whatever its mtime and size. Twins as `reindex`
         // sees them, from the disk: one more stat per unchanged plain note, so the two never disagree.
-        let stale: Vec<_> = files.iter().filter(|(path, _, meta)| !known.get(&s(path)).is_some_and(|k| k.mtime == meta.mtime && k.size == if plain_twin_of_locked(path) { TWIN_SIZE } else { meta.size })).collect();
+        let stale: Vec<_> = files.iter().filter(|(path, _, meta)| !known.get(&s(path)).is_some_and(|k| k.mtime == meta.mtime && match twin_state(path) {
+            Some(twin) => k.size == if twin { TWIN_SIZE } else { meta.size },
+            None => k.size == TWIN_SIZE || k.size == meta.size, // the disk can't tell: keep the row as it is
+        })).collect();
         let present: std::collections::HashSet<String> = files.iter().map(|(p, ..)| s(p)).collect();
         let gone: Vec<String> = known.keys().filter(|k| !present.contains(*k)).cloned().collect();
         let replaced = stale.iter().filter(|(p, ..)| known.contains_key(&s(p))).count() + gone.len();
@@ -353,8 +377,8 @@ impl Vault {
     /// (see `resync_twins`) for the twins a name can't find. A plain file arriving later asks the rule.
     fn reindex(&mut self, path: &Path, body: Option<&str>) -> anyhow::Result<()> {
         let nf = self.note(path)?;
-        let mut meta = stat(path)?;
         let key = s(path);
+        // before the stat too: a locked copy that can't be stat'ed still locks its twins
         if nf.encrypted && let Some(dir) = path.parent() {
             for ext in ["md", "txt"] {
                 let p = dir.join(format!("{}.{ext}", nf.title));
@@ -374,6 +398,7 @@ impl Vault {
                 self.resync_twins(path);
             }
         }
+        let mut meta = stat(path)?;
         let body = row_text(path, &mut meta, body);
         self.index.upsert(&key, &nf, &meta, body)?;
         Ok(())
@@ -403,9 +428,18 @@ impl Vault {
             return;
         };
         let mut gone: Vec<String> = Vec::new();
+        let mut doubt = false;
         for (key, k) in known {
             let p = PathBuf::from(&key);
-            if parse_note_file(&p).is_some_and(|n| !n.encrypted) && (k.size == TWIN_SIZE) != plain_twin_of_locked(&p) {
+            if !parse_note_file(&p).is_some_and(|n| !n.encrypted) {
+                continue;
+            }
+            // a stat error leaves the row as it is (it would strip every note on a failing disk): asked again later
+            let Some(twin) = twin_state(&p) else {
+                doubt = true;
+                continue;
+            };
+            if (k.size == TWIN_SIZE) != twin {
                 let r = match self.read_for_index(&p) {
                     // a row whose file is gone, now a twin: no delete event may ever name it (a row under an old
                     // spelling), so erase it here
@@ -419,6 +453,9 @@ impl Vault {
                     self.retry.push(p);
                 }
             }
+        }
+        if doubt {
+            self.retry.push(locked.to_path_buf()); // applying it again scans again
         }
         if gone.is_empty() {
             return;
@@ -1221,7 +1258,7 @@ impl Vault {
                         continue;
                     }
                     // a real locked copy only: deleting or encrypting history never follows from the index alone
-                    if nf.encrypted && file_on_disk(p) {
+                    if nf.encrypted && std::fs::metadata(p).is_ok_and(|m| m.is_file()) {
                         self.secure_revisions(&nf.title, identity);
                         if let Some(id) = identity {
                             self.try_unlock(p, id);
@@ -1279,6 +1316,10 @@ impl Vault {
 #[cfg(test)]
 mod tests {
     use super::*;
+    thread_local! {
+        /// Makes `note_file_at` fail with this error for every `.md.age` name (a failing disk, a short NAME_MAX).
+        pub(super) static STAT_FAIL: std::cell::Cell<Option<std::io::ErrorKind>> = const { std::cell::Cell::new(None) };
+    }
     use crate::crypto;
     use std::path::Path;
 
@@ -1883,20 +1924,23 @@ mod tests {
             assert!(!plain_twin_of_locked(&dir.join("t.md")));
         }
     }
-    /// Makes a folder at `p`, or (unix) a link to one.
-    fn folder_at(p: &Path, link: bool) {
-        if link {
+    /// Makes a folder at `p`, or (unix) a link to one or a socket.
+    fn folder_at(p: &Path, kind: &str) {
+        match kind {
+            "folder" => std::fs::create_dir(p).unwrap(),
             #[cfg(unix)]
-            std::os::unix::fs::symlink(tempfile::tempdir().unwrap().keep(), p).unwrap();
-        } else {
-            std::fs::create_dir(p).unwrap();
+            "link" => std::os::unix::fs::symlink(tempfile::tempdir().unwrap().keep(), p).unwrap(),
+            #[cfg(unix)]
+            "socket" => drop(std::os::unix::net::UnixListener::bind(p).unwrap()), // the socket file stays
+            _ => unreachable!(),
         }
     }
+    const SPECIAL: &[&str] = if cfg!(unix) { &["folder", "link", "socket"] } else { &["folder"] };
     /// Copilot on #156: a folder (or a link to one) named `s.md.age` that reaches the watcher, a rescan or a warm open
     /// is no locked note: no row, and the plain note `s.md` keeps its text and its plaintext history, with or without
-    /// a key. A bogus row an earlier build wrote is removed by a rescan.
+    /// a key. A bogus row an earlier build wrote is removed by a warm open. #156 full review m2: a socket neither.
     #[test] fn a_folder_named_like_a_locked_copy_touches_no_history() {
-        for link in [false, cfg!(unix)] {
+        for &link in SPECIAL {
             for with_id in [false, true] {
                 for how in ["event", "rescan", "open"] {
                     let (dir, db) = setup(); let id = crypto::new_identity();
@@ -1939,7 +1983,7 @@ mod tests {
     }
     /// The mirror image: a folder (or a link to one) named `s.md` or `s.txt` beside a real `s.md.age` is no plain twin.
     #[test] fn a_folder_named_like_a_plain_twin_is_not_one() {
-        for link in [false, cfg!(unix)] {
+        for &link in SPECIAL {
             let (dir, db) = setup(); let id = crypto::new_identity();
             let age = dir.join("s.md.age");
             std::fs::write(&age, crypto::encrypt(&id, BACK.as_bytes()).unwrap()).unwrap();
@@ -1951,6 +1995,37 @@ mod tests {
             assert_eq!(rows(&v), vec![s(&age)], "link={link}");
             assert_eq!(rows(&open(dir.clone(), &db, None).unwrap()), vec![s(&age)], "link={link}: warm open");
         }
+    }
+    /// #156 full review m1: while the disk can't stat `.md.age` names (I/O errors), a locked-note event leaves every
+    /// other row as it is and asks again later; the retry settles them once the error ends, with no locked event. A
+    /// name too long to exist is no locked copy: the plain note saves, as on `main`.
+    #[test] fn a_disk_that_cannot_stat_locked_names_strips_no_other_text() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        for k in 0..3 { std::fs::write(dir.join(format!("p{k}.md")), "plainzebra").unwrap(); }
+        std::fs::write(dir.join("u.md"), "uzebra").unwrap();
+        let (u_age, new_age) = (dir.join("u.md.age"), dir.join("new.md.age"));
+        std::fs::write(&u_age, crypto::encrypt(&id, b"x").unwrap()).unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let hits = |v: &Vault| ["plainzebra", "uzebra"].map(|q| v.search(q, Sort::Modified, 0, &[]).unwrap().hits.len());
+        assert_eq!(hits(&v), [3, 0]);
+        STAT_FAIL.set(Some(std::io::ErrorKind::Other));
+        std::fs::remove_file(&u_age).unwrap();
+        std::fs::write(&new_age, crypto::encrypt(&id, b"x").unwrap()).unwrap();
+        v.apply_fs_changes(&[u_age, new_age], None);
+        assert_eq!(hits(&v), [3, 0], "no row rewritten on a stat error");
+        let p0 = s(&dir.join("p0.md"));
+        let save = |v: &mut Vault| { let h = v.open_note(&p0, None).unwrap().hash; v.save_note(&p0, "plainzebra again", &h, None, false).map(|_| ()) };
+        assert_eq!(save(&mut v).unwrap_err().to_string(), "locked-sibling", "a note decided on its own fails closed");
+        STAT_FAIL.set(Some(std::io::ErrorKind::InvalidFilename));
+        save(&mut v).unwrap();
+        STAT_FAIL.set(None);
+        v.apply_fs_changes(&[], None); // the retry
+        assert_eq!(hits(&v), [3, 1]);
+        drop(v);
+        STAT_FAIL.set(Some(std::io::ErrorKind::Other));
+        let v = open(dir.clone(), &db, None).unwrap();
+        assert_eq!(hits(&v), [3, 1], "a warm open keeps the rows too");
+        STAT_FAIL.set(None);
     }
     /// #156 review M1: a symlink named like a locked copy (git-annex keeps `.md.age` files as links) is one when it
     /// leads to a file, and so is a dangling one: in doubt, the plain note is locked.
