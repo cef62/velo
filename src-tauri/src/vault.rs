@@ -169,10 +169,15 @@ fn note_meta(text: &str, m: &Meta) -> NoteMeta {
 /// folding) and follows links. Only a folder or nothing at that name means no locked copy: any other stat error
 /// (permission, I/O, a dangling link) counts as one, so a doubt never makes the plain text searchable.
 pub fn plain_twin_of_locked(path: &Path) -> bool {
-    let Some(locked) = parse_note_file(path).filter(|n| !n.encrypted).and_then(|n| Some(note_path(path.parent()?, &n.title, true))) else { return false };
-    match std::fs::metadata(&locked) {
+    parse_note_file(path).filter(|n| !n.encrypted).and_then(|n| Some(note_path(path.parent()?, &n.title, true))).is_some_and(|locked| file_on_disk(&locked))
+}
+
+/// Whether `p` is a note file on disk, as the twin rule sees one: anything but a folder (or a link to one) after
+/// following links. A dangling link and any stat error other than "not found" count (fail closed).
+fn file_on_disk(p: &Path) -> bool {
+    match std::fs::metadata(p) {
         Ok(m) => !m.is_dir(),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => locked.symlink_metadata().is_ok(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => p.symlink_metadata().is_ok(),
         Err(_) => true,
     }
 }
@@ -447,10 +452,10 @@ impl Vault {
 
     /// `p`'s bytes for the index, or `None` for a file whose row needs none and that can't be read (evicted by iCloud,
     /// held by a sync): a locked note, or a plain twin of one. Such a file is still indexed, without its text, so a
-    /// locked copy that can't be read yet still takes the text of its plain twin.
+    /// locked copy that can't be read yet still takes the text of its plain twin. A folder keeps its error: no row.
     fn read_for_index(&self, p: &Path) -> std::io::Result<Option<Vec<u8>>> {
         match self.store.read(p) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound && (parse_note_file(p).is_some_and(|n| n.encrypted) || plain_twin_of_locked(p)) => Ok(None),
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound && file_on_disk(p) && (parse_note_file(p).is_some_and(|n| n.encrypted) || plain_twin_of_locked(p)) => Ok(None),
             r => r.map(Some),
         }
     }
@@ -1215,7 +1220,8 @@ impl Vault {
                         self.retry.push(p.clone()); // a retried path (a plain twin's erase) must not be dropped
                         continue;
                     }
-                    if nf.encrypted {
+                    // a real locked copy only: deleting or encrypting history never follows from the index alone
+                    if nf.encrypted && file_on_disk(p) {
                         self.secure_revisions(&nf.title, identity);
                         if let Some(id) = identity {
                             self.try_unlock(p, id);
@@ -1875,6 +1881,75 @@ mod tests {
             std::fs::write(dir.join("t.md"), "t").unwrap();
             std::os::unix::fs::symlink(dir.join("s.md.age"), dir.join("t.md.age")).unwrap();
             assert!(!plain_twin_of_locked(&dir.join("t.md")));
+        }
+    }
+    /// Makes a folder at `p`, or (unix) a link to one.
+    fn folder_at(p: &Path, link: bool) {
+        if link {
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(tempfile::tempdir().unwrap().keep(), p).unwrap();
+        } else {
+            std::fs::create_dir(p).unwrap();
+        }
+    }
+    /// Copilot on #156: a folder (or a link to one) named `s.md.age` that reaches the watcher, a rescan or a warm open
+    /// is no locked note: no row, and the plain note `s.md` keeps its text and its plaintext history, with or without
+    /// a key. A bogus row an earlier build wrote is removed by a rescan.
+    #[test] fn a_folder_named_like_a_locked_copy_touches_no_history() {
+        for link in [false, cfg!(unix)] {
+            for with_id in [false, true] {
+                for how in ["event", "rescan", "open"] {
+                    let (dir, db) = setup(); let id = crypto::new_identity();
+                    let ident = with_id.then_some(id.as_str());
+                    let plain = dir.join("s.md");
+                    std::fs::write(&plain, BACK).unwrap();
+                    let mut v = open(dir.clone(), &db, ident).unwrap();
+                    for (i, h) in ["history one", "history two"].iter().enumerate() {
+                        v.revisions.snapshot_bytes("s", h.as_bytes(), false, now_ms() - 10_000 + i as i64 * 1_000, false).unwrap();
+                    }
+                    let age = dir.join("s.md.age");
+                    folder_at(&age, link);
+                    match how {
+                        "event" => { v.apply_fs_changes(std::slice::from_ref(&age), ident); }
+                        "rescan" => { v.rescan(ident); }
+                        _ => v = open(dir.clone(), &db, ident).unwrap(),
+                    }
+                    let case = format!("link={link} id={with_id} {how}");
+                    assert_eq!((rows(&v), twin_text(&v)), (vec![s(&plain)], (1, 1, 1, 1)), "{case}");
+                    let revs = v.revisions.list("s");
+                    assert_eq!(revs.len(), 2, "{case}");
+                    for r in &revs {
+                        let (bytes, enc) = v.revisions.read("s", &r.id).unwrap();
+                        assert!(!enc && bytes.starts_with(b"history"), "{case}");
+                    }
+                    if how == "rescan" { // a bogus row from an earlier build: kept like any unreadable path, history too
+                        v.index.upsert(&s(&age), &parse_note_file(&age).unwrap(), &stat(&plain).unwrap(), None).unwrap();
+                        v.rescan(ident);
+                        assert_eq!((twin_text(&v), v.revisions.list("s").len()), ((1, 1, 1, 1), 2), "{case}: bogus row");
+                    }
+                    if how == "open" {
+                        v.index.upsert(&s(&age), &parse_note_file(&age).unwrap(), &stat(&plain).unwrap(), None).unwrap();
+                        drop(v);
+                        let v = open(dir.clone(), &db, ident).unwrap();
+                        assert_eq!((rows(&v), v.revisions.list("s").len()), (vec![s(&plain)], 2), "{case}: a bogus row from an earlier build");
+                    }
+                }
+            }
+        }
+    }
+    /// The mirror image: a folder (or a link to one) named `s.md` or `s.txt` beside a real `s.md.age` is no plain twin.
+    #[test] fn a_folder_named_like_a_plain_twin_is_not_one() {
+        for link in [false, cfg!(unix)] {
+            let (dir, db) = setup(); let id = crypto::new_identity();
+            let age = dir.join("s.md.age");
+            std::fs::write(&age, crypto::encrypt(&id, BACK.as_bytes()).unwrap()).unwrap();
+            let mut v = open(dir.clone(), &db, None).unwrap();
+            let folders = [dir.join("s.md"), dir.join("s.txt")];
+            for f in &folders { folder_at(f, link); }
+            v.apply_fs_changes(&folders, None);
+            v.rescan(None);
+            assert_eq!(rows(&v), vec![s(&age)], "link={link}");
+            assert_eq!(rows(&open(dir.clone(), &db, None).unwrap()), vec![s(&age)], "link={link}: warm open");
         }
     }
     /// #156 review M1: a symlink named like a locked copy (git-annex keeps `.md.age` files as links) is one when it
