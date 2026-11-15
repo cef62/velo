@@ -1,5 +1,21 @@
 # velo
 
+## 0.19.0
+
+### Minor Changes
+
+- 9556a0f: Added a Debug logging switch and a Show log file button in Settings (and in the command palette): errors in the window now reach velo.log, and with the switch on, agent calls, commands, file-watcher events and saves are recorded with titles and sizes, never note text.
+- 85b897b: Added a What's new window that shows what an update brings before you install it.
+  Open it from What's new in the update pill: new things come first as cards, fixes follow in a short list, and Install and restart shows its progress right there.
+
+### Patch Changes
+
+- f368b2c: Fixed an agent being told "velo did not answer" when you typed in the open note while velo saved its change, and fixed `add_task` and `set_task_done` replying with a hash that could cover your newer typing: the agent now gets the hash its own save left (so its next hash-guarded write can't overwrite your typing), or the conflict error.
+- 306adfa: Fixed a locked note's text staying or becoming searchable through a plain copy beside the locked one (left by a sync, by Velo quitting mid-lock, or re-indexed by an agent in direct mode during the lock), while that plain copy now gets its text back in search once the locked copy is gone.
+- 306adfa: Fixed a note dropping out of search for the rest of the session when locking it failed because its encrypted copy could not be written (disk full or a read-only folder).
+- 3bf1bd3: Fixed a long status or error message pushing the note title bar's buttons off screen: the buttons now stay in place, an error always keeps its icon in view (hover or tab to it for the full text), and the message text and the title shorten or hide when space is short.
+- 306adfa: Fixed a note locked on another device staying searchable until the next relaunch or rescan when the search index failed to erase it once: the next change in the notes folder now erases it.
+
 ## 0.18.2
 
 ### Patch Changes
