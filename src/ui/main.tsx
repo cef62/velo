@@ -11,6 +11,7 @@ import { createStore, initialState } from "../app/store";
 import { isSearchInput, platform } from "./platform";
 import { App } from "./App";
 import { installWindowHandlers } from "../log";
+import { modalOpen, overlayOpen } from "./modal";
 
 installWindowHandlers(window); // before the controller starts: an error while starting up reaches velo.log too
 
@@ -26,8 +27,6 @@ createRoot(document.getElementById("root")!).render(
     <App controller={controller} store={store} />
   </StrictMode>,
 );
-
-const modalOpen = () => !!document.querySelector("dialog[open], [role=dialog][data-state=open], [role=alertdialog][data-state=open]");
 
 // One capture-phase handler: runs before CodeMirror's keymap and the webview defaults (so e.g. ⌘R works from the editor).
 window.addEventListener(
@@ -52,7 +51,7 @@ window.addEventListener(
       inEditor: !!t.closest?.("[data-editor-host]"),
       inSearchWithText: isSearchInput(t) && (t as HTMLInputElement).value !== "",
       inSearch: isSearchInput(t),
-      inDialog: !!t.closest?.("[role=menu], [data-lock-screen]") || modalOpen(),
+      inDialog: !!t.closest?.("[role=menu], [data-lock-screen]") || overlayOpen(),
       inRename: !!t.closest?.("[data-rename]"),
     });
     if (handled) {
@@ -81,7 +80,7 @@ void listen<string>("whatsnew-install", async (ev) => {
   if (failed) void api.whatsnewFailed(failed);
 });
 // tray menu: Today's daily note, Settings…; ignored while a modal is open, as their shortcuts are
-void listen<string>("run-action", (e) => !modalOpen() && controller.runAction(e.payload));
+void listen<string>("run-action", (e) => !overlayOpen() && controller.runAction(e.payload));
 void listen<api.AgentWrite>("agent-write", (ev) => void controller.onAgentWrite(ev.payload));
 
 // "today" rolls over at local midnight: refresh the Tasks groups and the due count/badge then.

@@ -74,6 +74,8 @@ const failed = css({ flex: "1", minW: "160px", fontSize: "uiSm", color: "velo.da
 const actions = css({ display: "flex", gap: "2", ml: "auto" });
 const toggle = css({ mt: "2", display: "inline-flex", alignItems: "center", gap: "1", fontSize: "uiSm", fontWeight: "500", color: "velo.accentText", cursor: "pointer", borderRadius: "sm", "& svg": { w: "4", h: "4", transition: "rotate 150ms" }, "&[aria-expanded=true] svg": { rotate: "180deg" }, _focusVisible: { outline: "2px solid", outlineColor: "velo.accent", outlineOffset: "2px" } });
 const srOnly = css({ srOnly: true });
+// Tauri's drag script (document listener) turns a double-click on a drag region into internal_toggle_maximize
+const noMaximize = (e: MouseEvent) => void (e.detail > 1 && e.stopPropagation());
 
 /** Feed text as inline Markdown: `html: false` and no images (render.ts), so markup in the notes shows as text. */
 function Md({ text, as: Tag = "span", className }: { text: string; as?: "span" | "p" | "h1" | "h3"; className?: string }) {
@@ -138,7 +140,8 @@ export function WhatsNew({ info, phase, onInstall }: { info: api.WhatsNewInfo | 
 
   return (
     <div className={page} onClick={onLinkClick} onAuxClick={onLinkClick}>
-      <div className={dragStrip} data-tauri-drag-region aria-hidden />
+      {/* drag only: a double-click would ask to maximize, which this window may not (whatsnew.json) */}
+      <div className={dragStrip} data-tauri-drag-region aria-hidden onMouseDown={noMaximize} onMouseUp={noMaximize} />
       <main className={scroller} aria-labelledby="wn-title">
         <header className={hero}>
           <div className={cx(versionRow, rise)}>

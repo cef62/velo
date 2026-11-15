@@ -28,11 +28,11 @@ pub fn allowed(label: &str, command: &str) -> bool {
 
 /// The bundled page (tauri://localhost on macOS/Linux, http(s)://tauri.localhost on Windows) or, in `tauri dev`, the
 /// dev server. Anything else (a link opened from the context menu, a dropped URL) must not load in this window.
+/// Scheme, host and port must match exactly (WebView2 resolves any *.localhost port to loopback), with no userinfo.
 fn own_page(u: &Url, dev: Option<&Url>) -> bool {
-    let host = u.host_str();
-    (u.scheme() == "tauri" && host == Some("localhost"))
-        || (matches!(u.scheme(), "http" | "https") && host == Some("tauri.localhost"))
-        || dev.is_some_and(|d| d.origin() == u.origin())
+    let at = |scheme: &str, host: &str| u.scheme() == scheme && u.host_str() == Some(host) && u.port().is_none();
+    let plain = u.username().is_empty() && u.password().is_none();
+    plain && (at("tauri", "localhost") || at("http", "tauri.localhost") || at("https", "tauri.localhost") || dev.is_some_and(|d| d.origin() == u.origin()))
 }
 
 /// The stored update, where its install stands, and the main window's look (theme, palette, font size).
@@ -157,12 +157,23 @@ mod tests {
     /// No event permission (listen would hear note events; emit could drive main), nothing implicit from a default set.
     #[test]
     fn capabilities_grant_the_window_only_drag_and_open_url() {
-        let read = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
-        let cap = read(include_str!("../capabilities/whatsnew.json"));
-        assert_eq!(cap["windows"], serde_json::json!([LABEL]));
-        let ids: Vec<_> = cap["permissions"].as_array().unwrap().iter().map(|p| p.as_str().or(p["identifier"].as_str()).unwrap()).collect();
-        assert_eq!(ids, ["core:window:allow-start-dragging", "opener:allow-open-url"]);
-        assert_eq!(read(include_str!("../capabilities/default.json"))["windows"], serde_json::json!([MAIN]));
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities");
+        let mut files: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        files.sort();
+        assert_eq!(files, ["default.json", "whatsnew.json"]); // a new capability file must be reviewed here
+        let read = |f: &str| serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(dir.join(f)).unwrap()).unwrap();
+        let mut cap = read("whatsnew.json");
+        cap.as_object_mut().unwrap().remove("description");
+        assert_eq!(
+            cap,
+            serde_json::json!({
+                "$schema": "../gen/schemas/desktop-schema.json",
+                "identifier": "whatsnew",
+                "windows": [LABEL],
+                "permissions": ["core:window:allow-start-dragging", { "identifier": "opener:allow-open-url", "allow": [{ "url": "https://*" }, { "url": "http://*" }] }]
+            })
+        );
+        assert_eq!(read("default.json")["windows"], serde_json::json!([MAIN]));
     }
 
     #[test]
@@ -173,7 +184,23 @@ mod tests {
         assert!(own_page(&u("https://tauri.localhost/whatsnew.html"), None));
         let dev = u("http://localhost:1420");
         assert!(own_page(&u("http://localhost:1420/whatsnew.html"), Some(&dev)));
-        for bad in ["https://github.com/cef62/velo", "http://localhost:1421/", "tauri://evil/", "file:///etc/passwd", "https://tauri.localhost.evil.com/", "javascript:alert(1)"] {
+        assert!(own_page(&u("HTTP://TAURI.LOCALHOST/whatsnew.html"), None)); // special schemes lowercase the host: same origin
+        for bad in [
+            "https://github.com/cef62/velo",
+            "http://localhost:1421/",
+            "tauri://evil/",
+            "file:///etc/passwd",
+            "https://tauri.localhost.evil.com/",
+            "javascript:alert(1)",
+            "http://tauri.localhost:1234/",
+            "https://tauri.localhost:8443/",
+            "tauri://localhost:9/",
+            "tauri://localhost.evil/",
+            "tauri://LOCALHOST/", // not lowercased for a custom scheme: not the app's origin
+            "http://tauri.localhost@evil.com/",
+            "http://user:pw@tauri.localhost/",
+            "http://localhost:1420@evil.com/",
+        ] {
             assert!(!own_page(&u(bad), Some(&dev)), "{bad}");
         }
         assert!(!own_page(&u("http://localhost:1420/"), None)); // release: no dev server
