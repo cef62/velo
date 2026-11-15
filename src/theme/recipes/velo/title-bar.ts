@@ -4,8 +4,8 @@ import { defineSlotRecipe } from '@pandacss/dev'
 // Fail-safe by construction (#115): Retry and the actions never shrink; the lead takes what is left and clips its own
 // content, so nothing inside it can push a control. The lead wraps: an item that does not fit at its floor moves to a
 // second, clipped line and disappears whole (never half an icon). The title takes the free space first, up to its full
-// text; the statuses get the rest. The error always stays: it comes right after the title, the title's floor yields to it
-// ([data-err]), and the gap shrinks on a lead under 42 px, so its 14 px icon fits any lead of 14 px or more (the narrowest
+// text; the statuses get the rest. The error always stays: it comes right after the title, the title leaves whole when
+// its floor and the icon do not both fit ([data-err]), and the gap shrinks on a lead under 42 px, so its 14 px icon fits any lead of 14 px or more (the narrowest
 // reachable is 18: bar 300, Preview, Retry).
 const line = { content: '""', h: 'full', w: '0' } // a full-height first item: the first line is as tall as its box, so its items centre in it
 const gap = 'max(0px, min(12px, 100% - 30px))' // % = the lead's width
@@ -54,8 +54,9 @@ export const titleBar = defineSlotRecipe({
       flex: '1000 1 0',
       minW: 'min(2.5em, 100%)', // about two characters and the ellipsis at every font size
       maxW: 'max-content',
-      // an error outranks the title's floor; when the lead cannot hold the floor, the gap and the 14 px icon, the title leaves whole (no sliver)
-      '[data-err] > &': { minW: '0', '@container (max-width: calc(2.5em + 26px))': { display: 'none' } },
+      // an error outranks the title: when the lead cannot hold the title's floor, the gap and the 14 px icon (+2 px for rounding), the
+      // title leaves the layout whole (no sliver) but stays for assistive technology; above that the floor holds, so later items wrap first
+      '[data-err] > &': { '@container (max-width: calc(2.5em + 28px))': { srOnly: true } },
     },
     status: {
       display: 'inline-flex',
