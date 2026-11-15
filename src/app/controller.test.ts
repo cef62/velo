@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import type { LinkTarget, Page, RenameResult, TaskItem, TaskView, TimelineRow } from "../api";
-import { Controller, INVALID_TITLE, type KeyEventLike } from "./controller";
+import { Controller, DIALOG_MSG, INVALID_TITLE, installRefusal, type KeyEventLike } from "./controller";
 import { chipsFor } from "../searchChips";
 import { emptyConnections, FakeEditor, FakePreview, deferred, fakeApi, fakeUi, hit, noMeta, settle } from "./fakes";
 import { createStore, initialState, shownPath } from "./store";
@@ -486,19 +486,275 @@ test("What's new opens its window, and the GitHub page when the window cannot op
 test("install from the What's new window: the pill's install, and the reason when it does not run", async () => {
   const { c, api, store, editor } = setup();
   api.installUpdate.mockImplementationOnce(() => new Promise(() => {})); // relaunching
-  void c.installFromWhatsNew("0.6.1"); // the pill was dismissed: still installs
+  void c.installFromWhatsNew("0.6.1", false); // the pill was dismissed: still installs
   await settle();
   expect(editor.flush).toHaveBeenCalled();
   expect(store.get().update?.status).toBe("installing");
-  expect(await c.installFromWhatsNew("0.6.1")).toBeNull(); // a repeat click while installing
+  let repeat: string | null | "waiting" = "waiting";
+  void c.installFromWhatsNew("0.6.1", false).then((r) => (repeat = r)); // a repeat click joins the running install
+  await settle();
+  expect(repeat).toBe("waiting"); // no reply: progress comes from the backend, then velo restarts
+  expect(api.installUpdate).toHaveBeenCalledTimes(1);
 
   const t = setup();
   t.editor.flushResult = false;
-  expect(await t.c.installFromWhatsNew("0.6.1")).toBe("The update did not start. The velo window says why.");
+  expect(await t.c.installFromWhatsNew("0.6.1", false)).toBe("The update did not start. The velo window says why.");
   expect(t.api.installUpdate).not.toHaveBeenCalled();
   t.editor.flushResult = true;
   t.api.installUpdate.mockRejectedValueOnce("signature mismatch");
-  expect(await t.c.installFromWhatsNew("0.6.1")).toBe("Update failed: signature mismatch");
+  expect(await t.c.installFromWhatsNew("0.6.1", false)).toBe("Update failed: signature mismatch");
+});
+
+// I-install: from an accepted install until velo restarts or the install fails, nothing unfreezes the editor and no
+// note action starts or continues; an install is never accepted under a native dialog, a modal, or an action in flight.
+describe("the install invariant", () => {
+  const REFUSED_DIALOG = `The update did not start: ${DIALOG_MSG}`;
+  const REFUSED_BUSY = "The update did not start: Busy — try again in a moment";
+  type T = ReturnType<typeof setup>;
+  // Every caller of the controller's native-dialog wrapper. `yes`: the answer that lets the action go on; `ran`: it did.
+  const actions: { name: string; dialog: "confirm" | "saveFile" | "chooseDirectory"; yes: unknown; prepare?: (t: T) => Promise<void>; run: (t: T) => Promise<unknown>; ran: (t: T, r: unknown) => boolean }[] = [
+    { name: "delete note", dialog: "confirm", yes: true, run: (t) => t.c.deleteNote(), ran: (t) => t.api.deleteNote.mock.calls.length > 0 },
+    { name: "delete saved search", dialog: "confirm", yes: true, run: (t) => t.c.deleteSaved("w"), ran: (t) => t.api.setSettings.mock.calls.length > 0 },
+    {
+      name: "restore revision",
+      dialog: "confirm",
+      yes: true,
+      prepare: async (t) => void t.api.readRevision.mockResolvedValue("then"),
+      run: (t) => t.c.restoreRevision("42"),
+      ran: (t) => t.api.readRevision.mock.calls.length > 0 || t.editor.text === "then",
+    },
+    { name: "quit with unsaved edits", dialog: "confirm", yes: true, prepare: async (t) => void (t.editor.flushResult = false), run: (t) => t.c.requestClose(), ran: (_t, r) => r === true },
+    {
+      name: "Markdown export's save picker",
+      dialog: "saveFile",
+      yes: "/out/x.md",
+      prepare: async (t) => {
+        t.api.exportPreview.mockResolvedValue({ notes: 2, open: 0, done: 0, locked: 0, over_limit: 0, no_tasks: 0, unreadable: 0 });
+        await t.c.startExport();
+      },
+      run: (t) => t.c.commitExport(true),
+      ran: (t) => t.api.exportMarkdown.mock.calls.length > 0,
+    },
+    { name: "first-run folder picker", dialog: "chooseDirectory", yes: "/m", run: (t) => t.c.chooseFolder(), ran: (t) => t.api.setSettings.mock.calls.length > 0 },
+  ];
+
+  /** The action stopped at its native dialog; the update is available; installs never finish (velo would restart). */
+  async function atDialog(a: (typeof actions)[number]) {
+    const t = setup();
+    await t.c.show(P("A"));
+    await a.prepare?.(t);
+    const answer = deferred<unknown>();
+    (t.ui as any)[a.dialog] = () => answer.promise;
+    t.api.installUpdate.mockImplementation(() => new Promise(() => {}));
+    t.c.onUpdateAvailable("0.6.1");
+    const run = a.run(t);
+    await settle();
+    return { t, answer, run };
+  }
+
+  for (const a of actions) {
+    test(`${a.name}: an install asked while its dialog is open is refused, and the action goes on`, async () => {
+      const { t, answer, run } = await atDialog(a);
+      expect(await t.c.installFromWhatsNew("0.6.1", false)).toBe(REFUSED_DIALOG); // the window
+      expect(await t.c.installUpdate()).toBe(REFUSED_DIALOG); // the pill (unclickable under a sheet, refused all the same)
+      expect(t.api.installUpdate).not.toHaveBeenCalled();
+      expect(t.editor.suspended).toBe(false);
+      answer.resolve(a.yes);
+      expect(a.ran(t, await run)).toBe(true);
+    });
+
+    if (a.name !== "quit with unsaved edits")
+      test(`${a.name}: a dialog answered after an install began counts as cancelled`, async () => {
+        const { t, answer, run } = await atDialog(a);
+        (t.c as any).dialogs = 0; // inject the other order: the install was accepted while the dialog was up
+        void t.c.installFromWhatsNew("0.6.1", false);
+        await settle();
+        expect(t.api.installUpdate).toHaveBeenCalledTimes(1);
+        expect(t.editor.suspended).toBe(true);
+        answer.resolve(a.yes);
+        expect(a.ran(t, await run)).toBe(false);
+        expect(t.editor.suspended).toBe(true);
+        expect(await t.c.show(P("B"))).toBe(false);
+        expect(t.editor.suspended).toBe(true);
+      });
+  }
+
+  test("quit with unsaved edits: answered after an install began, velo does not quit under it", async () => {
+    const a = actions.find((x) => x.name === "quit with unsaved edits")!;
+    const { t, answer, run } = await atDialog(a);
+    (t.c as any).dialogs = 0;
+    t.editor.flushResult = true; // the install's own save goes through
+    void t.c.installFromWhatsNew("0.6.1", false);
+    await settle();
+    expect(t.editor.suspended).toBe(true);
+    answer.resolve(true);
+    expect(await run).toBe(false);
+  });
+
+  test("rename's link question: the rename holds busy, so an install is refused in either order", async () => {
+    const t = setup();
+    await t.c.show(P("A"));
+    const answer = deferred<boolean>();
+    t.ui.confirm = () => answer.promise;
+    t.api.backlinkCount.mockResolvedValueOnce(2);
+    t.api.renameNote.mockResolvedValueOnce({ path: P("Z"), rewritten: 2 });
+    t.api.openNote.mockResolvedValueOnce({ path: P("Z"), title: "Z", text: "a", hash: "h", encrypted: false, meta: noMeta, archived: false });
+    t.c.onUpdateAvailable("0.6.1");
+    t.c.startRename();
+    const rename = t.c.commitRename("Z");
+    await settle();
+    expect(await t.c.installFromWhatsNew("0.6.1", false)).toBe(REFUSED_DIALOG);
+    (t.c as any).dialogs = 0;
+    expect(await t.c.installFromWhatsNew("0.6.1", false)).toBe(REFUSED_BUSY);
+    expect(t.api.installUpdate).not.toHaveBeenCalled();
+    answer.resolve(true);
+    await rename;
+    expect(t.api.renameNote).toHaveBeenCalledWith(P("A"), "Z", true);
+    expect(t.editor.suspended).toBe(false);
+  });
+
+  // Past its dialog and in flight: the same outcome as the pill's install on main (refused while the action holds busy;
+  // accepted otherwise, and then the action stops at its own busy check or writes outside the editor).
+  test("delete note in flight: the install is refused", async () => {
+    const t = setup();
+    await t.c.show(P("A"));
+    const gone = deferred<undefined>();
+    t.api.deleteNote.mockImplementationOnce(() => gone.promise);
+    t.c.onUpdateAvailable("0.6.1");
+    const del = t.c.deleteNote();
+    await settle();
+    expect(await t.c.installFromWhatsNew("0.6.1", false)).toBe(REFUSED_BUSY);
+    expect(await t.c.installUpdate()).toBe(REFUSED_BUSY);
+    gone.resolve(undefined);
+    await del;
+    expect(t.api.installUpdate).not.toHaveBeenCalled();
+  });
+
+  test("restore revision in flight: the install goes ahead, the restore stops at its busy check", async () => {
+    const t = setup();
+    await t.c.show(P("A"));
+    t.editor.text = "now";
+    const rev = deferred<string>();
+    t.api.readRevision.mockReturnValueOnce(rev.promise);
+    t.api.installUpdate.mockImplementation(() => new Promise(() => {}));
+    t.c.onUpdateAvailable("0.6.1");
+    const restore = t.c.restoreRevision("42");
+    await settle();
+    void t.c.installFromWhatsNew("0.6.1", false);
+    await settle();
+    expect(t.editor.suspended).toBe(true);
+    rev.resolve("then");
+    await restore;
+    expect(t.editor.text).toBe("now");
+    expect(t.editor.suspended).toBe(true);
+  });
+
+  for (const [name, hold, run] of [
+    ["delete saved search", (t: T) => t.api.setSettings, (t: T) => t.c.deleteSaved("w")],
+    ["Markdown export", (t: T) => t.api.exportMarkdown, async (t: T) => {
+      t.api.exportPreview.mockResolvedValue({ notes: 2, open: 0, done: 0, locked: 0, over_limit: 0, no_tasks: 0, unreadable: 0 });
+      t.ui.saveFile = async () => "/out/x.md";
+      await t.c.startExport();
+      return t.c.commitExport(true);
+    }],
+  ] as const)
+    test(`${name} in flight: the install goes ahead, the write leaves the editor frozen`, async () => {
+      const t = setup();
+      await t.c.show(P("A"));
+      const write = deferred<any>();
+      (hold(t) as any).mockReturnValueOnce(write.promise);
+      t.api.installUpdate.mockImplementation(() => new Promise(() => {}));
+      t.c.onUpdateAvailable("0.6.1");
+      const p = run(t);
+      await settle();
+      void t.c.installFromWhatsNew("0.6.1", false);
+      await settle();
+      expect(t.api.installUpdate).toHaveBeenCalledTimes(1);
+      write.resolve({ notes: 0, open: 0, done: 0, locked: 0, over_limit: 0, no_tasks: 0, unreadable: 0 });
+      await p;
+      expect(t.editor.suspended).toBe(true);
+    });
+
+  test("round 3: What's new install while Delete note's sheet is up is refused; the delete keeps the app unfrozen", async () => {
+    const t = setup();
+    const ask = deferred<boolean>();
+    t.ui.confirm = () => ask.promise; // native ask() sheet: not in the DOM, so modalOpen() is false
+    await t.c.show(P("A"));
+    const del = t.c.deleteNote(); // sheet up
+    await settle();
+    t.api.installUpdate.mockImplementationOnce(() => new Promise(() => {}));
+    expect(await t.c.installFromWhatsNew("0.6.1", false)).toBe(REFUSED_DIALOG);
+    expect(t.store.get().update?.status).toBe("available");
+    expect(t.editor.suspended).toBe(false);
+    ask.resolve(true);
+    await del;
+    expect(t.api.deleteNote).toHaveBeenCalled();
+    expect(t.api.installUpdate).not.toHaveBeenCalled();
+  });
+
+  test("a DOM modal in the main window refuses the window's install", async () => {
+    const t = setup();
+    expect(await t.c.installFromWhatsNew("0.6.1", true)).toBe(REFUSED_DIALOG);
+    expect(t.api.installUpdate).not.toHaveBeenCalled();
+    expect(await t.c.installFromWhatsNew("0.6.1", false)).toBeNull();
+    expect(t.api.installUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  test("installRefusal: a dialog first, then busy", () => {
+    expect(installRefusal({ modal: false, dialogs: 0, busy: false })).toBeNull();
+    expect(installRefusal({ modal: true, dialogs: 0, busy: false })).toBe(DIALOG_MSG);
+    expect(installRefusal({ modal: false, dialogs: 1, busy: false })).toBe(DIALOG_MSG);
+    expect(installRefusal({ modal: false, dialogs: 0, busy: true })).toBe("Busy — try again in a moment");
+  });
+
+  test("an accepted install keeps the editor frozen until it fails; then the editor is back and a new install works", async () => {
+    const t = setup();
+    await t.c.show(P("A"));
+    const run = deferred<void>();
+    t.api.installUpdate.mockImplementationOnce(() => run.promise);
+    t.c.onUpdateAvailable("0.6.1");
+    void t.c.installUpdate();
+    await settle();
+    expect(t.editor.suspended).toBe(true);
+    t.c.busy = false; // an action's finally clearing its own hold
+    expect(t.c.busy).toBe(true);
+    expect(await t.c.show(P("B"))).toBe(false);
+    expect(await t.c.openTitle("C", "enter")).toBe(false);
+    await t.c.toggleLock();
+    await t.c.deleteNote();
+    expect(t.api.deleteNote).not.toHaveBeenCalled();
+    expect(t.editor.suspended).toBe(true);
+    run.reject("network down");
+    await settle();
+    expect(t.editor.suspended).toBe(false);
+    expect(t.c.busy).toBe(false);
+    expect(await t.c.show(P("B"))).toBe(true);
+    t.api.installUpdate.mockImplementationOnce(() => new Promise(() => {}));
+    t.c.onUpdateAvailable("0.6.1");
+    void t.c.installUpdate();
+    await settle();
+    expect(t.api.installUpdate).toHaveBeenCalledTimes(2);
+    expect(t.editor.suspended).toBe(true);
+  });
+
+  test("the window joins the pill's install: a refusal or failure after its request still reaches it", async () => {
+    const t = setup();
+    const flushed = deferred<boolean>();
+    t.editor.flush.mockReturnValueOnce(flushed.promise);
+    t.c.onUpdateAvailable("0.6.1");
+    void t.c.installUpdate(); // the pill, saving first
+    const win = t.c.installFromWhatsNew("0.6.1", false);
+    flushed.resolve(false);
+    expect(await win).toBe("The update did not start. The velo window says why.");
+
+    const u = setup();
+    u.api.installUpdate.mockRejectedValueOnce("An update check or install is already running");
+    u.c.onUpdateAvailable("0.6.1");
+    const pill = u.c.installUpdate();
+    expect(await u.c.installFromWhatsNew("0.6.1", false)).toBe("The update did not start: Checking for updates — try again in a moment");
+    await pill;
+    expect(u.store.get().update?.status).toBe("available");
+  });
 });
 
 test("manual update check: up to date names the current version", async () => {

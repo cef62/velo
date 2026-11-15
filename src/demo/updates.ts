@@ -62,3 +62,15 @@ export const demoUpdate: UpdateInfo | null =
       : kind && changelog.includes(`\n## ${kind}\n`)
         ? { version: kind, current_version: current, notes: releaseNotes(changelog, kind) }
         : null;
+
+/**
+ * The demo's stand-in for Rust between the two tabs (same origin): What's new posts `{ install }`, the main tab's
+ * `whatsnew-install` listener (src/ui/main.tsx) runs it, then posts `{ failed }` (whatsnewFailed) or `{ play }` (the
+ * install started: the tab plays a fake download). So the browser runs the real listener and the real refusal rule.
+ */
+export const relay = () => new BroadcastChannel("velo-demo-whatsnew");
+export const post = (m: { install?: string; failed?: string; play?: true }) => {
+  const ch = relay();
+  ch.postMessage(m); // delivered even though the channel closes right after
+  ch.close();
+};

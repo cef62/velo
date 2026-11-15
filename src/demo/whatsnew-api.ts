@@ -1,13 +1,27 @@
 // Demo stand-in for src/whatsnew/api.ts: the What's new page as a browser tab (whatsnew.html?update=big|patch|…).
-// Install plays a fake download through the same phase callback the app's Channel feeds; nothing is installed.
+// Install asks the main demo tab, as the app asks the main window (src/demo/updates.ts `relay`): it refuses with a reason
+// or starts the install, and the tab then plays a fake download through the same phase callback the app's Channel
+// feeds; nothing is installed. Opened on its own (no main tab), Install stays on "Saving your notes…".
 // `?theme=`, `?palette=` and `?font=` set the look, as in the app demo.
 import type { Phase, WhatsNewInfo } from "../whatsnew/api";
-import { demoUpdate } from "./updates";
+import { demoUpdate, post, relay } from "./updates";
 
 export type * from "../whatsnew/api";
 
 const q = new URLSearchParams(location.search);
 let channel: (p: Phase) => void = () => {};
+
+function play() {
+  const total = 12e6;
+  for (let done = 0; done <= total; done += 1.5e6) setTimeout(() => channel({ kind: "downloading", downloaded: done, total }), 300 + done / 1e4);
+  setTimeout(() => channel({ kind: "installing" }), 1800);
+  setTimeout(() => channel({ kind: "failed", message: "This is a demo: nothing was installed.", retry: true }), 4000);
+}
+
+relay().onmessage = (m) => {
+  if (m.data?.failed) channel({ kind: "failed", message: m.data.failed, retry: true });
+  else if (m.data?.play) play();
+};
 
 export const info = async (onPhase: (p: Phase) => void): Promise<WhatsNewInfo> => {
   channel = onPhase;
@@ -20,12 +34,9 @@ export const info = async (onPhase: (p: Phase) => void): Promise<WhatsNewInfo> =
   };
 };
 
-export async function install(_version: string): Promise<void> {
-  const total = 12e6;
+export async function install(version: string): Promise<void> {
   channel({ kind: "starting" });
-  for (let done = 0; done <= total; done += 1.5e6) setTimeout(() => channel({ kind: "downloading", downloaded: done, total }), 300 + done / 1e4);
-  setTimeout(() => channel({ kind: "installing" }), 1800);
-  setTimeout(() => channel({ kind: "failed", message: "This is a demo: nothing was installed.", retry: true }), 4000);
+  post({ install: version });
 }
 
 export const close = async () => window.close(); // works only for a tab the demo opened

@@ -74,9 +74,10 @@ void listen<{ downloaded: number; total: number | null }>("update-progress", (ev
 void listen("update-installing", () => controller.onUpdateInstalling());
 void listen("check-updates", () => void controller.checkUpdates());
 // the What's new window's Install and restart, relayed by Rust (src-tauri/src/whatsnew.rs): this window saves first, then
-// installs. Refused while a modal is open, where the pill cannot be clicked either; the window shows why.
+// installs. Refused while a modal or a native dialog is open, where the pill cannot be clicked either (the controller's
+// installRefusal); the window shows why.
 void listen<string>("whatsnew-install", async (ev) => {
-  const failed = modalOpen() ? "Close the open dialog in the velo window first, then try again." : await controller.installFromWhatsNew(ev.payload);
+  const failed = await controller.installFromWhatsNew(ev.payload, modalOpen());
   if (failed) void api.whatsnewFailed(failed);
 });
 // tray menu: Today's daily note, Settings…; ignored while a modal is open, as their shortcuts are

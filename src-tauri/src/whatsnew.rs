@@ -50,6 +50,7 @@ pub struct WhatsNew {
 #[tauri::command]
 pub async fn open_whatsnew(app: AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window(LABEL) {
+        w.reload().ok(); // a newer version may have been found since it opened: the page asks for the stored one again
         w.unminimize().ok();
         w.show().ok();
         return w.set_focus().map_err(|e| e.to_string());
@@ -117,9 +118,22 @@ pub fn whatsnew_install(app: AppHandle, version: String) -> Result<(), String> {
         if available != version {
             return Err(update::NEWER.into());
         }
-        update::set_phase(&mut st, Phase::Starting);
+        mark_starting(&mut st);
     }
-    app.emit_to(MAIN, "whatsnew-install", version).map_err(|e| e.to_string())
+    app.emit_to(MAIN, "whatsnew-install", version).map_err(|e| {
+        let message = e.to_string();
+        // nobody will answer: the phase must not stay Starting for a window opened later
+        update::set_phase(&mut update::state(&app), Phase::Failed { message: message.clone(), retry: true });
+        message
+    })
+}
+
+/// The window asked to install: Starting, unless an install (the pill's) already downloads. That one keeps its phase:
+/// main joins it and reports only if it fails.
+fn mark_starting(st: &mut update::UpdateState) {
+    if !matches!(st.phase, Phase::Downloading { .. } | Phase::Installing) {
+        update::set_phase(st, Phase::Starting);
+    }
 }
 
 /// Main only (not in `COMMANDS`): the install asked by the window did not start, and why.
@@ -174,6 +188,24 @@ mod tests {
             })
         );
         assert_eq!(read("default.json")["windows"], serde_json::json!([MAIN]));
+        // inline capabilities in tauri.conf.json would apply next to these files: there must be none
+        let conf: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("../tauri.conf.json")).unwrap()).unwrap();
+        assert!(conf["app"]["security"].is_object() && conf["app"]["security"].get("capabilities").is_none());
+    }
+
+    #[test]
+    fn a_running_install_keeps_its_phase() {
+        let mut st = update::UpdateState::default();
+        mark_starting(&mut st);
+        assert_eq!(st.phase, Phase::Starting);
+        for p in [Phase::Downloading { downloaded: 5, total: None }, Phase::Installing] {
+            st.phase = p.clone();
+            mark_starting(&mut st);
+            assert_eq!(st.phase, p);
+        }
+        st.phase = Phase::Failed { message: "x".into(), retry: true };
+        mark_starting(&mut st);
+        assert_eq!(st.phase, Phase::Starting);
     }
 
     #[test]
