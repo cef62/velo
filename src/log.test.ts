@@ -106,6 +106,25 @@ test("a flood with no later error still reports its count once, when the window 
   vi.useRealTimers();
 });
 
+test("a synchronous send failure in the end-of-window timer escapes nowhere and still resets the window", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  for (let i = 0; i < BURST + 30; i++) logError("loop", "locked");
+  invoke.mockImplementation(() => {
+    throw new Error("sync throw");
+  });
+  now += WINDOW_MS;
+  expect(() => vi.advanceTimersByTime(WINDOW_MS)).not.toThrow();
+  invoke.mockImplementation(async () => {});
+  invoke.mockClear();
+  for (let i = 0; i < BURST + 1; i++) logError("next", "locked"); // fresh counters: BURST go out, one is suppressed
+  expect(invoke).toHaveBeenCalledTimes(BURST);
+  now += WINDOW_MS;
+  logError("next", "locked");
+  expect(texts().slice(BURST)).toEqual(["1 more window errors suppressed", "next: locked"]);
+  vi.useRealTimers();
+});
+
 test("debug records only while the switch is on, titles intact", () => {
   logDebug(() => "saver: saved Alice's and Bob's notes.md");
   expect(invoke).not.toHaveBeenCalled();
