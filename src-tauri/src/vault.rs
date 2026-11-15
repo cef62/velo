@@ -128,6 +128,9 @@ pub struct Vault {
     /// another caller.
     pub archive_error: std::cell::Cell<Option<String>>,
     archive_read_logged: std::cell::Cell<bool>,
+    /// deleted notes whose index removal failed (a plain twin's text stays searchable until then): the next
+    /// `apply_fs_changes` (any watcher event, rescan or agent call) tries them again
+    retry: Vec<PathBuf>,
 }
 
 fn s(p: &Path) -> String {
@@ -191,6 +194,10 @@ pub(crate) fn move_to_trash(p: &Path) -> std::io::Result<()> {
     ctx.delete(p).map_err(|e| std::io::Error::other(e.to_string()))
 }
 
+/// `notes.size` of a plain twin of a locked note, stored without its text: no file has this size, so `diff` sees the
+/// row as stale whenever the file is no longer a twin, even with its mtime and size unchanged.
+const TWIN_SIZE: u64 = u64::MAX;
+
 /// Notes per index transaction in bulk paths (10k-note cold build: 500 writes 544 MB, 2000 writes 270 MB, one transaction 155 MB).
 const CHUNK: usize = 2000;
 
@@ -203,7 +210,7 @@ impl Vault {
     pub fn open_with_progress(dir: PathBuf, db_path: &Path, identity: Option<&str>, progress: &mut dyn FnMut(usize, usize)) -> anyhow::Result<Vault> {
         // revisions live next to the index db (the app data dir), keyed by vault dir
         let root = db_path.parent().unwrap_or(Path::new(".")).join("revisions").join(fnv64(&dir.to_string_lossy()));
-        let mut v = Vault { store: Store::new(dir), index: Index::open(db_path)?, unlocked: HashMap::new(), revisions: Revisions::new(root), archive_loaded: Default::default(), archive_error: Default::default(), archive_read_logged: Default::default() };
+        let mut v = Vault { store: Store::new(dir), index: Index::open(db_path)?, unlocked: HashMap::new(), revisions: Revisions::new(root), archive_loaded: Default::default(), archive_error: Default::default(), archive_read_logged: Default::default(), retry: Vec::new() };
         v.revisions.maybe_prune(now_ms());
         v.store.clean_leftovers();
         let files = v.store.list()?;
@@ -217,8 +224,10 @@ impl Vault {
         v.index.begin()?;
         for (i, (path, nf, meta)) in stale.into_iter().enumerate() {
             if let Ok(bytes) = v.store.read(path) {
-                let body = (!nf.encrypted).then(|| lossy(&bytes));
-                v.index.upsert(&s(path), nf, meta, body.as_deref())?;
+                let twin = plain_twin_of_locked(path); // see `reindex`
+                let body = (!nf.encrypted && !twin).then(|| lossy(&bytes));
+                let meta = Meta { size: if twin { TWIN_SIZE } else { meta.size }, ..*meta };
+                v.index.upsert(&s(path), nf, &meta, body.as_deref())?;
             }
             if (i + 1) % CHUNK == 0 {
                 v.index.commit()?;
@@ -251,7 +260,11 @@ impl Vault {
     #[allow(clippy::type_complexity)]
     fn diff<'a>(&self, files: &'a [(PathBuf, NoteFile, Meta)]) -> anyhow::Result<(Vec<&'a (PathBuf, NoteFile, Meta)>, Vec<String>, usize)> {
         let known = self.index.known()?;
-        let stale: Vec<_> = files.iter().filter(|(path, _, meta)| !known.get(&s(path)).is_some_and(|k| k.mtime == meta.mtime && k.size == meta.size)).collect();
+        // A plain twin's row matches only with `TWIN_SIZE`: a twin indexed with its text (an index from an older build,
+        // a crash mid-lock) or a former twin indexed without it is stale, whatever its mtime and size.
+        let locked: std::collections::HashSet<String> = files.iter().filter(|(_, nf, _)| nf.encrypted).map(|(p, ..)| s(p)).collect();
+        let twin = |p: &Path, nf: &NoteFile| !nf.encrypted && p.parent().is_some_and(|d| locked.contains(&s(&note_path(d, &nf.title, true))));
+        let stale: Vec<_> = files.iter().filter(|(path, nf, meta)| !known.get(&s(path)).is_some_and(|k| k.mtime == meta.mtime && k.size == if twin(path, nf) { TWIN_SIZE } else { meta.size })).collect();
         let present: std::collections::HashSet<String> = files.iter().map(|(p, ..)| s(p)).collect();
         let gone: Vec<String> = known.keys().filter(|k| !present.contains(*k)).cloned().collect();
         let replaced = stale.iter().filter(|(p, ..)| known.contains_key(&s(p))).count() + gone.len();
@@ -300,10 +313,38 @@ impl Vault {
         }
     }
 
-    /// Index a file already on disk; plaintext `body` is dropped for encrypted notes.
+    /// Index a file already on disk; plaintext `body` is dropped for encrypted notes, and for a plain twin of a locked
+    /// note: it counts as locked, and may be one a lock is erasing right now in this or another process (`velo --mcp`
+    /// direct mode), which writes the locked copy first so no re-index here can put the text back.
+    /// Such a twin's row is stored with `TWIN_SIZE`, so `diff` re-checks it once the twin ends; a locked note indexed
+    /// here re-indexes its plain twins (see `resync_twins`).
     fn reindex(&mut self, path: &Path, body: Option<&str>) -> anyhow::Result<()> {
         let nf = self.note(path)?;
-        self.index.upsert(&s(path), &nf, &stat(path)?, body)
+        let mut meta = stat(path)?;
+        let twin = plain_twin_of_locked(path);
+        if twin {
+            meta.size = TWIN_SIZE;
+        }
+        self.index.upsert(&s(path), &nf, &meta, body.filter(|_| !twin))?;
+        if nf.encrypted {
+            self.resync_twins(path);
+        }
+        Ok(())
+    }
+
+    /// A locked note appeared or went away: re-index its plain twins (`X.md`, `X.txt`) from disk, so `reindex` drops
+    /// their text while it exists and restores it once it is gone (its file keeps its mtime and size, so nothing else
+    /// would). A failure is retried at the next change.
+    fn resync_twins(&mut self, locked: &Path) {
+        let (Some(nf), Some(dir)) = (parse_note_file(locked).filter(|n| n.encrypted), locked.parent()) else { return };
+        for ext in ["md", "txt"] {
+            let p = dir.join(format!("{}.{ext}", nf.title));
+            if let Ok(bytes) = self.store.read(&p)
+                && self.reindex(&p, Some(&lossy(&bytes))).is_err()
+            {
+                self.retry.push(p);
+            }
+        }
     }
 
     pub fn search(&self, query: &str, sort: Sort, offset: usize, tags: &[String]) -> anyhow::Result<Page> {
@@ -651,7 +692,7 @@ impl Vault {
         // save recreates the old file. Index errors heal on the next change; an unreadable link source is skipped.
         let (from_s, to_s) = (path.to_string(), s(&to));
         if to_s != from_s {
-            if let Err(e) = self.index.remove(&from_s) {
+            if let Err(e) = self.remove_note(&from_s) {
                 crate::log::warn(&format!("velo: removing a renamed note's old index entry failed: {e}"));
             }
             if let Some(plain) = self.unlocked.remove(&from_s) {
@@ -781,14 +822,22 @@ impl Vault {
         self.revisions.encrypt_all(&nf.title, |b| crypto::encrypt(identity, b))?;
         let plain = self.store.read(from)?;
         let created = self.index.created_from_file(path)?; // the erase drops it; a failed lock's re-index restores it
-        // Erase before the move: a failure here fails the lock with nothing changed, never a lock that reports success
-        // while the plain row stays searchable.
-        self.index.remove_erasing(path)?;
-        let moved = crypto::encrypt(identity, &plain)
-            .and_then(|c| Ok(self.store.write_atomic(&to, &c)?))
-            .and_then(|_| finish_move(from, &to).context("removing plaintext note"));
-        if let Err(e) = moved {
-            // still plain: back in the index (else the next rescan does it), with its earliest file date (see `upsert`)
+        // The locked copy first: a failed write (disk full, folder not writable) leaves the index untouched. From here
+        // the plain file is a plain twin, which no re-index stores with its text (see `reindex`), in any process.
+        self.store.write_atomic(&to, &crypto::encrypt(identity, &plain)?)?;
+        // Erase before the move: a failure here fails the lock with the note still plain and indexed, never a lock
+        // that reports success while the plain row stays searchable.
+        if let Err(e) = self.index.remove_erasing(path) {
+            if let Err(re) = std::fs::remove_file(&to) {
+                // the user must know: the stray locked copy makes the plain note refuse saves
+                return Err(anyhow!("{e}; the locked copy {} could not be removed ({re}): move it to the Trash to edit the note again", to.display()));
+            }
+            self.resync_twins(&to); // another process may have indexed the note as a twin meanwhile
+            return Err(e);
+        }
+        if let Err(e) = finish_move(from, &to).context("removing plaintext note") {
+            // `finish_move` removed the locked copy: still plain, back in the index (else the next rescan does it),
+            // with its earliest file date (see `upsert`)
             let back = stat(from).and_then(|mut m| {
                 if let Some(c) = created {
                     m.birth = if m.birth > 0 { m.birth.min(c) } else { c };
@@ -806,7 +855,8 @@ impl Vault {
         // Again, now the plaintext is gone: another process (`velo --mcp` direct mode, as the app starts) may have
         // re-indexed it since the first erase. A failure is logged; the watcher's delete event erases it too.
         if let Err(e) = self.index.remove_erasing(path) {
-            crate::log::warn(&format!("velo: erasing a locked note's plain index entry failed, retried by the watcher: {e}"));
+            crate::log::warn(&format!("velo: erasing a locked note's plain index entry failed, retried at the next change: {e}"));
+            self.retry.push(from.to_path_buf());
         }
         // Older versions from a bulk (even this process's) are still in the FTS segments. Best effort from here: the
         // note is locked, and a failure (disk full) stays marked for the next lock or open.
@@ -834,7 +884,7 @@ impl Vault {
         finish_move(from, &to).context("removing encrypted note")?;
         // as in `lock_note`: the file has moved, so nothing may fail the unlock. The stale row has no text (locked
         // notes are indexed without a body); the watcher's delete event removes it.
-        if let Err(e) = self.index.remove(path) {
+        if let Err(e) = self.remove_note(path) {
             crate::log::warn(&format!("velo: removing an unlocked note's old index entry failed: {e}"));
         }
         self.unlocked.remove(path);
@@ -935,6 +985,12 @@ impl Vault {
 
     /// `apply_fs_changes`; `bulk`: a chunk of this process's bulk, whose own finish erases what it deletes.
     fn apply_paths(&mut self, paths: &[PathBuf], identity: Option<&str>, bulk: bool) -> Vec<String> {
+        let mut paths = paths.to_vec();
+        for p in std::mem::take(&mut self.retry) {
+            if !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
         let mut changed = Vec::new();
         let mut lost_plain = false;
         // Plain notes being locked elsewhere are deleted securely, in a batch of their own after the rest: a bulk is
@@ -967,8 +1023,12 @@ impl Vault {
 
     /// Drop a note from the index; a plain note whose locked twin exists (on disk, or still indexed: a sync may be
     /// rewriting it) is being locked, so its text is erased now.
+    /// Every path by which a locked note leaves the index (watcher, open, rescan, trash, rename, unlock, retry) goes
+    /// through here, so its plain twins get their text back.
     fn remove_note(&mut self, path: &str) -> anyhow::Result<()> {
-        if self.locked_twin(path) { self.index.remove_erasing(path) } else { self.index.remove(path) }
+        let r = if self.locked_twin(path) { self.index.remove_erasing(path) } else { self.index.remove(path) };
+        self.resync_twins(Path::new(path));
+        r
     }
 
     fn locked_twin(&self, path: &str) -> bool {
@@ -1002,6 +1062,7 @@ impl Vault {
                         if batched && !self.index.in_batch() {
                             return false;
                         }
+                        self.retry.push(p.clone()); // a retried path (a plain twin's erase) must not be dropped
                         continue;
                     }
                     if nf.encrypted {
@@ -1017,8 +1078,9 @@ impl Vault {
                         if batched && !self.index.in_batch() {
                             return false;
                         }
-                        // a plain twin's text stays searchable until then: say so (the next open's diff erases it)
-                        crate::log::warn(&format!("velo: removing a deleted note from the search index failed, retried at the next launch: {e}"));
+                        // a plain twin's text stays searchable until then: say so, and try again at the next change
+                        crate::log::warn(&format!("velo: removing a deleted note from the search index failed, retried at the next change: {e}"));
+                        self.retry.push(p.clone());
                         continue;
                     }
                     self.unlocked.remove(&key);
@@ -1366,6 +1428,251 @@ mod tests {
         v.lock_all();
         assert!(v.search("secretzebra", Sort::Modified, 0, &[]).unwrap().hits.is_empty());
         assert!(v.index.task_rows(&[], true).unwrap().is_empty());
+    }
+    /// #93 (a): a lock whose encrypted write fails (folder not writable, disk full) must not touch the index: the
+    /// still-plain note used to be erased first and stay out of search when the rollback re-index failed too.
+    #[cfg(unix)]
+    #[test] fn failed_lock_write_keeps_the_note_indexed() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let d = v.open_or_create("s", None, false).unwrap();
+        let _r = v.save_note(&d.path, "- [ ] writezebra", &d.hash, None, false).unwrap();
+        v.index.raw().execute_batch("CREATE TEMP TRIGGER full BEFORE INSERT ON notes BEGIN SELECT RAISE(ABORT, 'disk full'); END;").unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let r = v.lock_note(&d.path, &id);
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        v.index.raw().execute_batch("DROP TRIGGER full").unwrap();
+        assert!(r.is_err());
+        assert!(Path::new(&d.path).exists() && !dir.join("s.md.age").exists());
+        assert_eq!(v.search("writezebra", Sort::Modified, 0, &[]).unwrap().hits.len(), 1, "the still-plain note dropped out of search");
+        assert_eq!(v.index.task_rows(&[], true).unwrap().len(), 1);
+    }
+    /// #93 cross-process: once the locked copy is on disk, the plain file is a plain twin. A second process (`velo
+    /// --mcp` direct mode, a second app instance) that re-indexes it, or opens the index, must not store its text.
+    #[test] fn a_plain_twin_of_a_locked_note_is_indexed_without_its_text() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        std::fs::write(dir.join("s.md"), "- [ ] twinzebra #twintag").unwrap();
+        let mut a = open(dir.clone(), &db, None).unwrap();
+        let mut b = open(dir.clone(), &db, None).unwrap();
+        std::fs::write(dir.join("s.md.age"), crypto::encrypt(&id, b"x").unwrap()).unwrap(); // a lock mid-way
+        b.apply_fs_changes(&[dir.join("s.md")], None);
+        let leaks = |v: &Vault| (v.search("twinzebra", Sort::Modified, 0, &[]).unwrap().hits.len(), v.index.task_rows(&[], true).unwrap().len(), v.tags(true).unwrap().len());
+        assert_eq!(leaks(&a), (0, 0, 0), "a re-index stored the plain twin's text");
+        assert!(a.index.title_modified(&dir.join("s.md").to_string_lossy()).unwrap().is_some(), "still listed");
+        drop((a, b));
+        std::fs::remove_file(&db).unwrap(); // a crash between the write and the erase, then a cold open
+        a = open(dir.clone(), &db, None).unwrap();
+        assert_eq!(leaks(&a), (0, 0, 0), "a cold open stored the plain twin's text");
+        std::fs::remove_file(dir.join("s.md.age")).unwrap(); // the twin is gone, s.md unchanged: the note is plain again
+        a.apply_fs_changes(&[dir.join("s.md.age")], None);
+        assert_eq!(leaks(&a), (1, 1, 1));
+    }
+    /// #93 cross-process (review m1 on #102): another process takes the index right after the lock's erase, applies the
+    /// note and holds the write lock past the lock's busy timeout. The lock either fails with the note intact, or
+    /// succeeds with no plain text in the index. Used to succeed and leave it searchable. In practice the other process
+    /// finds the file already moved, so this pins the order (locked copy, erase, move); the twin rule and the retries
+    /// have their own deterministic tests.
+    #[test] fn a_second_process_holding_the_index_during_a_lock_leaves_no_plain_text() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut a = open(dir.clone(), &db, None).unwrap();
+        let d = a.open_or_create("s", None, false).unwrap();
+        let _r = a.save_note(&d.path, "- [ ] racezebra", &d.hash, None, false).unwrap();
+        let mut b = open(dir.clone(), &db, None).unwrap();
+        a.index.raw().busy_timeout(std::time::Duration::from_millis(100)).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let tx = std::sync::Mutex::new(tx);
+        a.index.raw().create_scalar_function("erased", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8, move |_| { tx.lock().unwrap().send(()).ok(); Ok(0) }).unwrap();
+        a.index.raw().execute_batch(&format!("CREATE TEMP TRIGGER erased AFTER DELETE ON notes WHEN OLD.path = '{}' BEGIN SELECT erased(); END;", d.path.replace('\'', "''"))).unwrap();
+        let p = PathBuf::from(&d.path);
+        let other = std::thread::spawn(move || {
+            rx.recv().unwrap(); // inside the lock's erase: `begin` waits for its commit
+            b.index.begin().unwrap();
+            assert!(b.apply_chunk(&[p], None, true, &mut vec![], &mut false));
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            b.index.commit().unwrap();
+        });
+        let r = a.lock_note(&d.path, &id);
+        other.join().unwrap();
+        a.index.raw().execute_batch("DROP TRIGGER erased").unwrap();
+        a.lock_all();
+        match r {
+            Ok(_) => {
+                assert!(a.search("racezebra", Sort::Modified, 0, &[]).unwrap().hits.is_empty(), "plain text searchable after a successful lock");
+                assert!(a.index.task_rows(&[], true).unwrap().is_empty());
+            }
+            Err(_) => {
+                assert!(Path::new(&d.path).exists() && !dir.join("s.md.age").exists());
+                assert_eq!(a.open_note(&d.path, None).unwrap().text, "- [ ] racezebra");
+            }
+        }
+    }
+    /// A plain row put back by a writer that ignores twins (an older build) and a failing second erase: the lock
+    /// still succeeds (the file has moved), and the next change in the session erases the row.
+    #[test] fn a_failed_second_erase_of_a_lock_is_retried_by_the_next_change() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let d = v.open_or_create("s", None, false).unwrap();
+        let path = d.path.replace('\'', "''");
+        v.index.raw().execute_batch(&format!(
+            "CREATE TEMP TRIGGER back AFTER INSERT ON notes WHEN NEW.path LIKE '%.md.age' BEGIN
+               INSERT INTO notes(path,title,title_folded,mtime,size,encrypted,preview,created,created_src,modified,modified_src) VALUES('{path}','s','s',1,1,0,'retryzebra',1,'file',1,'file');
+               INSERT INTO notes_fts(rowid,path,body) VALUES((SELECT rowid FROM notes WHERE path='{path}'),'{path}','retryzebra');
+             END;
+             CREATE TEMP TRIGGER full BEFORE DELETE ON notes WHEN OLD.path = '{path}' AND EXISTS(SELECT 1 FROM notes WHERE path LIKE '%.md.age') BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END;")).unwrap();
+        v.lock_note(&d.path, &id).unwrap();
+        assert_eq!(v.search("retryzebra", Sort::Modified, 0, &[]).unwrap().hits.len(), 1); // the second erase failed
+        v.index.raw().execute_batch("DROP TRIGGER back; DROP TRIGGER full").unwrap();
+        let changed = v.apply_fs_changes(&[], None);
+        assert!(v.search("retryzebra", Sort::Modified, 0, &[]).unwrap().hits.is_empty(), "the plain row is still searchable");
+        assert!(v.index.title_modified(&d.path).unwrap().is_none());
+        assert_eq!(changed, vec![d.path.clone()]);
+    }
+    /// Body, tasks, tags and outgoing links of `s.md` (`BACK`) as the index has them.
+    fn twin_text(v: &Vault) -> (usize, usize, usize, usize) {
+        (v.search("backzebra", Sort::Modified, 0, &[]).unwrap().hits.len(), v.index.task_rows(&[], true).unwrap().len(), v.tags(true).unwrap().len(), v.index.backlinks("Target").unwrap().len())
+    }
+    const BACK: &str = "- [ ] backzebra #backtag [[Target]]";
+    /// A twin pair on disk, opened: the plain copy is indexed without its text.
+    fn twin_pair() -> (Vault, PathBuf, PathBuf) {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        std::fs::write(dir.join("s.md"), BACK).unwrap();
+        std::fs::write(dir.join("s.md.age"), crypto::encrypt(&id, BACK.as_bytes()).unwrap()).unwrap();
+        let v = open(dir.clone(), &db, None).unwrap();
+        assert_eq!(twin_text(&v), (0, 0, 0, 0));
+        (v, dir, db)
+    }
+    /// #147 review M1: an unlock on another device synced in as "s.md added", then "s.md.age deleted". The plain
+    /// file keeps its mtime and size, and the delete event names only the locked copy: its text must come back.
+    #[test] fn a_twin_gets_its_text_back_when_the_watcher_sees_the_locked_copy_go() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        std::fs::write(dir.join("s.md.age"), crypto::encrypt(&id, BACK.as_bytes()).unwrap()).unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        std::fs::write(dir.join("s.md"), BACK).unwrap();
+        v.apply_fs_changes(&[dir.join("s.md")], None);
+        assert_eq!(twin_text(&v), (0, 0, 0, 0));
+        std::fs::remove_file(dir.join("s.md.age")).unwrap();
+        v.apply_fs_changes(&[dir.join("s.md.age")], None);
+        assert_eq!(twin_text(&v), (1, 1, 1, 1));
+        assert!(v.rescan(None).is_empty(), "the row is current: a rescan finds nothing");
+    }
+    /// #147 review M1: the user trashes the locked copy of a twin pair in the app.
+    #[test] fn a_twin_gets_its_text_back_when_its_locked_copy_is_trashed() {
+        let (mut v, dir, _db) = twin_pair();
+        v.delete_note_with(&dir.join("s.md.age").to_string_lossy(), |p| std::fs::remove_file(p)).unwrap();
+        assert_eq!(twin_text(&v), (1, 1, 1, 1));
+    }
+    /// #147 review M1: the twin ended while Velo was closed. A warm open must not skip the text-less row because the
+    /// file's mtime and size are unchanged.
+    #[test] fn a_twin_gets_its_text_back_at_a_warm_open() {
+        let (v, dir, db) = twin_pair();
+        drop(v);
+        std::fs::remove_file(dir.join("s.md.age")).unwrap();
+        let v = open(dir.clone(), &db, None).unwrap();
+        assert_eq!(twin_text(&v), (1, 1, 1, 1));
+    }
+    /// #147 review M1: the watcher missed the delete; a rescan repairs it.
+    #[test] fn a_twin_gets_its_text_back_at_a_rescan() {
+        let (mut v, dir, _db) = twin_pair();
+        std::fs::remove_file(dir.join("s.md.age")).unwrap();
+        let changed = v.rescan(None);
+        assert_eq!(twin_text(&v), (1, 1, 1, 1));
+        assert!(changed.contains(&dir.join("s.md").to_string_lossy().into_owned()), "{changed:?}");
+        assert!(v.rescan(None).is_empty(), "no churn once current");
+    }
+    /// The reverse: a lock on another device syncs in as "s.md.age added" first. The plain row loses its text at
+    /// once, though the event names only the locked copy; a rescan of a still-twin row finds nothing to do.
+    #[test] fn a_plain_note_loses_its_text_when_a_locked_copy_appears() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        std::fs::write(dir.join("s.md"), BACK).unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        assert_eq!(twin_text(&v), (1, 1, 1, 1));
+        std::fs::write(dir.join("s.md.age"), crypto::encrypt(&id, BACK.as_bytes()).unwrap()).unwrap();
+        v.apply_fs_changes(&[dir.join("s.md.age")], None);
+        assert_eq!(twin_text(&v), (0, 0, 0, 0));
+        assert!(v.rescan(None).is_empty(), "a twin's row is current: no churn");
+    }
+    /// #147 review m1 / Copilot: Velo killed between the lock's write of the locked copy and its erase, or an index
+    /// written by an older build that kept a twin's text. A warm open (index kept, `s.md` unchanged) must drop it.
+    #[test] fn a_warm_open_drops_the_text_of_a_twin_indexed_with_it() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        std::fs::write(dir.join("s.md"), BACK).unwrap();
+        let v = open(dir.clone(), &db, None).unwrap();
+        assert_eq!(twin_text(&v), (1, 1, 1, 1));
+        drop(v);
+        std::fs::write(dir.join("s.md.age"), crypto::encrypt(&id, BACK.as_bytes()).unwrap()).unwrap();
+        let v = open(dir.clone(), &db, None).unwrap();
+        assert_eq!(twin_text(&v), (0, 0, 0, 0));
+    }
+    /// Renaming the locked copy of a twin pair to another title ends the twin too.
+    #[test] fn a_twin_gets_its_text_back_when_its_locked_copy_is_renamed() {
+        let (mut v, dir, _db) = twin_pair();
+        let r = v.rename_note(&dir.join("s.md.age").to_string_lossy(), "other", false).unwrap();
+        assert!(r.path.ends_with("other.md.age"));
+        assert_eq!(twin_text(&v), (1, 1, 1, 1));
+    }
+    /// Unlocking `s.md.age` beside a `s.txt` twin: `s.txt` is no longer a twin and gets its text back.
+    #[test] fn a_txt_twin_gets_its_text_back_when_the_locked_note_is_unlocked() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        std::fs::write(dir.join("s.txt"), BACK).unwrap();
+        std::fs::write(dir.join("s.md.age"), crypto::encrypt(&id, b"locked").unwrap()).unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        assert_eq!(twin_text(&v), (0, 0, 0, 0));
+        v.unlock_note(&dir.join("s.md.age").to_string_lossy(), &id).unwrap();
+        assert_eq!(twin_text(&v), (1, 1, 1, 1));
+    }
+    /// Copilot on #147: a retried path whose re-index fails (a plain twin recreated by a sync) stays on the retry list.
+    #[test] fn a_retried_path_whose_reindex_fails_is_kept() {
+        let (dir, db) = setup();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let p = dir.join("s.md");
+        v.retry.push(p.clone());
+        std::fs::write(&p, BACK).unwrap();
+        v.index.raw().execute_batch("CREATE TEMP TRIGGER full BEFORE INSERT ON notes BEGIN SELECT RAISE(ABORT, 'disk full'); END;").unwrap();
+        v.apply_fs_changes(&[], None);
+        assert_eq!(v.retry, vec![p.clone()]);
+        v.index.raw().execute_batch("DROP TRIGGER full").unwrap();
+        assert_eq!(v.apply_fs_changes(&[], None), vec![p.to_string_lossy().into_owned()]);
+        assert_eq!(twin_text(&v), (1, 1, 1, 1));
+    }
+    /// #147 review m2: the erase fails and the locked copy can't be removed either. The error must name the stray
+    /// file (it makes the plain note refuse saves), not only the index error.
+    #[cfg(unix)]
+    #[test] fn a_failed_lock_that_leaves_its_locked_copy_says_so() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let d = v.open_or_create("s", None, false).unwrap();
+        let ro = dir.clone();
+        v.index.raw().create_scalar_function("readonly", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8, move |_| {
+            std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).ok();
+            Ok(0)
+        }).unwrap();
+        v.index.raw().execute_batch("CREATE TEMP TRIGGER full BEFORE DELETE ON notes WHEN OLD.path NOT LIKE '%.age' BEGIN SELECT readonly(); SELECT RAISE(ABORT, 'disk I/O error'); END;").unwrap();
+        let r = v.lock_note(&d.path, &id);
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let e = r.unwrap_err().to_string();
+        assert!(e.contains("disk I/O error") && e.contains("s.md.age") && e.contains("Trash"), "{e}");
+        assert!(Path::new(&d.path).exists()); // nothing lost
+    }
+    /// #93 (b): a note locked on another machine whose plain row can't be erased by the watcher is erased by the next
+    /// change in the session, not only at the next rescan or launch.
+    #[test] fn a_failed_watcher_erase_is_retried_by_the_next_change() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let d = v.open_or_create("s", None, false).unwrap();
+        let _r = v.save_note(&d.path, "- [ ] watchzebra", &d.hash, None, false).unwrap();
+        v.index.raw().execute_batch("CREATE TEMP TRIGGER full BEFORE DELETE ON notes WHEN OLD.path NOT LIKE '%.age' BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END;").unwrap();
+        std::fs::write(dir.join("s.md.age"), crypto::encrypt(&id, b"x").unwrap()).unwrap();
+        std::fs::remove_file(&d.path).unwrap();
+        v.apply_fs_changes(&[dir.join("s.md"), dir.join("s.md.age")], None);
+        assert_eq!(v.search("watchzebra", Sort::Modified, 0, &[]).unwrap().hits.len(), 1); // the erase failed
+        v.index.raw().execute_batch("DROP TRIGGER full").unwrap();
+        std::fs::write(dir.join("other.md"), "x").unwrap();
+        let changed = v.apply_fs_changes(&[dir.join("other.md")], None);
+        assert!(v.search("watchzebra", Sort::Modified, 0, &[]).unwrap().hits.is_empty(), "the plain row is still searchable");
+        assert!(v.index.task_rows(&[], true).unwrap().is_empty());
+        assert!(changed.contains(&d.path), "the UI is told: {changed:?}");
     }
     /// With front matter off, an atomic save (new inode, new birth time) keeps the indexed created date.
     #[test] fn file_dated_created_survives_saves() {

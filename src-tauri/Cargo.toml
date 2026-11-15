@@ -45,6 +45,8 @@ strip = true
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# tests only: an authorizer makes a nested RELEASE fail, a scalar function signals a thread from a trigger
+rusqlite = { version = "0.41.1", features = ["bundled", "hooks", "functions"] }
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 tauri-plugin-single-instance = "2.5.5"

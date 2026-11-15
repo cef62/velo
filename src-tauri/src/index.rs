@@ -1179,6 +1179,45 @@ mod tests {
             assert!(i.known().unwrap().is_empty());
         }
     }
+    /// #93: a failing RELEASE of a note's nested savepoint inside a `begin` batch rolls that note back alone and keeps
+    /// the batch open. Nothing real was found to make it fail (deferred keys are checked at the outermost end only):
+    /// an authorizer denying the next RELEASE stands in.
+    #[test] fn failed_nested_release_rolls_back_the_note_and_keeps_the_batch() {
+        use rusqlite::hooks::{AuthAction, Authorization, TransactionOperation};
+        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+        let nf = |t: &str| NoteFile { title: t.into(), encrypted: false };
+        let m = Meta { mtime: 1, size: 1, birth: 0 };
+        for erase in [false, true] {
+            let mut i = idx(&[("a.md", "- [ ] alpha #one", 1), ("b.md", "beta", 1)]);
+            let deny = Arc::new(AtomicBool::new(false));
+            let d = deny.clone();
+            i.db.authorizer(Some(move |ctx: rusqlite::hooks::AuthContext<'_>| match ctx.action {
+                AuthAction::Savepoint { operation: TransactionOperation::Release, .. } if d.swap(false, Ordering::SeqCst) => Authorization::Deny,
+                _ => Authorization::Allow,
+            })).unwrap();
+            i.begin().unwrap();
+            i.upsert("c.md", &nf("c"), &m, Some("gamma")).unwrap();
+            deny.store(true, Ordering::SeqCst);
+            let r = if erase { i.remove_erasing("a.md") } else { i.remove("a.md") };
+            assert!(r.is_err(), "RELEASE was not denied (erase={erase})");
+            assert!(i.in_batch(), "the batch was lost (erase={erase})");
+            deny.store(true, Ordering::SeqCst);
+            assert!(i.upsert("b.md", &nf("b"), &m, Some("new zebra")).is_err());
+            assert!(i.in_batch(), "the batch was lost by the upsert (erase={erase})");
+            i.remove("c.md").unwrap(); // the batch still works
+            i.upsert("d.md", &nf("d"), &m, Some("delta")).unwrap();
+            i.commit().unwrap();
+            assert!(i.db.is_autocommit());
+            let mut k: Vec<_> = i.known().unwrap().into_keys().collect();
+            k.sort();
+            assert_eq!(k, ["a.md", "b.md", "d.md"]);
+            let u = HashMap::new();
+            assert_eq!(paths(&i, "alpha", Sort::Title, 0, 10, &u), ["a.md"]); // a's delete rolled back whole
+            assert_eq!((i.task_rows(&[], true).unwrap().len(), i.tags(true).unwrap().len()), (1, 1));
+            assert_eq!(paths(&i, "beta", Sort::Title, 0, 10, &u), ["b.md"]); // b keeps its old body
+            assert!(paths(&i, "zebra", Sort::Title, 0, 10, &u).is_empty());
+        }
+    }
     /// Re-indexing runs every DELETE once per note: a scan instead of an index search is O(notes²) over a rescan.
     #[test] fn note_deletes_search_an_index() {
         let i = idx(&[]);
