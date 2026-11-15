@@ -341,25 +341,36 @@ impl Vault {
     /// Index a file already on disk; plaintext `body` is dropped for encrypted notes, and for a plain twin of a locked
     /// note: it counts as locked, and may be one a lock is erasing right now in this or another process (`velo --mcp`
     /// direct mode), which writes the locked copy first so no re-index here can put the text back.
-    /// Such a twin's row is stored with `TWIN_SIZE`, so `diff` re-checks it once the twin ends; a locked note new to the
-    /// index here re-indexes its plain twins (see `resync_twins`).
+    /// Such a twin's row is stored with `TWIN_SIZE`, so `diff` re-checks it once the twin ends.
+    /// Every re-index of a locked note first re-indexes the rows of its plain twins by name (`X.md`, `X.txt`): a few
+    /// lookups, before its own row is written, so neither a failed write nor our own write's skipped event (a locked
+    /// copy re-created under the open editor) leaves their text. A locked note new to the index also scans every row
+    /// (see `resync_twins`) for the twins a name can't find. A plain file arriving later asks the rule.
     fn reindex(&mut self, path: &Path, body: Option<&str>) -> anyhow::Result<()> {
-        self.reindex_as(path, body, false)
-    }
-
-    /// `reindex`; `created`: this process just wrote the file where none was. A locked note saved again changes no
-    /// twin, so only a new one scans them: new to the index, or new on disk (its row may outlive the file while its
-    /// delete waits in a later batch, and our own write's event is skipped). A plain file arriving later asks the rule.
-    fn reindex_as(&mut self, path: &Path, body: Option<&str>, created: bool) -> anyhow::Result<()> {
         let nf = self.note(path)?;
         let mut meta = stat(path)?;
-        let body = row_text(path, &mut meta, body);
         let key = s(path);
-        let new = nf.encrypted && (created || self.index.title_modified(&key).ok().flatten().is_none());
-        self.index.upsert(&key, &nf, &meta, body)?;
-        if new {
-            self.resync_twins(path);
+        if nf.encrypted && let Some(dir) = path.parent() {
+            for ext in ["md", "txt"] {
+                let p = dir.join(format!("{}.{ext}", nf.title));
+                // only an existing row under this exact spelling: a case-insensitive disk opens other spellings too
+                if self.index.title_modified(&s(&p)).map_or(true, |r| r.is_some()) {
+                    match self.read_for_index(&p) {
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                        r => {
+                            if r.map_err(anyhow::Error::from).and_then(|b| self.reindex(&p, b.map(|b| lossy(&b)).as_deref())).is_err() {
+                                self.retry.push(p);
+                            }
+                        }
+                    }
+                }
+            }
+            if self.index.title_modified(&key).ok().flatten().is_none() {
+                self.resync_twins(path);
+            }
         }
+        let body = row_text(path, &mut meta, body);
+        self.index.upsert(&key, &nf, &meta, body)?;
         Ok(())
     }
 
@@ -448,9 +459,12 @@ impl Vault {
     /// which also takes the plain twin's text, or retry it at the next change.
     fn list_stray_lock(&mut self, to: &Path, locked: &[u8]) {
         self.store.take_self_write(to, locked);
-        if self.reindex_as(to, None, true).is_err() {
-            self.retry.push(to.to_path_buf());
-        }
+        self.deferring_resync(|v| {
+            if v.reindex(to, None).is_err() {
+                v.retry.push(to.to_path_buf());
+            }
+            v.resync_twins(to); // also over a stale row of `to`
+        });
     }
 
     pub fn search(&self, query: &str, sort: Sort, offset: usize, tags: &[String]) -> anyhow::Result<Page> {
@@ -740,13 +754,12 @@ impl Vault {
             text.as_bytes().to_vec()
         };
         let before = std::fs::read(p).ok(); // the version this save replaces, for the revision snapshot
-        let created = p.symlink_metadata().is_err(); // a locked note deleted under the open editor comes back
         let mut res = self.store.save(p, &bytes, base_hash)?;
-        let (target, created) = match &res {
-            SaveResult::Saved { .. } => (p.to_path_buf(), created),
-            SaveResult::Conflict { conflict_path, .. } => (PathBuf::from(conflict_path), true),
+        let target = match &res {
+            SaveResult::Saved { .. } => p.to_path_buf(),
+            SaveResult::Conflict { conflict_path, .. } => PathBuf::from(conflict_path),
         };
-        self.reindex_as(&target, (!encrypted).then_some(text), created)?;
+        self.reindex(&target, (!encrypted).then_some(text))?;
         if let Some(c) = parse_note_file(&target).filter(|_| target != p) {
             self.archive_follow(|e| e.retain(|t| fold(t) != fold(&c.title)));
         }
@@ -970,7 +983,10 @@ impl Vault {
         }
         // The file has moved: from here on nothing may fail the lock (as in `rename_note`), or the UI keeps the old
         // path, whose saves are refused. Index errors heal on the next change.
-        self.reindex_as(&to, None, true).ok();
+        self.deferring_resync(|v| {
+            v.reindex(&to, None).ok();
+            v.resync_twins(&to); // also over a stale row of `to`
+        });
         // Again, now the plaintext is gone: another process (`velo --mcp` direct mode, as the app starts) may have
         // re-indexed it since the first erase. A failure is logged; the watcher's delete event erases it too.
         if let Err(e) = self.index.remove_erasing(path) {
@@ -2122,6 +2138,88 @@ mod tests {
         v.lock_all();
         assert_eq!((twin_text(&v), text_cells(&v)), ((0, 0, 0, 0), 0));
     }
+    /// A locked `s`, open in the editor, then unlocked on another device: `s.md` (with front matter) is applied and the
+    /// delete of `s.md.age` waits in a later batch. Returns (vault, dir, locked path, editor hash, id, locked bytes).
+    fn unlocked_elsewhere() -> (Vault, PathBuf, String, String, String, Vec<u8>) {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, Some(&id)).unwrap();
+        let d = v.open_or_create("s", Some(&id), false).unwrap();
+        v.save_note(&d.path, "orig", &d.hash, Some(&id), false).unwrap();
+        let locked = v.lock_note(&d.path, &id).unwrap();
+        let doc = v.open_note(&locked, Some(&id)).unwrap();
+        let bytes = std::fs::read(&locked).unwrap();
+        std::fs::remove_file(&locked).unwrap();
+        std::fs::write(dir.join("s.md"), format!("---\naliases: [backalias]\ntags: [backfmtag]\n---\n{BACK}")).unwrap();
+        v.apply_fs_changes(&[dir.join("s.md")], None);
+        assert_eq!(twin_text(&v).0, 1); // no locked copy on disk: the text is fine
+        (v, dir, locked, doc.hash, id, bytes)
+    }
+    /// `text_cells`, plus aliases.
+    fn all_cells(v: &Vault) -> i64 {
+        text_cells(v) + v.index.raw().query_row("SELECT count(*) FROM aliases", [], |r| r.get::<_, i64>(0)).unwrap()
+    }
+    /// #156 scoped check m1: the sync puts back the same locked bytes, the editor autosaves over them (the file
+    /// exists, the row never went), and the watcher skips the restore's event as our own write. A plain `s.txt` too.
+    #[test] fn an_autosave_over_a_restored_locked_copy_takes_its_twins_text() {
+        let (mut v, dir, locked, hash, id, bytes) = unlocked_elsewhere();
+        std::fs::write(dir.join("s.txt"), BACK).unwrap();
+        v.apply_fs_changes(&[dir.join("s.txt")], None);
+        let age = dir.join("s.md.age");
+        std::fs::write(&age, &bytes).unwrap(); // its event waits in a later batch
+        v.save_note(&locked, "edited here", &hash, Some(&id), false).unwrap();
+        v.apply_fs_changes(&[age], None);
+        v.apply_fs_changes(&[], None);
+        v.lock_all();
+        assert_eq!((twin_text(&v), all_cells(&v)), ((0, 0, 0, 0), 0));
+    }
+    /// #156 scoped check m2: a save that re-creates the locked copy but can't write its row still takes the twin's text.
+    #[test] fn a_save_whose_row_write_fails_takes_its_twins_text() {
+        let (mut v, dir, locked, hash, id, _) = unlocked_elsewhere();
+        let age = dir.join("s.md.age");
+        let key = s(&age).replace('\'', "''");
+        v.index.raw().execute_batch(&format!("CREATE TEMP TRIGGER f BEFORE INSERT ON notes WHEN NEW.path = '{key}' BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END;")).unwrap();
+        assert!(v.save_note(&locked, "edited here", &hash, Some(&id), false).is_err());
+        assert!(age.exists());
+        assert_eq!((twin_text(&v), all_cells(&v)), ((0, 0, 0, 0), 0));
+        v.index.raw().execute_batch("DROP TRIGGER f").unwrap();
+        v.apply_fs_changes(&[age], None); // skipped as our own write
+        v.lock_all();
+        assert_eq!((twin_text(&v), all_cells(&v)), ((0, 0, 0, 0), 0));
+    }
+    /// A save that brings back a locked note whose row went (its delete was applied) scans every row: a twin under
+    /// another spelling (`S.md`, on a disk that pairs it with `s.md.age`) is out of reach by name.
+    #[test] fn a_save_that_brings_back_a_locked_row_scans_its_twins() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, Some(&id)).unwrap();
+        let d = v.open_or_create("s", Some(&id), false).unwrap();
+        let locked = v.lock_note(&d.path, &id).unwrap();
+        let doc = v.open_note(&locked, Some(&id)).unwrap();
+        std::fs::remove_file(&locked).unwrap();
+        v.apply_fs_changes(&[PathBuf::from(&locked)], None);
+        let other = dir.join("S.md");
+        std::fs::write(&other, BACK).unwrap();
+        v.apply_fs_changes(std::slice::from_ref(&other), None);
+        assert_eq!(twin_text(&v).0, 1);
+        v.save_note(&locked, "edited here", &doc.hash, Some(&id), false).unwrap();
+        let folds = plain_twin_of_locked(&other);
+        assert_eq!(twin_text(&v).0, if folds { 0 } else { 1 }, "the disk pairs S.md with s.md.age: {folds}");
+    }
+    /// #156 scoped check: Velo locks `s.md` while a stale `s.md.age` row waits for its delete event; a plain `s.txt`
+    /// took text meanwhile. A disk that pairs `S.txt` with `s.md.age` gets `S.txt`, out of reach by name: the lock
+    /// itself scans.
+    #[test] fn a_lock_over_a_stale_locked_row_takes_txt_text() {
+        let (mut v, dir, _, _, id, _) = unlocked_elsewhere();
+        let folds = dir.join("S.MD").exists();
+        let (plain, txt) = (dir.join("s.md"), dir.join(if folds { "S.txt" } else { "s.txt" }));
+        std::fs::write(&plain, "plain md").unwrap();
+        std::fs::write(&txt, BACK).unwrap();
+        v.apply_fs_changes(&[plain.clone(), txt], None);
+        assert_eq!(twin_text(&v).0, 1);
+        let to = v.lock_note(&s(&plain), &id).unwrap();
+        v.apply_fs_changes(&[plain, PathBuf::from(&to)], None);
+        v.lock_all();
+        assert_eq!((twin_text(&v), all_cells(&v)), ((0, 0, 0, 0), 0));
+    }
     /// #156 review 4 n3: a folder that can't be listed is not a folder that lists nothing: every changed note keeps
     /// its row.
     #[cfg(unix)]
@@ -2183,6 +2281,7 @@ mod tests {
         let d = v.open_note(&p, Some(&id)).unwrap();
         v.save_note(&p, "edited", &d.hash, Some(&id), false).unwrap();
         v.append_task(&p, "t", Some(&id), false).unwrap();
+        v.toggle_task(&p, 1, "- [ ] t", Some(&id), false).unwrap();
         assert_eq!(v.resync_scans, scans);
         for same in [false, true] {
             let (dir, db) = setup();
@@ -2215,6 +2314,9 @@ mod tests {
         // a row whose size isn't an integer makes `known()` fail
         v.index.raw().execute_batch("CREATE TEMP TRIGGER bad AFTER INSERT ON notes WHEN NEW.encrypted = 1 BEGIN
             INSERT INTO notes(path,title,title_folded,mtime,size,encrypted,preview,created,created_src,modified,modified_src) VALUES('zz.md','zz','zz',1,'x',0,'',1,'file',1,'file'); END;").unwrap();
+        // a row only the scan fixes (its file is gone, its delete event waits): a twin still on disk loses its text
+        // by name, without the scan
+        std::fs::remove_file(dir.join("s.md")).unwrap();
         std::fs::write(dir.join("s.md.age"), crypto::encrypt(&id, b"x").unwrap()).unwrap();
         v.apply_fs_changes(&[dir.join("s.md.age")], None);
         assert!(v.index.known().is_err());
