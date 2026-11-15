@@ -31,10 +31,19 @@ import { noInfo, type AppState, type Store } from "./store";
 
 export type Api = typeof ApiModule;
 
+/**
+ * Why an update install may not start now, or null: the one rule for the pill and the What's new window. A dialog may
+ * hold the user's input: a native one (`dialogs`, counted by the controller) or a DOM modal in the main window (`modal`;
+ * only the What's new window can ask under one, the pill cannot be clicked there). `busy`: an action is in flight.
+ */
+export const installRefusal = (s: { modal: boolean; dialogs: number; busy: boolean }): string | null =>
+  s.modal || s.dialogs > 0 ? DIALOG_MSG : s.busy ? BUSY_MSG : null;
+
 export const INVALID_TITLE = 'A title can\'t contain / \\ : * ? " < > | ] or start with a dot';
 
 
 const BUSY_MSG = "Busy — try again in a moment";
+export const DIALOG_MSG = "Close the open dialog in the velo window first, then try again.";
 const UPDATE_BUSY = "An update check or install is already running"; // update.rs BUSY
 const TASK_MOVED = "This task changed — refreshed";
 const UNDO_MS = 5000;
@@ -61,8 +70,15 @@ export class Controller {
   protected preview!: Preview;
   protected readonly results: Results;
   protected readonly history = new History();
-  // Set while a lock/unlock hand-off is in flight: the open note's file is moving, so navigation is refused.
-  busy = false;
+  // Set while a lock/unlock hand-off (or another action that moves the open note) is in flight: navigation is refused.
+  // An accepted update install holds it too, until it fails: an action clearing its own hold never ends the install's.
+  protected held = false;
+  get busy() {
+    return this.held || this.installing;
+  }
+  set busy(on: boolean) {
+    this.held = on;
+  }
   // One-shot notice (e.g. keychain unavailable) that survives the next err reset.
   protected notice = "";
   protected titles = new Set<string>(); // folded titles of all notes, for wikilink existence
@@ -73,7 +89,10 @@ export class Controller {
   protected searchSeq = 0;
   protected searching: Promise<void> = Promise.resolve(); // latest list reset, awaited by Enter so it never acts on stale rows
   protected settingsQueue: Promise<unknown> = Promise.resolve();
+  // An update install was accepted: from then until it fails, `busy` holds and the editor stays frozen (velo restarts).
   protected installing = false;
+  protected install: Promise<string | null> = Promise.resolve(null); // that install's outcome, while `installing`
+  protected dialogs = 0; // native dialogs open now (confirm, file pickers): they block the main window, not What's new
 
   // Wikilinks, tags and links act the same in the preview and in rich edit.
   readonly links: RichOpts = {
@@ -149,6 +168,25 @@ export class Controller {
 
   protected setErr(msg: string) {
     this.store.set({ err: msg, errFromSave: false });
+  }
+
+  /**
+   * Every native dialog opens through here. While one is open an update install is refused (the dialog blocks only the
+   * main window: What's new stays clickable); an answer given once an install is running counts as `cancelled`, so the
+   * action that asked never continues under the install. Together: no order of the two can unfreeze the editor.
+   */
+  protected async native<T>(open: () => Promise<T>, cancelled: T): Promise<T> {
+    this.dialogs++;
+    try {
+      const r = await open();
+      return this.installing ? cancelled : r;
+    } finally {
+      this.dialogs--;
+    }
+  }
+
+  protected confirm(message: string, o: Parameters<UiPort["confirm"]>[1]) {
+    return this.native(() => this.ui.confirm(message, o), false);
   }
 
   protected clearErr() {
@@ -959,7 +997,7 @@ export class Controller {
   requestClose(): Promise<boolean> {
     return shouldClose({
       flush: () => this.editor.flush(),
-      ask: (msg) => this.ui.confirm(msg, { title: "Unsaved edits", kind: "warning" }),
+      ask: (msg) => this.confirm(msg, { title: "Unsaved edits", kind: "warning" }),
       lastError: () => this.store.get().err,
     });
   }
@@ -1033,7 +1071,7 @@ export class Controller {
     if (!path) return;
     const title = open ? this.store.get().title : this.results.get(sel)?.title;
     const row = this.results.indexOf(path);
-    if (!(await this.ui.confirm(`Move “${title}” to the Trash?`, { title: "Delete note", kind: "warning", okLabel: "Move to Trash" }))) return;
+    if (!(await this.confirm(`Move “${title}” to the Trash?`, { title: "Delete note", kind: "warning", okLabel: "Move to Trash" }))) return;
     this.busy = true;
     let reopen = false;
     try {
@@ -1130,7 +1168,7 @@ export class Controller {
     try {
       if (!(await this.editor.flush())) return this.editor.focus();
       const n = await this.api.backlinkCount(old);
-      const rewrite = n > 0 && (await this.ui.confirm(`Update ${n} links to the new title?`, { title: "Rename", kind: "info" }));
+      const rewrite = n > 0 && (await this.confirm(`Update ${n} links to the new title?`, { title: "Rename", kind: "info" }));
       const r = await this.api.renameNote(path, title, rewrite);
       this.history.rename(path, r.path);
       const doc = await this.api.openNote(r.path);
@@ -1265,7 +1303,7 @@ export class Controller {
   }
 
   async deleteSaved(name: string) {
-    if (!(await this.ui.confirm(`Delete the saved search “${name}”?`, { title: "Delete saved search", kind: "warning", okLabel: "Delete" }))) return;
+    if (!(await this.confirm(`Delete the saved search “${name}”?`, { title: "Delete saved search", kind: "warning", okLabel: "Delete" }))) return;
     try {
       await this.writeSaved((l) => removeFrom(l, name));
       this.store.set((s) => (s.appliedSaved !== null && fold(s.appliedSaved) === fold(name) ? { appliedSaved: null } : {})); // its chips stay as plain tags
@@ -1428,7 +1466,7 @@ export class Controller {
       return;
     }
     try {
-      const path = await this.ui.saveFile(exportFileName(req.title, localToday()));
+      const path = await this.native(() => this.ui.saveFile(exportFileName(req.title, localToday())), null);
       if (path === null) return update({ pending: false });
       await this.api.exportMarkdown(path, req);
       this.store.set({ exporting: null });
@@ -1793,7 +1831,7 @@ export class Controller {
     try {
       const ts = this.store.get().info.revisions?.find((r) => r.id === id)?.ts;
       const when = ts === undefined ? "earlier" : new Date(ts).toLocaleString();
-      if (!(await this.ui.confirm(`Replace the note with this version from ${when}? The current text is kept as a revision.`, { title: "Restore revision", okLabel: "Restore" }))) return;
+      if (!(await this.confirm(`Replace the note with this version from ${when}? The current text is kept as a revision.`, { title: "Restore revision", okLabel: "Restore" }))) return;
       if (this.busy) return this.setErr(BUSY_MSG);
       const text = await this.api.readRevision(path, id);
       // Snapshot what the editor holds right before the replace; again if keys were typed meanwhile.
@@ -1890,7 +1928,7 @@ export class Controller {
   /** First-run chooser: pick the notes folder and load it. */
   async chooseFolder() {
     try {
-      const dir = await this.ui.chooseDirectory();
+      const dir = await this.native(() => this.ui.chooseDirectory(), null);
       if (typeof dir !== "string") return;
       const seq = this.archiveErrSeq; // a failure reported after this is about the new folder: it must stay
       await this.updateSettings((cur) => this.api.setSettings({ ...cur, notes_dir: dir }));
@@ -1979,29 +2017,49 @@ export class Controller {
     }
   }
 
-  /** Save, freeze the editor, then install; the backend relaunches velo. On failure the editor comes back. */
-  async installUpdate() {
+  /**
+   * Save, freeze the editor, then install; the backend relaunches velo. On failure the editor comes back. Resolves with
+   * why the install did not start or failed; null on a repeat click; never while velo restarts.
+   * `modal`: a DOM modal is open in the main window (the What's new window's request; the pill cannot be clicked then).
+   */
+  async installUpdate(modal = false): Promise<string | null> {
     const u = this.store.get().update;
-    if (u?.status !== "available" || this.installing) return; // a repeat click
-    if (this.busy) return this.setErr(BUSY_MSG);
-    this.busy = this.installing = true;
+    if (u?.status !== "available" || this.installing) return null; // a repeat click
+    // checked and taken with no await in between: nothing can start between the check and the hold
+    const refused = installRefusal({ modal, dialogs: this.dialogs, busy: this.busy });
+    if (refused) {
+      this.setErr(refused);
+      return `The update did not start: ${refused}`;
+    }
+    this.installing = true;
+    return (this.install = this.runInstall(u));
+  }
+
+  protected async runInstall(u: NonNullable<AppState["update"]>): Promise<string | null> {
+    const before = this.store.get().err;
     try {
-      if (!(await this.editor.flush())) return; // the save error stays visible; nothing is lost
+      if (!(await this.editor.flush())) {
+        this.installing = false; // the save error stays visible; nothing is lost
+        const err = this.store.get().err;
+        return err && err !== before ? `The update did not start: ${err}` : "The update did not start. The velo window says why.";
+      }
       this.newShow(); // a note reply still on its way must not load (load ends the suspension)
       this.editor.suspend(); // the relaunch skips the close flow: no edit may start now
       this.store.set({ update: { ...u, status: "installing", message: `Downloading velo ${u.version}…` } });
-      await this.api.installUpdate();
+      await this.api.installUpdate(u.version); // only the version shown: a newer one found since is refused
+      return null; // velo restarts: `installing` stays, so nothing unfreezes the editor before that
     } catch (e) {
+      this.installing = false;
       this.editor.resume();
       if (e === UPDATE_BUSY) {
         this.store.set({ update: u }); // the daily check is running; the update is still there
         this.setErr("Checking for updates — try again in a moment");
-      } else {
-        // No Install button: the backend dropped the update; the next check announces it again.
-        this.store.set({ update: { version: u.version, status: "failed", message: `Update failed: ${errText(e)}` } });
+        return "The update did not start: Checking for updates — try again in a moment";
       }
-    } finally {
-      this.busy = this.installing = false;
+      // No Install button: the backend dropped the update; the next check announces it again.
+      const message = `Update failed: ${errText(e)}`;
+      this.store.set({ update: { version: u.version, status: "failed", message } });
+      return message;
     }
   }
 
@@ -2023,8 +2081,26 @@ export class Controller {
     if (this.store.get().update?.status !== "installing") this.store.set({ update: null });
   }
 
+  /** The What's new window; the GitHub release page if the window cannot open. */
   openReleaseNotes(version: string) {
-    void this.ui.openUrl(`https://github.com/cef62/velo/releases/tag/v${version}`).catch((e) => this.setErr(String(e)));
+    void this.api
+      .openWhatsNew()
+      .catch((e) => {
+        logError("What's new window not opened", e, "warn");
+        return this.ui.openUrl(`https://github.com/cef62/velo/releases/tag/v${version}`);
+      })
+      .catch((e) => this.setErr(String(e)));
+  }
+
+  /**
+   * "Install and restart" in the What's new window: the same install as the pill's. `modal`: a DOM modal is open in the
+   * main window. Resolves with the reason the install did not start or failed (for that window), or never while velo
+   * restarts. An install already running (the pill's) is joined: its outcome is this request's, so the window always
+   * ends on progress, a reason, or the restart.
+   */
+  async installFromWhatsNew(version: string, modal: boolean): Promise<string | null> {
+    this.onUpdateAvailable(version); // the pill may have been dismissed meanwhile
+    return this.installing ? this.install : this.installUpdate(modal);
   }
 
   /** Title-bar Retry after a save error. */

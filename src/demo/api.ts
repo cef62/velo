@@ -8,6 +8,7 @@ import { frontMatterRange, stripFrontMatter } from "../frontmatter";
 import { TASK_ITEM } from "../preview";
 import { toggleTaskLine } from "../tasks";
 import { version } from "../../package.json";
+import { demoUpdate, post } from "./updates";
 
 export type * from "../api";
 
@@ -500,8 +501,17 @@ export const setupPassphrase = async (passphrase: string): Promise<string | null
 };
 export const identityFileExists = async (): Promise<boolean> => true;
 export const indexStatus = async (): Promise<[number, number] | null> => null;
-export const checkUpdate = async (): Promise<{ version: string } | null> => null;
-export const installUpdate = async (): Promise<void> => {};
+// `?update=big|patch` (src/demo/updates.ts): a fixture update; the demo has no second window, so What's new is a tab
+export const checkUpdate = async (): Promise<{ version: string } | null> => demoUpdate;
+export const openWhatsNew = async (): Promise<void> => void window.open(new URL(`whatsnew.html${location.search}`, location.href), "_blank");
+// the What's new tab, if open, plays the download; then the install fails, as nothing can install here: the controller
+// releases its install hold (a resolved install would keep main frozen for a restart that never comes)
+export const installUpdate = async (_version?: string): Promise<void> => {
+  post({ play: true });
+  await new Promise((r) => setTimeout(r, 2500));
+  throw "This is a demo: nothing was installed.";
+};
+export const whatsnewFailed = async (message: string): Promise<void> => post({ failed: message });
 export const appVersion = async (): Promise<string> => version;
 export const logFile = async (): Promise<string> => "~/Library/Logs/dev.velo.app/velo.log";
 

@@ -11,6 +11,7 @@ import { createStore, initialState } from "../app/store";
 import { isSearchInput, platform } from "./platform";
 import { App } from "./App";
 import { installWindowHandlers } from "../log";
+import { modalOpen, overlayOpen } from "./modal";
 
 installWindowHandlers(window); // before the controller starts: an error while starting up reaches velo.log too
 
@@ -26,8 +27,6 @@ createRoot(document.getElementById("root")!).render(
     <App controller={controller} store={store} />
   </StrictMode>,
 );
-
-const modalOpen = () => !!document.querySelector("dialog[open], [role=dialog][data-state=open], [role=alertdialog][data-state=open]");
 
 // One capture-phase handler: runs before CodeMirror's keymap and the webview defaults (so e.g. ⌘R works from the editor).
 window.addEventListener(
@@ -52,7 +51,7 @@ window.addEventListener(
       inEditor: !!t.closest?.("[data-editor-host]"),
       inSearchWithText: isSearchInput(t) && (t as HTMLInputElement).value !== "",
       inSearch: isSearchInput(t),
-      inDialog: !!t.closest?.("[role=menu], [data-lock-screen]") || modalOpen(),
+      inDialog: !!t.closest?.("[role=menu], [data-lock-screen]") || overlayOpen(),
       inRename: !!t.closest?.("[data-rename]"),
     });
     if (handled) {
@@ -74,8 +73,15 @@ void listen<{ version: string }>("update-available", (ev) => controller.onUpdate
 void listen<{ downloaded: number; total: number | null }>("update-progress", (ev) => controller.onUpdateProgress(ev.payload.downloaded, ev.payload.total));
 void listen("update-installing", () => controller.onUpdateInstalling());
 void listen("check-updates", () => void controller.checkUpdates());
+// the What's new window's Install and restart, relayed by Rust (src-tauri/src/whatsnew.rs): this window saves first, then
+// installs. Refused while a modal or a native dialog is open, where the pill cannot be clicked either (the controller's
+// installRefusal); the window shows why.
+void listen<string>("whatsnew-install", async (ev) => {
+  const failed = await controller.installFromWhatsNew(ev.payload, modalOpen());
+  if (failed) void api.whatsnewFailed(failed);
+});
 // tray menu: Today's daily note, Settings…; ignored while a modal is open, as their shortcuts are
-void listen<string>("run-action", (e) => !modalOpen() && controller.runAction(e.payload));
+void listen<string>("run-action", (e) => !overlayOpen() && controller.runAction(e.payload));
 void listen<api.AgentWrite>("agent-write", (ev) => void controller.onAgentWrite(ev.payload));
 
 // "today" rolls over at local midnight: refresh the Tasks groups and the due count/badge then.

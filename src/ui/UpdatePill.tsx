@@ -1,4 +1,5 @@
 import { CircleAlert, CircleCheck, Download } from "lucide-react";
+import { useState } from "react";
 import { css } from "styled-system/css";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
@@ -35,17 +36,19 @@ const srOnly = css({ srOnly: true });
 /** A new version (Install and restart), the install in progress, its failure, or a manual check's "up to date". */
 export function UpdatePill({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const update = useStore(store, (s) => s.update);
+  const [open, setOpen] = useState(false); // controlled: What's new closes it, so it is not left open behind that window
   const { version, status, message } = update ?? { version: "", status: "current" as const, message: undefined };
   const label = !update ? "" : status === "available" ? `velo ${version} is ready` : status === "installing" ? "Installing…" : status === "failed" ? "Update failed" : "Up to date";
   // the live region is always mounted, so an update's arrival is announced (text appearing in an existing region)
   if (!update) return <span className={srOnly} role="status" />;
   const icon = status === "installing" ? <Spinner size="xs" /> : status === "current" ? <CircleCheck aria-hidden /> : status === "failed" ? <CircleAlert aria-hidden /> : <Download aria-hidden />;
   const dismiss = () => {
+    setOpen(false); // the pill stays mounted: the next update must not come back with its popover open
     controller.dismissUpdate(); // the pill unmounts: focus must not fall to <body>
     platform.focusSearch();
   };
   return (
-    <Popover.Root positioning={{ placement: "bottom-end" }}>
+    <Popover.Root open={open} onOpenChange={(d) => setOpen(d.open)} positioning={{ placement: "bottom-end" }}>
       <span className={srOnly} role="status">{label}</span>
       <Popover.Trigger asChild>
         <button type="button" className={pill} data-tone={status} aria-label={`${label}: details`}>
@@ -61,7 +64,7 @@ export function UpdatePill({ controller, store }: { controller: Controller; stor
             {status === "current" && <span>velo is up to date ({version}).</span>}
             <div className={actions}>
               {status === "available" && (
-                <Button size="xs" variant="outline" onClick={() => controller.openReleaseNotes(version)}>
+                <Button size="xs" variant="outline" onClick={() => (setOpen(false), controller.openReleaseNotes(version))}>
                   What's new
                 </Button>
               )}

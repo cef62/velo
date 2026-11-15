@@ -1,5 +1,6 @@
 // Browser demo build: the real UI over an in-memory backend (src/demo). `pnpm demo:dev` / `pnpm demo:build` → dist-demo/.
 // DEMO_BASE sets the public path (e.g. /velo/demo/ for the docs site).
+// `?update=big` or `?update=patch` shows the update pill; its What's new button opens whatsnew.html (same query) in a tab.
 import { defineConfig, mergeConfig, type Plugin, type UserConfig } from "vite";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
@@ -24,6 +25,7 @@ const shims: Record<string, string> = {
 const swaps: Record<string, string> = {
   [src("api.ts")]: src("demo/api.ts"),
   [src("ui/platform.ts")]: src("demo/platform.ts"),
+  [src("whatsnew/api.ts")]: src("demo/whatsnew-api.ts"),
 };
 
 const demo: Plugin = {
