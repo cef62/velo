@@ -146,6 +146,7 @@ export class FakeEditor implements Editor {
     const clean = await this.flush();
     return { clean, copy: null as string | null, hash: clean ? "h" as string | null : null };
   });
+  adopt = vi.fn();
   focus() { this.focused++; }
   getText = () => this.text;
   setRich(on: boolean) { this.rich = on; }

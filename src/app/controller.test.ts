@@ -1952,6 +1952,7 @@ function setupRealSaver(onSave: (n: number, ctx: ReturnType<typeof setup> & { be
   editor.isDirty = () => saver.isDirty();
   editor.flush.mockImplementation(() => saver.flush());
   editor.flushOutcome.mockImplementation(() => saver.flushOutcome());
+  editor.adopt.mockImplementation((h: string) => saver.adopt(h));
   const append = editor.appendLine.bind(editor);
   editor.appendLine = (t) => append(t) && (saver.edit(), true);
   return ctx;
@@ -2074,9 +2075,12 @@ test("a no-op agent write after a byte-only change on disk replies with the hash
   be.hash = "h2"; // rewritten outside with the same text (e.g. line endings), not reloaded yet
   await c.onAgentWrite({ id: 1, path: P("A"), kind: "replace", insert: "a", base: "h2", summary: "s" });
   expect(api.agentWriteDone).toHaveBeenCalledWith(1, { hash: "h2" }); // before: { hash: "h" }, and its next write got a false conflict
-  await c.onAgentWrite({ id: 2, path: P("A"), kind: "replace", insert: "a", base: "h2", summary: "s" });
-  expect(api.agentWriteDone).toHaveBeenCalledWith(2, { hash: "h2" });
   expect(be.saves).toBe(0);
+  // its chained real change saves on h2, not into a conflict copy against the editor's stale h (Copilot on #155)
+  await c.onAgentWrite({ id: 2, path: P("A"), kind: "append", insert: "- [ ] x", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(2, { hash: "h:a\n- [ ] x" });
+  expect(be.copies).toEqual([]);
+  expect(be.disk).toBe("a\n- [ ] x");
 });
 
 test("agent write refused when the editor is read-only", async () => {
