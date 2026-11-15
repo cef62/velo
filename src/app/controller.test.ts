@@ -2068,6 +2068,17 @@ test("a no-op agent write right after a conflict reload replies with the hash, n
   expect(be.saves).toBe(1);
 });
 
+test("a no-op agent write after a byte-only change on disk replies with the hash it checked, not the editor's stale one (#134)", async () => {
+  const { c, api, be } = setupRealSaver(() => {});
+  await c.show(P("A"));
+  be.hash = "h2"; // rewritten outside with the same text (e.g. line endings), not reloaded yet
+  await c.onAgentWrite({ id: 1, path: P("A"), kind: "replace", insert: "a", base: "h2", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(1, { hash: "h2" }); // before: { hash: "h" }, and its next write got a false conflict
+  await c.onAgentWrite({ id: 2, path: P("A"), kind: "replace", insert: "a", base: "h2", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(2, { hash: "h2" });
+  expect(be.saves).toBe(0);
+});
+
 test("agent write refused when the editor is read-only", async () => {
   const { c, api, editor } = setup({ A: "a" });
   await c.show(P("A"));

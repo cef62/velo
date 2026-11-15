@@ -27,8 +27,9 @@ pub trait NoteOps {
     fn search(&self, query: &str, tags: &[String], offset: usize, no_links: bool, include_archived: bool) -> anyhow::Result<Page>;
     fn tags(&self, include_archived: bool) -> anyhow::Result<Vec<TagCount>>;
     fn tasks(&self, query: &str, tags: &[String], show_done: bool, include_archived: bool) -> anyhow::Result<TaskView>;
-    /// Returns the new path.
-    fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<String>;
+    /// Returns the new path and its hash, read under the rename's own lock (None: unreadable). Never a later read: the
+    /// open note's editor unfreezes after the rename, and a save it makes then must not be covered by the hash.
+    fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<(String, Option<String>)>;
     fn trash(&mut self, path: &str, summary: &str) -> anyhow::Result<()>;
     /// Appends `source` to `target`, rewrites links to it and trashes it (see `Vault::merge_notes_with`).
     fn merge(&mut self, source: &str, target: &str, summary: &str) -> anyhow::Result<MergeResult>;
@@ -245,7 +246,7 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
         Ok(v)
     }
 
-    fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<String> {
+    fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<(String, Option<String>)> {
         let path = plain(path)?;
         let mut snaps = vec![(path.to_string(), self.vault.agent_snapshot(path, summary)?)];
         let r = if rewrite_links { self.snapshot_link_sources(&title_of(path), &[path], summary, &mut snaps) } else { Ok(()) };
@@ -255,7 +256,10 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
             Err(e) => Err(e),
         });
         self.unsnapshot(&snaps, &r); // nothing moved when the rename failed
-        r
+        r.map(|p| {
+            let h = hash_of(Path::new(&p));
+            (p, h)
+        })
     }
 
     fn trash(&mut self, path: &str, summary: &str) -> anyhow::Result<()> {
@@ -399,7 +403,7 @@ mod tests {
     #[test] fn rename_snapshots_under_new_title() {
         let (mut o, _) = ops();
         let d = o.create("Before", "body", "c").unwrap();
-        let np = o.rename(&d.path, "After", false, "renamed it").unwrap();
+        let (np, _) = o.rename(&d.path, "After", false, "renamed it").unwrap();
         let r = o.vault.list_revisions(&np).unwrap();
         assert!(r.iter().any(|x| x.summary.as_deref() == Some("renamed it")));
     }

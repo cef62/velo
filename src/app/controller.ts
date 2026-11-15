@@ -2293,8 +2293,12 @@ export class Controller {
     };
     if ((bad = check())) return unapplied(bad);
     const insert = req.insert ?? "";
+    const before = this.editor.getText();
     const ok = req.kind === "append" ? this.editor.appendLine(insert) : this.editor.applyChange(changedSpan(this.editor.getText(), insert));
     if (!ok) return unapplied("refused");
+    // nothing changed: the note's hash is the one check() validated (its text is the agent's), not the editor's base,
+    // which lags a byte-only change on disk (line endings) that check() normalizes away
+    if (this.editor.getText() === before) return { hash: saved.hash };
     // applied: from here no failure may invite a retry, which would apply it twice
     try {
       const { copy, hash } = await this.editor.flushOutcome();
