@@ -3,7 +3,7 @@ import "@fontsource-variable/jetbrains-mono";
 import "./index.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { emitTo, listen } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as api from "../api";
 import { Controller } from "../app/controller";
@@ -74,10 +74,11 @@ void listen<{ version: string }>("update-available", (ev) => controller.onUpdate
 void listen<{ downloaded: number; total: number | null }>("update-progress", (ev) => controller.onUpdateProgress(ev.payload.downloaded, ev.payload.total));
 void listen("update-installing", () => controller.onUpdateInstalling());
 void listen("check-updates", () => void controller.checkUpdates());
-// the What's new window's Install and restart (src-tauri/src/whatsnew.rs): this window saves first, then installs
+// the What's new window's Install and restart, relayed by Rust (src-tauri/src/whatsnew.rs): this window saves first, then
+// installs. Refused while a modal is open, where the pill cannot be clicked either; the window shows why.
 void listen<string>("whatsnew-install", async (ev) => {
-  const failed = await controller.installFromWhatsNew(ev.payload);
-  if (failed) void emitTo("whatsnew", "whatsnew-install-failed", failed);
+  const failed = modalOpen() ? "Close the open dialog in the velo window first, then try again." : await controller.installFromWhatsNew(ev.payload);
+  if (failed) void api.whatsnewFailed(failed);
 });
 // tray menu: Today's daily note, Settings…; ignored while a modal is open, as their shortcuts are
 void listen<string>("run-action", (e) => !modalOpen() && controller.runAction(e.payload));

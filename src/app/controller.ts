@@ -1990,7 +1990,7 @@ export class Controller {
       this.newShow(); // a note reply still on its way must not load (load ends the suspension)
       this.editor.suspend(); // the relaunch skips the close flow: no edit may start now
       this.store.set({ update: { ...u, status: "installing", message: `Downloading velo ${u.version}…` } });
-      await this.api.installUpdate();
+      await this.api.installUpdate(u.version); // only the version shown: a newer one found since is refused
     } catch (e) {
       this.editor.resume();
       if (e === UPDATE_BUSY) {
@@ -2038,10 +2038,12 @@ export class Controller {
    *  did not start or failed (for that window), or never while velo restarts. */
   async installFromWhatsNew(version: string): Promise<string | null> {
     this.onUpdateAvailable(version); // the pill may have been dismissed meanwhile
+    const before = this.store.get().err;
     await this.installUpdate();
-    const u = this.store.get().update;
+    const { update: u, err } = this.store.get();
     if (u?.status === "installing") return null; // a repeat click while the install runs
-    return u?.status === "failed" && u.message ? u.message : "The update did not start. The velo window says why.";
+    if (u?.status === "failed" && u.message) return u.message;
+    return err && err !== before ? `The update did not start: ${err}` : "The update did not start. The velo window says why.";
   }
 
   /** Title-bar Retry after a save error. */

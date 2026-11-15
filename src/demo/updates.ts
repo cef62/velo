@@ -2,6 +2,9 @@
 // 20 fixes) or `?update=patch` (4 fixes) makes the pill appear and fills the What's new page (whatsnew.html, same query).
 import { version as current } from "../../package.json";
 import type { UpdateInfo } from "../whatsnew/api";
+import changelog from "../../CHANGELOG.md?raw";
+// @ts-expect-error plain .mjs (it runs in CI without a build step); no type declarations
+import { releaseNotes } from "../../scripts/release-notes.mjs";
 
 const HINTS = `\n\n---\n\nmacOS: the app is ad-hoc signed, not notarized: on first launch open System Settings → Privacy & Security and click Open Anyway, or run \`xattr -cr /Applications/velo.app\` once. Windows: the installer is unsigned. When SmartScreen appears, click More info → Run anyway.\n`;
 
@@ -49,6 +52,13 @@ ${bullets(FIXES.slice(0, 4))}${HINTS}`;
 
 const kind = new URLSearchParams(globalThis.location?.search ?? "").get("update");
 
-/** The update the demo announces, or null without `?update=`. */
+/** The update the demo announces, or null without `?update=`. `?update=0.17.0` (any CHANGELOG version): that release's
+ *  real notes, as the release script writes them. */
 export const demoUpdate: UpdateInfo | null =
-  kind === "big" ? { version: "0.19.0", current_version: current, notes: BIG } : kind === "patch" ? { version: "0.18.3", current_version: current, notes: PATCH } : null;
+  kind === "big"
+    ? { version: "0.19.0", current_version: current, notes: BIG }
+    : kind === "patch"
+      ? { version: "0.18.3", current_version: current, notes: PATCH }
+      : kind && changelog.includes(`\n## ${kind}\n`)
+        ? { version: kind, current_version: current, notes: releaseNotes(changelog, kind) }
+        : null;

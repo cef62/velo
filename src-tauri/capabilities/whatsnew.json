@@ -1,9 +1,9 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "whatsnew",
-  "description": "Capability for the What's new window: update progress events, close itself, drag its title bar, open http(s) links in the browser. Its custom commands are limited in Rust (whatsnew::allowed).",
+  "description": "Capability for the What's new window: drag its title bar and open http(s) links in the browser. No event permission: progress arrives over a Channel. velo's own commands are limited in Rust (whatsnew::allowed), not here.",
   "windows": ["whatsnew"],
-  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten", "core:window:allow-close", "core:window:allow-start-dragging",
+  "permissions": ["core:window:allow-start-dragging",
     { "identifier": "opener:allow-open-url", "allow": [{ "url": "https://*" }, { "url": "http://*" }] }
   ]
 }

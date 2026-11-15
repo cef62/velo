@@ -3,8 +3,6 @@
 // The section keeps its `### Minor Changes` / `### Patch Changes` headings and each bullet's continuation lines
 // (a changeset's later lines); the commit hash changesets puts before each bullet is dropped. The app's What's new
 // window (src/whatsnew/notes.ts) groups by those headings and cuts everything from the last `---` line on.
-import { readFileSync } from "node:fs";
-import { pathToFileURL } from "node:url";
 
 export const SEPARATOR = "---";
 export const FALLBACK = "- See CHANGELOG.md for details.";
@@ -28,11 +26,13 @@ export function releaseNotes(changelog, version) {
   return `${body}\n\n${SEPARATOR}\n\n${HINTS}\n`;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [version, file = "CHANGELOG.md"] = process.argv.slice(2);
+// the command line; Node only (the browser demo imports releaseNotes, src/demo/updates.ts)
+const argv = globalThis.process?.argv ?? [];
+if (argv[1] && argv[1].endsWith("release-notes.mjs")) {
+  const [version, file = "CHANGELOG.md"] = argv.slice(2);
   if (!version) {
     console.error("usage: node scripts/release-notes.mjs <version> [CHANGELOG.md]");
     process.exit(2);
   }
-  process.stdout.write(releaseNotes(readFileSync(file, "utf8"), version));
+  import("node:fs").then(({ readFileSync }) => process.stdout.write(releaseNotes(readFileSync(file, "utf8"), version)));
 }

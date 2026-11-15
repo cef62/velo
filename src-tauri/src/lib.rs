@@ -43,8 +43,8 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
     ])
 }
 
-/// Custom commands are open to every window (no app ACL manifest in build.rs): a window other than main reaches only
-/// the commands `whatsnew::allowed` names.
+/// Custom commands are open to every window (no app ACL manifest in build.rs, so capabilities do not restrict them):
+/// this guard is the boundary. A window other than main reaches only the commands `whatsnew::allowed` names.
 fn with_window_guard<R: tauri::Runtime>(handler: impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     move |invoke| {
         if !whatsnew::allowed(invoke.message.webview_ref().label(), invoke.message.command()) {
@@ -54,6 +54,75 @@ fn with_window_guard<R: tauri::Runtime>(handler: impl Fn(tauri::ipc::Invoke<R>) 
         handler(invoke)
     }
 }
+
+/// The app's commands: `APP_COMMANDS` lists their names (for the guard's tests), `app_handler` registers them behind
+/// `with_window_guard`.
+macro_rules! app_commands {
+    ($($m:ident :: $c:ident),* $(,)?) => {
+        #[cfg(test)]
+        const APP_COMMANDS: &[&str] = &[$(stringify!($c)),*];
+        fn app_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+            with_window_guard(tauri::generate_handler![$($m::$c),*])
+        }
+    };
+}
+
+app_commands![
+            commands::get_settings,
+            commands::set_settings,
+            commands::index_status,
+            commands::search,
+            commands::timeline,
+            commands::export_preview,
+            commands::export_text,
+            commands::export_markdown,
+            commands::print_page,
+            commands::list_tags,
+            commands::list_titles,
+            commands::list_link_targets,
+            commands::create_from_selection,
+            commands::open_note,
+            commands::open_or_create,
+            commands::save_note,
+            commands::link_mention,
+            commands::tasks,
+            commands::toggle_task,
+            commands::capture_task,
+            commands::capture_target_title,
+            commands::capture_done,
+            commands::set_badge,
+            commands::rename_note,
+            commands::backlink_count,
+            commands::connections,
+            commands::lock_note,
+            commands::unlock_note,
+            commands::lock_all,
+            commands::delete_note,
+            commands::set_archived,
+            commands::merge_notes,
+            commands::snapshot_agent,
+            commands::drop_agent_snapshot,
+            commands::agent_write_claim,
+            commands::agent_write_done,
+            commands::list_revisions,
+            commands::read_revision,
+            commands::snapshot_text,
+            commands::has_identity,
+            commands::agent_setup_command,
+            commands::setup_passphrase,
+            commands::identity_file_exists,
+            commands::close_requested,
+            commands::quit_app,
+            commands::reset_window_cmd,
+            commands::log_line,
+            update::check_update,
+            update::install_update,
+            whatsnew::open_whatsnew,
+            whatsnew::whatsnew_info,
+            whatsnew::whatsnew_install,
+            whatsnew::whatsnew_failed,
+            whatsnew::whatsnew_close,
+];
 
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -172,60 +241,7 @@ pub fn run() {
             update::spawn_checker(h.clone());
             Ok(())
         })
-        .invoke_handler(with_window_guard(tauri::generate_handler![
-            commands::get_settings,
-            commands::set_settings,
-            commands::index_status,
-            commands::search,
-            commands::timeline,
-            commands::export_preview,
-            commands::export_text,
-            commands::export_markdown,
-            commands::print_page,
-            commands::list_tags,
-            commands::list_titles,
-            commands::list_link_targets,
-            commands::create_from_selection,
-            commands::open_note,
-            commands::open_or_create,
-            commands::save_note,
-            commands::link_mention,
-            commands::tasks,
-            commands::toggle_task,
-            commands::capture_task,
-            commands::capture_target_title,
-            commands::capture_done,
-            commands::set_badge,
-            commands::rename_note,
-            commands::backlink_count,
-            commands::connections,
-            commands::lock_note,
-            commands::unlock_note,
-            commands::lock_all,
-            commands::delete_note,
-            commands::set_archived,
-            commands::merge_notes,
-            commands::snapshot_agent,
-            commands::drop_agent_snapshot,
-            commands::agent_write_claim,
-            commands::agent_write_done,
-            commands::list_revisions,
-            commands::read_revision,
-            commands::snapshot_text,
-            commands::has_identity,
-            commands::agent_setup_command,
-            commands::setup_passphrase,
-            commands::identity_file_exists,
-            commands::close_requested,
-            commands::quit_app,
-            commands::reset_window_cmd,
-            commands::log_line,
-            update::check_update,
-            update::install_update,
-            whatsnew::open_whatsnew,
-            whatsnew::whatsnew_info,
-            whatsnew::whatsnew_install,
-        ]))
+        .invoke_handler(app_handler())
         .build(tauri::generate_context!())
         .expect("error while running velo")
         .run(|app, ev| {
@@ -252,4 +268,56 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::*;
+    use tauri::test::{INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder, mock_context, noop_assets};
+
+    #[tauri::command]
+    fn open_note() -> &'static str {
+        "note"
+    }
+    #[tauri::command]
+    fn whatsnew_info() -> &'static str {
+        "info"
+    }
+
+    fn call(w: &tauri::WebviewWindow<MockRuntime>, cmd: &str) -> Result<String, serde_json::Value> {
+        let req = tauri::webview::InvokeRequest {
+            cmd: cmd.into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: if cfg!(windows) { "http://tauri.localhost" } else { "tauri://localhost" }.parse().unwrap(),
+            body: Default::default(),
+            headers: Default::default(),
+            invoke_key: INVOKE_KEY.to_string(),
+        };
+        get_ipc_response(w, req).map(|r| r.deserialize::<String>().unwrap())
+    }
+
+    #[test]
+    fn the_wrapper_refuses_other_commands_from_other_windows() {
+        let app = mock_builder().invoke_handler(with_window_guard(tauri::generate_handler![open_note, whatsnew_info])).build(mock_context(noop_assets())).unwrap();
+        let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        let other = tauri::WebviewWindowBuilder::new(&app, whatsnew::LABEL, Default::default()).build().unwrap();
+        assert_eq!(call(&main, "open_note").unwrap(), "note");
+        assert_eq!(call(&main, "whatsnew_info").unwrap(), "info");
+        assert_eq!(call(&other, "whatsnew_info").unwrap(), "info");
+        assert_eq!(call(&other, "open_note").unwrap_err(), serde_json::json!("not allowed from this window"));
+    }
+
+    #[test]
+    fn every_registered_command_but_the_allow_list_is_denied_to_other_windows() {
+        for c in whatsnew::COMMANDS {
+            assert!(APP_COMMANDS.contains(c), "{c} is not registered");
+        }
+        let denied: Vec<_> = APP_COMMANDS.iter().filter(|c| !whatsnew::allowed(whatsnew::LABEL, c)).collect();
+        assert_eq!(denied.len(), APP_COMMANDS.len() - whatsnew::COMMANDS.len());
+        assert!(APP_COMMANDS.iter().all(|c| whatsnew::allowed("main", c)));
+        for c in ["save_note", "open_note", "get_settings", "whatsnew_failed", "open_whatsnew", "install_update"] {
+            assert!(denied.contains(&&c), "{c}");
+        }
+    }
 }

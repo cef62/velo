@@ -429,7 +429,7 @@ test("update install saves, freezes the editor, then installs", async () => {
   await c.installUpdate();
   expect(editor.flush).toHaveBeenCalled();
   expect(editor.suspended).toBe(true);
-  expect(api.installUpdate).toHaveBeenCalled();
+  expect(api.installUpdate).toHaveBeenCalledWith("0.6.1"); // the version shown: the backend refuses a newer one found since
   expect(store.get().update).toEqual({ version: "0.6.1", status: "installing", message: "Downloading velo 0.6.1…" });
 });
 

@@ -124,8 +124,10 @@ export const indexStatus = () => invoke<[number, number] | null>("index_status")
 export const checkUpdate = () => invoke<{ version: string } | null>("check_update");
 /** Opens (or focuses) the What's new window for the stored update. */
 export const openWhatsNew = () => invoke<void>("open_whatsnew");
-/** Downloads, installs and relaunches; resolves only on failure paths (rejects with the reason). */
-export const installUpdate = () => invoke<void>("install_update");
+/** Tells the What's new window why the install it asked for did not start. */
+export const whatsnewFailed = (message: string) => invoke<void>("whatsnew_failed", { message });
+/** Downloads, installs and relaunches `version` (a newer one found since is refused); resolves only on failure paths (rejects with the reason). */
+export const installUpdate = (version?: string) => invoke<void>("install_update", { version });
 export const appVersion = getVersion;
 /** velo.log's path (Tauri's app log dir; src-tauri/src/log.rs writes it). */
 export const logFile = async () => join(await appLogDir(), "velo.log");

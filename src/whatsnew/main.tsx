@@ -9,7 +9,7 @@ import { applyFontScale } from "../app/fontscale";
 import { installWindowHandlers, logError } from "../log";
 import { applyPalette } from "../theme/palettes/apply";
 import * as api from "./api";
-import { WhatsNew, type Phase } from "./WhatsNew";
+import { WhatsNew } from "./WhatsNew";
 
 installWindowHandlers(window);
 document.documentElement.dataset.mac = String(navigator.platform.startsWith("Mac")); // the title bar overlays the content
@@ -28,28 +28,33 @@ dark.addEventListener("change", writeTheme);
 
 function App() {
   const [info, setInfo] = useState<api.WhatsNewInfo | null>(null);
-  const [phase, setPhase] = useState<Phase>({ kind: "idle" });
+  const [phase, setPhase] = useState<api.Phase>({ kind: "idle" });
   useEffect(() => {
-    // listen first, then ask: progress from an install started in the main window is never missed, and the data
-    // comes from a command reply rather than an event sent before this window listened
-    void api
-      .onInstall((e) => setPhase(e.kind === "progress" ? { kind: "downloading", downloaded: e.downloaded, total: e.total } : e))
-      .then(api.info)
+    // the reply carries the install's phase now; the channel every later one, even an install started from the pill.
+    // A channel message can land before the reply: the snapshot is then older and is dropped.
+    let live = false;
+    api
+      .info((p) => {
+        live = true;
+        setPhase(p);
+      })
       .then((i) => {
         theme = i.theme;
         writeTheme();
         applyPalette(i.palette);
         applyFontScale(i.font_size);
+        if (!live) setPhase(i.phase);
         setInfo(i);
       })
       .catch((e) => {
         logError("whatsnew: info failed", e);
-        setInfo({ update: null, theme: "system", palette: "", font_size: 14 });
+        setInfo({ update: null, phase: { kind: "idle" }, theme: "system", palette: "", font_size: 14 });
       });
   }, []);
   const install = () => {
+    if (!info?.update) return;
     setPhase({ kind: "starting" });
-    api.install().catch((e) => setPhase({ kind: "failed", message: typeof e === "string" ? e : "The update could not start." }));
+    api.install(info.update.version).catch((e) => setPhase({ kind: "failed", message: typeof e === "string" ? e : "The update could not start.", retry: false }));
   };
   return <WhatsNew info={info} phase={phase} onInstall={install} />;
 }

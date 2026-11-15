@@ -504,7 +504,8 @@ export const indexStatus = async (): Promise<[number, number] | null> => null;
 // `?update=big|patch` (src/demo/updates.ts): a fixture update; the demo has no second window, so What's new is a tab
 export const checkUpdate = async (): Promise<{ version: string } | null> => demoUpdate;
 export const openWhatsNew = async (): Promise<void> => void window.open(new URL(`whatsnew.html${location.search}`, location.href), "_blank");
-export const installUpdate = async (): Promise<void> => {};
+export const installUpdate = async (_version?: string): Promise<void> => {};
+export const whatsnewFailed = async (_message: string): Promise<void> => {};
 export const appVersion = async (): Promise<string> => version;
 export const logFile = async (): Promise<string> => "~/Library/Logs/dev.velo.app/velo.log";
 

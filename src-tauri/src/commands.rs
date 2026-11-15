@@ -81,7 +81,7 @@ fn with_vault<T>(st: &AppState, f: impl FnOnce(&mut Vault, Option<&str>) -> anyh
 /// `with_vault` for a note operation that may write `.velo/archived`: a failed list write is emitted as
 /// `archive-error` (taken, so it never lands on a later operation).
 fn with_vault_emit<T>(app: &AppHandle, st: &AppState, f: impl FnOnce(&mut Vault, Option<&str>) -> anyhow::Result<T>) -> Res<T> {
-    with_vault(st, |v, id| run_reporting(v, id, f, |e, p| { app.emit_to("main", e, p).ok(); }))
+    with_vault(st, |v, id| run_reporting(v, id, f, |e, p| { app.emit(e, p).ok(); }))
 }
 
 /// Runs `f`, then reports a kept archive error whatever `f` returned (a failed note operation can still have written the list).
@@ -107,8 +107,8 @@ pub fn open_vault(app: &AppHandle, st: &AppState, dir: &Path) -> anyhow::Result<
     let r = gated(&st.indexing, || open_vault_inner(app, st, dir, me));
     if current() {
         match &r {
-            Ok(()) => app.emit_to("main", "index-done", serde_json::json!({})),
-            Err(e) => app.emit_to("main", "index-error", serde_json::json!({ "message": e.to_string() })),
+            Ok(()) => app.emit("index-done", serde_json::json!({})),
+            Err(e) => app.emit("index-error", serde_json::json!({ "message": e.to_string() })),
         }
         .ok();
     }
@@ -123,7 +123,7 @@ fn open_vault_inner(app: &AppHandle, st: &AppState, dir: &Path, me: u64) -> anyh
         if current() {
             // a stale open finishing first clears the gate; the newer open's next callback restores it
             *st.indexing.lock().unwrap() = Some((done, total));
-            app.emit_to("main", "index-progress", serde_json::json!({ "done": done, "total": total })).ok();
+            app.emit("index-progress", serde_json::json!({ "done": done, "total": total })).ok();
         }
     })?;
     if !current() {
@@ -196,7 +196,7 @@ fn apply_watch(st: &AppState, base: &Path, batch: Option<Vec<PathBuf>>) -> Vec<S
 
 fn notify_changed(app: &AppHandle, changed: Vec<String>) {
     if !changed.is_empty() {
-        app.emit_to("main", "notes-changed", serde_json::json!({ "paths": changed })).ok();
+        app.emit("notes-changed", serde_json::json!({ "paths": changed })).ok();
     }
 }
 
@@ -401,9 +401,9 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             "tray-daily" | "tray-settings" | "tray-updates" => {
                 show_main(app);
                 match ev.id().as_ref() {
-                    "tray-daily" => app.emit_to("main", "run-action", "daily_note"),
-                    "tray-settings" => app.emit_to("main", "run-action", "settings"),
-                    _ => app.emit_to("main", "check-updates", ()),
+                    "tray-daily" => app.emit("run-action", "daily_note"),
+                    "tray-settings" => app.emit("run-action", "settings"),
+                    _ => app.emit("check-updates", ()),
                 }
                 .ok();
             }
@@ -443,7 +443,7 @@ pub fn capture_requested(app: &AppHandle, tray: bool) {
     let hidden = if tray && !cfg!(target_os = "macos") { !shown } else { !(shown && w.is_focused().unwrap_or(false)) };
     capture_shown(&app.state::<AppState>().capture_was_hidden, hidden);
     show_main(app);
-    app.emit_to("main", "capture", ()).ok();
+    app.emit("capture", ()).ok();
 }
 
 /// A repeat press finds velo in front (the first press showed it): the session still started hidden.

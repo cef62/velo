@@ -4,14 +4,14 @@ import { css, cx } from "styled-system/css";
 import { token } from "styled-system/tokens";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { externalUrl, renderInline } from "../preview";
+import { externalUrl } from "../preview";
 import * as api from "./api";
-import { fixesLabel, headline, parseReleaseNotes, type Item } from "./notes";
+import type { Phase } from "./api";
+import { fixesLabel, headline, headlineIsFirst, parseReleaseNotes, type Item } from "./notes";
+import { renderNote } from "./render";
 
 /** Fixes shown before "Show all" when the list is long. */
 const FOLD = 6;
-
-export type Phase = { kind: "idle" } | { kind: "starting" } | { kind: "downloading"; downloaded: number; total: number | null } | { kind: "installing" } | { kind: "failed"; message: string };
 
 const releaseUrl = (version: string) => `https://github.com/cef62/velo/releases/tag/v${encodeURIComponent(version)}`;
 
@@ -73,10 +73,11 @@ const track = css({ h: "1.5", borderRadius: "full", bg: "velo.muted", overflow: 
 const failed = css({ flex: "1", minW: "160px", fontSize: "uiSm", color: "velo.danger", overflowWrap: "anywhere" });
 const actions = css({ display: "flex", gap: "2", ml: "auto" });
 const toggle = css({ mt: "2", display: "inline-flex", alignItems: "center", gap: "1", fontSize: "uiSm", fontWeight: "500", color: "velo.accentText", cursor: "pointer", borderRadius: "sm", "& svg": { w: "4", h: "4", transition: "rotate 150ms" }, "&[aria-expanded=true] svg": { rotate: "180deg" }, _focusVisible: { outline: "2px solid", outlineColor: "velo.accent", outlineOffset: "2px" } });
+const srOnly = css({ srOnly: true });
 
-/** Feed text as inline Markdown: markdown-it with `html: false`, so markup in the notes shows as text. */
+/** Feed text as inline Markdown: `html: false` and no images (render.ts), so markup in the notes shows as text. */
 function Md({ text, as: Tag = "span", className }: { text: string; as?: "span" | "p" | "h1" | "h3"; className?: string }) {
-  return <Tag className={cx(inline, className)} dangerouslySetInnerHTML={{ __html: renderInline(text) }} />;
+  return <Tag className={cx(inline, className)} dangerouslySetInnerHTML={{ __html: renderNote(text) }} />;
 }
 
 const Detail = ({ lines }: { lines: string[] }) => lines.map((l, i) => <Md key={i} as="p" text={l} />);
@@ -89,15 +90,27 @@ function progressText(p: Phase, version: string): string {
   return p.total ? `Downloading velo ${version}… ${Math.min(100, Math.floor((p.downloaded * 10) / p.total) * 10)}%` : `Downloading velo ${version}… ${(p.downloaded / 1e6).toFixed(1)} MB`;
 }
 
+/** "…and 40 more in the full changelog", when a list was cut. */
+const More = ({ shown, total }: { shown: number; total: number }) => (total > shown ? <p className={more}>…and {total - shown} more in the full changelog.</p> : null);
+
 export function WhatsNew({ info, phase, onInstall }: { info: api.WhatsNewInfo | null; phase: Phase; onInstall: () => void }) {
   const [open, setOpen] = useState(false);
   const fixesId = useId();
   const primary = useRef<HTMLButtonElement>(null);
+  const later = useRef<HTMLButtonElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const u = info?.update ?? null;
+  const busy = phase.kind === "starting" || phase.kind === "downloading" || phase.kind === "installing";
+  const retry = phase.kind !== "failed" || phase.retry;
+  // read first: focus starts on the heading, never on Install (one Enter must not restart velo)
   useEffect(() => {
-    if (info) (primary.current ?? heading.current)?.focus(); // the primary action, else the heading (no update)
+    if (info) heading.current?.focus();
   }, [info]);
+  // the Install button turns busy (disabled) or goes away: keep focus on a live control
+  useEffect(() => {
+    if (busy && document.activeElement === primary.current) later.current?.focus();
+    if (phase.kind === "failed" && (!document.activeElement || document.activeElement === document.body)) (primary.current ?? later.current)?.focus();
+  }, [busy, phase.kind]);
 
   // every link (feed links included) opens in the browser, http(s) only; the window itself never navigates
   const onLinkClick = (e: MouseEvent) => {
@@ -111,15 +124,17 @@ export function WhatsNew({ info, phase, onInstall }: { info: api.WhatsNewInfo | 
   if (!info) return <div className={page} aria-busy="true" />;
   const notes = parseReleaseNotes(u?.notes ?? "");
   const title = headline(notes);
-  const [first, ...rest] = notes.highlights;
-  const parsed = notes.highlights.length + notes.fixes.length + notes.other.length > 0;
+  const heroFirst = headlineIsFirst(notes);
+  const first = heroFirst ? notes.highlights[0] : null;
+  const cardsShown = heroFirst ? notes.highlights.slice(1) : notes.highlights;
+  const { count } = notes;
+  const parsed = count.highlights + count.fixes + count.other > 0;
   const folded = notes.fixes.length > FOLD && !open;
   const shownFixes = folded ? notes.fixes.slice(0, FOLD - 1) : notes.fixes;
-  const busy = phase.kind === "starting" || phase.kind === "downloading" || phase.kind === "installing";
   const pct = phase.kind === "downloading" && phase.total ? Math.min(100, (phase.downloaded * 100) / phase.total) : phase.kind === "installing" ? 100 : null;
   let delay = 0;
   const step = () => ({ animationDelay: `${(delay += 50)}ms` });
-  const counts = [notes.highlights.length && `${notes.highlights.length} new`, notes.fixes.length && fixesLabel(notes.fixes.length), notes.other.length && `${notes.other.length} other`].filter(Boolean);
+  const counts = [count.highlights && `${count.highlights} new`, count.fixes && fixesLabel(count.fixes), count.other && `${count.other} other`].filter(Boolean);
 
   return (
     <div className={page} onClick={onLinkClick} onAuxClick={onLinkClick}>
@@ -162,26 +177,27 @@ export function WhatsNew({ info, phase, onInstall }: { info: api.WhatsNewInfo | 
           )}
         </header>
 
-        {rest.length > 0 && (
+        {cardsShown.length > 0 && (
           <section className={section} aria-labelledby="wn-new">
             <h2 id="wn-new" className={h2}>
-              <Sparkles aria-hidden /> Also new
+              <Sparkles aria-hidden /> {heroFirst ? "Also new" : "New"}
             </h2>
             <div className={cards}>
-              {rest.map((it, i) => (
+              {cardsShown.map((it, i) => (
                 <article key={i} className={cx(card, rise)} style={step()}>
                   <Md as="h3" text={it.title} />
                   <Detail lines={it.detail} />
                 </article>
               ))}
             </div>
+            <More shown={notes.highlights.length} total={count.highlights} />
           </section>
         )}
 
         {notes.fixes.length > 0 && (
           <section className={section} aria-labelledby="wn-fixed">
             <h2 id="wn-fixed" className={h2}>
-              Fixed <Badge size="sm" variant="surface">{notes.fixes.length}</Badge>
+              Fixed <Badge size="sm" variant="surface">{count.fixes}</Badge>
             </h2>
             <ul id={fixesId} className={cx(fixList, rise)} style={step()}>
               {shownFixes.map((it, i) => (
@@ -193,25 +209,21 @@ export function WhatsNew({ info, phase, onInstall }: { info: api.WhatsNewInfo | 
                 {open ? "Show fewer" : `Show all ${notes.fixes.length} fixes`} <ChevronDown aria-hidden />
               </button>
             )}
+            {(open || notes.fixes.length <= FOLD) && <More shown={notes.fixes.length} total={count.fixes} />}
           </section>
         )}
 
         {notes.other.length > 0 && (
           <section className={section} aria-labelledby="wn-other">
             <h2 id="wn-other" className={h2}>
-              {notes.highlights.length + notes.fixes.length ? "Other changes" : "Changes"}
+              {count.highlights + count.fixes ? "Other changes" : "Changes"}
             </h2>
             <ul className={cx(fixList, rise)} style={step()}>
               {notes.other.map((it, i) => (
                 <FixRow key={i} item={it} />
               ))}
             </ul>
-          </section>
-        )}
-
-        {notes.more > 0 && (
-          <section className={section}>
-            <p className={more}>…and {notes.more} more in the full changelog.</p>
+            <More shown={notes.other.length} total={count.other} />
           </section>
         )}
 
@@ -228,9 +240,13 @@ export function WhatsNew({ info, phase, onInstall }: { info: api.WhatsNewInfo | 
       </main>
 
       <footer className={bar}>
+        {/* always mounted, so its first message is announced too */}
+        <span className={srOnly} role="status">
+          {busy ? progressText(phase, u?.version ?? "") : ""}
+        </span>
         {busy ? (
-          <div className={status}>
-            <span role="status">{progressText(phase, u?.version ?? "")}</span>
+          <div className={status} aria-hidden>
+            <span>{progressText(phase, u?.version ?? "")}</span>
             <div className={track} role="progressbar" aria-label="Update progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct === null ? undefined : Math.round(pct)}>
               <div style={{ width: `${pct ?? 8}%` }} />
             </div>
@@ -238,6 +254,7 @@ export function WhatsNew({ info, phase, onInstall }: { info: api.WhatsNewInfo | 
         ) : phase.kind === "failed" ? (
           <p className={failed} role="alert">
             {phase.message}
+            {!phase.retry && " Check for updates again from the velo window."}
           </p>
         ) : (
           <a className={githubLink} href={u ? releaseUrl(u.version) : "https://github.com/cef62/velo/releases"}>
@@ -245,10 +262,10 @@ export function WhatsNew({ info, phase, onInstall }: { info: api.WhatsNewInfo | 
           </a>
         )}
         <div className={actions}>
-          <Button size="sm" variant="outline" onClick={() => void api.close()}>
-            {u ? "Later" : "Close"}
+          <Button ref={later} size="sm" variant="outline" onClick={() => void api.close()}>
+            {u && retry ? "Later" : "Close"}
           </Button>
-          {u && (
+          {u && retry && (
             <Button ref={primary} size="sm" colorPalette="green" loading={busy} loadingText="Installing…" onClick={onInstall}>
               {phase.kind === "failed" ? "Try again" : "Install and restart"}
             </Button>

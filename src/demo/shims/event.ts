@@ -6,4 +6,3 @@ export const listen = async <T>(event: string, handler: (e: { payload: T }) => v
   if (event === "update-available" && demoUpdate) setTimeout(() => handler({ payload: demoUpdate as T }), 500);
   return () => {};
 };
-export const emitTo = async (_target: string, _event: string, _payload?: unknown): Promise<void> => {};

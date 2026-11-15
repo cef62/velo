@@ -67,6 +67,7 @@ test("an empty or missing section falls back to the CHANGELOG pointer", () => {
   expect(releaseNotes(CHANGELOG, "0.17.1")).toBe(`${FALLBACK}${tail}`);
   expect(releaseNotes(CHANGELOG, "9.9.9")).toBe(`${FALLBACK}${tail}`);
   expect(releaseNotes(CHANGELOG, "0.17.0")).toBe(`${FALLBACK}${tail}`); // last section, no bullets
+  expect(releaseNotes("## 1.0.0\n\n### Patch Changes\n\n## 0.9.0\n", "1.0.0")).toBe(`${FALLBACK}${tail}`); // a heading, no bullet
 });
 
 test("CRLF checkouts give the same notes", () => {
