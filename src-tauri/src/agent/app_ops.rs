@@ -244,7 +244,7 @@ impl NoteOps for AppOps<'_> {
 
     /// The open note is saved and frozen in the editor first, so autosave can't recreate it under its old name; the
     /// editor then follows it to the new path (`renamed`). Notes whose links get rewritten are saved first too.
-    fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<String> {
+    fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<(String, Option<String>)> {
         let path = plain(path)?;
         let mut sources = Vec::new();
         if rewrite_links {
@@ -265,13 +265,13 @@ impl NoteOps for AppOps<'_> {
         if !ready {
             // (an open renamed note is reloaded by `renamed`)
             self.touched.push(path.to_string());
-            self.touched.extend(r.as_ref().ok().cloned());
+            self.touched.extend(r.as_ref().ok().map(|(p, _)| p.clone()));
         }
         // the rewritten sources were saved clean above: notes-changed makes the open one reload its new links
         self.touched.extend(sources);
         if ready {
             // unfreezes the editor, on the new path or (failed) the old one; a lost event would leave it frozen
-            let msg = json!({"path": path, "kind": "renamed", "to": r.as_ref().ok()});
+            let msg = json!({"path": path, "kind": "renamed", "to": r.as_ref().ok().map(|(p, _)| p)});
             for _ in 0..3 {
                 if (self.route)(msg.clone()).is_ok() {
                     break;
@@ -435,7 +435,7 @@ mod tests {
         let p = dir.join("P.md").to_string_lossy().into_owned();
         st.vault.lock().unwrap().as_mut().unwrap().set_archived(&p, true).unwrap();
         let route = |_: Value| -> anyhow::Result<Value> { Ok(json!("not-open")) }; // the note is not open in the editor
-        let to = AppOps::new(&st, &route).rename(&p, "Q", false, "s").unwrap();
+        let (to, _) = AppOps::new(&st, &route).rename(&p, "Q", false, "s").unwrap();
         let g = st.vault.lock().unwrap();
         let v = g.as_ref().unwrap();
         assert!(v.search_where("", Sort::Title, 0, &[], false, false).unwrap().hits.iter().all(|h| h.path != to));
@@ -600,6 +600,22 @@ mod tests {
         std::fs::write(&p, "plain zebra #shared\n- [ ] open task\n[[L]]\n").unwrap();
         let r = crate::agent::tools::call(&mut ops, "set_task_done", json!({"title": "P", "line": 1, "line_text": "- [ ] open task", "done": true, "summary": "s"})).unwrap();
         assert_eq!((r["status"].as_str(), r["hash"].as_str()), (Some("changed"), Some("agent-save")), "{r}");
+    }
+
+    /// The editor unfreezes on `renamed`: a save landing before the reply is read must not be covered by its hash.
+    #[test] fn rename_replies_the_hash_read_before_the_editor_unfreezes() {
+        let (st, dir) = state();
+        let q = dir.join("Q.md");
+        let route = |req: Value| {
+            if req["kind"] == "renamed" {
+                std::fs::write(&q, "owner typing after resume\n").unwrap();
+            }
+            Ok(json!(if req["kind"] == "rename" { "ready" } else { "ok" }))
+        };
+        let before = crate::store::hash(&std::fs::read(dir.join("P.md")).unwrap());
+        let mut ops = AppOps::new(&st, &route);
+        let r = crate::agent::tools::call(&mut ops, "rename_note", json!({"title": "P", "new_title": "Q", "rewrite_links": false, "summary": "s"})).unwrap();
+        assert_eq!((r["title"].as_str(), r["hash"].as_str()), (Some("Q"), Some(before.as_str())), "the renamed bytes, not the owner's typing");
     }
 
     #[test] fn editor_replies_route_the_write() {
@@ -840,7 +856,7 @@ mod tests {
         let seen = Mutex::new(Vec::new());
         let route = |req: Value| { seen.lock().unwrap().push(req.clone()); Ok(json!(if req["kind"] == "rename" { "ready" } else { "ok" })) };
         let mut ops = AppOps::new(&st, &route);
-        let np = ops.rename(&p, "Q", false, "s").unwrap();
+        let (np, _) = ops.rename(&p, "Q", false, "s").unwrap();
         let seen = seen.into_inner().unwrap();
         assert_eq!(seen, vec![json!({"path": p, "kind": "rename", "summary": "s"}), json!({"path": p, "kind": "renamed", "to": np})]);
         // a failed rename unfreezes it on the old path
@@ -866,7 +882,7 @@ mod tests {
         assert!(std::path::Path::new(&p).exists(), "not renamed");
         let route = |req: Value| Ok(json!(if req["kind"] == "flush" { "flushed" } else { "not-open" }));
         let mut ops = AppOps::new(&st, &route);
-        let q = ops.rename(&p, "Q", true, "s").unwrap();
+        let (q, _) = ops.rename(&p, "Q", true, "s").unwrap();
         assert_eq!(std::fs::read_to_string(&a).unwrap(), "see [[Q]]\n");
         // the watcher drops this self-write: notes-changed must name the (flushed, clean) source so the editor reloads
         assert_eq!(ops.touched, [p, q, a]);

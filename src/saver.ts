@@ -132,6 +132,14 @@ export class SaveController {
     return { clean, copy: pending && c?.v === v ? c.path : (s?.copy ?? null), hash };
   }
 
+  /**
+   * The open note's disk hash is `hash`, read while its text equalled the clean editor's (a byte-only change, e.g.
+   * line endings, not reloaded yet): later saves base on it. Ignored while dirty: unsaved text never equals the disk.
+   */
+  adopt(hash: string) {
+    if (this.cur.path && !this.dirty && !this.suspended) this.cur.baseHash = hash;
+  }
+
   external(path: string) {
     if (path !== this.cur.path || this.suspended) return;
     if (this.dirty) {
