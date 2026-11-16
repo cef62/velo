@@ -31,6 +31,65 @@ pub fn meta_of(md: &std::fs::Metadata) -> Meta {
     Meta { mtime: ms(md.modified()), size: md.len(), birth: ms(md.created()) }
 }
 
+/// Opens `path` for reading only if it is a regular file (after links). A FIFO named like a note would block a plain
+/// open until a writer comes (with the vault lock held); `O_NONBLOCK` makes the open return at once, and the type is
+/// checked on the opened handle, so a file swapped in after any earlier check can't block either. Regular files then
+/// read as usual (the flag is cleared again).
+pub fn open_regular(path: &Path) -> io::Result<std::fs::File> {
+    let mut o = std::fs::OpenOptions::new();
+    o.read(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut o, libc::O_NONBLOCK);
+    let f = o.open(path)?;
+    if !f.metadata()?.is_file() {
+        return Err(io::Error::other(format!("not a regular file: {}", path.display())));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        let fd = f.as_raw_fd();
+        // SAFETY: `fd` is open for the lifetime of `f`; F_GETFL/F_SETFL only read and set its status flags
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    Ok(f)
+}
+
+/// `std::fs::read` for a file in the notes folder: a regular file only, see `open_regular`.
+pub fn read_regular(path: &Path) -> io::Result<Vec<u8>> {
+    let mut b = Vec::new();
+    io::Read::read_to_end(&mut open_regular(path)?, &mut b)?;
+    Ok(b)
+}
+
+/// A fresh temp file at `tmp` for a write-then-rename. Whatever is there (a crash's leftover, a link, or a FIFO, whose
+/// open for writing blocks until a reader comes) is removed first; `create_new` never opens an existing file or
+/// follows a link, so the write cannot block or land elsewhere.
+pub fn create_tmp(tmp: &Path) -> io::Result<std::fs::File> {
+    match std::fs::remove_file(tmp) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+        _ => {}
+    }
+    std::fs::OpenOptions::new().write(true).create_new(true).open(tmp)
+}
+
+/// Test helpers: a FIFO at `p`, and `f` run on a thread that must finish within 10 s (a blocked open fails the test
+/// instead of hanging CI).
+#[cfg(all(test, unix))]
+pub(crate) mod fifo {
+    pub fn make(p: &std::path::Path) {
+        let c = std::ffi::CString::new(p.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o644) }, 0, "mkfifo {}", p.display());
+    }
+    pub fn within<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || tx.send(f()).ok());
+        rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap_or_else(|_| panic!("blocked on a FIFO: {what}"))
+    }
+}
+
 pub struct Store {
     pub dir: PathBuf,
     self_writes: Mutex<HashMap<PathBuf, String>>,
@@ -79,14 +138,14 @@ impl Store {
     }
 
     pub fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
-        std::fs::read(path)
+        read_regular(path)
     }
 
     pub fn write_atomic(&self, path: &Path, bytes: &[u8]) -> io::Result<String> {
         let name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
         let tmp = path.with_file_name(format!(".{name}.tmp"));
         // sync before the rename: after a power cut the note is either the old or the new version, never empty
-        let res = std::fs::File::create(&tmp)
+        let res = create_tmp(&tmp)
             .and_then(|mut f| io::Write::write_all(&mut f, bytes).and_then(|_| f.sync_all()))
             .and_then(|_| std::fs::rename(&tmp, path));
         if let Err(e) = res {
@@ -99,7 +158,7 @@ impl Store {
     }
 
     pub fn save(&self, path: &Path, bytes: &[u8], base_hash: &str) -> io::Result<SaveResult> {
-        match std::fs::read(path) {
+        match read_regular(path) {
             Ok(disk) if hash(&disk) != base_hash => {
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
                 let stem = parse_note_file(path).map_or_else(|| name.to_string(), |n| n.title);
@@ -292,6 +351,36 @@ mod tests {
         s.rename(&d.path().join("Caf\u{e9}.md"), "CAF\u{c9}").unwrap();
         let names: Vec<String> = fs::read_dir(d.path()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         assert_eq!(names, vec!["CAF\u{c9}.md"]);
+    }
+    /// #159: a FIFO named like a note fails at once instead of blocking until a writer comes; a folder fails too.
+    #[cfg(unix)]
+    #[test] fn read_refuses_a_fifo_without_blocking() {
+        let d = tempfile::tempdir().unwrap();
+        fifo::make(&d.path().join("s.md"));
+        fs::create_dir(d.path().join("f.md")).unwrap();
+        fs::write(d.path().join("a.md"), "a").unwrap();
+        let s = Store::new(d.path().to_path_buf());
+        let dir = d.path().to_path_buf();
+        let r = fifo::within("read", move || (s.read(&dir.join("s.md")).is_err(), s.save(&dir.join("s.md"), b"x", "h").is_err(), read_regular(&dir.join("f.md")).is_err(), s.read(&dir.join("a.md")).unwrap()));
+        assert_eq!(r, (true, true, true, b"a".to_vec()));
+    }
+    /// #163 review m4: a FIFO (or a link) at the temp name of an atomic write is replaced, never opened.
+    #[cfg(unix)]
+    #[test] fn write_atomic_replaces_a_fifo_or_link_at_its_temp_name() {
+        let d = tempfile::tempdir().unwrap();
+        fifo::make(&d.path().join(".s.md.tmp"));
+        let outside = d.path().join("outside");
+        fs::write(&outside, "keep").unwrap();
+        std::os::unix::fs::symlink(&outside, d.path().join(".l.md.tmp")).unwrap();
+        let s = Store::new(d.path().to_path_buf());
+        let dir = d.path().to_path_buf();
+        fifo::within("write_atomic", move || {
+            s.write_atomic(&dir.join("s.md"), b"x").unwrap();
+            s.write_atomic(&dir.join("l.md"), b"y").unwrap();
+        });
+        assert_eq!((fs::read(d.path().join("s.md")).unwrap(), fs::read(d.path().join("l.md")).unwrap()), (b"x".to_vec(), b"y".to_vec()));
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "keep");
+        assert!(!d.path().join(".s.md.tmp").exists() && d.path().join(".l.md.tmp").symlink_metadata().is_err());
     }
     #[test] fn rename_onto_existing_non_note_refused() {
         let d = tempfile::tempdir().unwrap();

@@ -184,6 +184,11 @@ impl Revisions {
         Ok(())
     }
 
+    /// Whether the note has a plaintext snapshot (what `remove_plain` would delete).
+    pub fn has_plain(&self, title: &str) -> bool {
+        std::fs::read_dir(self.dir(title)).is_ok_and(|rd| rd.flatten().any(|e| e.path().extension().is_some_and(|x| x == "md")))
+    }
+
     /// Delete every plaintext snapshot of the note (no key to encrypt them with).
     pub fn remove_plain(&self, title: &str) -> io::Result<()> {
         let Ok(rd) = std::fs::read_dir(self.dir(title)) else { return Ok(()) };
