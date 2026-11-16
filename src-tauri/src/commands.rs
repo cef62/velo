@@ -356,33 +356,140 @@ pub fn toggle_hotkey_live(s: &Settings, live: impl Fn(&str) -> bool) -> bool {
 /// The login item starts velo with this argument (see `run`); a normal launch never carries it.
 pub const HIDDEN_ARG: &str = "--hidden";
 
+/// The name of velo's login item: the LaunchAgent's file name and label on macOS (the bundle identifier, so a dev
+/// build or another tool called "velo" never shares it), the `Run` value on Windows. A test pins it to `tauri.conf.json`.
+pub const AUTOSTART_NAME: &str = "dev.velo.app";
+
 pub fn has_hidden_arg(args: impl IntoIterator<Item = impl AsRef<str>>) -> bool {
     args.into_iter().any(|a| a.as_ref() == HIDDEN_ARG)
 }
 
-/// Whether a login start may leave the window hidden: something must bring it back. macOS always has the Dock click or
-/// a Finder launch (`RunEvent::Reopen`). Elsewhere a window with no taskbar entry is reachable only through the tray
-/// icon, a registered Show/hide hotkey or a second launch, and the last one is not something a user thinks of: start
-/// shown unless the tray or the hotkey is there. `icon_applied`: the tray/taskbar mode really took effect.
-pub fn may_start_hidden(mac: bool, icon_applied: bool, mode: &str, toggle_live: bool) -> bool {
-    icon_applied && (mac || mode == "tray" || toggle_live)
+/// A second launch (Windows/Linux single-instance) shows the running window, unless it is the login item firing.
+pub fn second_launch_shows(args: impl IntoIterator<Item = impl AsRef<str>>) -> bool {
+    !has_hidden_arg(args)
 }
 
-/// First show of the main window (declared `visible: false`). `hidden`: a login start that may stay out of sight.
-/// macOS dock mode shows the window and hides the whole app, exactly what `hide_main` does, so Cmd+Tab and the Dock
-/// click bring it back; every other mode leaves it unshown.
-pub fn first_show(app: &AppHandle, hidden: bool, mode: &str) {
+/// Everything the first-show decision reads.
+pub struct StartCtx<'a, S: AsRef<str>> {
+    pub args: &'a [S],
+    /// The relaunch after an update the user started from the window (`take_restart_mark`).
+    pub after_update: bool,
+    /// The notes folder is set and exists: a first run, a missing folder or the agent fence's error needs the window.
+    pub notes_ready: bool,
+    pub mac: bool,
+    /// The tray/taskbar mode really took effect.
+    pub icon_applied: bool,
+    pub mode: &'a str,
+    pub toggle_live: bool,
+}
+
+/// Whether this start leaves the window hidden: the login item's argument, and a way back for the user. macOS always has
+/// the Dock click or a Finder launch (`RunEvent::Reopen`). Elsewhere a window with no taskbar entry is reachable only
+/// through the tray icon, a registered Show/hide hotkey or a second launch, and the last one is not something a user
+/// thinks of: start shown unless the tray or the hotkey is there. A hidden start never hides something the user must
+/// act on, and never follows an update they just installed from the window (the installer relaunches with the
+/// original arguments, `--hidden` included, and on Windows Tauri gives no way to drop it).
+pub fn start_hidden<S: AsRef<str>>(c: &StartCtx<S>) -> bool {
+    has_hidden_arg(c.args.iter().map(|a| a.as_ref()))
+        && !c.after_update
+        && c.notes_ready
+        && c.icon_applied
+        && (c.mac || c.mode == "tray" || c.toggle_live)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum FirstShow {
+    Show,
+    /// macOS Dock mode: window ordered in and the whole app hidden, as `hide_main` leaves it (Cmd+Tab still works).
+    ShowThenHideApp,
+    /// macOS tray / hotkey only: no window, and the app hides so it does not keep the focus.
+    HideApp,
+    Leave,
+}
+
+pub fn first_show_plan(hidden: bool, mac: bool, mode: &str) -> FirstShow {
+    match (hidden, mac) {
+        (false, _) => FirstShow::Show,
+        (true, true) if mode == "dock" => FirstShow::ShowThenHideApp,
+        (true, true) => FirstShow::HideApp,
+        (true, false) => FirstShow::Leave,
+    }
+}
+
+/// First show of the main window (declared `visible: false`).
+pub fn first_show(app: &AppHandle, plan: FirstShow) {
     let Some(w) = app.get_webview_window("main") else { return };
-    if !hidden || !orders_out(mode) {
+    if matches!(plan, FirstShow::Show | FirstShow::ShowThenHideApp) {
         w.show().ok();
     }
     #[cfg(target_os = "macos")]
-    if hidden && !orders_out(mode) {
-        app.hide().ok();
+    if matches!(plan, FirstShow::ShowThenHideApp | FirstShow::HideApp) {
+        app.hide().ok(); // show_main's app.show() brings it back
     }
 }
 
-/// The OS's own answer: velo keeps no copy, so a login item removed in System Settings shows as off.
+const RESTART_MARK: &str = "restart-shown";
+const RESTART_MARK_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// Written before an update installs (the user clicked in a visible window); the relaunch consumes it.
+pub fn mark_restart(dir: &Path) {
+    std::fs::write(dir.join(RESTART_MARK), b"").ok();
+}
+
+pub fn clear_restart_mark(dir: &Path) {
+    std::fs::remove_file(dir.join(RESTART_MARK)).ok();
+}
+
+/// True once for a mark younger than ten minutes; an older one (an install that never relaunched) is only deleted.
+pub fn take_restart_mark(dir: &Path) -> bool {
+    let p = dir.join(RESTART_MARK);
+    let fresh = std::fs::metadata(&p).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age < RESTART_MARK_TTL);
+    std::fs::remove_file(&p).ok();
+    fresh
+}
+
+/// Why a login item must not point at this executable, if so. macOS writes the path into a plist once, unescaped: an
+/// App Translocation path (a quarantined app run from where it was downloaded) is gone after a reboot, a path with
+/// `& < >` makes the plist invalid, and a development build is not the installed app that shares the item's name.
+pub fn login_item_refusal(exe: &str, mac: bool, debug_build: bool) -> Option<&'static str> {
+    if debug_build {
+        return Some("Start at login is not available in a development build.");
+    }
+    if !mac {
+        return None;
+    }
+    if exe.contains("/AppTranslocation/") {
+        return Some("macOS is running velo from a temporary location. Move velo to Applications, open it from there, then turn Start at login on.");
+    }
+    if exe.contains(['&', '<', '>']) {
+        return Some("velo's folder name contains & < or >, which a login item cannot hold. Move velo to Applications, then turn Start at login on.");
+    }
+    None
+}
+
+fn refusal() -> Option<&'static str> {
+    let exe = std::env::current_exe().and_then(|p| p.canonicalize()).map(|p| p.display().to_string()).unwrap_or_default();
+    login_item_refusal(&exe, cfg!(target_os = "macos"), cfg!(debug_assertions))
+}
+
+/// At startup, an enabled login item is written again so it points at this executable (the app may have moved since,
+/// and macOS keeps the path from the day it was enabled). Never turns on one that is off, and never writes a path
+/// `login_item_refusal` rejects. Not reached by `velo --mcp`, which returns before the app (and the plugin) exists.
+pub fn refresh_login_item(app: &AppHandle) {
+    use tauri_plugin_autostart::ManagerExt;
+    if refusal().is_some() {
+        return;
+    }
+    let launcher = app.autolaunch();
+    if launcher.is_enabled().unwrap_or(false)
+        && let Err(e) = launcher.enable()
+    {
+        crate::log::line(&format!("could not refresh the start at login item: {e}"));
+    }
+}
+
+/// The OS's own answer: velo keeps no copy. On macOS (LaunchAgent) that is whether the plist exists: a toggle in
+/// System Settings › Login Items is not visible to it.
 #[tauri::command]
 pub fn get_autostart(app: AppHandle) -> Res<bool> {
     use tauri_plugin_autostart::ManagerExt;
@@ -390,12 +497,17 @@ pub fn get_autostart(app: AppHandle) -> Res<bool> {
 }
 
 /// Flips the login item, then answers what the OS reports. A failure is logged and returned; the caller re-reads.
+/// Turning it off is never refused: a development build may remove an item the installed app wrote.
 #[tauri::command(async)]
 pub fn set_autostart(app: AppHandle, enabled: bool) -> Res<bool> {
     use tauri_plugin_autostart::ManagerExt;
+    let verb = if enabled { "turn on" } else { "turn off" };
+    if let Some(why) = refusal().filter(|_| enabled) {
+        crate::log::line(&format!("could not {verb} start at login: {why}"));
+        return Err(why.into());
+    }
     let launcher = app.autolaunch();
     if let Err(e) = if enabled { launcher.enable() } else { launcher.disable() } {
-        let verb = if enabled { "turn on" } else { "turn off" };
         crate::log::line(&format!("could not {verb} start at login: {e}"));
         return Err(format!("Could not {verb} start at login: {e}"));
     }
@@ -1145,11 +1257,65 @@ mod global_tests {
         assert!(has_hidden_arg(["/Applications/velo.app/Contents/MacOS/velo", "--hidden"]));
         assert!(!has_hidden_arg(["velo"]) && !has_hidden_arg(["velo", "--mcp", "hidden", "--hidden=1"]));
     }
-    #[test] fn a_hidden_start_needs_a_way_back() {
-        assert!(may_start_hidden(true, true, "dock", false), "macOS: the Dock click reopens");
-        assert!(may_start_hidden(false, true, "tray", false) && may_start_hidden(false, true, "none", true) && may_start_hidden(false, true, "dock", true));
-        assert!(!may_start_hidden(false, true, "dock", false), "taskbar-less and no hotkey");
-        assert!(!may_start_hidden(true, false, "tray", true), "the tray did not build: start shown");
+    fn ctx<'a>(args: &'a [&'a str]) -> StartCtx<'a, &'a str> {
+        StartCtx { args, after_update: false, notes_ready: true, mac: false, icon_applied: true, mode: "tray", toggle_live: false }
+    }
+    #[test] fn a_hidden_start_needs_the_argument_and_a_way_back() {
+        let h = ["velo", "--hidden"];
+        assert!(start_hidden(&ctx(&h)));
+        assert!(!start_hidden(&ctx(&["velo"])), "a normal launch shows the window");
+        assert!(start_hidden(&StartCtx { mac: true, mode: "dock", ..ctx(&h) }), "macOS: the Dock click reopens");
+        assert!(start_hidden(&StartCtx { mode: "none", toggle_live: true, ..ctx(&h) }) && start_hidden(&StartCtx { mode: "dock", toggle_live: true, ..ctx(&h) }));
+        assert!(!start_hidden(&StartCtx { mode: "dock", ..ctx(&h) }), "taskbar-less and no hotkey");
+        assert!(!start_hidden(&StartCtx { icon_applied: false, mac: true, ..ctx(&h) }), "the tray did not build");
+    }
+    #[test] fn a_hidden_start_never_hides_what_the_user_must_see() {
+        let h = ["velo", "--hidden"];
+        assert!(!start_hidden(&StartCtx { notes_ready: false, ..ctx(&h) }), "first run, missing folder, agent fence error");
+        assert!(!start_hidden(&StartCtx { after_update: true, ..ctx(&h) }), "the relaunch after Install and restart");
+    }
+    #[test] fn first_show_plan_covers_every_platform_and_mode() {
+        for mode in ["dock", "tray", "none"] {
+            assert_eq!(first_show_plan(false, true, mode), FirstShow::Show);
+            assert_eq!(first_show_plan(false, false, mode), FirstShow::Show);
+            assert_eq!(first_show_plan(true, false, mode), FirstShow::Leave);
+        }
+        assert_eq!(first_show_plan(true, true, "dock"), FirstShow::ShowThenHideApp);
+        assert_eq!(first_show_plan(true, true, "tray"), FirstShow::HideApp);
+        assert_eq!(first_show_plan(true, true, "none"), FirstShow::HideApp);
+    }
+    #[test] fn the_login_item_second_launch_does_not_show_the_window() {
+        assert!(second_launch_shows(["velo"]) && second_launch_shows(["velo", "--mcp"]));
+        assert!(!second_launch_shows(["velo", "--hidden"]));
+    }
+    #[test] fn the_restart_mark_is_consumed_once_and_expires() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(!take_restart_mark(d.path()));
+        mark_restart(d.path());
+        assert!(take_restart_mark(d.path()));
+        assert!(!take_restart_mark(d.path()), "consumed");
+        mark_restart(d.path());
+        clear_restart_mark(d.path());
+        assert!(!take_restart_mark(d.path()), "a failed install clears it");
+        mark_restart(d.path());
+        let old = std::time::SystemTime::now() - RESTART_MARK_TTL - std::time::Duration::from_secs(5);
+        std::fs::File::options().write(true).open(d.path().join(RESTART_MARK)).unwrap().set_modified(old).unwrap();
+        assert!(!take_restart_mark(d.path()), "a stale mark must not show a login start");
+        assert!(!d.path().join(RESTART_MARK).exists());
+    }
+    #[test] fn the_login_item_refuses_paths_it_cannot_hold() {
+        let ok = "/Applications/velo.app/Contents/MacOS/velo";
+        assert_eq!(login_item_refusal(ok, true, false), None);
+        assert!(login_item_refusal("/private/var/folders/x/T/AppTranslocation/ABC/d/velo.app/Contents/MacOS/velo", true, false).unwrap().contains("Move velo to Applications"));
+        for bad in ["/Apps & Tools/velo.app/Contents/MacOS/velo", "/a<b/velo", "/a>b/velo"] {
+            assert!(login_item_refusal(bad, true, false).is_some(), "{bad}");
+        }
+        assert_eq!(login_item_refusal("C:\\Apps & Tools\\velo.exe", false, false), None, "the Run key quotes its value");
+        assert!(login_item_refusal(ok, true, true).is_some(), "a development build");
+    }
+    #[test] fn the_login_item_name_is_the_bundle_identifier() {
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(conf["identifier"], AUTOSTART_NAME);
     }
     #[test] fn changed_globals_lists_only_real_changes() {
         let (a, mut b) = (Settings::default(), Settings::default());

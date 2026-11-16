@@ -78,7 +78,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
   // the login item lives in the OS, not in the settings: it applies at once and is not part of Save
   const [login, setLogin] = useState<boolean | null>(null);
   const [loginMsg, setLoginMsg] = useState("");
-  useEffect(() => void controller.autostartEnabled().then(setLogin), [controller]);
+  useEffect(() => void controller.autostartState().then((r) => (setLogin(r.enabled), setLoginMsg(r.error ?? ""))), [controller]);
   const [copyMsg, setCopyMsg] = useState(""); // same for the setup command copy
   const [saving, setSaving] = useState(false);
 

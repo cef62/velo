@@ -134,14 +134,20 @@ pub fn run() {
     #[cfg(not(target_os = "macos"))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _| {
         // the login item firing while velo already runs (it was started by hand first) must not pop the window up
-        if !commands::has_hidden_arg(&args) {
+        if commands::second_launch_shows(&args) {
             commands::show_main(app);
         }
     }));
     builder
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         // the OS keeps the login item (LaunchAgent on macOS, HKCU Run on Windows, .desktop on Linux); only it passes --hidden
-        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec![commands::HIDDEN_ARG])))
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent)
+                .app_name(commands::AUTOSTART_NAME)
+                .arg(commands::HIDDEN_ARG)
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -219,6 +225,7 @@ pub fn run() {
                     None
                 }
             };
+            let notes_ready = dir.as_ref().is_some_and(|d| d.is_dir());
             if let Some(dir) = dir {
                 // detached on purpose: quitting must not wait for indexing
                 let h = h.clone();
@@ -243,8 +250,18 @@ pub fn run() {
             };
             let icon_applied = commands::apply_app_icon(&h, icon).map_err(|e| eprintln!("velo: app icon mode not applied: {e}")).is_ok();
             let toggle_live = commands::toggle_hotkey_live(&app.state::<commands::AppState>().settings.lock().unwrap(), |k| commands::hotkey_live(&h, k));
-            let hidden = commands::has_hidden_arg(std::env::args()) && commands::may_start_hidden(cfg!(target_os = "macos"), icon_applied, icon, toggle_live);
-            commands::first_show(&h, hidden, icon);
+            let args: Vec<String> = std::env::args().collect();
+            let hidden = commands::start_hidden(&commands::StartCtx {
+                args: &args,
+                after_update: commands::take_restart_mark(&app.state::<commands::AppState>().data_dir),
+                notes_ready,
+                mac: cfg!(target_os = "macos"),
+                icon_applied,
+                mode: icon,
+                toggle_live,
+            });
+            commands::first_show(&h, commands::first_show_plan(hidden, cfg!(target_os = "macos"), icon));
+            commands::refresh_login_item(&h);
             app.manage(Mutex::new(update::UpdateState::default()));
             update::spawn_checker(h.clone());
             Ok(())

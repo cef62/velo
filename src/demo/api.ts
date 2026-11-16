@@ -268,7 +268,10 @@ function mentionSpans(body: string, name: string): [number, number][] {
 export const getSettings = async (): Promise<Settings> => structuredClone(settings);
 let autostart = false;
 export const getAutostart = async (): Promise<boolean> => autostart;
-export const setAutostart = async (enabled: boolean): Promise<boolean> => (autostart = enabled);
+export const setAutostart = async (enabled: boolean): Promise<boolean> => {
+  if (param("autostart") === "refuse") throw `Could not turn ${enabled ? "on" : "off"} start at login: the demo refuses (?autostart=refuse)`;
+  return (autostart = enabled);
+};
 export const setSettings = async (s: Settings): Promise<void> => void (settings = structuredClone(s));
 
 export const search = async (query: string, sort: "modified" | "title", offset: number, tags: string[], noLinks: boolean, includeArchived: boolean): Promise<Page> => {
