@@ -13,6 +13,7 @@
     "windows": [
       {
         "label": "main",
+        "visible": false,
         "title": "velo",
         "width": 1000,
         "height": 700,

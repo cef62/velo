@@ -94,6 +94,8 @@ export function fakeApi(notes: Record<string, string> = {}) {
     openWhatsNew: vi.fn(async () => {}),
     installUpdate: vi.fn(async (_version?: string) => {}),
     appVersion: vi.fn(async () => "0.6.0"),
+    getAutostart: vi.fn(async () => false),
+    setAutostart: vi.fn(async (on: boolean) => on),
     logFile: vi.fn(async () => "/logs/velo.log"),
   };
   return { api: api as unknown as Api & typeof api, notes };

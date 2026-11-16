@@ -346,7 +346,60 @@ pub fn close_requested(app: AppHandle, st: State<'_, AppState>) -> bool {
 /// "none" leaves the Show/hide hotkey as the only way back to a hidden velo: it must be registered, not only set
 /// (another app can hold the keys, and then registration failed at startup or in `set_settings`).
 pub fn hotkey_only_ok(s: &Settings, live: impl Fn(&str) -> bool) -> bool {
-    s.app_icon != "none" || s.global_bindings().iter().any(|(a, k)| *a == GlobalAction::ToggleWindow && live(k))
+    s.app_icon != "none" || toggle_hotkey_live(s, live)
+}
+
+pub fn toggle_hotkey_live(s: &Settings, live: impl Fn(&str) -> bool) -> bool {
+    s.global_bindings().iter().any(|(a, k)| *a == GlobalAction::ToggleWindow && live(k))
+}
+
+/// The login item starts velo with this argument (see `run`); a normal launch never carries it.
+pub const HIDDEN_ARG: &str = "--hidden";
+
+pub fn has_hidden_arg(args: impl IntoIterator<Item = impl AsRef<str>>) -> bool {
+    args.into_iter().any(|a| a.as_ref() == HIDDEN_ARG)
+}
+
+/// Whether a login start may leave the window hidden: something must bring it back. macOS always has the Dock click or
+/// a Finder launch (`RunEvent::Reopen`). Elsewhere a window with no taskbar entry is reachable only through the tray
+/// icon, a registered Show/hide hotkey or a second launch, and the last one is not something a user thinks of: start
+/// shown unless the tray or the hotkey is there. `icon_applied`: the tray/taskbar mode really took effect.
+pub fn may_start_hidden(mac: bool, icon_applied: bool, mode: &str, toggle_live: bool) -> bool {
+    icon_applied && (mac || mode == "tray" || toggle_live)
+}
+
+/// First show of the main window (declared `visible: false`). `hidden`: a login start that may stay out of sight.
+/// macOS dock mode shows the window and hides the whole app, exactly what `hide_main` does, so Cmd+Tab and the Dock
+/// click bring it back; every other mode leaves it unshown.
+pub fn first_show(app: &AppHandle, hidden: bool, mode: &str) {
+    let Some(w) = app.get_webview_window("main") else { return };
+    if !hidden || !orders_out(mode) {
+        w.show().ok();
+    }
+    #[cfg(target_os = "macos")]
+    if hidden && !orders_out(mode) {
+        app.hide().ok();
+    }
+}
+
+/// The OS's own answer: velo keeps no copy, so a login item removed in System Settings shows as off.
+#[tauri::command]
+pub fn get_autostart(app: AppHandle) -> Res<bool> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+/// Flips the login item, then answers what the OS reports. A failure is logged and returned; the caller re-reads.
+#[tauri::command(async)]
+pub fn set_autostart(app: AppHandle, enabled: bool) -> Res<bool> {
+    use tauri_plugin_autostart::ManagerExt;
+    let launcher = app.autolaunch();
+    if let Err(e) = if enabled { launcher.enable() } else { launcher.disable() } {
+        let verb = if enabled { "turn on" } else { "turn off" };
+        crate::log::line(&format!("could not {verb} start at login: {e}"));
+        return Err(format!("Could not {verb} start at login: {e}"));
+    }
+    launcher.is_enabled().map_err(|e| e.to_string())
 }
 
 pub fn hotkey_live(app: &AppHandle, binding: &str) -> bool {
@@ -1087,6 +1140,16 @@ mod global_tests {
         assert!(!hotkey_only_ok(&s, |_| false), "set but taken by another app");
         s.shortcuts.insert("toggle_window".into(), "none".into());
         assert!(!hotkey_only_ok(&s, |k| k != "none"), "cleared");
+    }
+    #[test] fn only_the_login_item_argument_marks_a_hidden_start() {
+        assert!(has_hidden_arg(["/Applications/velo.app/Contents/MacOS/velo", "--hidden"]));
+        assert!(!has_hidden_arg(["velo"]) && !has_hidden_arg(["velo", "--mcp", "hidden", "--hidden=1"]));
+    }
+    #[test] fn a_hidden_start_needs_a_way_back() {
+        assert!(may_start_hidden(true, true, "dock", false), "macOS: the Dock click reopens");
+        assert!(may_start_hidden(false, true, "tray", false) && may_start_hidden(false, true, "none", true) && may_start_hidden(false, true, "dock", true));
+        assert!(!may_start_hidden(false, true, "dock", false), "taskbar-less and no hotkey");
+        assert!(!may_start_hidden(true, false, "tray", true), "the tray did not build: start shown");
     }
     #[test] fn changed_globals_lists_only_real_changes() {
         let (a, mut b) = (Settings::default(), Settings::default());

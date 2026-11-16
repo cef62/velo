@@ -115,6 +115,8 @@ app_commands![
             commands::quit_app,
             commands::reset_window_cmd,
             commands::log_line,
+            commands::get_autostart,
+            commands::set_autostart,
             update::check_update,
             update::install_update,
             whatsnew::open_whatsnew,
@@ -130,11 +132,16 @@ pub fn run() {
     // running window instead of starting a second process on the same notes. Not on macOS: LaunchServices keeps one
     // instance and RunEvent::Reopen shows it, and the plugin's socket in shared /tmp could be squatted to block launch.
     #[cfg(not(target_os = "macos"))]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
-        commands::show_main(app);
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _| {
+        // the login item firing while velo already runs (it was started by hand first) must not pop the window up
+        if !commands::has_hidden_arg(&args) {
+            commands::show_main(app);
+        }
     }));
     builder
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // the OS keeps the login item (LaunchAgent on macOS, HKCU Run on Windows, .desktop on Linux); only it passes --hidden
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec![commands::HIDDEN_ARG])))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -234,9 +241,10 @@ pub fn run() {
                 "none" if !live => "tray",
                 m => m,
             };
-            if let Err(e) = commands::apply_app_icon(&h, icon) {
-                eprintln!("velo: app icon mode not applied: {e}");
-            }
+            let icon_applied = commands::apply_app_icon(&h, icon).map_err(|e| eprintln!("velo: app icon mode not applied: {e}")).is_ok();
+            let toggle_live = commands::toggle_hotkey_live(&app.state::<commands::AppState>().settings.lock().unwrap(), |k| commands::hotkey_live(&h, k));
+            let hidden = commands::has_hidden_arg(std::env::args()) && commands::may_start_hidden(cfg!(target_os = "macos"), icon_applied, icon, toggle_live);
+            commands::first_show(&h, hidden, icon);
             app.manage(Mutex::new(update::UpdateState::default()));
             update::spawn_checker(h.clone());
             Ok(())
@@ -282,7 +290,7 @@ mod guard_tests {
         let denied: Vec<_> = APP_COMMANDS.iter().filter(|c| !whatsnew::allowed(whatsnew::LABEL, c)).collect();
         assert_eq!(denied.len(), APP_COMMANDS.len() - whatsnew::COMMANDS.len());
         assert!(APP_COMMANDS.iter().all(|c| whatsnew::allowed("main", c)));
-        for c in ["save_note", "open_note", "get_settings", "whatsnew_failed", "open_whatsnew", "install_update"] {
+        for c in ["save_note", "open_note", "get_settings", "whatsnew_failed", "open_whatsnew", "install_update", "get_autostart", "set_autostart"] {
             assert!(denied.contains(&&c), "{c}");
         }
     }

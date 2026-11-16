@@ -1775,6 +1775,28 @@ export class Controller {
     }
   }
 
+  /** The login item as the OS reports it; a failed read shows off. */
+  async autostartEnabled(): Promise<boolean> {
+    return this.api.getAutostart().catch(() => false);
+  }
+
+  /** Sets the login item. Resolves with the OS's state afterwards (re-read, never assumed) and why it failed, if it did. */
+  async setAutostart(on: boolean): Promise<{ enabled: boolean; error: string | null }> {
+    let error: string | null = null;
+    try {
+      await this.api.setAutostart(on);
+    } catch (e) {
+      error = errText(e);
+    }
+    return { enabled: await this.autostartEnabled(), error };
+  }
+
+  /** Palette "Toggle start at login": flips what the OS reports now. */
+  async toggleAutostart() {
+    const { enabled, error } = await this.setAutostart(!(await this.autostartEnabled()));
+    this.setErr(error ?? (enabled ? "Start at login on" : "Start at login off"));
+  }
+
   /** Reveals velo.log in the file manager. */
   async showLog() {
     try {
@@ -2173,6 +2195,7 @@ export class Controller {
     check_updates: () => void this.checkUpdates(),
     toggle_debug_log: () => void this.toggleDebugLog(),
     show_log: () => void this.showLog(),
+    toggle_autostart: () => void this.toggleAutostart(),
   };
 
   /**

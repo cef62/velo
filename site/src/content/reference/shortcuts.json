@@ -297,6 +297,15 @@
     "group": "App"
   },
   {
+    "action": "toggle_autostart",
+    "label": "Toggle start at login",
+    "keys": "none",
+    "mac": null,
+    "other": null,
+    "global": false,
+    "group": "App"
+  },
+  {
     "action": "quit",
     "label": "Quit velo",
     "keys": "none",
