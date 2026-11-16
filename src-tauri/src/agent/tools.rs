@@ -33,7 +33,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "read_note",
-        description: "Read a note by title (or alias). Returns the full text (front matter included), `hash` (pass it to replace_note), created, modified, tags, aliases, outgoing [[links]] and backlinks (titles of notes linking here). Backlinks leave out archived notes; get_connections with include_archived lists them.",
+        description: "Read a note by title (or alias). Returns the full text (front matter included), `hash` (pass it to replace_note; it covers exactly the text returned), created, modified, tags, aliases, outgoing [[links]] and backlinks (titles of notes linking here). Backlinks leave out archived notes; get_connections with include_archived lists them.",
         input_schema: r#"{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}"#,
     },
     ToolSpec {
@@ -43,27 +43,27 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "append_to_note",
-        description: concat!("Append text at the end of a note, on a new line. Creates the note if it does not exist. Returns the title and new hash.", conventions!()),
+        description: concat!("Append text at the end of a note, on a new line. Creates the note if it does not exist. Returns the title, no hash: the note may hold text you have not read, so call read_note before replace_note.", conventions!()),
         input_schema: r#"{"type":"object","properties":{"title":{"type":"string"},"text":{"type":"string"},"summary":{"type":"string"}},"required":["title","text","summary"]}"#,
     },
     ToolSpec {
         name: "edit_note",
-        description: concat!("Replace `old_text` with `new_text` in a note. `old_text` must occur exactly once in the current text (include surrounding text to make it unique); otherwise nothing changes and the error gives the match count. Returns the new hash.", conventions!()),
+        description: concat!("Replace `old_text` with `new_text` in a note. `old_text` must occur exactly once in the current text (include surrounding text to make it unique); otherwise nothing changes and the error gives the match count. Returns the title, no hash: the note may hold text you have not read, so call read_note before replace_note.", conventions!()),
         input_schema: r#"{"type":"object","properties":{"title":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"},"summary":{"type":"string"}},"required":["title","old_text","new_text","summary"]}"#,
     },
     ToolSpec {
         name: "replace_note",
-        description: concat!("Replace a note's whole text (front matter included). `expected_hash` must be the hash from your latest read_note or write; if the note changed since, nothing changes. Prefer edit_note for small changes. Returns the new hash.", conventions!()),
+        description: concat!("Replace a note's whole text (front matter included). `expected_hash` must be the hash from your latest read_note (or from a create_note or replace_note reply, which cover exactly the text you sent); if the note changed since, nothing changes. After edit_note, append_to_note, add_tags, remove_tags, add_task, set_task_done, rename_note or merge_notes, call read_note first: those replies carry no hash. Prefer edit_note for small changes. Returns the new hash.", conventions!()),
         input_schema: r#"{"type":"object","properties":{"title":{"type":"string"},"text":{"type":"string"},"expected_hash":{"type":"string"},"summary":{"type":"string"}},"required":["title","text","expected_hash","summary"]}"#,
     },
     ToolSpec {
         name: "add_tags",
-        description: concat!("Add up to 50 tags to up to 200 notes (`titles`). Each note is its own write; the result lists `changed` (with the new hash), `unchanged` (already has the tag, in front matter or inline) or `failed` with a reason per title. Tags go in the front-matter `tags:` list (or as a #tag line at the end of the note when velo's front-matter setting is off).", conventions!()),
+        description: concat!("Add up to 50 tags to up to 200 notes (`titles`). Each note is its own write; the result lists `changed`, `unchanged` (already has the tag, in front matter or inline) or `failed` with a reason per title. Tags go in the front-matter `tags:` list (or as a #tag line at the end of the note when velo's front-matter setting is off).", conventions!()),
         input_schema: r#"{"type":"object","properties":{"titles":{"type":"array","items":{"type":"string"},"maxItems":200},"tags":{"type":"array","items":{"type":"string"},"maxItems":50},"summary":{"type":"string"}},"required":["titles","tags","summary"]}"#,
     },
     ToolSpec {
         name: "remove_tags",
-        description: concat!("Remove up to 50 tags from up to 200 notes (`titles`): from the front-matter `tags:` list and exact inline #tag words (never inside code or links). Each note is its own write; the result lists `changed` (with the new hash), `unchanged` or `failed` with a reason per title.", conventions!()),
+        description: concat!("Remove up to 50 tags from up to 200 notes (`titles`): from the front-matter `tags:` list and exact inline #tag words (never inside code or links). Each note is its own write; the result lists `changed`, `unchanged` or `failed` with a reason per title.", conventions!()),
         input_schema: r#"{"type":"object","properties":{"titles":{"type":"array","items":{"type":"string"},"maxItems":200},"tags":{"type":"array","items":{"type":"string"},"maxItems":50},"summary":{"type":"string"}},"required":["titles","tags","summary"]}"#,
     },
     ToolSpec {
@@ -73,17 +73,17 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "add_task",
-        description: concat!("Add a `- [ ] text` task line. Without `title` it goes to velo's capture target (the Inbox or today's daily note, per the user's setting); the note is created if missing. `due` (YYYY-MM-DD) adds ` 📅 due`. Returns the note title and new hash.", conventions!()),
+        description: concat!("Add a `- [ ] text` task line. Without `title` it goes to velo's capture target (the Inbox or today's daily note, per the user's setting); the note is created if missing. `due` (YYYY-MM-DD) adds ` 📅 due`. Returns the note title, no hash: call read_note before replace_note.", conventions!()),
         input_schema: r#"{"type":"object","properties":{"text":{"type":"string"},"title":{"type":"string"},"due":{"type":"string","pattern":"^\\d{4}-\\d{2}-\\d{2}$"},"summary":{"type":"string"}},"required":["text","summary"]}"#,
     },
     ToolSpec {
         name: "set_task_done",
-        description: concat!("Tick (`done` true) or untick a task in a note, with velo's done date handling (`@done(YYYY-MM-DD)`). Pass `line` and `line_text` from list_tasks or read_note; if the line changed since, it fails with task-moved. Returns status `changed` (with the new hash and line) or `unchanged` when the task is already in that state.", conventions!()),
+        description: concat!("Tick (`done` true) or untick a task in a note, with velo's done date handling (`@done(YYYY-MM-DD)`). Pass `line` and `line_text` from list_tasks or read_note; if the line changed since, it fails with task-moved. Returns status `changed` (with the line) or `unchanged` when the task is already in that state; no hash, so call read_note before replace_note.", conventions!()),
         input_schema: r#"{"type":"object","properties":{"title":{"type":"string"},"line":{"type":"integer","minimum":0},"line_text":{"type":"string"},"done":{"type":"boolean"},"summary":{"type":"string"}},"required":["title","line","line_text","done","summary"]}"#,
     },
     ToolSpec {
         name: "rename_note",
-        description: concat!("Rename a note. With `rewrite_links` true, [[links]] to it in other notes are updated. Returns the new title and hash.", conventions!()),
+        description: concat!("Rename a note. With `rewrite_links` true, [[links]] to it in other notes are updated. Returns the new title, no hash: call read_note before replace_note.", conventions!()),
         input_schema: r#"{"type":"object","properties":{"title":{"type":"string"},"new_title":{"type":"string"},"rewrite_links":{"type":"boolean"},"summary":{"type":"string"}},"required":["title","new_title","rewrite_links","summary"]}"#,
     },
     ToolSpec {
@@ -93,7 +93,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "merge_notes",
-        description: concat!("Merge note `source` into note `target`: the source's text is appended to the target under a `## Source title` heading, its tags and aliases (and its title, as an alias) join the target's front matter, [[links]] to the source in other notes are rewritten to the target, and the source goes to the OS Trash. Returns the target's title and hash, the number of links rewritten and whether the source was trashed.", conventions!()),
+        description: concat!("Merge note `source` into note `target`: the source's text is appended to the target under a `## Source title` heading, its tags and aliases (and its title, as an alias) join the target's front matter, [[links]] to the source in other notes are rewritten to the target, and the source goes to the OS Trash. Returns the target's title (no hash: call read_note before replace_note), the number of links rewritten and whether the source was trashed.", conventions!()),
         input_schema: r#"{"type":"object","properties":{"source":{"type":"string"},"target":{"type":"string"},"summary":{"type":"string"}},"required":["source","target","summary"]}"#,
     },
     ToolSpec {
@@ -242,11 +242,11 @@ fn dispatch(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
             let (title, text) = (title_arg(&a, "title")?, arg(&a, "text")?);
             let Some(path) = ops.find(title).map_err(err)? else {
                 let doc = ops.create(title, &format!("{text}\n"), summary).map_err(err)?;
-                return Ok(json!({"title": doc.title, "hash": doc.hash}));
+                return Ok(json!({"title": doc.title}));
             };
             let doc = ops.read(&path).map_err(err)?;
-            let hash = ops.write(&path, &append_line(&doc.text, text), &doc.hash, summary).map_err(err)?;
-            Ok(json!({"title": doc.title, "hash": hash}))
+            ops.write(&path, &append_line(&doc.text, text), &doc.hash, summary).map_err(err)?;
+            Ok(json!({"title": doc.title}))
         }
         "edit_note" => {
             let (old, new) = (arg(&a, "old_text")?, arg(&a, "new_text")?);
@@ -258,8 +258,8 @@ fn dispatch(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
                 let hint = if n == 0 && doc.text.contains("\r\n") && old.contains('\n') && !old.contains("\r\n") { " This note uses CRLF line endings: use \\r\\n in old_text." } else { "" };
                 return Err(format!("old_text must occur exactly once in the note; it occurs {n} times. Nothing was changed.{hint}"));
             }
-            let hash = ops.write(&path, &doc.text.replacen(old, new, 1), &doc.hash, summary).map_err(err)?;
-            Ok(json!({"title": doc.title, "hash": hash}))
+            ops.write(&path, &doc.text.replacen(old, new, 1), &doc.hash, summary).map_err(err)?;
+            Ok(json!({"title": doc.title}))
         }
         "replace_note" => {
             let (text, expected) = (arg(&a, "text")?, arg(&a, "expected_hash")?);
@@ -298,10 +298,10 @@ fn dispatch(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
                 Some(t) => t.to_string(),
                 None => crate::settings::capture_title(&ops.settings(), &crate::tasks::local_today()),
             };
-            // the hash the save left, not the read's: newer typing saved since must not be covered by it (#134)
-            let (path, hash) = ops.capture_task(&title, &text, summary).map_err(err)?;
+            // no hash in the reply: it would cover the whole note, text the agent never read (#157)
+            let (path, _) = ops.capture_task(&title, &text, summary).map_err(err)?;
             let doc = ops.read(&path).map_err(err)?;
-            Ok(json!({"title": doc.title, "hash": hash}))
+            Ok(json!({"title": doc.title}))
         }
         "set_task_done" => {
             let line = a.get("line").and_then(Value::as_u64).ok_or("line is required")? as usize;
@@ -310,19 +310,19 @@ fn dispatch(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
             let doc = ops.read(&path).map_err(err)?;
             let Some(t) = crate::tasks::parse_tasks(&doc.text).into_iter().find(|t| t.line == line && t.line_text == expected) else { return Err("task-moved".into()) };
             if t.done == done {
-                return Ok(json!({"title": doc.title, "status": "unchanged", "hash": doc.hash, "line": line, "line_text": t.line_text}));
+                return Ok(json!({"title": doc.title, "status": "unchanged", "line": line, "line_text": t.line_text}));
             }
             let r = ops.toggle_task(&path, line, expected, summary).map_err(err)?;
-            Ok(json!({"title": doc.title, "status": "changed", "hash": r.hash, "line": r.line, "line_text": r.line_text}))
+            Ok(json!({"title": doc.title, "status": "changed", "line": r.line, "line_text": r.line_text}))
         }
         "rename_note" => {
             let rewrite = a.get("rewrite_links").and_then(Value::as_bool).ok_or("missing rewrite_links")?;
-            // the hash read under the rename's lock: the editor unfreezes before a read here, and typing it saves then
-            // must not be covered by the reply (#134). Unreadable: it moved, but no hash can vouch for it.
-            let (new, hash) = ops.rename(&path_of(ops, &a)?, title_arg(&a, "new_title")?, rewrite, summary).map_err(err)?;
-            let hash = hash.ok_or(super::client::NO_ANSWER)?;
+            // no hash in the reply: it would cover the whole note, typing the editor saves at unfreeze included (#157).
+            // Unreadable right after the move: still "no answer", as before.
+            let (new, read) = ops.rename(&path_of(ops, &a)?, title_arg(&a, "new_title")?, rewrite, summary).map_err(err)?;
+            read.ok_or(super::client::NO_ANSWER)?;
             let doc = ops.read(&new).map_err(err)?;
-            Ok(json!({"title": doc.title, "hash": hash}))
+            Ok(json!({"title": doc.title}))
         }
         "move_to_trash" => {
             let path = path_of(ops, &a)?;
@@ -336,7 +336,7 @@ fn dispatch(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
             let m = ops.merge(&source, &target, summary).map_err(err)?;
             // read back: the link rewrite may have written the target again
             let doc = ops.read(&target).map_err(err)?;
-            Ok(json!({"title": doc.title, "hash": doc.hash, "rewritten": m.rewritten, "trashed": m.trash_error.is_none(), "trash_error": m.trash_error}))
+            Ok(json!({"title": doc.title, "rewritten": m.rewritten, "trashed": m.trash_error.is_none(), "trash_error": m.trash_error}))
         }
         "daily_note" => {
             let date = match a.get("date").and_then(Value::as_str) {
@@ -390,8 +390,8 @@ fn bulk_tags(ops: &mut dyn NoteOps, add: bool, a: &Value, summary: &str) -> Resu
         return Err(format!("invalid tag: {t}"));
     }
     let wfm = ops.settings().write_front_matter;
-    // the new hash when the note changed
-    let one = |ops: &mut dyn NoteOps, title: &str| -> Result<Option<String>, String> {
+    // whether the note changed
+    let one = |ops: &mut dyn NoteOps, title: &str| -> Result<bool, String> {
         let path = ops.find(title).map_err(err)?.ok_or("not found")?;
         let doc = ops.read(&path).map_err(err)?;
         let fm = frontmatter::parse(&doc.text);
@@ -413,9 +413,8 @@ fn bulk_tags(ops: &mut dyn NoteOps, add: bool, a: &Value, summary: &str) -> Resu
             cur.push_str(&body);
             Some(cur).filter(|c| *c != doc.text)
         };
-        let mut changed = None;
         if let Some(new) = &new {
-            changed = Some(ops.write(&path, new, &doc.hash, summary).map_err(err)?);
+            ops.write(&path, new, &doc.hash, summary).map_err(err)?;
         }
         if !add {
             // A tag the index still sees (e.g. only in a link target) could not be removed: write what went, then fail.
@@ -425,15 +424,15 @@ fn bulk_tags(ops: &mut dyn NoteOps, add: bool, a: &Value, summary: &str) -> Resu
                 return Err("tag only appears in code or a link".into());
             }
         }
-        Ok(changed)
+        Ok(new.is_some())
     };
     let busy = crate::agent::client::BUSY;
     let mut stop = false; // once velo said busy, the rest would only queue up behind it
     let results: Vec<Value> = titles.iter().map(|v| {
         let Some(t) = v.as_str() else { return json!({"title": v, "status": "failed", "reason": "not a title"}) };
         match if stop { Err(busy.to_string()) } else { one(ops, t) } {
-            Ok(Some(hash)) => json!({"title": t, "status": "changed", "hash": hash}),
-            Ok(None) => json!({"title": t, "status": "unchanged"}),
+            Ok(true) => json!({"title": t, "status": "changed"}),
+            Ok(false) => json!({"title": t, "status": "unchanged"}),
             Err(e) => {
                 stop |= e == busy;
                 json!({"title": t, "status": "failed", "reason": e})
@@ -603,7 +602,7 @@ mod tests {
         let r = edit(&mut ops, "one").unwrap();
         let bytes = std::fs::read(dir.join("a.md")).unwrap();
         assert!(String::from_utf8_lossy(&bytes).ends_with("three two two"));
-        assert_eq!(r["hash"], crate::store::hash(&bytes));
+        assert!(r.get("hash").is_none(), "{r}");
     }
 
     #[test] fn edit_note_counts_overlapping_matches() {
@@ -631,7 +630,7 @@ mod tests {
         let r = call(&mut ops, "append_to_note", json!({"title": "new", "text": "- [ ] second", "summary": "test"})).unwrap();
         let bytes = std::fs::read(dir.join("New.md")).unwrap();
         assert!(String::from_utf8_lossy(&bytes).ends_with("- [ ] first\n- [ ] second\n"), "{}", String::from_utf8_lossy(&bytes));
-        assert_eq!(r["hash"], crate::store::hash(&bytes));
+        assert!(r.get("hash").is_none(), "{r}");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
     }
 
@@ -835,7 +834,6 @@ mod tests {
         ops.vault.list_revisions(path).unwrap().into_iter().filter(|r| r.agent).map(|r| r.summary.unwrap_or_default()).collect()
     }
 
-    fn hash_of(dir: &Path, f: &str) -> String { crate::store::hash(&std::fs::read(dir.join(f)).unwrap()) }
 
     #[test] fn list_tasks_excludes_locked() {
         let (mut ops, _) = task_ops(&[("a.md", "- [ ] open one"), ("b.md", "- [ ] hidden")]);
@@ -857,7 +855,7 @@ mod tests {
         let (mut ops, dir) = task_ops(&[]);
         let r = call(&mut ops, "add_task", json!({"text": "buy milk", "due": "2030-01-02", "summary": "added milk"})).unwrap();
         assert_eq!(r["title"], "Inbox");
-        assert_eq!(r["hash"], hash_of(&dir, "Inbox.md"));
+        assert!(r.get("hash").is_none(), "{r}");
         assert!(read(&dir, "Inbox.md").ends_with("- [ ] buy milk 📅 2030-01-02\n"), "{}", read(&dir, "Inbox.md"));
         let p = ops.find("Inbox").unwrap().unwrap();
         // created note: exactly one agent revision, holding the created text
@@ -867,7 +865,7 @@ mod tests {
         // existing note: one more agent revision holding the text before the write
         let r = call(&mut ops, "add_task", json!({"text": "two", "summary": "added two"})).unwrap();
         assert_eq!(agent_revs(&ops, &p), ["added two", "added milk"]);
-        assert_eq!(r["hash"], hash_of(&dir, "Inbox.md"));
+        assert!(r.get("hash").is_none(), "{r}");
         call(&mut ops, "add_task", json!({"text": "three", "title": "Other", "summary": "s"})).unwrap();
         assert!(read(&dir, "Other.md").contains("- [ ] three"));
         let (mut ops, dir) = task_ops(&[("Daily.md.age", "x")]);
@@ -927,12 +925,12 @@ mod tests {
         let args = |done: bool, lt: &str, s: &str| json!({"title": "a", "line": line.get(), "line_text": lt, "done": done, "summary": s});
         let r = call(&mut ops, "set_task_done", args(false, "- [ ] do it", "noop")).unwrap();
         assert_eq!(r["status"], "unchanged");
-        assert_eq!(r["hash"], hash_of(&dir, "a.md"));
+        assert!(r.get("hash").is_none(), "{r}");
         assert_eq!(read(&dir, "a.md"), "intro\n- [ ] do it");
         assert!(agent_revs(&ops, &p).is_empty(), "unchanged takes no snapshot");
         let r = call(&mut ops, "set_task_done", args(true, "- [ ] do it", "ticked")).unwrap();
         assert_eq!(r["status"], "changed");
-        assert_eq!(r["hash"], hash_of(&dir, "a.md"));
+        assert!(r.get("hash").is_none(), "{r}");
         assert!(read(&dir, "a.md").contains("- [x] do it @done("), "{}", read(&dir, "a.md"));
         assert_eq!(agent_revs(&ops, &p), ["ticked"]);
         let lt = r["line_text"].as_str().unwrap().to_string();
@@ -941,7 +939,7 @@ mod tests {
         assert_eq!(agent_revs(&ops, &p), ["ticked"]);
         let r = call(&mut ops, "set_task_done", args(false, &lt, "unticked")).unwrap();
         assert_eq!(r["status"], "changed");
-        assert_eq!(r["hash"], hash_of(&dir, "a.md"));
+        assert!(r.get("hash").is_none(), "{r}");
         assert_eq!(agent_revs(&ops, &p), ["unticked", "ticked"]);
         assert!(read(&dir, "a.md").contains("- [ ] do it"));
     }
@@ -965,7 +963,7 @@ mod tests {
         let (mut ops, dir) = task_ops(&[("a.md", "x"), ("b.md", "see [[a]]")]);
         let r = call(&mut ops, "rename_note", json!({"title": "a", "new_title": "z", "rewrite_links": true, "summary": "renamed"})).unwrap();
         assert_eq!(r["title"], "z");
-        assert_eq!(r["hash"], hash_of(&dir, "z.md"));
+        assert!(r.get("hash").is_none(), "{r}");
         assert!(dir.join("z.md").exists() && !dir.join("a.md").exists());
         assert_eq!(read(&dir, "b.md"), "see [[z]]");
         let p = ops.find("z").unwrap().unwrap();
@@ -1005,12 +1003,46 @@ mod tests {
         assert_eq!(call(&mut ops, "daily_note", json!({"date": "2031-05-06"})).unwrap()["title"], "2031-05-06");
         assert!(call(&mut ops, "daily_note", json!({"date": "2031-13-06"})).unwrap_err().contains("invalid date"));
     }
+    /// #157 (b): the owner saved after the agent's last read; a hash from edit_note would cover that text.
+    #[test] fn edit_note_after_an_unread_owner_save_replies_no_hash() {
+        let (mut ops, dir) = task_ops(&[("a.md", "one two")]);
+        let seen = call(&mut ops, "read_note", json!({"title": "a"})).unwrap()["hash"].clone();
+        std::fs::write(dir.join("a.md"), "one two\nowner typed this\n").unwrap();
+        let r = call(&mut ops, "edit_note", json!({"title": "a", "old_text": "one", "new_text": "1", "summary": "s"})).unwrap();
+        assert_eq!(r, json!({"title": "a"}));
+        let stale = call(&mut ops, "replace_note", json!({"title": "a", "text": "x", "expected_hash": seen, "summary": "s"}));
+        assert_eq!(stale, Err("note changed since you read it".to_string()));
+        assert!(read(&dir, "a.md").contains("owner typed this"));
+    }
+
+    /// #157: every partial-write reply, even a no-op or a create, names the note and nothing that vouches for its text.
+    #[test] fn partial_write_replies_carry_no_hash() {
+        let (mut ops, _) = task_ops(&[("a.md", "x\n- [ ] do it\n#t"), ("b.md", "y"), ("c.md", "z")]);
+        let task = json!({"title": "a", "line": 1, "line_text": "- [ ] do it", "done": false, "summary": "s"});
+        let replies = [
+            call(&mut ops, "set_task_done", task).unwrap(), // no-op
+            call(&mut ops, "set_task_done", json!({"title": "a", "line": 1, "line_text": "- [ ] do it", "done": true, "summary": "s"})).unwrap(),
+            call(&mut ops, "edit_note", json!({"title": "a", "old_text": "do it", "new_text": "did it", "summary": "s"})).unwrap(),
+            call(&mut ops, "append_to_note", json!({"title": "a", "text": "more", "summary": "s"})).unwrap(),
+            call(&mut ops, "append_to_note", json!({"title": "new", "text": "more", "summary": "s"})).unwrap(),
+            call(&mut ops, "add_task", json!({"text": "t", "title": "a", "summary": "s"})).unwrap(),
+            call(&mut ops, "add_task", json!({"text": "t", "summary": "s"})).unwrap(),
+            call(&mut ops, "rename_note", json!({"title": "b", "new_title": "bb", "rewrite_links": true, "summary": "s"})).unwrap(),
+            call(&mut ops, "merge_notes", json!({"source": "bb", "target": "c", "summary": "s"})).unwrap(),
+            call(&mut ops, "add_tags", json!({"titles": ["a"], "tags": ["u"], "summary": "s"})).unwrap()["results"][0].clone(),
+            call(&mut ops, "remove_tags", json!({"titles": ["a"], "tags": ["u"], "summary": "s"})).unwrap()["results"][0].clone(),
+        ];
+        for r in replies {
+            assert!(r.get("hash").is_none(), "{r}");
+        }
+    }
+
     #[test] fn merge_notes_merges_and_rewrites() {
         let (mut ops, dir) = task_ops(&[("Source.md", "from source\n"), ("Target.md", "target text\n"), ("C.md", "see [[Source]]\n")]);
         let r = call(&mut ops, "merge_notes", json!({"source": "Source", "target": "Target", "summary": "merged"})).unwrap();
         assert_eq!((r["title"].as_str(), r["rewritten"].as_u64(), r["trashed"].as_bool()), (Some("Target"), Some(1), Some(true)));
         assert_eq!(r["trash_error"], Value::Null);
-        assert_eq!(r["hash"], crate::store::hash(&std::fs::read(dir.join("Target.md")).unwrap()));
+        assert!(r.get("hash").is_none(), "{r}");
         let t = call(&mut ops, "read_note", json!({"title": "Target"})).unwrap();
         assert!(t["aliases"].as_array().unwrap().contains(&json!("Source")), "{t}");
         assert_eq!(call(&mut ops, "read_note", json!({"title": "Source"})).unwrap()["title"], "Target", "the alias resolves it");
@@ -1157,13 +1189,13 @@ mod fix_tests {
         }
     }
 
-    #[test] fn bulk_tag_results_carry_the_new_hash() {
-        let (mut ops, dir) = vault(&[("a.md", "one\n"), ("b.md", "two #t\n")]);
+    #[test] fn bulk_tag_results_carry_no_hash() {
+        let (mut ops, _) = vault(&[("a.md", "one\n"), ("b.md", "two #t\n")]);
         let r = call(&mut ops, "add_tags", json!({"titles": ["a", "b"], "tags": ["t"], "summary": "s"})).unwrap();
-        assert_eq!(r["results"][0]["hash"], crate::store::hash(&std::fs::read(dir.join("a.md")).unwrap()));
+        assert!(r["results"][0].get("hash").is_none(), "{r}");
         assert_eq!(r["results"][1], json!({"title": "b", "status": "unchanged"}));
         let r = call(&mut ops, "remove_tags", json!({"titles": ["b"], "tags": ["t"], "summary": "s"})).unwrap();
-        assert_eq!(r["results"][0]["hash"], crate::store::hash(&std::fs::read(dir.join("b.md")).unwrap()));
+        assert!(r["results"][0].get("hash").is_none(), "{r}");
     }
 
     /// The file write lands, then indexing fails (SQLite busy or broken): a plain error would invite a retry that
