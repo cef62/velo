@@ -93,6 +93,9 @@ pub struct VaultOps<V: DerefMut<Target = Vault>> {
     settings_path: PathBuf,
     /// Real OS Trash; tests swap it for a plain remove.
     pub(crate) remove: fn(&Path) -> std::io::Result<()>,
+    /// Test seam: runs right after `create`'s save, where an outside save can land.
+    #[cfg(test)]
+    pub(crate) after_save: fn(&Path),
 }
 
 pub type DirectOps = VaultOps<Box<Vault>>;
@@ -112,7 +115,7 @@ impl DirectOps {
 
 impl<V: DerefMut<Target = Vault>> VaultOps<V> {
     pub fn new(vault: V, settings_path: PathBuf) -> Self {
-        VaultOps { vault, settings_path, remove: crate::vault::move_to_trash }
+        VaultOps { vault, settings_path, remove: crate::vault::move_to_trash, #[cfg(test)] after_save: |_| {} }
     }
 
     fn save(&mut self, path: &str, text: &str, base_hash: &str) -> anyhow::Result<String> {
@@ -187,9 +190,19 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
         }
         // an empty file, stamped by the save below: a front-matter stub would be snapshotted as a revision of its own
         let doc = landed(self.vault.open_or_create(title, None, false), &note_path(&dir, title, false), None)?;
-        self.save(&doc.path, text, &doc.hash)?; // the created text is the first revision
-        // the note exists now: a retry would only fail with "already exists", so say it may have been applied
-        let r = self.read(&doc.path).and_then(|d| self.vault.agent_snapshot_text(&d.path, &d.text, summary).map(|_| d));
+        let saved = self.save(&doc.path, text, &doc.hash)?; // the created text is the first revision
+        #[cfg(test)]
+        (self.after_save)(Path::new(&doc.path));
+        // the note exists now: a retry would only fail with "already exists", so say it may have been applied.
+        // The reply carries the save's own hash, never a re-read's: an outside save in between must not be vouched
+        // for (#157). The snapshot holds the re-read text only when it is what was saved, else the text sent.
+        let r = self.read(&doc.path).and_then(|mut d| {
+            if d.hash != saved {
+                d.text = text.to_string();
+                d.hash = saved;
+            }
+            self.vault.agent_snapshot_text(&d.path, &d.text, summary).map(|_| d)
+        });
         r.map_err(|_| anyhow!(NO_ANSWER))
     }
 
@@ -403,6 +416,17 @@ mod tests {
         let r = o.vault.list_revisions(&d.path).unwrap();
         assert_eq!((r[0].summary.as_deref(), r[0].agent), (Some("made it"), true));
         assert!(o.vault.read_revision(&d.path, &r[0].id, None).unwrap().contains("hello"));
+    }
+    /// #157: an outside save lands between create's save and its re-read; the reply hash is the save's, so a
+    /// replace_note chained from it conflicts instead of overwriting the outside text.
+    #[test] fn create_replies_the_hash_of_what_it_wrote_not_a_later_read() {
+        let (mut o, _) = ops();
+        o.after_save = |p| std::fs::write(p, "outside text\n").unwrap();
+        let d = o.create("Fresh", "hello", "made it").unwrap();
+        assert_ne!(d.hash, hash(b"outside text\n"), "not the outside save");
+        assert_eq!(d.text, "hello", "text and hash both come from the save, not the re-read");
+        assert!(o.write(&d.path, "mine", &d.hash, "s").is_err(), "the outside text is not covered by the hash");
+        assert_eq!(std::fs::read_to_string(&d.path).unwrap(), "outside text\n");
     }
     #[test] fn agent_write_snapshots_previous_text_with_summary() {
         let (mut o, _) = ops();
