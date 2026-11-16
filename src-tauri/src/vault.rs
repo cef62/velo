@@ -277,15 +277,19 @@ impl Vault {
         v.deferring_resync(|v| -> anyhow::Result<()> {
             // One transaction per chunk: a crash loses at most a chunk, which isn't in `known()`, so the next open redoes it.
             v.index.begin()?;
-            let mut folds = None;
             for (i, (path, nf, meta)) in stale.into_iter().enumerate() {
                 if let Ok(bytes) = v.read_for_index(path) {
                     let mut meta = Meta { ..*meta };
                     let body = bytes.map(|b| lossy(&b));
                     let body = row_text(path, &mut meta, body.as_deref()); // see `reindex`
                     v.index.upsert(&s(path), nf, &meta, body)?;
-                    // a note locked elsewhere while Velo was closed: as the watcher would (see `apply_chunk`)
-                    v.secure_revisions(path, identity, &mut folds);
+                    // a note locked elsewhere while Velo was closed: encrypt its plaintext history. Only with the key:
+                    // an open without it (agent direct mode, an empty keychain, after Lock all) may run on a machine
+                    // that has one, and deleting would lose what a keyed open could keep; the locked note hides the
+                    // plaintext meanwhile (`list_revisions`)
+                    if identity.is_some() {
+                        v.secure_revisions(path, identity, &mut None);
+                    }
                 }
                 if (i + 1) % CHUNK == 0 {
                     v.index.commit()?;
@@ -2042,61 +2046,76 @@ mod tests {
             assert!(!v.revisions.has_plain("Cafe"), "the next arrival secures it");
         }
     }
-    /// #163: a note locked on another machine while Velo was closed is secured at the warm open, as the watcher would:
-    /// with the key its pre-lock history is encrypted and still listed and read from the locked note, without it the
-    /// plaintext goes.
-    #[test] fn a_note_locked_while_closed_is_secured_at_the_warm_open() {
+    /// `s` saved once (one plaintext revision), Velo closed, then `s` locked on another machine.
+    fn locked_while_closed() -> (PathBuf, PathBuf, String) {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let d = v.open_or_create("s", None, false).unwrap();
+        std::fs::write(&d.path, "plainsecret").unwrap();
+        v.save_note(&d.path, "later", &stat_hash(&d.path), None, false).unwrap();
+        assert!(v.revisions.has_plain("s"));
+        drop(v);
+        std::fs::write(dir.join("s.md.age"), crypto::encrypt(&id, b"later").unwrap()).unwrap();
+        std::fs::remove_file(&d.path).unwrap();
+        (dir, db, id)
+    }
+    /// #163: a note locked on another machine while Velo was closed: a warm open with the key encrypts its pre-lock
+    /// history, still listed and read from the locked note.
+    #[test] fn a_keyed_warm_open_encrypts_the_history_of_a_note_locked_while_closed() {
+        let (dir, db, id) = locked_while_closed();
+        let v = open(dir.clone(), &db, Some(&id)).unwrap();
+        assert!(!v.revisions.has_plain("s"), "no plaintext left");
+        let l = s(&dir.join("s.md.age"));
+        let r = v.list_revisions(&l).unwrap();
+        assert_eq!(r.len(), 1);
+        assert_eq!(v.read_revision(&l, &r[0].id, Some(&id)).unwrap(), "plainsecret");
+    }
+    /// #163 review 2 M1: a warm open without the key (agent direct mode, an empty keychain, after Lock all) never
+    /// deletes it: the plaintext stays on disk, hidden from the locked note. Its row is then current, so a later keyed
+    /// open does not reach it either (a documented limit): it waits for the next change of the locked file or the
+    /// prune. No folder is listed for it.
+    #[test] fn a_keyless_warm_open_keeps_the_history_of_a_note_locked_while_closed() {
+        let (dir, db, id) = locked_while_closed();
+        FOLD_LISTINGS.with(|n| n.set(0));
+        let v = open(dir.clone(), &db, None).unwrap();
+        assert_eq!(FOLD_LISTINGS.with(|n| n.get()), 0, "no listing at a keyless open");
+        let l = s(&dir.join("s.md.age"));
+        assert!(v.revisions.has_plain("s"), "kept on disk");
+        assert!(v.list_revisions(&l).unwrap().is_empty(), "hidden from the locked note");
+        drop(v);
+        let mut v = open(dir.clone(), &db, Some(&id)).unwrap();
+        assert!(v.revisions.has_plain("s"), "the row is current: a keyed open leaves it");
+        let age = dir.join("s.md.age");
+        std::fs::write(&age, crypto::encrypt(&id, b"changed").unwrap()).unwrap();
+        v.apply_fs_changes(std::slice::from_ref(&age), Some(&id));
+        assert!(!v.revisions.has_plain("s"), "the next change of the locked file encrypts it");
+        assert_eq!(v.read_revision(&s(&age), &v.list_revisions(&s(&age)).unwrap().last().unwrap().id, Some(&id)).unwrap(), "plainsecret");
+    }
+    /// #163: a keyed warm open encrypts (never deletes) the fold-equal plain note's history, which stays readable with
+    /// the key, as on the watcher path. A keyless one touches nothing.
+    #[test] fn a_warm_open_never_deletes_a_fold_equal_note_s_history() {
         for with_id in [false, true] {
             let (dir, db) = setup(); let id = crypto::new_identity();
-            let mut v = open(dir.clone(), &db, None).unwrap();
-            let d = v.open_or_create("s", None, false).unwrap();
-            std::fs::write(&d.path, "plainsecret").unwrap();
-            v.save_note(&d.path, "later", &stat_hash(&d.path), None, false).unwrap(); // a plaintext revision
-            assert!(v.revisions.has_plain("s"));
-            drop(v);
-            std::fs::write(dir.join("s.md.age"), crypto::encrypt(&id, b"later").unwrap()).unwrap();
-            std::fs::remove_file(&d.path).unwrap();
             let ident = with_id.then_some(id.as_str());
+            let plain = dir.join("Caf\u{e9}.md");
+            std::fs::write(&plain, BACK).unwrap();
+            let v = open(dir.clone(), &db, None).unwrap();
+            v.revisions.snapshot_bytes("Caf\u{e9}", b"history", false, now_ms() - 1_000, false).unwrap();
+            drop(v);
+            std::fs::write(dir.join("Cafe.md.age"), crypto::encrypt(&id, b"x").unwrap()).unwrap();
             let v = open(dir.clone(), &db, ident).unwrap();
-            assert!(!v.revisions.has_plain("s"), "id={with_id}: no plaintext left");
-            let l = s(&dir.join("s.md.age"));
-            let r = v.list_revisions(&l).unwrap();
-            if with_id {
-                assert_eq!(r.len(), 1);
-                assert_eq!(v.read_revision(&l, &r[0].id, ident).unwrap(), "plainsecret");
-            } else {
-                assert!(r.is_empty());
-            }
+            let r = v.list_revisions(&s(&plain)).unwrap();
+            assert_eq!(r.len(), 1, "id={with_id}");
+            assert_eq!(v.read_revision(&s(&plain), &r[0].id, ident).unwrap(), "history", "id={with_id}");
+            assert_eq!(v.revisions.has_plain("Cafe"), !with_id, "id={with_id}: encrypted only with the key");
         }
     }
-    /// #163: at a warm open the fold-equal guard holds as on the watcher path (`Café.md` keeps its history), a locked
-    /// note without plaintext history lists no folder, and the folder is listed at most once for the whole open.
-    #[test] fn the_warm_open_secures_with_the_same_guard_and_one_listing() {
-        let (dir, db) = setup(); let id = crypto::new_identity();
-        std::fs::write(dir.join("Caf\u{e9}.md"), BACK).unwrap();
-        let v = open(dir.clone(), &db, None).unwrap();
-        v.revisions.snapshot_bytes("Caf\u{e9}", b"history", false, now_ms() - 1_000, false).unwrap();
-        for i in 0..3 { v.revisions.snapshot_bytes(&format!("M{i}"), b"old", false, now_ms() - 1_000, false).unwrap(); }
-        drop(v);
-        let c = crypto::encrypt(&id, b"x").unwrap();
-        for i in 0..20 { std::fs::write(dir.join(format!("L{i}.md.age")), &c).unwrap(); }
-        FOLD_LISTINGS.with(|n| n.set(0));
-        drop(open(dir.clone(), &db, None).unwrap());
-        assert_eq!(FOLD_LISTINGS.with(|n| n.get()), 0, "no plaintext history: no listing");
-        std::fs::write(dir.join("Cafe.md.age"), &c).unwrap();
-        for i in 0..3 { std::fs::write(dir.join(format!("M{i}.md.age")), &c).unwrap(); }
-        FOLD_LISTINGS.with(|n| n.set(0));
-        let v = open(dir.clone(), &db, None).unwrap();
-        assert_eq!(FOLD_LISTINGS.with(|n| n.get()), 1, "one listing for the whole open");
-        assert!(v.revisions.has_plain("Cafe"), "the fold-equal plain note keeps its history");
-        assert!((0..3).all(|i| !v.revisions.has_plain(&format!("M{i}"))), "the others are secured");
-    }
-    /// #163: a folder, or a link to a device, named like a locked note never secures (deletes) the plain note's
-    /// history at a warm open.
+    /// #163: a folder, or a link to a device, named like a locked note never secures the plain note's history at a
+    /// warm open, even with the key.
     #[test] fn a_special_file_named_like_a_locked_note_keeps_the_history_at_a_warm_open() {
         let kinds: &[&str] = if cfg!(unix) { &["folder", "device"] } else { &["folder"] };
         for &kind in kinds {
-            let (dir, db) = setup();
+            let (dir, db) = setup(); let id = crypto::new_identity();
             std::fs::write(dir.join("s.md"), BACK).unwrap();
             let v = open(dir.clone(), &db, None).unwrap();
             v.revisions.snapshot_bytes("s", b"history", false, now_ms() - 1_000, false).unwrap();
@@ -2109,21 +2128,31 @@ mod tests {
                 #[cfg(not(unix))]
                 _ => unreachable!(),
             }
-            let v = open(dir.clone(), &db, None).unwrap();
+            let v = open(dir.clone(), &db, Some(&id)).unwrap();
             assert!(v.revisions.has_plain("s"), "{kind}");
             // the gate itself, for a path that reaches it in a race (replaced after it was read)
-            assert!(!v.secure_revisions(&age, None, &mut None), "{kind}: no real locked copy");
+            for ident in [None, Some(id.as_str())] {
+                assert!(!v.secure_revisions(&age, ident, &mut None), "{kind}: no real locked copy");
+            }
             assert!(v.revisions.has_plain("s"), "{kind}");
         }
     }
-    /// #163 review: what holds the delete back. A dangling link is no note (m1): the history goes. A twin check the
-    /// disk can't answer, or a folder that can't be listed, is a doubt: the history stays (mutations M4, M3).
+    /// #163 review: what holds the delete back. A dangling link or a folder is no note: the history goes. A stat error
+    /// on the candidate, a twin check the disk can't answer, or a folder that can't be listed is a doubt: the history
+    /// stays.
     #[test] fn only_a_plain_note_or_a_doubt_holds_history_back() {
         #[cfg(unix)]
         {
             let (v, ..) = cafe_pair(|p| std::os::unix::fs::symlink(p.with_file_name("gone"), p).unwrap());
             assert!(!v.revisions.has_plain("Cafe"), "dangling link: secured");
         }
+        #[cfg(unix)]
+        {
+            let (v, ..) = cafe_pair(|p| std::os::unix::fs::symlink(p, p).unwrap()); // ELOOP: a stat error
+            assert!(v.revisions.has_plain("Cafe"), "candidate stat doubt: kept");
+        }
+        let (v, ..) = cafe_pair(|p| std::fs::create_dir(p).unwrap());
+        assert!(!v.revisions.has_plain("Cafe"), "a folder is no note: secured");
         STAT_FAIL.with(|f| f.set(Some(std::io::ErrorKind::PermissionDenied)));
         let (v, ..) = cafe_pair(|p| std::fs::write(p, BACK).unwrap());
         STAT_FAIL.with(|f| f.set(None));
