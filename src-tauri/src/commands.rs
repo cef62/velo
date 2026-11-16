@@ -416,11 +416,11 @@ pub fn first_show_plan(hidden: bool, mac: bool, mode: &str) -> FirstShow {
     }
 }
 
-/// First show of the main window (declared `visible: false`).
+/// First show of the main window (declared `visible: false`). Through `show_main`, the one way velo shows it: on Windows
+/// the taskbar tab that `set_skip_taskbar` could not delete from the invisible window must be dropped after the show.
 pub fn first_show(app: &AppHandle, plan: FirstShow) {
-    let Some(w) = app.get_webview_window("main") else { return };
     if matches!(plan, FirstShow::Show | FirstShow::ShowThenHideApp) {
-        w.show().ok();
+        show_main(app);
     }
     #[cfg(target_os = "macos")]
     if matches!(plan, FirstShow::ShowThenHideApp | FirstShow::HideApp) {
@@ -438,6 +438,75 @@ pub fn mark_restart(dir: &Path) {
 
 pub fn clear_restart_mark(dir: &Path) {
     std::fs::remove_file(dir.join(RESTART_MARK)).ok();
+}
+
+/// An update's download-and-install `step` with the restart mark around it. `step` gets the end-of-download hook: it runs
+/// `done` (the window save), then writes the mark, last, so its ten minutes start after the download, and before the
+/// install step that ends the process on Windows. A failed step clears the mark.
+pub async fn with_restart_mark<'a, E, F: Future<Output = Result<(), E>>>(
+    dir: &'a Path,
+    done: impl FnOnce() + Send + 'a,
+    step: impl FnOnce(Box<dyn FnOnce() + Send + 'a>) -> F,
+) -> Result<(), E> {
+    let result = step(Box::new(move || {
+        done();
+        mark_restart(dir);
+    }))
+    .await;
+    if result.is_err() {
+        clear_restart_mark(dir);
+    }
+    result
+}
+
+/// What a GUI start does about another velo on the same data dir (macOS, see `hold_instance_lock`).
+#[derive(Debug, PartialEq, Eq)]
+pub enum Instance {
+    Run,
+    /// The login item firing while velo runs: the running one is the app.
+    Exit,
+    /// A launch by the user that lost the race to a hidden login start: that velo must show its window.
+    ShowOtherThenExit,
+}
+
+pub fn instance_plan(held_here: bool, hidden: bool) -> Instance {
+    match (held_here, hidden) {
+        (true, _) => Instance::Run,
+        (false, true) => Instance::Exit,
+        (false, false) => Instance::ShowOtherThenExit,
+    }
+}
+
+/// Takes the exclusive lock on `dir/instance.lock` for the rest of the process (the OS drops it at exit or crash, so no
+/// stale lock is left). Retried for `wait`: the relaunch after an update can start before the old process has ended.
+/// False only when another process holds it; a file system that cannot lock lets velo run.
+pub fn hold_instance_lock(dir: &Path, wait: std::time::Duration) -> bool {
+    let Ok(f) = std::fs::File::options().create(true).truncate(false).write(true).open(dir.join("instance.lock")) else { return true };
+    let until = std::time::Instant::now() + wait;
+    loop {
+        match f.try_lock() {
+            Ok(()) => break,
+            Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < until => std::thread::sleep(std::time::Duration::from_millis(100)),
+            Err(std::fs::TryLockError::WouldBlock) => return false,
+            Err(std::fs::TryLockError::Error(e)) => {
+                crate::log::line(&format!("instance lock not taken: {e}"));
+                break;
+            }
+        }
+    }
+    std::mem::forget(f); // held until the process ends
+    true
+}
+
+/// Has the running velo (the lock holder) show its window, through LaunchServices as a Finder launch would (it sends
+/// `RunEvent::Reopen`). `open` runs once this process is gone, so it cannot pick this copy. Should LaunchServices start a
+/// new copy instead, `--hidden` makes that copy exit (or, if the holder is gone by then, start as a login start would).
+#[cfg(target_os = "macos")]
+pub fn show_other_after_exit() {
+    let script = format!("while kill -0 {} 2>/dev/null; do sleep 0.1; done; sleep 0.3; exec /usr/bin/open -b {AUTOSTART_NAME} --args {HIDDEN_ARG}", std::process::id());
+    if let Err(e) = std::process::Command::new("/bin/sh").args(["-c", &script]).spawn() {
+        crate::log::line(&format!("could not ask the running velo to show: {e}"));
+    }
 }
 
 /// True once for a mark younger than ten minutes; an older one (an install that never relaunched) is only deleted.
@@ -459,15 +528,30 @@ pub fn login_item_refusal(exe: &str, os: &str, debug_build: bool) -> Option<&'st
     match os {
         "macos" if exe.contains("/AppTranslocation/") => Some("macOS is running velo from a temporary location. Move velo to Applications, open it from there, then turn Start at login on."),
         "macos" if exe.contains(['&', '<', '>']) => Some("velo's folder name contains & < or >, which a login item cannot hold. Move velo to Applications, then turn Start at login on."),
-        "linux" if exe.contains(|c: char| c.is_whitespace() || "%\"\\".contains(c)) => Some("velo's path contains a space or one of % \" \\, which an autostart entry cannot hold. Move velo to a folder without them, then turn Start at login on."),
+        // every character the Desktop Entry spec reserves (whitespace, " ' \ > < ~ | & ; $ * ? # ( ) `), and % (field codes)
+        "linux" if exe.contains(|c: char| c.is_whitespace() || "%\"'\\><~|&;$*?#()`".contains(c)) => Some("velo's path contains a space or one of % \" ' \\ > < ~ | & ; $ * ? # ( ) `, which an autostart entry cannot hold. Move velo to a folder without them, then turn Start at login on."),
         _ => None,
     }
+}
+
+/// Why `set_autostart` failed when the OS reported success but kept the previous state. On Windows that is an all-users
+/// (HKLM) item an elevated velo wrote: the plugin deletes only the current user's value when HKLM is not writable.
+pub fn kept_state_error(os: &str, requested: bool, now: bool) -> Option<&'static str> {
+    (requested != now).then_some(if os == "windows" && !requested {
+        "Windows keeps this item for all users; run velo as administrator to turn it off."
+    } else {
+        "The system kept the previous state."
+    })
 }
 
 /// The path the crate writes: `$APPIMAGE` for an AppImage (the executable itself sits in a temporary mount), else the executable.
 fn login_exe() -> String {
     let own = || std::env::current_exe().and_then(|p| p.canonicalize()).map(|p| p.display().to_string()).unwrap_or_default();
-    if cfg!(target_os = "linux") { std::env::var("APPIMAGE").unwrap_or_else(|_| own()) } else { own() }
+    login_exe_for(std::env::consts::OS, std::env::var("APPIMAGE").ok(), own)
+}
+
+fn login_exe_for(os: &str, appimage: Option<String>, own: impl FnOnce() -> String) -> String {
+    appimage.filter(|_| os == "linux").unwrap_or_else(own)
 }
 
 fn refusal() -> Option<&'static str> {
@@ -523,7 +607,12 @@ pub fn set_autostart(app: AppHandle, enabled: bool) -> Res<bool> {
         crate::log::line(&format!("could not {verb} start at login: {e}"));
         return Err(format!("Could not {verb} start at login: {e}"));
     }
-    launcher.is_enabled().map_err(|e| e.to_string())
+    let now = launcher.is_enabled().map_err(|e| e.to_string())?;
+    if let Some(why) = kept_state_error(std::env::consts::OS, enabled, now) {
+        crate::log::line(&format!("could not {verb} start at login: {why}"));
+        return Err(format!("Could not {verb} start at login: {why}"));
+    }
+    Ok(now)
 }
 
 pub fn hotkey_live(app: &AppHandle, binding: &str) -> bool {
@@ -1322,9 +1411,12 @@ mod global_tests {
         for bad in ["/Apps & Tools/velo.app/Contents/MacOS/velo", "/a<b/velo", "/a>b/velo"] {
             assert!(login_item_refusal(bad, "macos", false).is_some(), "{bad}");
         }
-        assert_eq!(login_item_refusal("/home/u/bin/velo.AppImage", "linux", false), None);
-        for bad in ["/home/u/My Apps/velo.AppImage", "/home/u/100%/velo", "/home/u/a\"b/velo", "/home/u/a\\b/velo"] {
-            assert!(login_item_refusal(bad, "linux", false).is_some(), "{bad}");
+        assert_eq!(login_item_refusal("/home/u/bin/velo-0.20_x86-64.AppImage", "linux", false), None);
+        for bad in ["/home/u/My Apps/velo.AppImage", "/home/u/a\tb/velo", "/home/u/a\nb/velo", "/home/u/100%/velo", "/home/u/a\"b/velo", "/home/o'neal/velo.AppImage", "/home/u/a\\b/velo"] {
+            assert!(login_item_refusal(bad, "linux", false).is_some(), "{bad:?}");
+        }
+        for c in [">", "<", "~", "|", "&", ";", "$", "*", "?", "#", "(", ")", "`"] {
+            assert!(login_item_refusal(&format!("/home/u/a{c}b/velo"), "linux", false).is_some(), "{c}");
         }
         assert_eq!(login_item_refusal("C:\\Apps & Tools\\velo.exe", "windows", false), None, "the plugin writes the Run value unquoted and Windows still resolves it");
         assert!(login_item_refusal(ok, "macos", true).is_some(), "a development build");
@@ -1342,6 +1434,69 @@ mod global_tests {
         let plist = "<?xml version=\"1.0\"?>\n<plist version=\"1.0\">\n  <dict>\n  <key>Label</key>\n  <string>dev.velo.app</string>\n  <key>AssociatedBundleIdentifiers</key>\n  <array></array>\n  <key>ProgramArguments</key>\n  <array><string>/Applications/velo.app/Contents/MacOS/velo</string><string>--hidden</string></array>\n  <key>RunAtLoad</key>\n  <true/>\n  </dict>\n</plist>";
         assert_eq!(plist_program(plist), Some("/Applications/velo.app/Contents/MacOS/velo"));
         assert_eq!(plist_program("garbage"), None);
+    }
+    #[test] fn a_toggle_the_system_did_not_apply_is_an_error() {
+        assert_eq!(kept_state_error("windows", true, true), None);
+        assert_eq!(kept_state_error("macos", false, false), None);
+        assert!(kept_state_error("windows", false, true).unwrap().contains("run velo as administrator"), "an all-users item");
+        for (os, on) in [("windows", true), ("macos", false), ("macos", true), ("linux", false)] {
+            assert_eq!(kept_state_error(os, on, !on), Some("The system kept the previous state."), "{os} {on}");
+        }
+    }
+    #[test] fn the_login_item_path_is_the_appimage_on_linux_only() {
+        let own = || "/tmp/.mount_velo/velo".to_string();
+        assert_eq!(login_exe_for("linux", Some("/home/u/velo.AppImage".into()), own), "/home/u/velo.AppImage");
+        assert_eq!(login_exe_for("linux", None, own), "/tmp/.mount_velo/velo");
+        assert_eq!(login_exe_for("macos", Some("/x.AppImage".into()), own), "/tmp/.mount_velo/velo");
+    }
+    #[test] fn the_restart_mark_is_written_after_the_download_and_cleared_when_the_install_fails() {
+        let d = tempfile::tempdir().unwrap();
+        let mark = d.path().join(RESTART_MARK);
+        let saved = AtomicBool::new(false);
+        let ok: Result<(), ()> = tauri::async_runtime::block_on(with_restart_mark(
+            d.path(),
+            || {
+                assert!(!mark.exists(), "the mark follows the window save");
+                saved.store(true, Ordering::SeqCst);
+            },
+            |finish| async {
+                assert!(!mark.exists(), "not before the download");
+                finish();
+                assert!(mark.exists(), "written when the download is done, before the install step");
+                Ok(())
+            },
+        ));
+        assert!(ok.is_ok() && saved.load(Ordering::SeqCst) && take_restart_mark(d.path()));
+        let failed: Result<(), &str> = tauri::async_runtime::block_on(with_restart_mark(d.path(), || {}, |finish| async {
+            finish();
+            Err("signature")
+        }));
+        assert!(failed.is_err() && !mark.exists(), "a failed verify/install clears it");
+        let failed: Result<(), &str> = tauri::async_runtime::block_on(with_restart_mark(d.path(), || {}, |_| async { Err("download") }));
+        assert!(failed.is_err() && !mark.exists());
+    }
+    #[test] fn one_gui_velo_per_data_dir() {
+        assert_eq!(instance_plan(true, true), Instance::Run);
+        assert_eq!(instance_plan(true, false), Instance::Run);
+        assert_eq!(instance_plan(false, true), Instance::Exit, "the login item while velo runs");
+        assert_eq!(instance_plan(false, false), Instance::ShowOtherThenExit, "a user launch shows the running velo");
+        let d = tempfile::tempdir().unwrap();
+        assert!(hold_instance_lock(d.path(), std::time::Duration::ZERO));
+        let t = std::time::Instant::now();
+        assert!(!hold_instance_lock(d.path(), std::time::Duration::from_millis(300)), "a second handle cannot take it");
+        assert!(t.elapsed() >= std::time::Duration::from_millis(300), "retried for the wait");
+    }
+    #[test] fn the_instance_lock_is_released_when_its_holder_ends() {
+        // the lock lives on an open file: closing it (as process exit does) frees it, so no stale lock is left
+        let d = tempfile::tempdir().unwrap();
+        let other = std::fs::File::options().create(true).truncate(false).write(true).open(d.path().join("instance.lock")).unwrap();
+        other.try_lock().unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            drop(other);
+        });
+        assert!(hold_instance_lock(d.path(), std::time::Duration::from_secs(5)), "an update relaunch waits for the old process");
+        release.join().unwrap();
     }
     #[test] fn the_login_item_name_is_the_bundle_identifier() {
         let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();

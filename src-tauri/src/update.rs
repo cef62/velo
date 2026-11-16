@@ -226,13 +226,12 @@ pub async fn install(app: &AppHandle, expected: Option<&str>) -> Result<(), Stri
         // Windows: the install step that follows ends the process (std::process::exit), so RunEvent::Exit and the
         // plugin's save never run. Saved after the download, so moves made during it count; waits for the main thread.
         crate::commands::save_window(app).recv().ok();
-        crate::commands::mark_restart(&data_dir); // last: nothing after it can age the mark
     };
-    let result = update.download_and_install(on_chunk, on_finish).await;
+    let update = &update;
+    let result = crate::commands::with_restart_mark(&data_dir, on_finish, move |finish| update.download_and_install(on_chunk, finish)).await;
     let mut st = state(app);
     st.busy = false;
     if let Err(e) = result {
-        crate::commands::clear_restart_mark(&data_dir);
         let phase = if downloaded.load(Ordering::Relaxed) { "verify/install" } else { "download" }; // the plugin checks the signature after on_finish
         log::line(&format!("update {phase} error: {e}"));
         eprintln!("velo: update {phase} failed: {e}");

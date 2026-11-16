@@ -129,8 +129,10 @@ app_commands![
 pub fn run() {
     let builder = tauri::Builder::default();
     // first plugin, as its docs ask: launching velo again (common once the close button only hides it) shows the
-    // running window instead of starting a second process on the same notes. Not on macOS: LaunchServices keeps one
-    // instance and RunEvent::Reopen shows it, and the plugin's socket in shared /tmp could be squatted to block launch.
+    // running window instead of starting a second process on the same notes. Not on macOS: the plugin's socket in shared
+    // /tmp could be squatted to block launch. There LaunchServices keeps one instance of a Finder/Dock launch and
+    // RunEvent::Reopen shows it, but the login item execs the binary outside LaunchServices: `hold_instance_lock` in
+    // setup keeps that copy from becoming a second process on the same notes.
     #[cfg(not(target_os = "macos"))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _| {
         // the login item firing while velo already runs (it was started by hand first) must not pop the window up
@@ -179,6 +181,19 @@ pub fn run() {
             let data_dir = h.path().app_data_dir()?;
             std::fs::create_dir_all(&config_dir)?;
             std::fs::create_dir_all(&data_dir)?;
+            // before anything opens the notes, the index or the agent marker: one GUI velo per data dir. The wait covers
+            // the update relaunch (`open -n` returns before the old process exits); a start that loses waits it out once.
+            #[cfg(target_os = "macos")]
+            match commands::instance_plan(commands::hold_instance_lock(&data_dir, std::time::Duration::from_secs(5)),commands::has_hidden_arg(std::env::args())) {
+                commands::Instance::Run => {}
+                plan => {
+                    log::line(&format!("another velo runs on this data dir; this start exits ({plan:?})"));
+                    if plan == commands::Instance::ShowOtherThenExit {
+                        commands::show_other_after_exit();
+                    }
+                    std::process::exit(0);
+                }
+            }
             let settings_path = config_dir.join("settings.json");
             let settings = settings::load(&settings_path);
             log::set_debug(settings.debug_log);
