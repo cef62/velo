@@ -63,7 +63,7 @@ fn build_from(rows: Vec<TimelineRow>, dates: &HashMap<String, (i64, i64)>, r: &E
         if row.locked { c.locked += 1; continue; }
         plain += 1;
         if plain > LIMIT { c.over_limit += 1; continue; }
-        let Ok(text) = std::fs::read(&row.path).map(|b| String::from_utf8_lossy(&b).into_owned()) else { c.unreadable += 1; continue };
+        let Ok(text) = crate::store::read_regular(std::path::Path::new(&row.path)).map(|b| String::from_utf8_lossy(&b).into_owned()) else { c.unreadable += 1; continue };
         let tasks = parse_tasks(&text);
         if r.tasks_only && tasks.is_empty() { c.no_tasks += 1; continue; }
         for t in &tasks {

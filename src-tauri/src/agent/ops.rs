@@ -62,11 +62,11 @@ pub fn locked(path: &str) -> bool {
 /// `r`, unless it failed after the file at `path` changed from `before` (its hash; `None` = missing): the write
 /// landed, so a plain error would invite a retry that applies it twice.
 fn landed<T>(r: anyhow::Result<T>, path: &Path, before: Option<&str>) -> anyhow::Result<T> {
-    r.map_err(|e| if std::fs::read(path).ok().map(|b| hash(&b)).as_deref() != before { anyhow!(NO_ANSWER) } else { e })
+    r.map_err(|e| if crate::store::read_regular(path).ok().map(|b| hash(&b)).as_deref() != before { anyhow!(NO_ANSWER) } else { e })
 }
 
 fn hash_of(path: &Path) -> Option<String> {
-    std::fs::read(path).ok().map(|b| hash(&b))
+    crate::store::read_regular(path).ok().map(|b| hash(&b))
 }
 
 fn title_of(path: &str) -> String {
@@ -334,7 +334,7 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
     fn snapshot(&mut self, path: &str, summary: &str) -> anyhow::Result<()> {
         // the note's text as created, even an empty one: the revision records who made it and why
         let path = plain(path)?;
-        let text = String::from_utf8_lossy(&std::fs::read(path)?).into_owned();
+        let text = String::from_utf8_lossy(&crate::store::read_regular(Path::new(path))?).into_owned();
         self.vault.agent_snapshot_text(path, &text, summary)
     }
 

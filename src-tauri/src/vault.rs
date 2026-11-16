@@ -795,7 +795,7 @@ impl Vault {
         } else {
             text.as_bytes().to_vec()
         };
-        let before = std::fs::read(p).ok(); // the version this save replaces, for the revision snapshot
+        let before = crate::store::read_regular(p).ok(); // the version this save replaces, for the revision snapshot
         let mut res = self.store.save(p, &bytes, base_hash)?;
         let target = match &res {
             SaveResult::Saved { .. } => p.to_path_buf(),
@@ -971,7 +971,7 @@ impl Vault {
     /// (save_note refuses it the same way); a source the index still lists after it was deleted, or one that can't be
     /// read, is skipped.
     pub fn rewritable(&self, src: &Path) -> bool {
-        parse_note_file(src).is_some_and(|n| !n.encrypted) && !plain_twin_of_locked(src) && src.is_file() && std::fs::File::open(src).is_ok()
+        parse_note_file(src).is_some_and(|n| !n.encrypted) && !plain_twin_of_locked(src) && crate::store::open_regular(src).is_ok()
     }
 
     pub fn lock_note(&mut self, path: &str, identity: &str) -> anyhow::Result<String> {
@@ -1128,7 +1128,7 @@ impl Vault {
         if nf.encrypted || plain_twin_of_locked(Path::new(path)) {
             return Err(anyhow!("locked"));
         }
-        let bytes = std::fs::read(path)?;
+        let bytes = crate::store::read_regular(Path::new(path))?;
         if bytes.is_empty() {
             return Ok(None);
         }
@@ -1305,11 +1305,25 @@ impl Vault {
 
     /// A note locked elsewhere (synced in as .md.age) must leave no plaintext revisions here: encrypt them,
     /// or delete them when this machine has no key.
+    /// Revisions are keyed by the folded title, so the folder may also hold the history of another note: a disk that
+    /// tells `Plan.md` from `plan.md.age` (case-sensitive) or `Café.md` from `Cafe.md.age` (any) keeps both as notes.
+    /// Encrypting with the key loses nothing; deleting does, so it waits while such a plain note is on disk.
     fn secure_revisions(&self, title: &str, identity: Option<&str>) {
         match identity {
             Some(id) => self.revisions.encrypt_all(title, |b| crypto::encrypt(id, b)).ok(),
-            None => self.revisions.remove_plain(title).ok(),
+            None if !self.history_shared_with_plain(title) => self.revisions.remove_plain(title).ok(),
+            None => None,
         };
+    }
+
+    /// Whether a plain note folding to `title` is on disk and is no plain twin of a locked note (the disk decides, see
+    /// `twin_state`): its history shares `title`'s folder. A doubt (folder or stat error) counts as one.
+    fn history_shared_with_plain(&self, title: &str) -> bool {
+        let Ok(rd) = std::fs::read_dir(&self.store.dir) else { return true };
+        let want = fold(title);
+        rd.flatten().map(|e| e.path()).any(|p| {
+            parse_note_file(&p).is_some_and(|n| !n.encrypted && fold(&n.title) == want) && file_on_disk(&p) && twin_state(&p) != Some(true)
+        })
     }
 }
 
@@ -1890,6 +1904,59 @@ mod tests {
         assert_eq!(twin_text(&v), if folds { (0, 0, 0, 0) } else { (1, 1, 1, 1) });
         assert!(v.rescan(None).is_empty(), "no churn");
     }
+    /// #159: a FIFO named like a note (`s.md`, `s.md.age`) reaching the watcher, a save or the agent fails at once,
+    /// instead of blocking in `open` with the vault lock held. No row is written for it.
+    #[cfg(unix)]
+    #[test] fn a_fifo_named_like_a_note_never_blocks() {
+        let (dir, db) = setup();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let (plain, locked) = (dir.join("s.md"), dir.join("s.md.age"));
+        for p in [&plain, &locked] {
+            let c = std::ffi::CString::new(p.to_str().unwrap()).unwrap();
+            assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o644) }, 0);
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let changed = v.apply_fs_changes(&[plain.clone(), locked.clone()], None);
+            let p = s(&plain);
+            let refused = (v.open_note(&p, None).is_err(), v.save_note(&p, "x", "h", None, false).is_err(), v.agent_snapshot(&p, "x").is_err(), v.rewritable(&plain));
+            tx.send((changed, rows(&v), refused)).ok();
+        });
+        let (changed, rows, refused) = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("blocked on a FIFO");
+        assert_eq!((changed, rows, refused), (vec![], vec![], (true, true, true, false)));
+    }
+    /// #159: revisions are keyed by the folded title. A locked note arriving with no key deletes the plaintext history
+    /// under that key only when no other plain note shares it: `Café.md` beside `Cafe.md.age` (two notes on every disk),
+    /// `Plan.md` beside `plan.md.age` on a case-sensitive one. Where the disk pairs them, the plain note is the locked
+    /// note's twin and its history goes as before. With a key the history is encrypted, never lost.
+    #[test] fn a_locked_note_keeps_the_history_of_a_fold_equal_plain_note() {
+        for (plain, other) in [("Café", "Cafe"), ("Plan", "plan")] {
+            for with_id in [false, true] {
+                let (dir, db) = setup(); let id = crypto::new_identity();
+                let ident = with_id.then_some(id.as_str());
+                let plain_p = dir.join(format!("{plain}.md"));
+                std::fs::write(&plain_p, BACK).unwrap();
+                let mut v = open(dir.clone(), &db, ident).unwrap();
+                for (i, h) in ["history one", "history two"].iter().enumerate() {
+                    v.revisions.snapshot_bytes(plain, h.as_bytes(), false, now_ms() - 10_000 + i as i64 * 1_000, false).unwrap();
+                }
+                let locked = dir.join(format!("{other}.md.age"));
+                std::fs::write(&locked, crypto::encrypt(&id, b"x").unwrap()).unwrap();
+                let twins = plain_p.with_extension("md.age").exists();
+                v.apply_fs_changes(std::slice::from_ref(&locked), ident);
+                let case = format!("{plain}/{other} id={with_id} twins={twins}");
+                let revs = v.list_revisions(&s(&plain_p)).unwrap();
+                if twins && !with_id {
+                    assert!(revs.is_empty(), "{case}: a twin's plaintext history goes");
+                    continue;
+                }
+                assert_eq!(revs.len(), 2, "{case}");
+                for r in &revs {
+                    assert!(v.read_revision(&s(&plain_p), &r.id, ident).unwrap().starts_with("history"), "{case}");
+                }
+            }
+        }
+    }
     /// #148: a title the stem mapping rewrites (cut at 200 bytes here; `What?` → `What-` alike) pairs with the locked
     /// copy `note_path` names, and is re-synced when that copy comes and goes.
     #[test] fn a_twin_whose_stem_differs_from_its_title_is_resynced() {
@@ -1981,8 +2048,9 @@ mod tests {
             }
         }
     }
-    /// #156 scoped check m4: a link `s.md.age -> /dev/null` reads and stats, and its event writes a (stray) locked row,
-    /// but it is no regular file: the history of `s` is neither deleted nor encrypted, with or without a key.
+    /// #156 scoped check m4: a link `s.md.age -> /dev/null` stats, but it is no regular file: since #159 it is not read
+    /// and gets no row (it wrote a stray locked row before), and the history of `s` is neither deleted nor encrypted,
+    /// with or without a key.
     #[cfg(unix)]
     #[test] fn a_locked_name_linked_to_a_device_keeps_the_history() {
         for with_id in [false, true] {
@@ -1998,7 +2066,7 @@ mod tests {
                 std::os::unix::fs::symlink("/dev/null", &age).unwrap();
                 v.apply_fs_changes(std::slice::from_ref(&age), ident);
                 let case = format!("id={with_id} {how}");
-                assert!(rows(&v).contains(&s(&age)), "{case}: the event writes a locked row");
+                assert!(!rows(&v).contains(&s(&age)), "{case}: a device is not read: no row");
                 if how == "rescan" {
                     v.rescan(ident);
                 }

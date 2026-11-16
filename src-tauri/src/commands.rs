@@ -882,7 +882,7 @@ pub fn identity_file_exists(st: State<'_, AppState>) -> Res<bool> {
 
 /// None only when the file does not exist; any other read error must abort.
 fn read_identity_file(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
-    match std::fs::read(path) {
+    match crate::store::read_regular(path) {
         Ok(b) => Ok(Some(b)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e),

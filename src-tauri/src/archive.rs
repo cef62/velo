@@ -21,7 +21,7 @@ fn dedupe(v: &mut Vec<String>) {
 }
 
 pub fn read(dir: &Path) -> Result<Vec<String>> {
-    let bytes = match std::fs::read(dir.join(FILE)) {
+    let bytes = match crate::store::read_regular(&dir.join(FILE)) {
         Ok(b) => b,
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(vec![]),
         Err(e) => return Err(e),
