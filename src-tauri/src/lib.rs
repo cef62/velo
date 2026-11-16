@@ -181,18 +181,13 @@ pub fn run() {
             let data_dir = h.path().app_data_dir()?;
             std::fs::create_dir_all(&config_dir)?;
             std::fs::create_dir_all(&data_dir)?;
-            // before anything opens the notes, the index or the agent marker: one GUI velo per data dir. The wait covers
-            // the update relaunch (`open -n` returns before the old process exits); a start that loses waits it out once.
+            // before anything opens the notes, the index or the agent marker: one GUI velo per data dir. A start that
+            // loses exits at once (a user who clicks again gets `Reopen` in the running velo); only the update relaunch,
+            // whose old process is still exiting, waits. The mark is read here, not consumed: the winner takes it below.
             #[cfg(target_os = "macos")]
-            match commands::instance_plan(commands::hold_instance_lock(&data_dir, std::time::Duration::from_secs(5)),commands::has_hidden_arg(std::env::args())) {
-                commands::Instance::Run => {}
-                plan => {
-                    log::line(&format!("another velo runs on this data dir; this start exits ({plan:?})"));
-                    if plan == commands::Instance::ShowOtherThenExit {
-                        commands::show_other_after_exit();
-                    }
-                    std::process::exit(0);
-                }
+            if !commands::hold_instance_lock(&data_dir, commands::lock_wait(commands::restart_mark_fresh(&data_dir))) {
+                log::line("another velo runs on this data dir; this start exits");
+                std::process::exit(0);
             }
             let settings_path = config_dir.join("settings.json");
             let settings = settings::load(&settings_path);

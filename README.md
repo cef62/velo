@@ -212,6 +212,8 @@ cd src-tauri && cargo test
 pnpm build:app          # release bundles, signed for the updater with ~/.tauri/velo.key
 ```
 
+On macOS a development build shares the identifier, the data folder and the instance lock with the installed velo: quit the installed app before `pnpm tauri dev`, or the dev build exits at once.
+
 Performance test (10k notes, release build only):
 
 ```sh

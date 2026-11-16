@@ -459,22 +459,10 @@ pub async fn with_restart_mark<'a, E, F: Future<Output = Result<(), E>>>(
     result
 }
 
-/// What a GUI start does about another velo on the same data dir (macOS, see `hold_instance_lock`).
-#[derive(Debug, PartialEq, Eq)]
-pub enum Instance {
-    Run,
-    /// The login item firing while velo runs: the running one is the app.
-    Exit,
-    /// A launch by the user that lost the race to a hidden login start: that velo must show its window.
-    ShowOtherThenExit,
-}
-
-pub fn instance_plan(held_here: bool, hidden: bool) -> Instance {
-    match (held_here, hidden) {
-        (true, _) => Instance::Run,
-        (false, true) => Instance::Exit,
-        (false, false) => Instance::ShowOtherThenExit,
-    }
+/// How long a start waits for another velo's instance lock: only the relaunch after an update (a fresh restart mark),
+/// whose old process is still exiting. Any other start that loses exits at once, before macOS shows it in the Dock.
+pub fn lock_wait(fresh_mark: bool) -> std::time::Duration {
+    if fresh_mark { std::time::Duration::from_secs(5) } else { std::time::Duration::ZERO }
 }
 
 /// Takes the exclusive lock on `dir/instance.lock` for the rest of the process (the OS drops it at exit or crash, so no
@@ -498,23 +486,16 @@ pub fn hold_instance_lock(dir: &Path, wait: std::time::Duration) -> bool {
     true
 }
 
-/// Has the running velo (the lock holder) show its window, through LaunchServices as a Finder launch would (it sends
-/// `RunEvent::Reopen`). `open` runs once this process is gone, so it cannot pick this copy. Should LaunchServices start a
-/// new copy instead, `--hidden` makes that copy exit (or, if the holder is gone by then, start as a login start would).
-#[cfg(target_os = "macos")]
-pub fn show_other_after_exit() {
-    let script = format!("while kill -0 {} 2>/dev/null; do sleep 0.1; done; sleep 0.3; exec /usr/bin/open -b {AUTOSTART_NAME} --args {HIDDEN_ARG}", std::process::id());
-    if let Err(e) = std::process::Command::new("/bin/sh").args(["-c", &script]).spawn() {
-        crate::log::line(&format!("could not ask the running velo to show: {e}"));
-    }
-}
-
 /// True once for a mark younger than ten minutes; an older one (an install that never relaunched) is only deleted.
 pub fn take_restart_mark(dir: &Path) -> bool {
-    let p = dir.join(RESTART_MARK);
-    let fresh = std::fs::metadata(&p).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age < RESTART_MARK_TTL);
-    std::fs::remove_file(&p).ok();
+    let fresh = restart_mark_fresh(dir);
+    std::fs::remove_file(dir.join(RESTART_MARK)).ok();
     fresh
+}
+
+/// Whether a mark younger than ten minutes exists; reads only.
+pub fn restart_mark_fresh(dir: &Path) -> bool {
+    std::fs::metadata(dir.join(RESTART_MARK)).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age < RESTART_MARK_TTL)
 }
 
 /// Why a login item must not point at this executable, if so. `os` is `std::env::consts::OS`. The crate writes the path
@@ -1476,15 +1457,24 @@ mod global_tests {
         assert!(failed.is_err() && !mark.exists());
     }
     #[test] fn one_gui_velo_per_data_dir() {
-        assert_eq!(instance_plan(true, true), Instance::Run);
-        assert_eq!(instance_plan(true, false), Instance::Run);
-        assert_eq!(instance_plan(false, true), Instance::Exit, "the login item while velo runs");
-        assert_eq!(instance_plan(false, false), Instance::ShowOtherThenExit, "a user launch shows the running velo");
         let d = tempfile::tempdir().unwrap();
         assert!(hold_instance_lock(d.path(), std::time::Duration::ZERO));
         let t = std::time::Instant::now();
         assert!(!hold_instance_lock(d.path(), std::time::Duration::from_millis(300)), "a second handle cannot take it");
         assert!(t.elapsed() >= std::time::Duration::from_millis(300), "retried for the wait");
+        // a start that loses only reads the mark: the winner consumes it, and the loser leaves the data dir as it was
+        assert_eq!(lock_wait(restart_mark_fresh(d.path())), std::time::Duration::ZERO, "no mark: exit at once");
+        mark_restart(d.path());
+        assert_eq!(lock_wait(restart_mark_fresh(d.path())), std::time::Duration::from_secs(5), "the update relaunch waits");
+        assert!(!hold_instance_lock(d.path(), std::time::Duration::ZERO));
+        let mut files: Vec<_> = std::fs::read_dir(d.path()).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        files.sort();
+        assert_eq!(files, ["instance.lock", RESTART_MARK], "the losing starts wrote nothing else");
+        assert!(take_restart_mark(d.path()), "still there for the winner");
+        mark_restart(d.path());
+        let old = std::time::SystemTime::now() - RESTART_MARK_TTL - std::time::Duration::from_secs(5);
+        std::fs::File::options().write(true).open(d.path().join(RESTART_MARK)).unwrap().set_modified(old).unwrap();
+        assert!(!restart_mark_fresh(d.path()), "an expired mark: no wait");
     }
     #[test] fn the_instance_lock_is_released_when_its_holder_ends() {
         // the lock lives on an open file: closing it (as process exit does) frees it, so no stale lock is left
