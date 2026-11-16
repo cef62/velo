@@ -270,6 +270,7 @@ impl Vault {
         let files = v.store.list()?;
         let (stale, gone, replaced) = v.diff(&files)?;
         let total = stale.len();
+        let fresh_locked: Vec<PathBuf> = stale.iter().filter(|(_, nf, _)| nf.encrypted).map(|(p, ..)| p.clone()).collect();
         // `replaced`, not `total`: a cold build deletes nothing, so it needs no bulk
         if replaced >= BULK {
             v.index.begin_bulk().ok(); // no room: as on main, slow but safe
@@ -283,13 +284,6 @@ impl Vault {
                     let body = bytes.map(|b| lossy(&b));
                     let body = row_text(path, &mut meta, body.as_deref()); // see `reindex`
                     v.index.upsert(&s(path), nf, &meta, body)?;
-                    // a note locked elsewhere while Velo was closed: encrypt its plaintext history. Only with the key:
-                    // an open without it (agent direct mode, an empty keychain, after Lock all) may run on a machine
-                    // that has one, and deleting would lose what a keyed open could keep; the locked note hides the
-                    // plaintext meanwhile (`list_revisions`)
-                    if identity.is_some() {
-                        v.secure_revisions(path, identity, &mut None);
-                    }
                 }
                 if (i + 1) % CHUNK == 0 {
                     v.index.commit()?;
@@ -313,6 +307,14 @@ impl Vault {
                 if nf.encrypted {
                     v.try_unlock(path, id);
                 }
+            }
+            // A note locked elsewhere while Velo was closed: encrypt its plaintext history, only with a key that opens
+            // it (unlocked above), else the history would be readable only with another vault's key. Never without a
+            // key: an open without one (agent direct mode, an empty keychain, after Lock all) may run on a machine
+            // that has it, and deleting would lose what a keyed open keeps. The locked note hides the plaintext
+            // meanwhile (`list_revisions`).
+            for p in fresh_locked.iter().filter(|p| v.unlocked.contains_key(&s(p))) {
+                v.secure_revisions(p, identity, &mut None);
             }
         }
         Ok(v)
@@ -2069,6 +2071,27 @@ mod tests {
         let r = v.list_revisions(&l).unwrap();
         assert_eq!(r.len(), 1);
         assert_eq!(v.read_revision(&l, &r[0].id, Some(&id)).unwrap(), "plainsecret");
+    }
+    /// #163 review 3 m1: a key that does not open the note (another vault's) encrypts nothing at the warm open: the
+    /// note's own history stays plaintext on disk, hidden from the locked note, and so does a fold-equal note's.
+    #[test] fn a_warm_open_with_a_key_that_does_not_open_the_note_encrypts_nothing() {
+        let other = crypto::new_identity();
+        let (dir, db, _) = locked_while_closed();
+        let v = open(dir.clone(), &db, Some(&other)).unwrap();
+        assert!(v.revisions.has_plain("s"), "kept as plaintext");
+        assert!(v.revisions.list("s").iter().all(|r| !r.id.ends_with(".age")), "nothing encrypted");
+        assert!(v.list_revisions(&s(&dir.join("s.md.age"))).unwrap().is_empty(), "hidden from the locked note");
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let plain = dir.join("Caf\u{e9}.md");
+        std::fs::write(&plain, BACK).unwrap();
+        let v = open(dir.clone(), &db, None).unwrap();
+        v.revisions.snapshot_bytes("Caf\u{e9}", b"history", false, now_ms() - 1_000, false).unwrap();
+        drop(v);
+        std::fs::write(dir.join("Cafe.md.age"), crypto::encrypt(&id, b"x").unwrap()).unwrap();
+        let v = open(dir.clone(), &db, Some(&other)).unwrap();
+        let r = v.list_revisions(&s(&plain)).unwrap();
+        assert_eq!((r.len(), r[0].id.ends_with(".age")), (1, false), "the fold-equal note's history is untouched");
+        assert_eq!(v.read_revision(&s(&plain), &r[0].id, None).unwrap(), "history");
     }
     /// #163 review 2 M1: a warm open without the key (agent direct mode, an empty keychain, after Lock all) never
     /// deletes it: the plaintext stays on disk, hidden from the locked note. Its row is then current, so a later keyed
