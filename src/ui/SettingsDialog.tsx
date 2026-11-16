@@ -75,6 +75,10 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
   const [recMsg, setRecMsg] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [updateMsg, setUpdateMsg] = useState(""); // the dialog covers the update banner: show the result here
+  // the login item lives in the OS, not in the settings: it applies at once and is not part of Save
+  const [login, setLogin] = useState<boolean | null>(null);
+  const [loginMsg, setLoginMsg] = useState("");
+  useEffect(() => void controller.autostartState().then((r) => (setLogin(r.enabled), setLoginMsg(r.error ?? ""))), [controller]);
   const [copyMsg, setCopyMsg] = useState(""); // same for the setup command copy
   const [saving, setSaving] = useState(false);
 
@@ -226,6 +230,27 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
                 <span className={help} role="status">{d.agentAccess && cur.agent_access !== true ? "Save to turn it on, then copy the setup command here." : copyMsg}</span>
               </div>
               <span className={help}>Lets Claude Code read and edit your notes. Locked notes are never shared; deletes go to the Trash; every change is saved as a revision you can restore.</span>
+            </div>
+          </div>
+          <div className={frow}>
+            <span className={flab}>Startup</span>
+            <div className={css({ display: "flex", flexDirection: "column", gap: "1.5" })}>
+              <Checkbox.Root
+                checked={login === true}
+                disabled={login === null}
+                onCheckedChange={async (x) => {
+                  setLoginMsg("");
+                  const r = await controller.setAutostart(x.checked === true);
+                  setLogin(r.enabled);
+                  setLoginMsg(r.error ?? "");
+                }}
+                size="sm"
+              >
+                <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                <Checkbox.Label>Start at login</Checkbox.Label>
+                <Checkbox.HiddenInput />
+              </Checkbox.Root>
+              <span className={help} role="status">{loginMsg || "Starts velo hidden when you log in. Applies at once, without Save."}</span>
             </div>
           </div>
           <div className={frow}>

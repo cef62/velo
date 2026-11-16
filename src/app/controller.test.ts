@@ -4829,3 +4829,42 @@ describe("runAction wiring", () => {
     await run(t);
   });
 });
+
+test("start at login: the palette action flips what the OS reports and the switch re-reads the OS after a refusal", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  c.runAction("toggle_autostart"); await settle();
+  expect(api.setAutostart).toHaveBeenLastCalledWith(true);
+  api.getAutostart.mockResolvedValue(true);
+  c.runAction("toggle_autostart"); await settle();
+  expect(api.setAutostart).toHaveBeenLastCalledWith(false);
+  api.setAutostart.mockRejectedValueOnce("denied");
+  c.runAction("toggle_autostart"); await settle();
+  expect(store.get().err).toBe("denied");
+  expect(await c.setAutostart(false)).toEqual({ enabled: true, error: null }); // the state is the OS's, not the request
+  api.setAutostart.mockRejectedValueOnce("denied");
+  expect(await c.setAutostart(true)).toEqual({ enabled: true, error: "denied" });
+});
+
+test("start at login: an unreadable OS state is unknown, never off, and a toggle does not write blind", async () => {
+  const { c, api, store } = setup();
+  await c.start(); await settle();
+  api.getAutostart.mockRejectedValue("no home directory");
+  expect(await c.autostartState()).toEqual({ enabled: null, error: "Could not read start at login: no home directory" });
+  const n = api.setAutostart.mock.calls.length;
+  c.runAction("toggle_autostart"); await settle();
+  expect(api.setAutostart.mock.calls.length).toBe(n);
+  expect(store.get().err).toBe("Could not read start at login: no home directory");
+  expect(await c.setAutostart(true)).toEqual({ enabled: null, error: "Could not read start at login: no home directory" }); // no false "off" confirmation
+});
+
+test("start at login: two quick toggles run one after the other, each reading what the first left", async () => {
+  const { c, api } = setup();
+  await c.start(); await settle();
+  let os = false;
+  api.getAutostart.mockImplementation(async () => os);
+  api.setAutostart.mockImplementation(async (on: boolean) => { await settle(); os = on; return on; });
+  c.runAction("toggle_autostart"); c.runAction("toggle_autostart"); for (let i = 0; i < 6; i++) await settle();
+  expect(api.setAutostart.mock.calls.slice(-2)).toEqual([[true], [false]]);
+  expect(os).toBe(false);
+});

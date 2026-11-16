@@ -1775,6 +1775,47 @@ export class Controller {
     }
   }
 
+  /** One login-item operation at a time, queued behind settings writes: a read-flip-write must not interleave. */
+  protected autostartOp<T>(f: () => Promise<T>): Promise<T> {
+    const run = this.settingsQueue.then(f);
+    this.settingsQueue = run.catch(() => {});
+    return run;
+  }
+
+  /** The login item as the OS reports it; null (with the reason) when the read failed, never a guess. */
+  async autostartState(): Promise<{ enabled: boolean | null; error: string | null }> {
+    try {
+      return { enabled: await this.api.getAutostart(), error: null };
+    } catch (e) {
+      return { enabled: null, error: `Could not read start at login: ${errText(e)}` };
+    }
+  }
+
+  /** Sets the login item. Resolves with the OS's state afterwards (re-read, never assumed) and why it failed, if it did. */
+  setAutostart(on: boolean): Promise<{ enabled: boolean | null; error: string | null }> {
+    return this.autostartOp(() => this.writeAutostart(on));
+  }
+
+  private async writeAutostart(on: boolean) {
+    let error: string | null = null;
+    try {
+      await this.api.setAutostart(on);
+    } catch (e) {
+      error = errText(e);
+    }
+    const s = await this.autostartState();
+    return { enabled: s.enabled, error: error ?? s.error };
+  }
+
+  /** Palette "Toggle start at login": reads what the OS reports now, flips it, shows what the OS reports after. */
+  async toggleAutostart() {
+    const r = await this.autostartOp(async () => {
+      const cur = await this.autostartState();
+      return cur.enabled === null ? cur : this.writeAutostart(!cur.enabled);
+    });
+    this.setErr(r.error ?? (r.enabled ? "Start at login on" : "Start at login off"));
+  }
+
   /** Reveals velo.log in the file manager. */
   async showLog() {
     try {
@@ -2173,6 +2214,7 @@ export class Controller {
     check_updates: () => void this.checkUpdates(),
     toggle_debug_log: () => void this.toggleDebugLog(),
     show_log: () => void this.showLog(),
+    toggle_autostart: () => void this.toggleAutostart(),
   };
 
   /**

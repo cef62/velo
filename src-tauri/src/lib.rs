@@ -115,6 +115,8 @@ app_commands![
             commands::quit_app,
             commands::reset_window_cmd,
             commands::log_line,
+            commands::get_autostart,
+            commands::set_autostart,
             update::check_update,
             update::install_update,
             whatsnew::open_whatsnew,
@@ -127,14 +129,26 @@ app_commands![
 pub fn run() {
     let builder = tauri::Builder::default();
     // first plugin, as its docs ask: launching velo again (common once the close button only hides it) shows the
-    // running window instead of starting a second process on the same notes. Not on macOS: LaunchServices keeps one
-    // instance and RunEvent::Reopen shows it, and the plugin's socket in shared /tmp could be squatted to block launch.
+    // running window instead of starting a second process on the same notes. Not on macOS: the plugin's socket in shared
+    // /tmp could be squatted to block launch. There LaunchServices keeps one instance of a Finder/Dock launch and
+    // RunEvent::Reopen shows it, but the login item execs the binary outside LaunchServices: `hold_instance_lock` in
+    // setup keeps that copy from becoming a second process on the same notes.
     #[cfg(not(target_os = "macos"))]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
-        commands::show_main(app);
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _| {
+        // the login item firing while velo already runs (it was started by hand first) must not pop the window up
+        if commands::second_launch_shows(&args) {
+            commands::show_main(app);
+        }
     }));
     builder
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // the OS keeps the login item (the builder's default on macOS is a LaunchAgent; Windows Run key; Linux .desktop); only it passes --hidden
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .app_name(commands::AUTOSTART_NAME)
+                .arg(commands::HIDDEN_ARG)
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -167,6 +181,14 @@ pub fn run() {
             let data_dir = h.path().app_data_dir()?;
             std::fs::create_dir_all(&config_dir)?;
             std::fs::create_dir_all(&data_dir)?;
+            // before anything opens the notes, the index or the agent marker: one GUI velo per data dir. A start that
+            // loses exits at once (a user who clicks again gets `Reopen` in the running velo); only the update relaunch,
+            // whose old process is still exiting, waits. The mark is read here, not consumed: the winner takes it below.
+            #[cfg(target_os = "macos")]
+            if !commands::hold_instance_lock(&data_dir, commands::lock_wait(commands::restart_mark_fresh(&data_dir))) {
+                log::line("another velo runs on this data dir; this start exits");
+                std::process::exit(0);
+            }
             let settings_path = config_dir.join("settings.json");
             let settings = settings::load(&settings_path);
             log::set_debug(settings.debug_log);
@@ -212,6 +234,7 @@ pub fn run() {
                     None
                 }
             };
+            let notes_ready = dir.as_ref().is_some_and(|d| d.is_dir());
             if let Some(dir) = dir {
                 // detached on purpose: quitting must not wait for indexing
                 let h = h.clone();
@@ -234,9 +257,20 @@ pub fn run() {
                 "none" if !live => "tray",
                 m => m,
             };
-            if let Err(e) = commands::apply_app_icon(&h, icon) {
-                eprintln!("velo: app icon mode not applied: {e}");
-            }
+            let icon_applied = commands::apply_app_icon(&h, icon).map_err(|e| eprintln!("velo: app icon mode not applied: {e}")).is_ok();
+            let toggle_live = commands::toggle_hotkey_live(&app.state::<commands::AppState>().settings.lock().unwrap(), |k| commands::hotkey_live(&h, k));
+            let args: Vec<String> = std::env::args().collect();
+            let hidden = commands::start_hidden(&commands::StartCtx {
+                args: &args,
+                after_update: commands::take_restart_mark(&app.state::<commands::AppState>().data_dir),
+                notes_ready,
+                mac: cfg!(target_os = "macos"),
+                icon_applied,
+                mode: icon,
+                toggle_live,
+            });
+            commands::first_show(&h, commands::first_show_plan(hidden, cfg!(target_os = "macos"), icon));
+            commands::refresh_login_item(&h);
             app.manage(Mutex::new(update::UpdateState::default()));
             update::spawn_checker(h.clone());
             Ok(())
@@ -282,7 +316,7 @@ mod guard_tests {
         let denied: Vec<_> = APP_COMMANDS.iter().filter(|c| !whatsnew::allowed(whatsnew::LABEL, c)).collect();
         assert_eq!(denied.len(), APP_COMMANDS.len() - whatsnew::COMMANDS.len());
         assert!(APP_COMMANDS.iter().all(|c| whatsnew::allowed("main", c)));
-        for c in ["save_note", "open_note", "get_settings", "whatsnew_failed", "open_whatsnew", "install_update"] {
+        for c in ["save_note", "open_note", "get_settings", "whatsnew_failed", "open_whatsnew", "install_update", "get_autostart", "set_autostart"] {
             assert!(denied.contains(&&c), "{c}");
         }
     }

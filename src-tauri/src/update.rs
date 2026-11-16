@@ -214,6 +214,10 @@ pub async fn install(app: &AppHandle, expected: Option<&str>) -> Result<(), Stri
             log::line(&format!("update download {}% ({done} bytes)", logged * 25));
         }
     };
+    // The relaunch (ours, or the Windows installer's) repeats the original arguments, `--hidden` of a login start
+    // included; the user is looking at the window now, so the mark tells the new process to show it. Written when the
+    // download is done, not before: its ten minutes must not run out on a slow link.
+    let data_dir = app.state::<crate::commands::AppState>().data_dir.clone();
     let on_finish = || {
         downloaded.store(true, Ordering::Relaxed);
         log::line("update download done; verifying and installing");
@@ -223,7 +227,8 @@ pub async fn install(app: &AppHandle, expected: Option<&str>) -> Result<(), Stri
         // plugin's save never run. Saved after the download, so moves made during it count; waits for the main thread.
         crate::commands::save_window(app).recv().ok();
     };
-    let result = update.download_and_install(on_chunk, on_finish).await;
+    let update = &update;
+    let result = crate::commands::with_restart_mark(&data_dir, on_finish, move |finish| update.download_and_install(on_chunk, finish)).await;
     let mut st = state(app);
     st.busy = false;
     if let Err(e) = result {

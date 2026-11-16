@@ -30,6 +30,10 @@ export type SavedSearch = { name: string; query: string; tags: string[]; no_link
 export type Settings = { notes_dir: string | null; layout: "vertical" | "horizontal"; font_size: number; sort: "modified" | "title"; editor_style: "rich" | "plain"; theme: "system" | "light" | "dark"; shortcuts: Record<string, string>; write_front_matter: boolean; show_front_matter: boolean; info_panel: boolean; auto_update_check: boolean; capture_target: "inbox" | "daily"; inbox_title: string; agent_access: boolean; saved_searches: SavedSearch[]; timeline_sort: "updated" | "created"; palette: string; app_icon: "dock" | "tray" | "none"; tasks_by_note: boolean; show_archived: boolean; debug_log: boolean };
 
 export const getSettings = () => invoke<Settings>("get_settings");
+/** The OS's login item, read live: velo stores no copy. */
+export const getAutostart = () => invoke<boolean>("get_autostart");
+/** Resolves with the state the OS reports after the change; rejects with why the OS refused. */
+export const setAutostart = (enabled: boolean) => invoke<boolean>("set_autostart", { enabled });
 export const setSettings = (settings: Settings) => invoke<void>("set_settings", { settings });
 export type Page = { hits: Hit[]; has_more: boolean; total: number; hidden: number };
 export type TagCount = { tag: string; count: number };
