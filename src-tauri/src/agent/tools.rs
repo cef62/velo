@@ -33,7 +33,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "read_note",
-        description: "Read a note by title (or alias). Returns the full text (front matter included), `hash` (pass it to replace_note; it covers exactly the text returned), created, modified, tags, aliases, outgoing [[links]] and backlinks (titles of notes linking here). Backlinks leave out archived notes; get_connections with include_archived lists them.",
+        description: "Read a note by title (or alias). Returns the full text (front matter included), `hash` (pass it to replace_note; it covers the note as it is on disk at this read), created, modified, tags, aliases, outgoing [[links]] and backlinks (titles of notes linking here). Backlinks leave out archived notes; get_connections with include_archived lists them.",
         input_schema: r#"{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}"#,
     },
     ToolSpec {
@@ -53,7 +53,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "replace_note",
-        description: concat!("Replace a note's whole text (front matter included). `expected_hash` must be the hash from your latest read_note (or from a create_note or replace_note reply, which cover exactly the text you sent); if the note changed since, nothing changes. After edit_note, append_to_note, add_tags, remove_tags, add_task, set_task_done, rename_note or merge_notes, call read_note first: those replies carry no hash. Prefer edit_note for small changes. Returns the new hash.", conventions!()),
+        description: concat!("Replace a note's whole text (front matter included). `expected_hash` must be the hash from your latest read_note (or from a create_note or replace_note reply, which cover the note as saved from your text, velo may stamp front matter, and never text you did not send); if the note changed since, nothing changes. After edit_note, append_to_note, add_tags, remove_tags, add_task, set_task_done, rename_note or merge_notes, call read_note first: those replies carry no hash. Prefer edit_note for small changes. Returns the new hash.", conventions!()),
         input_schema: r#"{"type":"object","properties":{"title":{"type":"string"},"text":{"type":"string"},"expected_hash":{"type":"string"},"summary":{"type":"string"}},"required":["title","text","expected_hash","summary"]}"#,
     },
     ToolSpec {

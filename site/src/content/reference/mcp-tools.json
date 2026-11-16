@@ -45,7 +45,7 @@
     "name": "list_tags"
   },
   {
-    "description": "Read a note by title (or alias). Returns the full text (front matter included), `hash` (pass it to replace_note; it covers exactly the text returned), created, modified, tags, aliases, outgoing [[links]] and backlinks (titles of notes linking here). Backlinks leave out archived notes; get_connections with include_archived lists them.",
+    "description": "Read a note by title (or alias). Returns the full text (front matter included), `hash` (pass it to replace_note; it covers the note as it is on disk at this read), created, modified, tags, aliases, outgoing [[links]] and backlinks (titles of notes linking here). Backlinks leave out archived notes; get_connections with include_archived lists them.",
     "input_schema": {
       "properties": {
         "title": {
@@ -133,7 +133,7 @@
     "name": "edit_note"
   },
   {
-    "description": "Replace a note's whole text (front matter included). `expected_hash` must be the hash from your latest read_note (or from a create_note or replace_note reply, which cover exactly the text you sent); if the note changed since, nothing changes. After edit_note, append_to_note, add_tags, remove_tags, add_task, set_task_done, rename_note or merge_notes, call read_note first: those replies carry no hash. Prefer edit_note for small changes. Returns the new hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list; an error can end with the same news. Tell the user.",
+    "description": "Replace a note's whole text (front matter included). `expected_hash` must be the hash from your latest read_note (or from a create_note or replace_note reply, which cover the note as saved from your text, velo may stamp front matter, and never text you did not send); if the note changed since, nothing changes. After edit_note, append_to_note, add_tags, remove_tags, add_task, set_task_done, rename_note or merge_notes, call read_note first: those replies carry no hash. Prefer edit_note for small changes. Returns the new hash. velo conventions: notes are Markdown, one note per title (titles are case-insensitive and may have aliases). Tasks are `- [ ] text` lines (done: `- [x]`); a due date is ` 📅 YYYY-MM-DD` at the end of the task line. Link notes with [[Note title]]. Tag with inline #tag words or the front-matter `tags:` list. Always read_note before editing a note. `summary` is a one-line description of the change, shown in the note's revisions. A `warning` in the result means the change was made but velo could not update its archived-notes list; an error can end with the same news. Tell the user.",
     "input_schema": {
       "properties": {
         "expected_hash": {
