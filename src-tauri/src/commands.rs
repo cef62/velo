@@ -448,40 +448,52 @@ pub fn take_restart_mark(dir: &Path) -> bool {
     fresh
 }
 
-/// Why a login item must not point at this executable, if so. macOS writes the path into a plist once, unescaped: an
-/// App Translocation path (a quarantined app run from where it was downloaded) is gone after a reboot, a path with
-/// `& < >` makes the plist invalid, and a development build is not the installed app that shares the item's name.
-pub fn login_item_refusal(exe: &str, mac: bool, debug_build: bool) -> Option<&'static str> {
+/// Why a login item must not point at this executable, if so. `os` is `std::env::consts::OS`. The crate writes the path
+/// unquoted and unescaped. macOS: an App Translocation path (a quarantined app run from where it was downloaded) is
+/// gone after a reboot, and `& < >` make the plist invalid. Linux: a space or `%` splits or expands the `Exec=` line.
+/// A development build is not the installed app that shares the item's name.
+pub fn login_item_refusal(exe: &str, os: &str, debug_build: bool) -> Option<&'static str> {
     if debug_build {
         return Some("Start at login is not available in a development build.");
     }
-    if !mac {
-        return None;
+    match os {
+        "macos" if exe.contains("/AppTranslocation/") => Some("macOS is running velo from a temporary location. Move velo to Applications, open it from there, then turn Start at login on."),
+        "macos" if exe.contains(['&', '<', '>']) => Some("velo's folder name contains & < or >, which a login item cannot hold. Move velo to Applications, then turn Start at login on."),
+        "linux" if exe.contains(|c: char| c.is_whitespace() || "%\"\\".contains(c)) => Some("velo's path contains a space or one of % \" \\, which an autostart entry cannot hold. Move velo to a folder without them, then turn Start at login on."),
+        _ => None,
     }
-    if exe.contains("/AppTranslocation/") {
-        return Some("macOS is running velo from a temporary location. Move velo to Applications, open it from there, then turn Start at login on.");
-    }
-    if exe.contains(['&', '<', '>']) {
-        return Some("velo's folder name contains & < or >, which a login item cannot hold. Move velo to Applications, then turn Start at login on.");
-    }
-    None
+}
+
+/// The path the crate writes: `$APPIMAGE` for an AppImage (the executable itself sits in a temporary mount), else the executable.
+fn login_exe() -> String {
+    let own = || std::env::current_exe().and_then(|p| p.canonicalize()).map(|p| p.display().to_string()).unwrap_or_default();
+    if cfg!(target_os = "linux") { std::env::var("APPIMAGE").unwrap_or_else(|_| own()) } else { own() }
 }
 
 fn refusal() -> Option<&'static str> {
-    let exe = std::env::current_exe().and_then(|p| p.canonicalize()).map(|p| p.display().to_string()).unwrap_or_default();
-    login_item_refusal(&exe, cfg!(target_os = "macos"), cfg!(debug_assertions))
+    login_item_refusal(&login_exe(), std::env::consts::OS, cfg!(debug_assertions))
 }
 
-/// At startup, an enabled login item is written again so it points at this executable (the app may have moved since,
-/// and macOS keeps the path from the day it was enabled). Never turns on one that is off, and never writes a path
-/// `login_item_refusal` rejects. Not reached by `velo --mcp`, which returns before the app (and the plugin) exists.
+/// `ProgramArguments[0]` of a LaunchAgent plist as the crate writes it.
+fn plist_program(plist: &str) -> Option<&str> {
+    plist.split("<key>ProgramArguments</key>").nth(1)?.split("<string>").nth(1)?.split("</string>").next()
+}
+
+/// Whether to rewrite the login item at startup. macOS only: its plist keeps the path from the day it was enabled, so a
+/// moved app goes stale. Linux and Windows are left alone (a rewrite would undo what the desktop's own startup settings
+/// wrote into the entry, and on Windows an elevated start would write the all-users key). Never an item that is off, never
+/// a refused path, and only when the recorded path differs, so a normal start writes nothing (no macOS "Background Items
+/// Added" notice each time).
+pub fn should_refresh(os: &str, enabled: bool, refused: bool, recorded: Option<&str>, exe: &str) -> bool {
+    os == "macos" && enabled && !refused && recorded != Some(exe)
+}
+
 pub fn refresh_login_item(app: &AppHandle) {
     use tauri_plugin_autostart::ManagerExt;
-    if refusal().is_some() {
-        return;
-    }
+    let exe = login_exe();
+    let recorded = dirs::home_dir().and_then(|h| std::fs::read_to_string(h.join("Library/LaunchAgents").join(format!("{AUTOSTART_NAME}.plist"))).ok());
     let launcher = app.autolaunch();
-    if launcher.is_enabled().unwrap_or(false)
+    if should_refresh(std::env::consts::OS, launcher.is_enabled().unwrap_or(false), refusal().is_some(), recorded.as_deref().and_then(plist_program), &exe)
         && let Err(e) = launcher.enable()
     {
         crate::log::line(&format!("could not refresh the start at login item: {e}"));
@@ -1305,13 +1317,31 @@ mod global_tests {
     }
     #[test] fn the_login_item_refuses_paths_it_cannot_hold() {
         let ok = "/Applications/velo.app/Contents/MacOS/velo";
-        assert_eq!(login_item_refusal(ok, true, false), None);
-        assert!(login_item_refusal("/private/var/folders/x/T/AppTranslocation/ABC/d/velo.app/Contents/MacOS/velo", true, false).unwrap().contains("Move velo to Applications"));
+        assert_eq!(login_item_refusal(ok, "macos", false), None);
+        assert!(login_item_refusal("/private/var/folders/x/T/AppTranslocation/ABC/d/velo.app/Contents/MacOS/velo", "macos", false).unwrap().contains("Move velo to Applications"));
         for bad in ["/Apps & Tools/velo.app/Contents/MacOS/velo", "/a<b/velo", "/a>b/velo"] {
-            assert!(login_item_refusal(bad, true, false).is_some(), "{bad}");
+            assert!(login_item_refusal(bad, "macos", false).is_some(), "{bad}");
         }
-        assert_eq!(login_item_refusal("C:\\Apps & Tools\\velo.exe", false, false), None, "the Run key quotes its value");
-        assert!(login_item_refusal(ok, true, true).is_some(), "a development build");
+        assert_eq!(login_item_refusal("/home/u/bin/velo.AppImage", "linux", false), None);
+        for bad in ["/home/u/My Apps/velo.AppImage", "/home/u/100%/velo", "/home/u/a\"b/velo", "/home/u/a\\b/velo"] {
+            assert!(login_item_refusal(bad, "linux", false).is_some(), "{bad}");
+        }
+        assert_eq!(login_item_refusal("C:\\Apps & Tools\\velo.exe", "windows", false), None, "the plugin writes the Run value unquoted and Windows still resolves it");
+        assert!(login_item_refusal(ok, "macos", true).is_some(), "a development build");
+    }
+    #[test] fn the_startup_refresh_is_macos_only_never_turns_an_item_on_and_skips_a_current_path() {
+        let exe = "/Applications/velo.app/Contents/MacOS/velo";
+        assert!(should_refresh("macos", true, false, Some("/Users/u/Downloads/velo.app/Contents/MacOS/velo"), exe), "moved");
+        assert!(should_refresh("macos", true, false, None, exe), "unreadable record");
+        assert!(!should_refresh("macos", true, false, Some(exe), exe), "same path: write nothing");
+        assert!(!should_refresh("macos", false, false, Some("/old"), exe), "off stays off");
+        assert!(!should_refresh("macos", true, true, Some("/old"), exe), "refused path");
+        assert!(!should_refresh("linux", true, false, Some("/old"), exe) && !should_refresh("windows", true, false, None, exe));
+    }
+    #[test] fn the_recorded_path_is_read_from_the_plist_the_crate_writes() {
+        let plist = "<?xml version=\"1.0\"?>\n<plist version=\"1.0\">\n  <dict>\n  <key>Label</key>\n  <string>dev.velo.app</string>\n  <key>AssociatedBundleIdentifiers</key>\n  <array></array>\n  <key>ProgramArguments</key>\n  <array><string>/Applications/velo.app/Contents/MacOS/velo</string><string>--hidden</string></array>\n  <key>RunAtLoad</key>\n  <true/>\n  </dict>\n</plist>";
+        assert_eq!(plist_program(plist), Some("/Applications/velo.app/Contents/MacOS/velo"));
+        assert_eq!(plist_program("garbage"), None);
     }
     #[test] fn the_login_item_name_is_the_bundle_identifier() {
         let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
