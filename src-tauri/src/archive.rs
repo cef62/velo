@@ -45,7 +45,7 @@ pub fn update(dir: &Path, change: impl FnOnce(&mut Vec<String>)) -> Result<Vec<S
     let path = dir.join(FILE);
     std::fs::create_dir_all(path.parent().expect("FILE has a parent"))?;
     let tmp = dir.join(format!("{FILE}.{}.tmp", std::process::id()));
-    let put = std::fs::write(&tmp, now.iter().map(|t| format!("{t}\n")).collect::<String>()).and_then(|()| std::fs::rename(&tmp, path));
+    let put = crate::store::create_tmp(&tmp).and_then(|mut f| std::io::Write::write_all(&mut f, now.iter().map(|t| format!("{t}\n")).collect::<String>().as_bytes())).and_then(|()| std::fs::rename(&tmp, path));
     if let Err(e) = put {
         std::fs::remove_file(&tmp).ok(); // no stray temp file after a failed write or rename
         return Err(e);
@@ -56,6 +56,19 @@ pub fn update(dir: &Path, change: impl FnOnce(&mut Vec<String>)) -> Result<Vec<S
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// #163: a FIFO at the list's name fails at once; one at its temp name is replaced.
+    #[cfg(unix)]
+    #[test] fn a_fifo_never_blocks_the_list() {
+        let d = tempfile::tempdir().unwrap().keep();
+        std::fs::create_dir_all(d.join(".velo")).unwrap();
+        crate::store::fifo::make(&d.join(format!("{FILE}.{}.tmp", std::process::id())));
+        let dir = d.clone();
+        assert_eq!(crate::store::fifo::within("update", move || update(&dir, |v| v.push("A".into())).unwrap()), vec!["A".to_string()]);
+        std::fs::remove_file(d.join(FILE)).unwrap();
+        crate::store::fifo::make(&d.join(FILE));
+        let dir = d.clone();
+        assert!(crate::store::fifo::within("read", move || read(&dir).is_err()));
+    }
     #[test] fn read_missing_is_empty() { let d = tempfile::tempdir().unwrap(); assert_eq!(read(d.path()).unwrap(), Vec::<String>::new()); }
     #[test] fn read_parses_bom_crlf_and_keeps_spaces() {
         assert_eq!(parse("\u{feff}meeting notes\r\n\nFoo \n \nBar"), ["meeting notes", "Foo ", " ", "Bar"]);

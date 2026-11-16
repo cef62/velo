@@ -100,7 +100,7 @@ fn build_from(rows: Vec<TimelineRow>, dates: &HashMap<String, (i64, i64)>, r: &E
 pub fn write(path: &Path, text: &str) -> std::io::Result<()> {
     let name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
     let tmp = path.with_file_name(format!(".{name}.tmp"));
-    let res = std::fs::File::create(&tmp)
+    let res = crate::store::create_tmp(&tmp)
         .and_then(|mut f| std::io::Write::write_all(&mut f, text.as_bytes()).and_then(|_| f.sync_all()))
         .and_then(|_| std::fs::rename(&tmp, path));
     if res.is_err() { let _ = std::fs::remove_file(&tmp); }
@@ -163,6 +163,22 @@ mod tests {
         assert!(t.ends_with("---\n1 without tasks\n"), "{t}");
     }
 
+    /// #163: a note replaced by a FIFO counts as unreadable instead of blocking the export; a FIFO at the temp name of
+    /// the export file is replaced.
+    #[cfg(unix)]
+    #[test] fn export_never_blocks_on_a_fifo() {
+        let (v, d) = vault(&[("a", "2026-01-01T00:00:00+00:00", "x")]);
+        std::fs::remove_file(d.join("a.md")).unwrap();
+        crate::store::fifo::make(&d.join("a.md"));
+        let out = d.join("out.md");
+        crate::store::fifo::make(&d.join(".out.md.tmp"));
+        let unreadable = crate::store::fifo::within("export", move || {
+            write(&out, "hello").unwrap();
+            build(&v, &req(false), "2026-01-03").unwrap().1.unreadable
+        });
+        assert_eq!(unreadable, 1);
+        assert_eq!(std::fs::read_to_string(d.join("out.md")).unwrap(), "hello");
+    }
     #[test] fn export_never_includes_locked_notes() {
         let (mut v, _) = vault(&[]);
         let id = crypto::new_identity();

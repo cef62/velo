@@ -912,7 +912,7 @@ pub fn setup_passphrase(app: AppHandle, st: State<'_, AppState>, passphrase: Str
         std::fs::create_dir_all(file.parent().unwrap()).map_err(|e| e.to_string())?;
         let tmp = file.with_extension("age.tmp");
         // hard_link fails if identity.age appeared meanwhile: never overwrite an existing identity
-        let linked = std::fs::write(&tmp, wrapped).and_then(|_| std::fs::hard_link(&tmp, &file));
+        let linked = crate::store::create_tmp(&tmp).and_then(|mut f| std::io::Write::write_all(&mut f, &wrapped)).and_then(|_| std::fs::hard_link(&tmp, &file));
         std::fs::remove_file(&tmp).ok();
         linked.map_err(|e| e.to_string())?;
     }
@@ -946,6 +946,14 @@ fn keychain_warning<E>(needs_set: bool, set: impl FnOnce() -> Result<(), E>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// #163: a FIFO at `.velo/identity.age` fails at once instead of blocking.
+    #[cfg(unix)]
+    #[test] fn identity_file_fifo_never_blocks() {
+        let d = tempfile::tempdir().unwrap().keep();
+        let f = d.join("identity.age");
+        crate::store::fifo::make(&f);
+        assert!(crate::store::fifo::within("identity", move || read_identity_file(&f).is_err()));
+    }
     #[test] fn setup_command_uses_current_exe() {
         let c = agent_setup_command().unwrap();
         let exe = std::env::current_exe().unwrap();

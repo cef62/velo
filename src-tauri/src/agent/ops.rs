@@ -385,6 +385,18 @@ mod tests {
         (DirectOps::open(dir.clone(), &t.join("i.sqlite"), t.join("settings.json")).unwrap(), dir)
     }
 
+    /// #163: the agent's reads of a note (its hash, its created text) fail at once on a FIFO.
+    #[cfg(unix)]
+    #[test] fn agent_reads_never_block_on_a_fifo() {
+        let (mut o, dir) = ops();
+        let p = dir.join("a.md");
+        crate::store::fifo::make(&p);
+        let r = crate::store::fifo::within("agent", move || {
+            let ps = p.to_string_lossy().into_owned();
+            (hash_of(&p), landed(Err::<(), _>(anyhow!("x")), &p, None).is_err(), o.snapshot(&ps, "s").is_err())
+        });
+        assert_eq!(r, (None, true, true));
+    }
     #[test] fn created_note_has_first_revision() {
         let (mut o, _) = ops();
         let d = o.create("Fresh", "hello", "made it").unwrap();
