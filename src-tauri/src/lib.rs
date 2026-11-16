@@ -140,10 +140,9 @@ pub fn run() {
     }));
     builder
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        // the OS keeps the login item (LaunchAgent on macOS, HKCU Run on Windows, .desktop on Linux); only it passes --hidden
+        // the OS keeps the login item (the builder's default on macOS is a LaunchAgent; Windows Run key; Linux .desktop); only it passes --hidden
         .plugin(
             tauri_plugin_autostart::Builder::new()
-                .macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent)
                 .app_name(commands::AUTOSTART_NAME)
                 .arg(commands::HIDDEN_ARG)
                 .build(),
