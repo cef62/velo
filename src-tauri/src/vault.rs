@@ -101,7 +101,7 @@ pub struct NoteMeta {
     pub aliases: Vec<String>,
 }
 
-/// `append_task`'s save went to a conflict copy at this path, not the note.
+/// `append_task`'s or `toggle_task`'s save went to a conflict copy at this path, not the note.
 #[derive(Debug)]
 pub struct ConflictCopy(pub String);
 impl std::fmt::Display for ConflictCopy {
@@ -802,12 +802,13 @@ impl Vault {
         self.toggle_in(doc, line, expected, identity, write_fm)
     }
 
-    fn toggle_in(&mut self, doc: NoteDoc, line: usize, expected: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<Toggled> {
+    pub(crate) fn toggle_in(&mut self, doc: NoteDoc, line: usize, expected: &str, identity: Option<&str>, write_fm: bool) -> anyhow::Result<Toggled> {
         let (text, line_text) = toggled_text(&doc.text, line, expected)?;
         match self.save_note(&doc.path, &text, &doc.hash, identity, write_fm)? {
             // stamping may replace or prepend the front-matter block: shift the line by its change in height
             SaveResult::Saved { front_matter, hash, .. } => Ok(Toggled { line: line - fm_lines(&text) + front_matter.as_deref().map_or(fm_lines(&text), fm_lines), line_text, hash }),
-            SaveResult::Conflict { .. } => Err(anyhow!("task-moved")), // disk changed since we read it
+            // disk changed since we read it: the note is untouched, the toggled text is in this copy
+            SaveResult::Conflict { conflict_path, .. } => Err(ConflictCopy(conflict_path).into()),
         }
     }
 
@@ -3498,8 +3499,12 @@ mod tests {
     #[test] fn toggle_and_capture_conflict_on_stale_hash() {
         let mut v = open_empty(); let p = note_with(&mut v, "t", "- [ ] a\n");
         let stale = |v: &mut Vault| { let mut d = v.open_note(&p, None).unwrap(); d.hash = "stale".into(); d };
+        // each names its copy, like `save` (#134): the toggled or appended text is there, the note is untouched
         let d = stale(&mut v);
-        assert_eq!(v.toggle_in(d, 0, "- [ ] a", None, false).unwrap_err().to_string(), "task-moved");
+        let e = v.toggle_in(d, 0, "- [ ] a", None, false).unwrap_err();
+        assert_eq!(e.to_string(), "conflict");
+        let copy = &e.downcast_ref::<ConflictCopy>().expect("names the copy").0;
+        assert!(copy.contains("(conflict") && std::fs::read_to_string(copy).unwrap().starts_with("- [x] a"), "{copy}");
         let d = stale(&mut v);
         let e = v.append_in(d, "x", None, false).unwrap_err();
         assert_eq!(e.to_string(), "conflict");

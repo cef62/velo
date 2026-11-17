@@ -168,7 +168,7 @@ export class FakeEditor implements Editor {
     if (this.path === null || this.suspended || this.readOnly) return false;
     this.changes.push(c);
     this.text = this.text.slice(0, c.from) + c.insert + this.text.slice(c.to);
-    this.dirty = true;
+    if (c.from !== c.to || c.insert) this.dirty = true; // like CodeMirror: an empty change is no edit
     return true;
   }
   selection: { from: number; to: number } | null = null;
@@ -179,7 +179,9 @@ export class FakeEditor implements Editor {
   appendLine(text: string) {
     this.appended.push(text);
     if (this.path === null || this.suspended) return false;
-    this.text += (this.text === "" || this.text.endsWith("\n") ? "" : "\n") + text;
+    const sep = this.text === "" || this.text.endsWith("\n") ? "" : "\n";
+    this.text += sep + text;
+    if (sep + text) this.dirty = true;
     return true;
   }
 }

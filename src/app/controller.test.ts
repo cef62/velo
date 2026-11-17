@@ -1203,6 +1203,15 @@ test("task-moved refreshes and says so", async () => {
   expect(store.get().tickUndo).toBeNull();
 });
 
+test("a tick whose backend save went to a conflict copy refreshes and says so (#134)", async () => {
+  const { c, api, store } = setup();
+  api.toggleTask.mockRejectedValueOnce("conflict");
+  await c.tickTask(task("B", 2, "- [ ] buy"));
+  expect(api.tasks).toHaveBeenCalled();
+  expect(store.get().err).toBe("This task changed — refreshed; your change went to a conflict copy");
+  expect(store.get().tickUndo).toBeNull();
+});
+
 test("loadTasks sets the badge", async () => {
   const { c, api, store } = setup();
   api.tasks.mockResolvedValue(view(3));
@@ -1954,7 +1963,14 @@ function setupRealSaver(onSave: (n: number, ctx: ReturnType<typeof setup> & { be
   editor.flushOutcome.mockImplementation(() => saver.flushOutcome());
   editor.adopt.mockImplementation((h: string) => saver.adopt(h));
   const append = editor.appendLine.bind(editor);
-  editor.appendLine = (t) => append(t) && (saver.edit(), true);
+  // an edit marks the saver dirty only when it changed the text, as the real editor's update listener does
+  const edited = (run: () => boolean) => {
+    const before = editor.text;
+    return run() && (editor.text !== before && saver.edit(), true);
+  };
+  editor.appendLine = (t) => edited(() => append(t));
+  const apply = editor.applyChange.bind(editor);
+  editor.applyChange = (ch, iso) => edited(() => apply(ch, iso));
   return ctx;
 }
 
@@ -2037,6 +2053,64 @@ test("the user typing during the agent's save that went to a conflict copy gets 
   expect(await editor.flush()).toBe(true);
   expect(be.disk).toBe("other");
   expect(be.copies).toEqual(["a\n- [ ] x", "a\n- [ ] x typed"]);
+});
+
+test("a no-op agent write to the clean open note drops its snapshot and replies the disk hash (#134)", async () => {
+  const { c, api, be, editor } = setupRealSaver(() => {});
+  await c.show(P("A"));
+  be.hash = "hD"; // the same text rewritten on disk with other bytes (line endings), not reloaded yet
+  api.snapshotAgent.mockResolvedValueOnce("3.md");
+  await c.onAgentWrite({ id: 1, path: P("A"), kind: "replace", insert: "a", base: "hD", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(1, { hash: "hD" });
+  expect(api.dropAgentSnapshot).toHaveBeenCalledWith(P("A"), "3.md"); // main: kept, a revision for a write that changed nothing
+  expect(editor.text).toBe("a");
+  expect(be.disk).toBe("a");
+  expect(be.copies).toEqual([]);
+});
+
+test("owner typing while a no-op's snapshot drop is awaited: the reply is the hash checked before it, a chained replace conflicts, and the typing stays the owner's (#134)", async () => {
+  const { c, api, be, editor, type } = setupRealSaver(() => {});
+  await c.show(P("A"));
+  api.snapshotAgent.mockResolvedValueOnce("3.md");
+  api.dropAgentSnapshot.mockImplementationOnce(async () => type("a typed")); // the owner types during the drop's IPC
+  await c.onAgentWrite({ id: 1, path: P("A"), kind: "replace", insert: "a", base: "h", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(1, { hash: "h" }); // review round 2 of #166: "h:a typed", typing the agent never read
+  expect(api.dropAgentSnapshot).toHaveBeenCalledTimes(1);
+  expect(editor.text).toBe("a typed");
+  expect(be.disk).toBe("a"); // not saved as part of the agent's write
+  await c.onAgentWrite({ id: 2, path: P("A"), kind: "replace", insert: "agent", base: "h", summary: "s2" });
+  expect(api.agentWriteDone).toHaveBeenLastCalledWith(2, "conflict");
+  expect(api.snapshotAgent).toHaveBeenCalledTimes(1); // refused before any snapshot
+  expect(editor.text).toBe("a typed");
+  expect(be.disk).toBe("a typed"); // saved by the editor's own flush, as the owner's text
+  expect(be.copies).toEqual([]);
+});
+
+test.each(["replace", "append"] as const)("a throw in the editor's %s apply replies refused and leaves no snapshot (#134)", async (kind) => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  api.snapshotAgent.mockResolvedValueOnce("3.md");
+  const boom = (): boolean => { throw new RangeError("Selection points outside of document"); };
+  editor.applyChange = boom;
+  editor.appendLine = boom;
+  await c.onAgentWrite({ id: 1, path: P("A"), kind, insert: "b", base: "h", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(1, "refused");
+  expect(api.dropAgentSnapshot).toHaveBeenCalledWith(P("A"), "3.md"); // main: kept
+});
+
+test("a throw after the agent's change was saved keeps its snapshot (#134)", async () => {
+  const { c, api, editor } = setup({ A: "a" });
+  await c.show(P("A"));
+  api.snapshotAgent.mockResolvedValueOnce("3.md");
+  editor.flushOutcome.mockImplementationOnce(async () => {
+    await editor.flush();
+    editor.dirty = false; // saved
+    throw new Error("after the save");
+  });
+  await c.onAgentWrite({ id: 1, path: P("A"), kind: "replace", insert: "b", base: "h", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(1, "unsaved");
+  expect(editor.text).toBe("b");
+  expect(api.dropAgentSnapshot).not.toHaveBeenCalled();
 });
 
 test("an agent save into a copy named like the banner already shown is still reported as a conflict (#114)", async () => {
