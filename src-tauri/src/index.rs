@@ -603,6 +603,11 @@ impl Index {
         Ok(st.query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?.collect::<Result<_, _>>()?)
     }
 
+    /// `notes.size` of `path`'s row, if indexed.
+    pub fn size(&self, path: &str) -> anyhow::Result<Option<u64>> {
+        Ok(self.db.query_row("SELECT size FROM notes WHERE path=?", [path], |r| r.get::<_, i64>(0)).optional()?.map(|s| s as u64))
+    }
+
     pub fn title_modified(&self, path: &str) -> anyhow::Result<Option<(String, i64)>> {
         Ok(self.db.query_row("SELECT title, modified FROM notes WHERE path=?", [path], |r| Ok((r.get(0)?, r.get(1)?))).optional()?)
     }
