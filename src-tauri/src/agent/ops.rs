@@ -27,8 +27,8 @@ pub trait NoteOps {
     fn search(&self, query: &str, tags: &[String], offset: usize, no_links: bool, include_archived: bool) -> anyhow::Result<Page>;
     fn tags(&self, include_archived: bool) -> anyhow::Result<Vec<TagCount>>;
     fn tasks(&self, query: &str, tags: &[String], show_done: bool, include_archived: bool) -> anyhow::Result<TaskView>;
-    /// Returns the new path and its hash, read under the rename's own lock (None: unreadable). Never a later read: the
-    /// open note's editor unfreezes after the rename, and a save it makes then must not be covered by the hash.
+    /// Returns the new path. No hash and no later read: the reply's title comes from the path, so a read that fails or
+    /// meets indexing cannot turn a rename that happened into an error.
     fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<String>;
     fn trash(&mut self, path: &str, summary: &str) -> anyhow::Result<()>;
     /// Appends `source` to `target`, rewrites links to it and trashes it (see `Vault::merge_notes_with`).
