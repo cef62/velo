@@ -2438,8 +2438,12 @@ async function settled(latest: () => Promise<unknown>) {
   }
 }
 
-/** The single change turning `a` into `b`: common prefix and suffix kept, so undo and the caret only touch what changed. */
+/**
+ * The single change turning `a` (editor text, always LF) into `b`: common prefix and suffix kept, so undo and the caret only touch what changed.
+ * `b` is read as CodeMirror reads text: \r\n and a lone \r are one line break. Left raw, the span can cut a \r\n in two and leave a bare \r (#134).
+ */
 export function changedSpan(a: string, b: string) {
+  b = b.replace(/\r\n?/g, "\n");
   let s = 0;
   while (s < a.length && s < b.length && a[s] === b[s]) s++;
   let e = 0;

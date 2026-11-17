@@ -166,6 +166,16 @@ export function replaceAll(doc: Text, text: string) {
   return { changes: { from: 0, to: doc.length, insert: text }, selection: { anchor: 0 } };
 }
 
+/**
+ * Append `text` as a new line at the end, caret after it. `text` is read as CodeMirror reads it (\r\n and a lone \r are one break):
+ * the caret is computed from the inserted length, or a CRLF text would put it past the document's end and the transaction would throw.
+ */
+export function appendSpec(doc: Text, text: string) {
+  text = text.replace(/\r\n?/g, "\n");
+  const sep = doc.length === 0 || doc.sliceString(doc.length - 1) === "\n" ? "" : "\n";
+  return { changes: { from: doc.length, insert: sep + text }, selection: { anchor: doc.length + sep.length + text.length } };
+}
+
 const shownTheme = EditorView.theme({
   // Shown raw: undo markdown styling (the closing --- would otherwise make a setext heading).
   ".cm-fm, .cm-fm span": { fontSize: "0.86em", fontWeight: "400", color: "var(--colors-velo-fg-muted)", fontFamily: '"JetBrains Mono Variable", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace' },

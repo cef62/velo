@@ -6,7 +6,7 @@ import { writingSetup } from "./editortheme";
 import { refreshRich, richMarkdown, type RichOpts } from "./richmd";
 import { dueInputRule, localToday, toggleTaskAt } from "./tasks";
 import { SaveController } from "./saver";
-import { frontMatterHide, ISOLATED, reloadSpec, replaceAll, stampSelection, undoHistory } from "./fmhide";
+import { appendSpec, frontMatterHide, ISOLATED, reloadSpec, replaceAll, stampSelection, undoHistory } from "./fmhide";
 import { stampChange } from "./frontmatter";
 import { clampPos, getPos, renamePos, setPos, type Pos } from "./positions";
 import { openNote, saveNote, type NoteDoc, type NoteMeta } from "./api";
@@ -287,9 +287,7 @@ export function mountEditor(el: HTMLElement, opts: EditorOpts = {}): Editor {
     },
     appendLine(text) {
       if (!view.state.facet(EditorView.editable)) return false;
-      const doc = view.state.doc;
-      const sep = doc.length === 0 || doc.sliceString(doc.length - 1) === "\n" ? "" : "\n";
-      view.dispatch({ changes: { from: doc.length, insert: sep + text }, selection: { anchor: doc.length + sep.length + text.length } });
+      view.dispatch(appendSpec(view.state.doc, text));
       return true;
     },
     applyChange(change, isolate) {
