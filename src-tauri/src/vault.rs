@@ -2296,6 +2296,7 @@ mod tests {
         std::fs::remove_file(&d.path).unwrap();
         v.apply_fs_changes(&[PathBuf::from(&d.path), age.clone()], Some(&other));
         assert_eq!(v.revisions.list("s"), before, "not encrypted, not deleted");
+        assert!(v.retry.is_empty(), "a key that does not open the note is never retried");
         assert!(v.list_revisions(&s(&age)).unwrap().is_empty(), "hidden from the locked note");
         drop(v);
         let v = open(dir.clone(), &db, Some(&id)).unwrap();
@@ -2321,6 +2322,65 @@ mod tests {
             (first, text, v.list_revisions(&p).unwrap().len())
         });
         assert_eq!((first.ts, first.summary, first.agent, text.as_str(), after), (ts, None, false, "first", 2));
+    }
+    /// `s` with plaintext history, locked elsewhere while the vault is open with the key: its locked copy can't be
+    /// read at its watcher event (a sync lock, an eviction; here mode 000). Returns the vault, the locked path, the key
+    /// and the history as it was. `None` as root (root reads a mode-000 file).
+    #[cfg(unix)]
+    fn unreadable_at_its_event() -> Option<(Vault, PathBuf, String, Vec<RevisionInfo>)> {
+        use std::os::unix::fs::PermissionsExt;
+        if unsafe { libc::geteuid() } == 0 {
+            return None;
+        }
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, Some(&id)).unwrap();
+        let d = v.open_or_create("s", None, false).unwrap();
+        std::fs::write(&d.path, "plainsecret").unwrap();
+        v.save_note(&d.path, "later", &stat_hash(&d.path), None, false).unwrap();
+        let before = v.revisions.list("s");
+        assert_eq!(before.len(), 1);
+        let age = dir.join("s.md.age");
+        std::fs::write(&age, crypto::encrypt(&id, b"later").unwrap()).unwrap();
+        std::fs::set_permissions(&age, std::fs::Permissions::from_mode(0o000)).unwrap();
+        std::fs::remove_file(&d.path).unwrap();
+        v.apply_fs_changes(&[PathBuf::from(&d.path), age.clone()], Some(&id));
+        assert_eq!(v.revisions.list("s"), before, "held back: not encrypted, not deleted");
+        assert!(!v.unlocked.contains_key(&s(&age)) && v.retry.is_empty(), "not unlocked, no retry");
+        std::fs::set_permissions(&age, std::fs::Permissions::from_mode(0o644)).unwrap();
+        Some((v, age, id, before))
+    }
+    /// #158 (#170 review m3): a locked file that can't be read at its watcher event is secured at the next event for
+    /// that path (the sync client's write, the download, the permission change). Nothing else retries it: once
+    /// readable, unrelated events leave it held back, so one that stays unreadable costs them nothing (no re-apply, no
+    /// twin scan). Bound: one attempt per event that names the path.
+    #[cfg(unix)]
+    #[test] fn an_unreadable_locked_file_is_secured_at_its_next_event() {
+        let Some((mut v, age, id, before)) = unreadable_at_its_event() else { return };
+        let other = age.with_file_name("o.md");
+        let scans = v.resync_scans;
+        for i in 0..20 {
+            std::fs::write(&other, format!("edit {i}")).unwrap();
+            v.apply_fs_changes(std::slice::from_ref(&other), Some(&id));
+        }
+        assert_eq!((v.resync_scans - scans, v.retry.len()), (0, 0), "unrelated events re-apply nothing");
+        assert_eq!(v.revisions.list("s"), before, "not retried by them, nothing deleted");
+        assert!(!v.unlocked.contains_key(&s(&age)));
+        v.apply_fs_changes(std::slice::from_ref(&age), Some(&id));
+        assert!(!v.revisions.has_plain("s"), "no plaintext left");
+        let r = v.list_revisions(&s(&age)).unwrap();
+        assert_eq!(r.len(), 1);
+        assert_eq!(v.read_revision(&s(&age), &r[0].id, Some(&id)).unwrap(), "plainsecret");
+        assert_eq!(v.unlocked.get(&s(&age)).map(String::as_str), Some("later"));
+    }
+    /// #158: Lock all between the failed read and the next event: the app passes no key from then on, so that event
+    /// unlocks nothing and encrypts nothing with the cleared key.
+    #[cfg(unix)]
+    #[test] fn lock_all_before_the_next_event_unlocks_and_encrypts_nothing() {
+        let Some((mut v, age, _, _)) = unreadable_at_its_event() else { return };
+        v.lock_all();
+        v.apply_fs_changes(std::slice::from_ref(&age), None);
+        assert!(v.unlocked.is_empty(), "nothing unlocked");
+        assert!(v.revisions.list("s").iter().all(|r| !r.id.ends_with(".age")), "nothing encrypted");
     }
     /// #163: a keyed warm open encrypts (never deletes) the fold-equal plain note's history, which stays readable with
     /// the key, as on the watcher path. A keyless one touches nothing.
