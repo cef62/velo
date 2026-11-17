@@ -78,15 +78,19 @@ fn put(p: &std::path::Path, b: &[u8]) -> io::Result<()> {
     io::Write::write_all(&mut f, b).inspect_err(|_| drop(std::fs::remove_file(p)))
 }
 
-/// Places a snapshot at the first id at or after `now_ms` that nobody holds, and returns `(ms, id)`. `make(path,
-/// is_sidecar)` must create the file at `path` exclusively (`put`, or `hard_link`): it fails with `AlreadyExists` on
-/// anything there, so two writers (threads or processes) never get one id, and nothing at a name is ever removed or
-/// written through. An id with any entry at either spelling or at `<ms>.json` (a file, a FIFO, a link, a dangling
-/// link, an orphan sidecar that a new snapshot would inherit) is skipped. With `has_sidecar`, `<ms>.json` is made
-/// first, so a snapshot and its sidecar are always one writer's. `.md` and `.md.age` of one `<ms>` share that sidecar
-/// name, so after its create a writer yields (removes only the file it just made) when the other spelling exists, or
-/// a sidecar it does not own; both sides of a same-ms race may yield, then both retry at the next id.
-fn claim(dir: &std::path::Path, now_ms: i64, encrypted: bool, has_sidecar: bool, make: &dyn Fn(&std::path::Path, bool) -> io::Result<()>) -> io::Result<(i64, String)> {
+type Make<'a> = &'a dyn Fn(&std::path::Path) -> io::Result<()>;
+
+/// Places a snapshot at the first id at or after `now_ms` that nobody holds, and returns `(ms, id)`. `make(path)` must
+/// create the snapshot at `path` exclusively (`put`, or `hard_link`): it fails with `AlreadyExists` on anything
+/// there, so two writers (threads or processes) never get one id, and nothing at a name is ever removed or written
+/// through. An id with any entry at either spelling or at `<ms>.json` (a file, a FIFO, a link, a dangling link, an
+/// orphan sidecar that a new snapshot would inherit) is skipped. With `fill_sidecar`, an empty `<ms>.json` is created
+/// first, then the snapshot, and only once the id is certainly ours does `fill_sidecar(<ms>.json)` give the sidecar
+/// its content, so a reader never sees a label under an id its writer does not own. `.md` and `.md.age` of one `<ms>`
+/// share that sidecar name, so after the snapshot's create a writer yields (removes only the files it just made)
+/// when the other spelling exists, or a sidecar it does not own; both sides of a same-ms race may yield, then both
+/// retry at the next id.
+fn claim(dir: &std::path::Path, now_ms: i64, encrypted: bool, fill_sidecar: Option<Make>, make: Make) -> io::Result<(i64, String)> {
     let (ext, other) = if encrypted { ("md.age", "md") } else { ("md", "md.age") };
     for ms in now_ms..now_ms.saturating_add(MAX_CLAIMS) {
         let at = |e: &str| dir.join(format!("{ms}.{e}"));
@@ -94,8 +98,8 @@ fn claim(dir: &std::path::Path, now_ms: i64, encrypted: bool, has_sidecar: bool,
         if taken("md") || taken("md.age") || taken("json") {
             continue;
         }
-        if has_sidecar {
-            match make(&at("json"), true) {
+        if fill_sidecar.is_some() {
+            match put(&at("json"), &[]) {
                 Ok(()) => {}
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(e) => return Err(e),
@@ -106,24 +110,45 @@ fn claim(dir: &std::path::Path, now_ms: i64, encrypted: bool, has_sidecar: bool,
             if snap {
                 std::fs::remove_file(at(ext)).ok();
             }
-            if has_sidecar {
+            if fill_sidecar.is_some() {
                 std::fs::remove_file(at("json")).ok();
             }
         };
-        if let Err(e) = make(&at(ext), false) {
+        if let Err(e) = make(&at(ext)) {
             undo(false);
             if e.kind() == io::ErrorKind::AlreadyExists {
                 continue;
             }
             return Err(e);
         }
-        if taken(other) || (!has_sidecar && taken("json")) {
+        if taken(other) || (fill_sidecar.is_none() && taken("json")) {
             undo(true);
             continue;
+        }
+        if let Some(Err(e)) = fill_sidecar.map(|fill| fill(&at("json"))) {
+            undo(true);
+            return Err(e);
         }
         return Ok((ms, format!("{ms}.{ext}")));
     }
     Err(io::Error::other("no free snapshot id"))
+}
+
+/// `rename`'s fallback where hard links fail: copies snapshot and sidecar into `to` through `claim` and removes the
+/// sources. A read error (snapshot or sidecar) copies nothing and leaves the source pair untouched. Returns whether
+/// the revision moved.
+fn copy_move(to: &std::path::Path, ts: i64, enc: bool, src: &std::path::Path, side: Option<&std::path::PathBuf>) -> bool {
+    let sb = side.map_or(Ok(None), |p| crate::store::read_regular(p).map(Some));
+    let (Ok(b), Ok(sb)) = (crate::store::read_regular(src), sb) else { return false };
+    let fill = |p: &std::path::Path| std::fs::write(p, sb.as_deref().unwrap_or_default());
+    let moved = claim(to, ts, enc, sb.is_some().then_some(&fill as Make), &|dst| put(dst, &b)).is_ok();
+    if moved {
+        std::fs::remove_file(src).ok();
+        if let Some(p) = side {
+            std::fs::remove_file(p).ok();
+        }
+    }
+    moved
 }
 
 impl Revisions {
@@ -169,7 +194,7 @@ impl Revisions {
         }
         let dir = self.dir(title);
         std::fs::create_dir_all(&dir)?;
-        claim(&dir, now_ms, encrypted, false, &|p, _| put(p, bytes))?;
+        claim(&dir, now_ms, encrypted, None, &|p| put(p, bytes))?;
         Ok(true)
     }
 
@@ -179,7 +204,7 @@ impl Revisions {
         let dir = self.dir(title);
         std::fs::create_dir_all(&dir)?;
         let side = serde_json::to_vec(&Sidecar { summary: summary.into(), agent: true })?;
-        Ok(claim(&dir, now_ms, encrypted, true, &|p, is_side| put(p, if is_side { &side } else { bytes }))?.1)
+        Ok(claim(&dir, now_ms, encrypted, Some(&|p| std::fs::write(p, &side)), &|p| put(p, bytes))?.1)
     }
 
     pub fn read(&self, title: &str, id: &str) -> io::Result<(Vec<u8>, bool)> {
@@ -211,22 +236,21 @@ impl Revisions {
         // each snapshot moves with its sidecar, to a free id when the target already uses its own; oldest first, so
         // bumped ids keep the moved history in order
         for info in self.list(old_title).into_iter().rev() {
-            // hard-link into the target (it never overwrites, and the file is whole from its first moment), then
-            // drop the source. Crash after the sidecar link: an orphan sidecar in the target, the revision still in
-            // the source. After the snapshot link: the revision in both folders. After the source snapshot is
-            // removed: only an orphan source sidecar, which the sweep below drops. Never an empty or partial file.
+            // Steps, each with what a crash leaves: 1 an empty `<ms>.json` in the target (source intact; the target
+            // shows no agent mark); 2 hard-link the snapshot, which never overwrites and is whole at once (the
+            // revision is in both folders); 3 the yield check; 4 move the source sidecar over our own empty one
+            // (the target revision is labelled; the source copy loses its label); 5 remove the source snapshot.
+            // Never an empty or partial snapshot in the target, and the revision is always in at least one folder.
             let src = from.join(&info.id);
             let side = from.join(format!("{}.json", info.ts));
             let has_side = side.symlink_metadata().is_ok_and(|m| m.is_file());
             let enc = info.id.ends_with(".age");
-            let linked = claim(&to, info.ts, enc, has_side, &|dst, is_side| std::fs::hard_link(if is_side { &side } else { &src }, dst));
-            // shortcut: a filesystem without hard links gets a copy (a crash mid-copy leaves a partial file in the
-            // target next to the intact source); upgrade only if such a filesystem matters
-            let moved = linked.is_ok() || {
-                let body = crate::store::read_regular(&src);
-                let side_body = if has_side { crate::store::read_regular(&side).ok() } else { None };
-                body.is_ok_and(|b| claim(&to, info.ts, enc, side_body.is_some(), &|dst, is_side| put(dst, if is_side { side_body.as_deref().unwrap_or_default() } else { &b })).is_ok())
-            };
+            let mv_side = |dst: &std::path::Path| std::fs::rename(&side, dst);
+            let linked = claim(&to, info.ts, enc, has_side.then_some(&mv_side as Make), &|dst| std::fs::hard_link(&src, dst));
+            // shortcut: where hard links fail (FAT/exFAT, some network shares) a copy is made instead, and a crash
+            // mid-copy leaves a partial file in the target, listed as a revision, next to the intact source; upgrade
+            // if such a filesystem matters. A sidecar that cannot be read skips the revision, source untouched.
+            let moved = linked.is_ok() || copy_move(&to, info.ts, enc, &src, has_side.then_some(&side));
             if moved {
                 std::fs::remove_file(&src).ok();
                 if has_side {
@@ -318,6 +342,13 @@ impl Revisions {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `Revisions` whose folder is removed when the returned `TempDir` drops (`rev()` keeps its folder).
+    fn tmp_rev() -> (tempfile::TempDir, Revisions) {
+        let d = tempfile::tempdir().unwrap();
+        let r = Revisions::new(d.path().to_path_buf());
+        (d, r)
+    }
 
     fn rev() -> Revisions {
         Revisions::new(tempfile::tempdir().unwrap().keep())
@@ -470,9 +501,10 @@ mod tests {
     /// id is skipped. Both the agent path and the plain save path.
     #[cfg(unix)]
     #[test] fn a_snapshot_never_writes_through_or_replaces_a_link_at_its_name() {
-        let r = rev();
+        let (_d, r) = tmp_rev();
         std::fs::create_dir_all(r.dir("n")).unwrap();
-        let outside = tempfile::tempdir().unwrap().keep();
+        let outside_dir = tempfile::tempdir().unwrap();
+        let outside = outside_dir.path().to_path_buf();
         for n in ["5.md", "5.json", "7.md"] {
             std::os::unix::fs::symlink(outside.join(n), r.dir("n").join(n)).unwrap();
         }
@@ -490,7 +522,8 @@ mod tests {
     #[test] fn concurrent_writers_lose_nothing_and_pair_sidecars() {
         const WRITERS: usize = 4;
         const EACH: usize = 40;
-        let r = std::sync::Arc::new(rev());
+        let (_d, r) = tmp_rev();
+            let r = std::sync::Arc::new(r);
         let hs: Vec<_> = (0..WRITERS)
             .map(|w| {
                 let r = r.clone();
@@ -534,7 +567,8 @@ mod tests {
     #[test] fn rename_racing_a_snapshot_loses_nothing_and_pairs_sidecars() {
         const N: usize = 30;
         for _ in 0..40 {
-            let r = std::sync::Arc::new(rev());
+            let (_d, r) = tmp_rev();
+            let r = std::sync::Arc::new(r);
             for i in 0..N {
                 r.snapshot_agent("old", format!("old-{i}").as_bytes(), i % 2 == 0, 1000 + i as i64, &format!("old-{i}")).unwrap();
             }
@@ -567,13 +601,83 @@ mod tests {
     }
     /// A moved revision is whole at once: no empty file, sidecar paired, source gone.
     #[test] fn rename_moves_whole_files_only() {
-        let r = rev();
+        let (_d, r) = tmp_rev();
         r.snapshot_agent("old", b"body", true, 10, "why").unwrap();
         r.rename("old", "new");
         let d = r.dir("new");
         assert_eq!(std::fs::read(d.join("10.md.age")).unwrap(), b"body");
         assert!(std::fs::read_to_string(d.join("10.json")).unwrap().contains("why"));
         assert!(!r.dir("old").exists());
+    }
+    /// `claim` order, pinned through its closures: the empty sidecar exists before the snapshot is made, its content
+    /// is written only after the snapshot and the yield check, and a yield (here: the other spelling appears) never
+    /// fills the sidecar of an id it gives up.
+    #[test] fn claim_orders_sidecar_snapshot_check_fill() {
+        let (_d, r) = tmp_rev();
+        let dir = r.dir("n");
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = std::cell::RefCell::new(Vec::<String>::new());
+        let make = |p: &std::path::Path| {
+            let n = p.file_name().unwrap().to_string_lossy().into_owned();
+            let json = p.with_file_name(format!("{}.json", n.split('.').next().unwrap()));
+            assert!(json.exists() && std::fs::metadata(&json).unwrap().len() == 0, "empty sidecar claimed before {n}");
+            log.borrow_mut().push(format!("make {n}"));
+            put(p, b"snap")?;
+            if n == "5.md" {
+                std::fs::write(dir.join("5.md.age"), b"racer").unwrap(); // the other spelling lands: yield
+            }
+            Ok(())
+        };
+        let fill = |p: &std::path::Path| {
+            let n = p.file_name().unwrap().to_string_lossy().into_owned();
+            assert!(p.with_extension("md").exists(), "snapshot exists before its sidecar is filled");
+            log.borrow_mut().push(format!("fill {n}"));
+            std::fs::write(p, b"label")
+        };
+        assert_eq!(claim(&dir, 5, false, Some(&fill), &make).unwrap(), (6, "6.md".to_string()));
+        assert_eq!(*log.borrow(), ["make 5.md", "make 6.md", "fill 6.json"]);
+        assert!(!dir.join("5.json").exists() && !dir.join("5.md").exists(), "the yielded id is released");
+        assert_eq!(std::fs::read(dir.join("5.md.age")).unwrap(), b"racer", "the racer's file is untouched");
+    }
+    /// A failed snapshot step leaves no snapshot, no empty file and no sidecar of ours in the target.
+    #[test] fn claim_failing_at_the_snapshot_step_leaves_nothing() {
+        let (_d, r) = tmp_rev();
+        let dir = r.dir("n");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(claim(&dir, 5, false, Some(&|_| Ok(())), &|_| Err(io::Error::other("boom"))).is_err());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+    }
+    /// `rename` links the snapshot (no copy, never an empty file in the target): the target file is the source's inode.
+    /// This pins the mechanism: `rename` has no seam to observe the target between its steps.
+    #[cfg(unix)]
+    #[test] fn rename_links_instead_of_copying() {
+        use std::os::unix::fs::MetadataExt;
+        let (_d, r) = tmp_rev();
+        r.snapshot_bytes("old", b"body", false, 10, false).unwrap();
+        let keep = r.dir("old").join("10.md");
+        let held = r.dir("old").with_file_name("held");
+        std::fs::hard_link(&keep, &held).unwrap();
+        r.rename("old", "new");
+        assert_eq!(std::fs::metadata(r.dir("new").join("10.md")).unwrap().ino(), std::fs::metadata(&held).unwrap().ino());
+    }
+    /// The copy fallback of `rename`: whole files, sidecar paired; a sidecar that cannot be read skips the revision.
+    #[cfg(unix)]
+    #[test] fn copy_move_copies_and_skips_on_an_unreadable_sidecar() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_d, r) = tmp_rev();
+        r.snapshot_agent("old", b"a", false, 10, "why").unwrap();
+        let (from, to) = (r.dir("old"), r.dir("new"));
+        std::fs::create_dir_all(&to).unwrap();
+        if unsafe { libc::geteuid() } != 0 {
+            std::fs::set_permissions(from.join("10.json"), std::fs::Permissions::from_mode(0o000)).unwrap();
+            assert!(!copy_move(&to, 10, false, &from.join("10.md"), Some(&from.join("10.json"))));
+            assert_eq!(std::fs::read_dir(&to).unwrap().count(), 0, "nothing copied");
+            assert!(from.join("10.md").exists() && from.join("10.json").exists(), "source pair untouched");
+            std::fs::set_permissions(from.join("10.json"), std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        assert!(copy_move(&to, 10, false, &from.join("10.md"), Some(&from.join("10.json"))));
+        assert!(!from.join("10.md").exists() && !from.join("10.json").exists());
+        assert_eq!((r.read("new", "10.md").unwrap().0, r.list("new")[0].summary.clone()), (b"a".to_vec(), Some("why".to_string())));
     }
     #[test] fn sidecar_follows_rename_prune_encrypt() {
         let r = rev();
