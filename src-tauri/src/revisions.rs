@@ -166,22 +166,26 @@ impl Revisions {
     }
 
     /// Replace every plaintext snapshot of the note by its encrypted twin; plaintext is removed only after the twin is written.
-    /// Only regular files are read, and every write replaces what is at its name (`create_tmp`): a FIFO there can't
-    /// block. An entry that can't be read (a FIFO, a folder, no permission) is skipped and kept; a write error stops
-    /// the rest of the folder (snapshots already encrypted stay so, the others stay plaintext).
+    /// An entry that is not a regular file (a FIFO, a folder, a link; from its directory entry, never opened) is
+    /// skipped and kept. A regular one: a snapshot that can't be read is an error (`lock_note` then fails before
+    /// anything else changes), and a sidecar that can't be read or parsed is scrubbed. Reads go through `read_regular`,
+    /// so a file swapped for a FIFO after that check fails instead of blocking; writes replace what is at their name
+    /// (`create_tmp`). Any error stops the rest of the folder: snapshots already encrypted stay so, the others stay
+    /// plaintext.
     pub fn encrypt_all(&self, title: &str, encrypt: impl Fn(&[u8]) -> anyhow::Result<Vec<u8>>) -> anyhow::Result<()> {
         let write = |p: &std::path::Path, b: &[u8]| crate::store::create_tmp(p).and_then(|mut f| io::Write::write_all(&mut f, b));
         let dir = self.dir(title);
         let Ok(rd) = std::fs::read_dir(&dir) else { return Ok(()) };
         for e in rd.flatten() {
+            if e.file_type().is_ok_and(|t| !t.is_file()) {
+                continue;
+            }
             let p = e.path();
             if p.extension().is_some_and(|x| x == "md") {
-                let Ok(plain) = crate::store::read_regular(&p) else { continue };
-                write(&p.with_extension("md.age"), &encrypt(&plain)?)?;
+                write(&p.with_extension("md.age"), &encrypt(&crate::store::read_regular(&p)?)?)?;
                 std::fs::remove_file(&p)?;
             } else if p.extension().is_some_and(|x| x == "json")
-                && let Ok(b) = crate::store::read_regular(&p)
-                && serde_json::from_slice::<Sidecar>(&b).ok().is_none_or(|s| !s.summary.is_empty())
+                && crate::store::read_regular(&p).ok().and_then(|b| serde_json::from_slice::<Sidecar>(&b).ok()).is_none_or(|s| !s.summary.is_empty())
             {
                 // an agent summary is plaintext about the note: drop it, keep the agent mark
                 write(&p, &serde_json::to_vec(&Sidecar { summary: String::new(), agent: true })?)?;
@@ -350,6 +354,23 @@ mod tests {
         r.rename("old", "new");
         std::fs::set_permissions(r.dir("new"), std::fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(r.list("old").first().and_then(|x| x.summary.clone()).as_deref(), Some("why"));
+    }
+    /// #170 Copilot: a regular sidecar that can't be read is scrubbed, as on `main` (its summary may be plaintext
+    /// about the note); only a non-regular entry is skipped.
+    #[cfg(unix)]
+    #[test] fn encrypt_all_scrubs_an_unreadable_sidecar() {
+        use std::os::unix::fs::PermissionsExt;
+        if unsafe { libc::geteuid() } == 0 {
+            return; // root reads a mode-000 file
+        }
+        let r = rev();
+        r.snapshot_agent("n", b"a", false, 10, "secret why").unwrap();
+        let side = r.dir("n").join("10.json");
+        std::fs::set_permissions(&side, std::fs::Permissions::from_mode(0o000)).unwrap();
+        r.encrypt_all("n", |b| Ok(b.to_vec())).unwrap();
+        let b = std::fs::read(&side).expect("replaced by a readable sidecar");
+        assert!(!String::from_utf8_lossy(&b).contains("secret"), "no plaintext summary left");
+        assert_eq!(r.list("n")[0].id, "10.md.age");
     }
     #[test] fn sidecar_follows_rename_prune_encrypt() {
         let r = rev();

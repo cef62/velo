@@ -2220,6 +2220,8 @@ mod tests {
         let hist = db.parent().unwrap().join("revisions").join(fnv64(&dir.to_string_lossy())).join(crate::revisions::key_for("s"));
         let fifo = hist.join(format!("{}.md", now_ms() - 500));
         crate::store::fifo::make(&fifo);
+        let side = hist.join(format!("{}.json", now_ms() - 400)); // a sidecar name: never read, never scrubbed
+        crate::store::fifo::make(&side);
         let (d, i) = (dir.clone(), id.clone());
         let texts = crate::store::fifo::within("keyed open", move || {
             let v = open(d.clone(), &db, Some(&i)).unwrap();
@@ -2227,7 +2229,8 @@ mod tests {
             v.list_revisions(&l).unwrap().iter().map(|r| v.read_revision(&l, &r.id, Some(&i)).unwrap()).collect::<Vec<_>>()
         });
         assert_eq!(texts, ["plainsecret"], "the regular snapshot is secured");
-        assert!(fifo.symlink_metadata().is_ok(), "the FIFO is skipped, never deleted");
+        use std::os::unix::fs::FileTypeExt;
+        assert!(fifo.symlink_metadata().is_ok() && side.symlink_metadata().unwrap().file_type().is_fifo(), "the FIFOs are skipped, never deleted");
     }
     /// #158 scoped check n2: whatever sits at the encrypted twin's name (`<ms>.md.age`) is replaced, never opened: a
     /// FIFO can't block the keyed open, and a link is not written through to a file outside the history folder.
@@ -2256,6 +2259,27 @@ mod tests {
             assert_eq!(std::fs::read(&outside).unwrap(), b"untouched", "{kind}: nothing written through");
             assert!(target.symlink_metadata().unwrap().is_file(), "{kind}: replaced by a regular file");
         }
+    }
+    /// #170 Copilot: a regular snapshot that can't be read fails the lock before anything changes (as on `main`): the
+    /// note stays plain and no locked copy is written. Only a non-regular entry is skipped.
+    #[cfg(unix)]
+    #[test] fn a_lock_fails_on_an_unreadable_snapshot() {
+        use std::os::unix::fs::PermissionsExt;
+        if unsafe { libc::geteuid() } == 0 {
+            return; // root reads a mode-000 file
+        }
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let d = v.open_or_create("s", None, false).unwrap();
+        std::fs::write(&d.path, "plainsecret").unwrap();
+        v.save_note(&d.path, "later", &stat_hash(&d.path), None, false).unwrap();
+        let hist = db.parent().unwrap().join("revisions").join(fnv64(&dir.to_string_lossy())).join(crate::revisions::key_for("s"));
+        let snap = std::fs::read_dir(&hist).unwrap().flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|x| x == "md")).unwrap();
+        std::fs::set_permissions(&snap, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let r = v.lock_note(&d.path, &id);
+        std::fs::set_permissions(&snap, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(r.is_err(), "the lock fails");
+        assert!(Path::new(&d.path).exists() && !dir.join("s.md.age").exists(), "still plain, no locked copy");
     }
     /// #158: the watcher path with a key that does not open the arriving note (another vault's) neither encrypts nor
     /// deletes its plaintext history: it is held back, as at a keyless open.
