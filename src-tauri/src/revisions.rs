@@ -53,19 +53,73 @@ fn ts_of(name: &str) -> Option<i64> {
 }
 
 /// Writes `b` to a new file at `p`, replacing whatever is at that name (`create_tmp`): a FIFO would block the write, a
-/// link (`free_id` sees a dangling one as free) would send it elsewhere.
+/// link would send it elsewhere. Only for names that are not fresh snapshot ids (`claim` never replaces).
 fn write_new(p: &std::path::Path, b: &[u8]) -> io::Result<()> {
     io::Write::write_all(&mut crate::store::create_tmp(p)?, b)
 }
 
-/// First snapshot id at or after `now_ms` that no snapshot uses yet (same-ms ids bump by 1 ms).
-fn free_id(dir: &std::path::Path, now_ms: i64, encrypted: bool) -> (i64, String) {
-    let mut ms = now_ms;
-    // an orphan sidecar (its snapshot gone) counts as taken, or the new snapshot would inherit its summary
-    while dir.join(format!("{ms}.md")).exists() || dir.join(format!("{ms}.md.age")).exists() || dir.join(format!("{ms}.json")).exists() {
-        ms += 1;
+/// Attempts before `claim` gives up: far beyond any real run of taken ids, so the loop always ends.
+const MAX_CLAIMS: i64 = 100_000;
+
+/// Creates a snapshot (`body`) at the first id at or after `now_ms` that nobody holds, and returns `(ms, id)`. The
+/// claim is an exclusive create (`O_EXCL`), so two writers (threads or processes) never get one id, and nothing at a
+/// name is ever removed or written through: an id with any entry at either spelling or at `<ms>.json` (a file, a
+/// FIFO, a link, a dangling link, an orphan sidecar that a new snapshot would inherit) is skipped. With `sidecar`,
+/// `<ms>.json` is claimed first, so a snapshot and its sidecar are always one writer's. `.md` and `.md.age` of one
+/// `<ms>` share that sidecar name, so after its create a writer yields (removes only the file it just created) when
+/// the other spelling exists, or a sidecar it does not own; both sides of a same-ms race may yield, then both retry
+/// at the next id.
+fn claim(dir: &std::path::Path, now_ms: i64, encrypted: bool, sidecar: Option<&[u8]>, body: &[u8]) -> io::Result<(i64, String)> {
+    let (ext, other) = if encrypted { ("md.age", "md") } else { ("md", "md.age") };
+    let create = |p: &std::path::Path| std::fs::OpenOptions::new().write(true).create_new(true).open(p);
+    for ms in now_ms..now_ms.saturating_add(MAX_CLAIMS) {
+        let at = |e: &str| dir.join(format!("{ms}.{e}"));
+        let taken = |e: &str| at(e).symlink_metadata().is_ok();
+        if taken("md") || taken("md.age") || taken("json") {
+            continue;
+        }
+        let mut side = None;
+        if sidecar.is_some() {
+            match create(&at("json")) {
+                Ok(f) => side = Some(f),
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        // removes only what this call created
+        let undo = |snap: bool| {
+            if snap {
+                std::fs::remove_file(at(ext)).ok();
+            }
+            if sidecar.is_some() {
+                std::fs::remove_file(at("json")).ok();
+            }
+        };
+        let mut snap = match create(&at(ext)) {
+            Ok(f) => f,
+            Err(e) => {
+                undo(false);
+                if e.kind() == io::ErrorKind::AlreadyExists {
+                    continue;
+                }
+                return Err(e);
+            }
+        };
+        if taken(other) || (sidecar.is_none() && taken("json")) {
+            undo(true);
+            continue;
+        }
+        let done = io::Write::write_all(&mut snap, body).and_then(|()| match (&mut side, sidecar) {
+            (Some(f), Some(b)) => io::Write::write_all(f, b),
+            _ => Ok(()),
+        });
+        if let Err(e) = done {
+            undo(true);
+            return Err(e);
+        }
+        return Ok((ms, format!("{ms}.{ext}")));
     }
-    (ms, format!("{ms}.{}", if encrypted { "md.age" } else { "md" }))
+    Err(io::Error::other("no free snapshot id"))
 }
 
 impl Revisions {
@@ -105,14 +159,16 @@ impl Revisions {
             if throttle && now_ms - newest.ts < THROTTLE_MS {
                 return Ok(false);
             }
-            if fnv64_bytes(&crate::store::read_regular(&self.dir(title).join(&newest.id))?) == fnv64_bytes(bytes) {
-                return Ok(false);
+            // a newest that vanished (another writer yielded its id, or a prune) is not identical
+            match crate::store::read_regular(&self.dir(title).join(&newest.id)) {
+                Ok(b) if fnv64_bytes(&b) == fnv64_bytes(bytes) => return Ok(false),
+                Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+                _ => {}
             }
         }
         let dir = self.dir(title);
         std::fs::create_dir_all(&dir)?;
-        let (_, id) = free_id(&dir, now_ms, encrypted);
-        write_new(&dir.join(id), bytes)?;
+        claim(&dir, now_ms, encrypted, None, bytes)?;
         Ok(true)
     }
 
@@ -121,10 +177,7 @@ impl Revisions {
     pub fn snapshot_agent(&self, title: &str, bytes: &[u8], encrypted: bool, now_ms: i64, summary: &str) -> io::Result<String> {
         let dir = self.dir(title);
         std::fs::create_dir_all(&dir)?;
-        let (ms, id) = free_id(&dir, now_ms, encrypted);
-        write_new(&dir.join(&id), bytes)?;
-        write_new(&dir.join(format!("{ms}.json")), &serde_json::to_vec(&Sidecar { summary: summary.into(), agent: true })?)?;
-        Ok(id)
+        Ok(claim(&dir, now_ms, encrypted, Some(&serde_json::to_vec(&Sidecar { summary: summary.into(), agent: true })?), bytes)?.1)
     }
 
     pub fn read(&self, title: &str, id: &str) -> io::Result<(Vec<u8>, bool)> {
@@ -156,9 +209,20 @@ impl Revisions {
         // each snapshot moves with its sidecar, to a free id when the target already uses its own; oldest first, so
         // bumped ids keep the moved history in order
         for info in self.list(old_title).into_iter().rev() {
-            let (ms, id) = free_id(&to, info.ts, info.id.ends_with(".age"));
-            if std::fs::rename(from.join(&info.id), to.join(id)).is_ok() {
-                std::fs::rename(from.join(format!("{}.json", info.ts)), to.join(format!("{ms}.json"))).ok();
+            // claim empty files at the target ids, then rename over our own claims: a rename straight to a free-looking
+            // id could overwrite a revision another process wrote there meanwhile
+            let side = from.join(format!("{}.json", info.ts));
+            let has_side = side.exists();
+            let Ok((ms, id)) = claim(&to, info.ts, info.id.ends_with(".age"), has_side.then_some(&[][..]), &[]) else { continue };
+            if std::fs::rename(from.join(&info.id), to.join(&id)).is_ok() {
+                if has_side {
+                    std::fs::rename(&side, to.join(format!("{ms}.json"))).ok();
+                }
+            } else {
+                std::fs::remove_file(to.join(&id)).ok();
+                if has_side {
+                    std::fs::remove_file(to.join(format!("{ms}.json"))).ok();
+                }
             }
         }
         // orphan sidecars (no snapshot left beside them) go; a snapshot that failed to move keeps its own
@@ -393,19 +457,62 @@ mod tests {
         });
         assert_eq!((listed, read_fails, saved), (vec!["10.md".to_string()], true, true));
     }
-    /// #158: a snapshot and its sidecar replace a link at their names (`free_id` sees a dangling one as free), never
-    /// writing through it to a file outside the history folder.
+    /// #158: a link (dangling or not) at a snapshot or sidecar name is never written through, replaced or removed: its
+    /// id is skipped. Both the agent path and the plain save path.
     #[cfg(unix)]
-    #[test] fn a_snapshot_never_writes_through_a_link_at_its_name() {
+    #[test] fn a_snapshot_never_writes_through_or_replaces_a_link_at_its_name() {
         let r = rev();
         std::fs::create_dir_all(r.dir("n")).unwrap();
         let outside = tempfile::tempdir().unwrap().keep();
-        for n in ["5.md", "5.json"] {
+        for n in ["5.md", "5.json", "7.md"] {
             std::os::unix::fs::symlink(outside.join(n), r.dir("n").join(n)).unwrap();
         }
-        assert_eq!(r.snapshot_agent("n", b"a", false, 5, "why").unwrap(), "5.md");
-        assert!(!outside.join("5.md").exists() && !outside.join("5.json").exists(), "nothing written through");
-        assert_eq!((r.read("n", "5.md").unwrap().0, r.list("n")[0].summary.as_deref()), (b"a".to_vec(), Some("why")));
+        assert_eq!(r.snapshot_agent("n", b"a", false, 5, "why").unwrap(), "6.md");
+        assert!(r.snapshot_bytes("n", b"b", false, 7, false).unwrap());
+        assert!(!outside.join("5.md").exists() && !outside.join("5.json").exists() && !outside.join("7.md").exists(), "nothing written through");
+        for n in ["5.md", "5.json", "7.md"] {
+            assert!(r.dir("n").join(n).symlink_metadata().unwrap().file_type().is_symlink(), "{n} kept");
+        }
+        assert_eq!((r.read("n", "6.md").unwrap().0, r.list("n")[1].summary.as_deref()), (b"a".to_vec(), Some("why")));
+        assert_eq!(r.read("n", "8.md").unwrap().0, b"b");
+    }
+    /// #158 m3: writers (threads here, processes in life; no lock, `&self` only) snapshotting one note in the same
+    /// ms each get their own id: no revision lost, no sidecar on another writer's snapshot, no error.
+    #[test] fn concurrent_writers_lose_nothing_and_pair_sidecars() {
+        const WRITERS: usize = 4;
+        const EACH: usize = 40;
+        let r = std::sync::Arc::new(rev());
+        let hs: Vec<_> = (0..WRITERS)
+            .map(|w| {
+                let r = r.clone();
+                std::thread::spawn(move || {
+                    for i in 0..EACH {
+                        let tag = format!("w{w}-{i}");
+                        if (w + i).is_multiple_of(2) {
+                            r.snapshot_agent("n", tag.as_bytes(), w % 2 == 1, 1000, &tag).unwrap();
+                        } else {
+                            assert!(r.snapshot_bytes("n", tag.as_bytes(), w % 2 == 1, 1000, false).unwrap());
+                        }
+                    }
+                })
+            })
+            .collect();
+        for h in hs {
+            h.join().unwrap();
+        }
+        let l = r.list("n");
+        let mut seen: Vec<String> = l.iter().map(|x| String::from_utf8(r.read("n", &x.id).unwrap().0).unwrap()).collect();
+        for x in &l {
+            let body = String::from_utf8(r.read("n", &x.id).unwrap().0).unwrap();
+            let i: usize = body.rsplit('-').next().unwrap().parse().unwrap();
+            let w: usize = body[1..body.find('-').unwrap()].parse().unwrap();
+            assert_eq!(x.agent, (w + i).is_multiple_of(2), "{body}");
+            assert_eq!(x.summary.as_deref(), x.agent.then_some(body.as_str()), "sidecar of {}", x.id);
+        }
+        seen.sort();
+        let mut want: Vec<String> = (0..WRITERS).flat_map(|w| (0..EACH).map(move |i| format!("w{w}-{i}"))).collect();
+        want.sort();
+        assert_eq!(seen, want);
     }
     #[test] fn sidecar_follows_rename_prune_encrypt() {
         let r = rev();
