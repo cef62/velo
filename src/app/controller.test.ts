@@ -4869,18 +4869,6 @@ test("start at login: two quick toggles run one after the other, each reading wh
   expect(os).toBe(false);
 });
 
-test("an agent write that changes nothing keeps no snapshot, also for LF text on a CRLF note, and replies the hash it checked", async () => {
-  for (const [disk, insert] of [["a\nb", "a\nb"], ["a\r\nb", "a\nb"]]) {
-    const { c, api, editor } = setup({ A: disk });
-    await c.show(P("A"));
-    editor.text = editor.text.replace(/\r\n/g, "\n"); // CodeMirror holds LF
-    api.snapshotAgent.mockResolvedValueOnce("3.md");
-    await c.onAgentWrite({ id: 1, path: P("A"), kind: "replace", insert, base: "h", summary: "s" });
-    expect(api.agentWriteDone).toHaveBeenCalledWith(1, { hash: "h" });
-    expect(api.dropAgentSnapshot).toHaveBeenCalledWith(P("A"), "3.md");
-  }
-});
-
 test("an agent replace with the disk text while the editor holds unsaved typing conflicts and keeps the typing", async () => {
   const { c, api, be, editor, type } = setupRealSaver(() => {});
   await c.show(P("A"));

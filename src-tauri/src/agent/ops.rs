@@ -493,6 +493,17 @@ mod tests {
         o.unsnapshot(&[(d.path.clone(), snap)], &r);
         assert_eq!(agent_revs(&o, &d.path), ["c"]);
     }
+    /// The no-op skip needs the hash the agent read too: the same bytes under a stale hash is a conflict, not a success.
+    #[test] fn same_bytes_with_a_stale_hash_conflicts_and_leaves_no_snapshot() {
+        let (mut o, _) = ops();
+        let d = o.create("A", "hello\n", "c").unwrap();
+        let disk = o.read(&d.path).unwrap();
+        let e = o.write(&d.path, &disk.text, "stale", "noop").unwrap_err().to_string();
+        assert!(e.starts_with("conflict"), "{e}");
+        assert_eq!(agent_revs(&o, &d.path), ["c"]);
+        assert_eq!(o.write(&d.path, &disk.text, &disk.hash, "noop").unwrap(), disk.hash);
+        assert_eq!(agent_revs(&o, &d.path), ["c"]);
+    }
     #[test] fn created_note_has_no_stub_revision() {
         let (mut o, _) = ops(); // front matter on (default)
         let d = o.create("Fresh", "hello", "made it").unwrap();

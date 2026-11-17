@@ -2340,8 +2340,6 @@ export class Controller {
     const insert = req.insert ?? "";
     const ok = req.kind === "append" ? this.editor.appendLine(insert) : this.editor.applyChange(changedSpan(this.editor.getText(), insert));
     if (!ok) return unapplied("refused");
-    // it changed nothing (the editor's text already was `insert`, line endings aside): no revision to keep
-    if (!this.editor.isDirty()) await unapplied("ok");
     // applied: from here no failure may invite a retry, which would apply it twice
     try {
       const { copy, hash } = await this.editor.flushOutcome();
