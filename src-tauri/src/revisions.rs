@@ -167,7 +167,8 @@ impl Revisions {
 
     /// Replace every plaintext snapshot of the note by its encrypted twin; plaintext is removed only after the twin is written.
     /// Only regular files are read, and every write replaces what is at its name (`create_tmp`): a FIFO there can't
-    /// block. An entry that can't be read (a FIFO, a folder, no permission) is skipped and kept.
+    /// block. An entry that can't be read (a FIFO, a folder, no permission) is skipped and kept; a write error stops
+    /// the rest of the folder (snapshots already encrypted stay so, the others stay plaintext).
     pub fn encrypt_all(&self, title: &str, encrypt: impl Fn(&[u8]) -> anyhow::Result<Vec<u8>>) -> anyhow::Result<()> {
         let write = |p: &std::path::Path, b: &[u8]| crate::store::create_tmp(p).and_then(|mut f| io::Write::write_all(&mut f, b));
         let dir = self.dir(title);

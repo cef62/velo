@@ -2229,6 +2229,34 @@ mod tests {
         assert_eq!(texts, ["plainsecret"], "the regular snapshot is secured");
         assert!(fifo.symlink_metadata().is_ok(), "the FIFO is skipped, never deleted");
     }
+    /// #158 scoped check n2: whatever sits at the encrypted twin's name (`<ms>.md.age`) is replaced, never opened: a
+    /// FIFO can't block the keyed open, and a link is not written through to a file outside the history folder.
+    #[cfg(unix)]
+    #[test] fn securing_replaces_a_fifo_or_link_at_the_encrypted_name() {
+        for kind in ["fifo", "link"] {
+            let (dir, db, id) = locked_while_closed();
+            drop(open(dir.clone(), &db, None).unwrap()); // holds the history back
+            let hist = db.parent().unwrap().join("revisions").join(fnv64(&dir.to_string_lossy())).join(crate::revisions::key_for("s"));
+            let snap = std::fs::read_dir(&hist).unwrap().flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|x| x == "md")).unwrap();
+            let target = snap.with_extension("md.age");
+            let outside = tempfile::tempdir().unwrap().keep().join("outside.txt");
+            std::fs::write(&outside, "untouched").unwrap();
+            match kind {
+                "fifo" => crate::store::fifo::make(&target),
+                _ => std::os::unix::fs::symlink(&outside, &target).unwrap(),
+            }
+            let (d, i) = (dir.clone(), id.clone());
+            let texts = crate::store::fifo::within(kind, move || {
+                let v = open(d.clone(), &db, Some(&i)).unwrap();
+                let l = s(&d.join("s.md.age"));
+                v.list_revisions(&l).unwrap().iter().map(|r| v.read_revision(&l, &r.id, Some(&i)).unwrap()).collect::<Vec<_>>()
+            });
+            assert_eq!(texts, ["plainsecret"], "{kind}: the snapshot is secured");
+            assert!(!snap.exists(), "{kind}: no plaintext left");
+            assert_eq!(std::fs::read(&outside).unwrap(), b"untouched", "{kind}: nothing written through");
+            assert!(target.symlink_metadata().unwrap().is_file(), "{kind}: replaced by a regular file");
+        }
+    }
     /// #158: the watcher path with a key that does not open the arriving note (another vault's) neither encrypts nor
     /// deletes its plaintext history: it is held back, as at a keyless open.
     #[test] fn a_locked_note_arriving_with_a_wrong_key_keeps_its_history_held_back() {
