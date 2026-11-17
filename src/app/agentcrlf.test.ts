@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { EditorState } from "@codemirror/state";
 import type { NoteDoc } from "../api";
+import { appendSpec } from "../fmhide";
 import { Controller, changedSpan } from "./controller";
 import { FakeEditor, FakePreview, fakeApi, fakeUi } from "./fakes";
 import { createStore, initialState } from "./store";
@@ -20,9 +21,7 @@ class CmEditor extends FakeEditor {
     return true;
   }
   appendLine(text: string) {
-    const doc = this.state.doc;
-    const sep = doc.length === 0 || doc.sliceString(doc.length - 1) === "\n" ? "" : "\n"; // as src/editor.ts
-    this.state = this.state.update({ changes: { from: doc.length, insert: sep + text } }).state;
+    this.state = this.state.update(appendSpec(this.state.doc, text)).state; // the production spec: the fake cannot drift
     this.dirty = true;
     return true;
   }
@@ -61,6 +60,20 @@ test("lone CR and mixed endings in agent text read as one break each", async () 
 
 test("an append of CRLF text to an open CRLF note adds no blank line", async () => {
   expect((await write("a\r\nb", { kind: "append", insert: "- [ ] x\r\n- [ ] y" })).after).toBe("a\nb\n- [ ] x\n- [ ] y");
+});
+
+test.each([
+  ["CRLF", "x\r\ny"],
+  ["lone CR", "x\ry"],
+  ["mixed", "x\r\ny\rz\nw"],
+])("appendSpec with %s text: no throw, no blank line, caret at the end", (_n, text) => {
+  for (const doc of ["a", "a\n", "a\r\nb\r\n", ""]) {
+    const s = EditorState.create({ doc });
+    const out = s.update(appendSpec(s.doc, text)).state;
+    const sep = s.doc.length === 0 || s.doc.toString().endsWith("\n") ? "" : "\n";
+    expect(out.doc.toString()).toBe(s.doc.toString() + sep + text.replace(/\r\n?/g, "\n"));
+    expect(out.selection.main.head).toBe(out.doc.length);
+  }
 });
 
 test("changedSpan reads CRLF and lone CR in the new text as LF", () => {
