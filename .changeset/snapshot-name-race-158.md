@@ -2,4 +2,4 @@
 "velo": patch
 ---
 
-No note revision is lost or refused any more when the app and an agent save the same note at the same moment.
+Saving a note at the same moment as an agent, or renaming it, no longer loses or refuses a revision.
