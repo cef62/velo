@@ -1,5 +1,14 @@
 # velo
 
+## 0.20.1
+
+### Patch Changes
+
+- e217b66: Fixed agent edits to a note not open in the app that change nothing leaving an undo revision, an agent `add_task` on a closed note that hit a conflict not naming its conflict copy, and `rename_note` reporting "no answer" or "busy" for a rename that had succeeded.
+- b3d8ee4: Fixed an agent write or append with Windows (CRLF) line endings to a note open in the app inserting blank lines, and an agent append with such text failing with "can't be edited right now".
+- 6542950: Velo encrypted a locked note's leftover unencrypted history the next time the notes folder opened with a key that opens the note, and no longer encrypted a note's history with a key that cannot open it, except for notes whose names differ only in case or accents, which share one history.
+- f40ef9d: Refreshed search results on screen when a note locked or unlocked elsewhere hid or restored the text of its plain copy, instead of showing stale results until the next change.
+
 ## 0.20.0
 
 ### Minor Changes
