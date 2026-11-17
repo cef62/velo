@@ -4868,3 +4868,13 @@ test("start at login: two quick toggles run one after the other, each reading wh
   expect(api.setAutostart.mock.calls.slice(-2)).toEqual([[true], [false]]);
   expect(os).toBe(false);
 });
+
+test("an agent replace with the disk text while the editor holds unsaved typing conflicts and keeps the typing", async () => {
+  const { c, api, be, editor, type } = setupRealSaver(() => {});
+  await c.show(P("A"));
+  type("typed"); // unsaved; the disk text is still "a"
+  await c.onAgentWrite({ id: 1, path: P("A"), kind: "replace", insert: "a", base: "h", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(1, "conflict");
+  expect(editor.text).toBe("typed");
+  expect(be.disk).toBe("typed"); // flushed first, as before: nothing lost, and the stale hash is refused
+});

@@ -537,3 +537,20 @@ test("adopt moves the base hash of a clean editor only: the watcher reload of th
   await c.flush();
   expect(d.saveNote).toHaveBeenLastCalledWith("a.md", "typed", "h2");
 });
+
+test("adopt is ignored while suspended: the file is about to move, its base hash stays (#134)", async () => {
+  const { c, d } = mk();
+  c.suspend();
+  c.adopt("h2");
+  c.resume();
+  type(c, "typed");
+  await c.flush();
+  expect(d.saveNote).toHaveBeenLastCalledWith("a.md", "typed", "h0");
+});
+
+test("adopt is ignored with no note open: a hash for a detached note is not kept (#134)", async () => {
+  const { c } = mk();
+  c.discard();
+  c.adopt("h2");
+  expect((await c.flushOutcome()).hash).toBe(""); // nothing open: the empty base, not the adopted hash
+});

@@ -318,11 +318,9 @@ fn dispatch(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
         "rename_note" => {
             let rewrite = a.get("rewrite_links").and_then(Value::as_bool).ok_or("missing rewrite_links")?;
             // no hash in the reply: it would cover the whole note, typing the editor saves at unfreeze included (#157).
-            // Unreadable right after the move: still "no answer", as before.
-            let (new, read) = ops.rename(&path_of(ops, &a)?, title_arg(&a, "new_title")?, rewrite, summary).map_err(err)?;
-            read.ok_or(super::client::NO_ANSWER)?;
-            let doc = ops.read(&new).map_err(err)?;
-            Ok(json!({"title": doc.title}))
+            // No read after the move either: the title is the new path's, and a read could fail for a rename that happened.
+            let new = ops.rename(&path_of(ops, &a)?, title_arg(&a, "new_title")?, rewrite, summary).map_err(err)?;
+            Ok(json!({"title": super::ops::title_of(&new)}))
         }
         "move_to_trash" => {
             let path = path_of(ops, &a)?;
@@ -916,6 +914,34 @@ mod tests {
             assert!(e.contains("invalid date"), "{d}: {e}");
         }
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+    }
+
+    /// #157: a write that changes nothing leaves no agent revision, and replace_note replies the unchanged hash.
+    #[test] fn no_op_writes_leave_no_agent_revision() {
+        let (mut ops, dir) = task_ops(&[("a.md", "one two\n")]);
+        let p = ops.find("a").unwrap().unwrap();
+        let h = ops.read(&p).unwrap().hash;
+        call(&mut ops, "edit_note", json!({"title": "a", "old_text": "two", "new_text": "two", "summary": "s"})).unwrap();
+        let r = call(&mut ops, "replace_note", json!({"title": "a", "text": "one two\n", "expected_hash": h, "summary": "s"})).unwrap();
+        assert_eq!(r["hash"], json!(h));
+        assert_eq!(read(&dir, "a.md"), "one two\n");
+        assert!(agent_revs(&ops, &p).is_empty());
+        call(&mut ops, "edit_note", json!({"title": "a", "old_text": "two", "new_text": "2", "summary": "real"})).unwrap();
+        assert_eq!(agent_revs(&ops, &p), ["real"]);
+    }
+
+    /// Copilot on #166: `doc.text` is the lossy decode, so equal text is not equal bytes: the write must happen.
+    #[test] fn replace_with_the_lossy_text_of_an_invalid_utf8_note_writes() {
+        let (mut ops, dir) = task_ops(&[]);
+        std::fs::write(dir.join("a.md"), b"one \xFF two\n").unwrap();
+        ops.rescan().unwrap();
+        let p = ops.find("a").unwrap().unwrap();
+        let d = ops.read(&p).unwrap();
+        assert_eq!(d.text, "one \u{FFFD} two\n");
+        let r = call(&mut ops, "replace_note", json!({"title": "a", "text": d.text, "expected_hash": d.hash, "summary": "fix bytes"})).unwrap();
+        assert_ne!(r["hash"], json!(d.hash));
+        assert!(read(&dir, "a.md").ends_with("one \u{FFFD} two\n"), "the invalid byte is replaced for good");
+        assert_eq!(agent_revs(&ops, &p), ["fix bytes"]);
     }
 
     #[test] fn set_task_done_idempotent() {
