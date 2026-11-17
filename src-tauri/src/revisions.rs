@@ -52,6 +52,12 @@ fn ts_of(name: &str) -> Option<i64> {
     name.split('.').next()?.parse().ok()
 }
 
+/// Writes `b` to a new file at `p`, replacing whatever is at that name (`create_tmp`): a FIFO would block the write, a
+/// link (`free_id` sees a dangling one as free) would send it elsewhere.
+fn write_new(p: &std::path::Path, b: &[u8]) -> io::Result<()> {
+    io::Write::write_all(&mut crate::store::create_tmp(p)?, b)
+}
+
 /// First snapshot id at or after `now_ms` that no snapshot uses yet (same-ms ids bump by 1 ms).
 fn free_id(dir: &std::path::Path, now_ms: i64, encrypted: bool) -> (i64, String) {
     let mut ms = now_ms;
@@ -81,8 +87,11 @@ impl Revisions {
                     return None; // sidecars are never snapshots
                 }
                 let ts = ts_of(&id)?;
-                let side = std::fs::read(self.dir(title).join(format!("{ts}.json"))).ok().and_then(|b| serde_json::from_slice::<Sidecar>(&b).ok());
-                Some(RevisionInfo { ts, id, size: e.metadata().ok()?.len(), agent: side.is_some(), summary: side.map(|s| s.summary) })
+                // a regular snapshot only (from its directory entry, never opened): a FIFO would block the save that
+                // reads the newest one; a non-regular sidecar counts as none
+                let size = e.metadata().ok().filter(|m| m.is_file())?.len();
+                let side = crate::store::read_regular(&self.dir(title).join(format!("{ts}.json"))).ok().and_then(|b| serde_json::from_slice::<Sidecar>(&b).ok());
+                Some(RevisionInfo { ts, id, size, agent: side.is_some(), summary: side.map(|s| s.summary) })
             })
             .collect();
         v.sort_by(|a, b| b.ts.cmp(&a.ts));
@@ -96,14 +105,14 @@ impl Revisions {
             if throttle && now_ms - newest.ts < THROTTLE_MS {
                 return Ok(false);
             }
-            if fnv64_bytes(&std::fs::read(self.dir(title).join(&newest.id))?) == fnv64_bytes(bytes) {
+            if fnv64_bytes(&crate::store::read_regular(&self.dir(title).join(&newest.id))?) == fnv64_bytes(bytes) {
                 return Ok(false);
             }
         }
         let dir = self.dir(title);
         std::fs::create_dir_all(&dir)?;
         let (_, id) = free_id(&dir, now_ms, encrypted);
-        std::fs::write(dir.join(id), bytes)?;
+        write_new(&dir.join(id), bytes)?;
         Ok(true)
     }
 
@@ -113,8 +122,8 @@ impl Revisions {
         let dir = self.dir(title);
         std::fs::create_dir_all(&dir)?;
         let (ms, id) = free_id(&dir, now_ms, encrypted);
-        std::fs::write(dir.join(&id), bytes)?;
-        std::fs::write(dir.join(format!("{ms}.json")), serde_json::to_vec(&Sidecar { summary: summary.into(), agent: true })?)?;
+        write_new(&dir.join(&id), bytes)?;
+        write_new(&dir.join(format!("{ms}.json")), &serde_json::to_vec(&Sidecar { summary: summary.into(), agent: true })?)?;
         Ok(id)
     }
 
@@ -122,7 +131,7 @@ impl Revisions {
         if id.contains(['/', '\\']) || id.contains("..") {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
-        Ok((std::fs::read(self.dir(title).join(id))?, id.ends_with(".age")))
+        Ok((crate::store::read_regular(&self.dir(title).join(id))?, id.ends_with(".age")))
     }
 
     /// Deletes snapshot `id` and its sidecar.
@@ -173,7 +182,6 @@ impl Revisions {
     /// (`create_tmp`). Any error stops the rest of the folder: snapshots already encrypted stay so, the others stay
     /// plaintext.
     pub fn encrypt_all(&self, title: &str, encrypt: impl Fn(&[u8]) -> anyhow::Result<Vec<u8>>) -> anyhow::Result<()> {
-        let write = |p: &std::path::Path, b: &[u8]| crate::store::create_tmp(p).and_then(|mut f| io::Write::write_all(&mut f, b));
         let dir = self.dir(title);
         let Ok(rd) = std::fs::read_dir(&dir) else { return Ok(()) };
         for e in rd.flatten() {
@@ -182,13 +190,13 @@ impl Revisions {
             }
             let p = e.path();
             if p.extension().is_some_and(|x| x == "md") {
-                write(&p.with_extension("md.age"), &encrypt(&crate::store::read_regular(&p)?)?)?;
+                write_new(&p.with_extension("md.age"), &encrypt(&crate::store::read_regular(&p)?)?)?;
                 std::fs::remove_file(&p)?;
             } else if p.extension().is_some_and(|x| x == "json")
                 && crate::store::read_regular(&p).ok().and_then(|b| serde_json::from_slice::<Sidecar>(&b).ok()).is_none_or(|s| !s.summary.is_empty())
             {
                 // an agent summary is plaintext about the note: drop it, keep the agent mark
-                write(&p, &serde_json::to_vec(&Sidecar { summary: String::new(), agent: true })?)?;
+                write_new(&p, &serde_json::to_vec(&Sidecar { summary: String::new(), agent: true })?)?;
             }
         }
         Ok(())
@@ -371,6 +379,33 @@ mod tests {
         let b = std::fs::read(&side).expect("replaced by a readable sidecar");
         assert!(!String::from_utf8_lossy(&b).contains("secret"), "no plaintext summary left");
         assert_eq!(r.list("n")[0].id, "10.md.age");
+    }
+    /// #158: a FIFO named like a snapshot is never listed, so a save never reads it as the newest; reading it by id
+    /// fails instead of blocking.
+    #[cfg(unix)]
+    #[test] fn a_fifo_snapshot_is_never_listed_or_read() {
+        let r = rev();
+        r.snapshot_bytes("n", b"a", false, 10, false).unwrap();
+        crate::store::fifo::make(&r.dir("n").join("20.md"));
+        let (listed, read_fails, saved) = crate::store::fifo::within("FIFO snapshot", move || {
+            let listed: Vec<String> = r.list("n").into_iter().map(|x| x.id).collect();
+            (listed, r.read("n", "20.md").is_err(), r.snapshot_bytes("n", b"b", false, 30, false).unwrap())
+        });
+        assert_eq!((listed, read_fails, saved), (vec!["10.md".to_string()], true, true));
+    }
+    /// #158: a snapshot and its sidecar replace a link at their names (`free_id` sees a dangling one as free), never
+    /// writing through it to a file outside the history folder.
+    #[cfg(unix)]
+    #[test] fn a_snapshot_never_writes_through_a_link_at_its_name() {
+        let r = rev();
+        std::fs::create_dir_all(r.dir("n")).unwrap();
+        let outside = tempfile::tempdir().unwrap().keep();
+        for n in ["5.md", "5.json"] {
+            std::os::unix::fs::symlink(outside.join(n), r.dir("n").join(n)).unwrap();
+        }
+        assert_eq!(r.snapshot_agent("n", b"a", false, 5, "why").unwrap(), "5.md");
+        assert!(!outside.join("5.md").exists() && !outside.join("5.json").exists(), "nothing written through");
+        assert_eq!((r.read("n", "5.md").unwrap().0, r.list("n")[0].summary.as_deref()), (b"a".to_vec(), Some("why")));
     }
     #[test] fn sidecar_follows_rename_prune_encrypt() {
         let r = rev();

@@ -2301,6 +2301,27 @@ mod tests {
         let v = open(dir.clone(), &db, Some(&id)).unwrap();
         assert_eq!(v.read_revision(&s(&age), &v.list_revisions(&s(&age)).unwrap()[0].id, Some(&id)).unwrap(), "plainsecret", "the right key secures it later");
     }
+    /// #158 (scoped check of #170): a FIFO sidecar `<ts>.json` beside a real snapshot never blocks listing, reading or
+    /// a save that snapshots; the revision is listed without a summary.
+    #[cfg(unix)]
+    #[test] fn a_fifo_sidecar_never_blocks_the_history() {
+        let (dir, db) = setup();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        let d = v.open_or_create("s", None, false).unwrap();
+        std::fs::write(&d.path, "first").unwrap();
+        v.save_note(&d.path, "second", &stat_hash(&d.path), None, false).unwrap();
+        let ts = v.list_revisions(&d.path).unwrap()[0].ts;
+        let hist = db.parent().unwrap().join("revisions").join(fnv64(&dir.to_string_lossy())).join(crate::revisions::key_for("s"));
+        crate::store::fifo::make(&hist.join(format!("{ts}.json")));
+        let p = d.path.clone();
+        let (first, text, after) = crate::store::fifo::within("FIFO sidecar", move || {
+            let first = v.list_revisions(&p).unwrap().remove(0);
+            let text = v.read_revision(&p, &first.id, None).unwrap();
+            v.snapshot_text(&p, "third", None).unwrap();
+            (first, text, v.list_revisions(&p).unwrap().len())
+        });
+        assert_eq!((first.ts, first.summary, first.agent, text.as_str(), after), (ts, None, false, "first", 2));
+    }
     /// #163: a keyed warm open encrypts (never deletes) the fold-equal plain note's history, which stays readable with
     /// the key, as on the watcher path. A keyless one touches nothing.
     #[test] fn a_warm_open_never_deletes_a_fold_equal_note_s_history() {
