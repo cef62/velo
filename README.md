@@ -129,7 +129,7 @@ velo can act as an MCP server, so Claude Code can search, read, create and edit 
 - `create_note`: a new note.
 - `append_to_note`: add text at the end (creates the note if missing).
 - `edit_note`: replace text that occurs exactly once.
-- `replace_note`: replace the whole note, guarded by the hash from `read_note`.
+- `replace_note`: replace the whole note, guarded by the hash from `read_note` (partial writes reply no hash: read first).
 - `add_tags`, `remove_tags`: up to 50 tags on up to 200 notes per call.
 - `list_tasks`: the Tasks view.
 - `add_task`: add a `- [ ]` line to a note, or to the capture target.
@@ -146,7 +146,7 @@ velo can act as an MCP server, so Claude Code can search, read, create and edit 
 - Edits are anchored (`old_text` must match once) or hash-guarded (`replace_note` fails if the note changed since you read it).
 - A note open in velo is edited through the editor, so nothing is overwritten behind it. If velo does not take the change within 5 seconds the call fails with "velo is busy, retry" and nothing changes. Once velo has taken it, the call waits up to 60 seconds; if no answer comes back, it fails with "velo did not answer; the change may have been applied — read the note before retrying".
 - If a note open in velo changes on disk while the editor saves an agent's change, the change goes to a `(conflict ...)` copy (velo shows its conflict banner) and the call fails with an error that starts with "conflict:" and names the copy. The note keeps the other version: read it again and retry.
-- If you type in the note while velo saves an agent's change, the agent still gets the hash its own save left (or the conflict error), and your typing is saved after it. A later `replace_note` with that hash then fails as "changed since you read it", so it can't overwrite your typing.
+- Tools that change part of a note (`append_to_note`, `edit_note`, `add_tags`, `remove_tags`, `add_task`, `set_task_done`, `rename_note`, `merge_notes`) reply with no hash, because it would cover text the agent never read (your typing, or an outside change). Only `read_note`, `create_note` and `replace_note` reply a hash, and `replace_note` needs the one from `read_note` (or from a `create_note` or `replace_note` reply); after a partial write the agent must `read_note` first. If you type while velo saves an agent's change, your typing is saved after it, and an older hash then fails as "changed since you read it".
 - Off by default. The running app listens on 127.0.0.1 only, and every request needs a random token.
 
 **Seeing and undoing changes.** Every write needs a summary (for `daily_note` it is optional). Before it, velo saves a revision of the note with that summary, marked as an agent change in the info panel (⌘I). Select it and press Restore.

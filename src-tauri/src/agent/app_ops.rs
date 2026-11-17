@@ -580,9 +580,9 @@ mod tests {
         assert!(editors.pending.lock().unwrap().is_empty());
     }
 
-    /// The owner's typing is saved right after the editor saved the agent's change, before the tool's later read: the
-    /// tool replies with the hash of the agent's own save, never one covering typing the agent never read (#134).
-    #[test] fn task_tools_reply_with_the_editor_save_hash_not_a_later_read() {
+    /// The owner's typing is saved right after the editor saved the agent's change: the reply carries no hash, which
+    /// would cover typing the agent never read (#134, #157).
+    #[test] fn task_tools_reply_no_hash_in_forwarded_mode() {
         let (st, dir) = state();
         let p = dir.join("P.md").to_string_lossy().into_owned();
         let route = |req: Value| {
@@ -593,17 +593,17 @@ mod tests {
             Ok(json!("not-open"))
         };
         let mut ops = AppOps::new(&st, &route);
-        let typed = crate::store::hash(b"typed by the owner\n- [x] open task\n");
         let r = crate::agent::tools::call(&mut ops, "add_task", json!({"title": "P", "text": "milk", "summary": "s"})).unwrap();
-        assert_eq!(r["hash"], "agent-save", "{r}");
-        assert_ne!(r["hash"], json!(typed));
+        assert!(r.get("hash").is_none(), "{r}");
         std::fs::write(&p, "plain zebra #shared\n- [ ] open task\n[[L]]\n").unwrap();
         let r = crate::agent::tools::call(&mut ops, "set_task_done", json!({"title": "P", "line": 1, "line_text": "- [ ] open task", "done": true, "summary": "s"})).unwrap();
-        assert_eq!((r["status"].as_str(), r["hash"].as_str()), (Some("changed"), Some("agent-save")), "{r}");
+        assert_eq!(r["status"], "changed");
+        assert!(r.get("hash").is_none(), "{r}");
     }
 
-    /// The editor unfreezes on `renamed`: a save landing before the reply is read must not be covered by its hash.
-    #[test] fn rename_replies_the_hash_read_before_the_editor_unfreezes() {
+    /// Issue #157 (a): the editor unfreezes on `renamed` and saves the owner's typing before the reply is built; the
+    /// reply must carry no hash that covers it.
+    #[test] fn rename_with_typing_flushed_at_unfreeze_replies_no_hash() {
         let (st, dir) = state();
         let q = dir.join("Q.md");
         let route = |req: Value| {
@@ -612,10 +612,9 @@ mod tests {
             }
             Ok(json!(if req["kind"] == "rename" { "ready" } else { "ok" }))
         };
-        let before = crate::store::hash(&std::fs::read(dir.join("P.md")).unwrap());
         let mut ops = AppOps::new(&st, &route);
         let r = crate::agent::tools::call(&mut ops, "rename_note", json!({"title": "P", "new_title": "Q", "rewrite_links": false, "summary": "s"})).unwrap();
-        assert_eq!((r["title"].as_str(), r["hash"].as_str()), (Some("Q"), Some(before.as_str())), "the renamed bytes, not the owner's typing");
+        assert_eq!(r, json!({"title": "Q"}), "title only, no hash");
     }
 
     #[test] fn editor_replies_route_the_write() {
