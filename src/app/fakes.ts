@@ -168,7 +168,7 @@ export class FakeEditor implements Editor {
     if (this.path === null || this.suspended || this.readOnly) return false;
     this.changes.push(c);
     this.text = this.text.slice(0, c.from) + c.insert + this.text.slice(c.to);
-    this.dirty = true;
+    if (c.from !== c.to || c.insert) this.dirty = true; // an empty change leaves the editor clean, as in CodeMirror
     return true;
   }
   selection: { from: number; to: number } | null = null;

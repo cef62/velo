@@ -178,6 +178,11 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
 
     fn write(&mut self, path: &str, new_text: &str, base_hash: &str, summary: &str) -> anyhow::Result<String> {
         let path = plain(path)?;
+        // Same bytes as on disk, and the hash the agent read: nothing to write, so no snapshot and no stamp (#157). The
+        // bytes, not the lossy text a note with invalid UTF-8 reads as; a stale hash still goes to `save` and conflicts.
+        if crate::store::read_regular(Path::new(path)).is_ok_and(|b| b == new_text.as_bytes() && hash(&b) == base_hash) {
+            return Ok(base_hash.to_string());
+        }
         let snap = self.vault.agent_snapshot(path, summary)?;
         let r = self.save(path, new_text, base_hash);
         self.unsnapshot(&[(path.to_string(), snap)], &r);

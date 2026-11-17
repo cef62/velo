@@ -4868,3 +4868,25 @@ test("start at login: two quick toggles run one after the other, each reading wh
   expect(api.setAutostart.mock.calls.slice(-2)).toEqual([[true], [false]]);
   expect(os).toBe(false);
 });
+
+test("an agent write that changes nothing keeps no snapshot, also for LF text on a CRLF note, and replies the hash it checked", async () => {
+  for (const [disk, insert] of [["a\nb", "a\nb"], ["a\r\nb", "a\nb"]]) {
+    const { c, api, editor } = setup({ A: disk });
+    await c.show(P("A"));
+    editor.text = editor.text.replace(/\r\n/g, "\n"); // CodeMirror holds LF
+    api.snapshotAgent.mockResolvedValueOnce("3.md");
+    await c.onAgentWrite({ id: 1, path: P("A"), kind: "replace", insert, base: "h", summary: "s" });
+    expect(api.agentWriteDone).toHaveBeenCalledWith(1, { hash: "h" });
+    expect(api.dropAgentSnapshot).toHaveBeenCalledWith(P("A"), "3.md");
+  }
+});
+
+test("an agent replace with the disk text while the editor holds unsaved typing conflicts and keeps the typing", async () => {
+  const { c, api, be, editor, type } = setupRealSaver(() => {});
+  await c.show(P("A"));
+  type("typed"); // unsaved; the disk text is still "a"
+  await c.onAgentWrite({ id: 1, path: P("A"), kind: "replace", insert: "a", base: "h", summary: "s" });
+  expect(api.agentWriteDone).toHaveBeenCalledWith(1, "conflict");
+  expect(editor.text).toBe("typed");
+  expect(be.disk).toBe("typed"); // flushed first, as before: nothing lost, and the stale hash is refused
+});

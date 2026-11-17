@@ -636,12 +636,13 @@ mod tests {
         }
     }
 
-    /// #157: a write that changes nothing (same text) must not reach the editor and leaves no agent revision.
-    #[test] fn no_op_writes_skip_the_editor_and_leave_no_revision() {
+    /// #157: a write that changes nothing (same bytes) on a note not open in the editor leaves no agent revision. The
+    /// editor is still asked first: it decides for an open note.
+    #[test] fn no_op_write_of_a_closed_note_leaves_no_revision() {
         let (st, dir) = state();
         let p = dir.join("P.md").to_string_lossy().into_owned();
         let text = std::fs::read_to_string(&p).unwrap();
-        let route = |req: Value| -> anyhow::Result<Value> { panic!("no editor round trip for a no-op: {req}") };
+        let route = |_: Value| Ok(json!("not-open"));
         let mut ops = AppOps::new(&st, &route);
         let h = ops.read(&p).unwrap().hash;
         crate::agent::tools::call(&mut ops, "edit_note", json!({"title": "P", "old_text": "zebra", "new_text": "zebra", "summary": "s"})).unwrap();
@@ -649,6 +650,22 @@ mod tests {
         assert_eq!(r["hash"], json!(h));
         assert_eq!(std::fs::read_to_string(&p).unwrap(), text);
         assert!(st.vault.lock().unwrap().as_mut().unwrap().list_revisions(&p).unwrap().iter().all(|r| !r.agent));
+    }
+
+    /// Copilot on #166: disk text A, the open editor holds unsaved B. `replace_note(A, hash(A))` is not a no-op for the
+    /// note: the editor round trip must run, and its conflict reaches the agent.
+    #[test] fn replace_with_the_disk_text_still_asks_the_editor_which_may_conflict() {
+        let (st, dir) = state();
+        let p = dir.join("P.md").to_string_lossy().into_owned();
+        let text = std::fs::read_to_string(&p).unwrap();
+        let seen = Mutex::new(Vec::new());
+        let route = |req: Value| { seen.lock().unwrap().push(req["kind"].clone()); Ok(json!("conflict")) };
+        let mut ops = AppOps::new(&st, &route);
+        let h = ops.read(&p).unwrap().hash;
+        let r = crate::agent::tools::call(&mut ops, "replace_note", json!({"title": "P", "text": text, "expected_hash": h, "summary": "s"}));
+        assert_eq!(r, Err("note changed since you read it".to_string()));
+        assert_eq!(*seen.lock().unwrap(), [json!("replace")]);
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), text);
     }
 
     #[test] fn editor_replies_route_the_write() {

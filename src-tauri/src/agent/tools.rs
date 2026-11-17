@@ -128,15 +128,6 @@ fn err(e: anyhow::Error) -> String {
     e.to_string()
 }
 
-/// Writes `text` over `doc` (just read), unless it is the text already there: a write that changes nothing must leave
-/// no agent snapshot revision (#157). Returns the note's hash after the call.
-fn write_note(ops: &mut dyn NoteOps, path: &str, doc: &crate::vault::NoteDoc, text: &str, summary: &str) -> Result<String, String> {
-    if text == doc.text {
-        return Ok(doc.hash.clone());
-    }
-    ops.write(path, text, &doc.hash, summary).map_err(err)
-}
-
 /// `a[k]` as a title that maps to a file name (one of only dots and spaces would become "Untitled").
 fn title_arg<'a>(a: &'a Value, k: &str) -> Result<&'a str, String> {
     let t = arg(a, k)?;
@@ -254,7 +245,7 @@ fn dispatch(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
                 return Ok(json!({"title": doc.title}));
             };
             let doc = ops.read(&path).map_err(err)?;
-            write_note(ops, &path, &doc, &append_line(&doc.text, text), summary)?;
+            ops.write(&path, &append_line(&doc.text, text), &doc.hash, summary).map_err(err)?;
             Ok(json!({"title": doc.title}))
         }
         "edit_note" => {
@@ -267,7 +258,7 @@ fn dispatch(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
                 let hint = if n == 0 && doc.text.contains("\r\n") && old.contains('\n') && !old.contains("\r\n") { " This note uses CRLF line endings: use \\r\\n in old_text." } else { "" };
                 return Err(format!("old_text must occur exactly once in the note; it occurs {n} times. Nothing was changed.{hint}"));
             }
-            write_note(ops, &path, &doc, &doc.text.replacen(old, new, 1), summary)?;
+            ops.write(&path, &doc.text.replacen(old, new, 1), &doc.hash, summary).map_err(err)?;
             Ok(json!({"title": doc.title}))
         }
         "replace_note" => {
@@ -277,7 +268,7 @@ fn dispatch(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
             if doc.hash != expected {
                 return Err("note changed since you read it".into());
             }
-            let hash = write_note(ops, &path, &doc, text, summary)?;
+            let hash = ops.write(&path, text, &doc.hash, summary).map_err(err)?;
             Ok(json!({"title": doc.title, "hash": hash}))
         }
         "list_tasks" => {
@@ -421,7 +412,7 @@ fn bulk_tags(ops: &mut dyn NoteOps, add: bool, a: &Value, summary: &str) -> Resu
             Some(cur).filter(|c| *c != doc.text)
         };
         if let Some(new) = &new {
-            write_note(ops, &path, &doc, new, summary)?;
+            ops.write(&path, new, &doc.hash, summary).map_err(err)?;
         }
         if !add {
             // A tag the index still sees (e.g. only in a link target) could not be removed: write what went, then fail.
@@ -937,6 +928,20 @@ mod tests {
         assert!(agent_revs(&ops, &p).is_empty());
         call(&mut ops, "edit_note", json!({"title": "a", "old_text": "two", "new_text": "2", "summary": "real"})).unwrap();
         assert_eq!(agent_revs(&ops, &p), ["real"]);
+    }
+
+    /// Copilot on #166: `doc.text` is the lossy decode, so equal text is not equal bytes: the write must happen.
+    #[test] fn replace_with_the_lossy_text_of_an_invalid_utf8_note_writes() {
+        let (mut ops, dir) = task_ops(&[]);
+        std::fs::write(dir.join("a.md"), b"one \xFF two\n").unwrap();
+        ops.rescan().unwrap();
+        let p = ops.find("a").unwrap().unwrap();
+        let d = ops.read(&p).unwrap();
+        assert_eq!(d.text, "one \u{FFFD} two\n");
+        let r = call(&mut ops, "replace_note", json!({"title": "a", "text": d.text, "expected_hash": d.hash, "summary": "fix bytes"})).unwrap();
+        assert_ne!(r["hash"], json!(d.hash));
+        assert!(read(&dir, "a.md").ends_with("one \u{FFFD} two\n"), "the invalid byte is replaced for good");
+        assert_eq!(agent_revs(&ops, &p), ["fix bytes"]);
     }
 
     #[test] fn set_task_done_idempotent() {
