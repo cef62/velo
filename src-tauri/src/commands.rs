@@ -1109,15 +1109,11 @@ pub fn has_identity(st: State<'_, AppState>) -> bool {
         return false;
     }
     let found = crypto::keychain_get(); // no locks held across the keychain call
-    let Some(id) = found else { return false };
-    *st.identity.lock().unwrap() = Some(id.clone());
-    // the vault stays open, so this is the keyed open's step for history a keyless open held back
-    if let Some(v) = st.vault.lock().unwrap().as_mut()
-        && let Ok(files) = v.store.list()
-    {
-        v.secure_held_back(&files, &id);
+    let has = found.is_some();
+    if has {
+        *st.identity.lock().unwrap() = found;
     }
-    true
+    has
 }
 
 /// Whether `<dir>/.velo/identity.age` exists; lets the UI choose between "enter" and "create" wording.

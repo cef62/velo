@@ -166,19 +166,24 @@ impl Revisions {
     }
 
     /// Replace every plaintext snapshot of the note by its encrypted twin; plaintext is removed only after the twin is written.
+    /// Only regular files are read, and every write replaces what is at its name (`create_tmp`): a FIFO there can't
+    /// block. An entry that can't be read (a FIFO, a folder, no permission) is skipped and kept.
     pub fn encrypt_all(&self, title: &str, encrypt: impl Fn(&[u8]) -> anyhow::Result<Vec<u8>>) -> anyhow::Result<()> {
+        let write = |p: &std::path::Path, b: &[u8]| crate::store::create_tmp(p).and_then(|mut f| io::Write::write_all(&mut f, b));
         let dir = self.dir(title);
         let Ok(rd) = std::fs::read_dir(&dir) else { return Ok(()) };
         for e in rd.flatten() {
             let p = e.path();
             if p.extension().is_some_and(|x| x == "md") {
-                std::fs::write(p.with_extension("md.age"), encrypt(&std::fs::read(&p)?)?)?;
+                let Ok(plain) = crate::store::read_regular(&p) else { continue };
+                write(&p.with_extension("md.age"), &encrypt(&plain)?)?;
                 std::fs::remove_file(&p)?;
             } else if p.extension().is_some_and(|x| x == "json")
-                && std::fs::read(&p).ok().and_then(|b| serde_json::from_slice::<Sidecar>(&b).ok()).is_none_or(|s| !s.summary.is_empty())
+                && let Ok(b) = crate::store::read_regular(&p)
+                && serde_json::from_slice::<Sidecar>(&b).ok().is_none_or(|s| !s.summary.is_empty())
             {
                 // an agent summary is plaintext about the note: drop it, keep the agent mark
-                std::fs::write(&p, serde_json::to_vec(&Sidecar { summary: String::new(), agent: true })?)?;
+                write(&p, &serde_json::to_vec(&Sidecar { summary: String::new(), agent: true })?)?;
             }
         }
         Ok(())
