@@ -1631,6 +1631,8 @@ export class Controller {
       r = await this.track(this.pendingWrites, this.api.toggleTask(path, line, expected));
     } catch (e) {
       if (e === "task-moved") return this.taskMoved();
+      // the note changed on disk between the backend's read and its save: the toggle went to a conflict copy
+      if (e === "conflict") return this.taskMoved(`${TASK_MOVED}; your change went to a conflict copy`);
       if (e === "locked" && !retried) {
         const ok = await this.promptPassphrase({ trigger: "open", context: null });
         if (ok) return this.flipTask(path, line, expected, true);
@@ -1643,8 +1645,8 @@ export class Controller {
     return r;
   }
 
-  protected taskMoved(): null {
-    this.setErr(TASK_MOVED);
+  protected taskMoved(msg = TASK_MOVED): null {
+    this.setErr(msg);
     void this.loadTasks();
     return null;
   }
@@ -2328,30 +2330,38 @@ export class Controller {
     if (bad) return bad;
     if (!(await this.api.agentWriteClaim(req.id))) return null; // timed out: the agent was told velo is busy
     const snap = await this.api.snapshotAgent(req.path, req.summary ?? "");
-    // not applied after all (a keystroke landed during the snapshot): its revision would record a write that never happened
-    const unapplied = async (r: AgentReply) => {
-      if (snap) await this.api.dropAgentSnapshot(req.path, snap).catch((e) => logError("dropping the agent snapshot failed", e, "warn"));
-      return r;
-    };
-    if ((bad = check())) return unapplied(bad);
-    // check() found the clean editor holding the note's text at `saved.hash`: base the save (and a no-op's reply) on it,
-    // not on a base that lags a byte-only change on disk (line endings) check() normalizes away (#134)
-    this.editor.adopt(saved.hash);
-    const insert = req.insert ?? "";
-    const ok = req.kind === "append" ? this.editor.appendLine(insert) : this.editor.applyChange(changedSpan(this.editor.getText(), insert));
-    if (!ok) return unapplied("refused");
-    // applied: from here no failure may invite a retry, which would apply it twice
+    // The snapshot is the owner's undo point for this write, kept only once the note changed. Every other exit, a throw
+    // included, drops it: its revision would record a write that never happened.
+    let keep = false;
     try {
-      const { copy, hash } = await this.editor.flushOutcome();
-      // its save went to a conflict copy: the note does not hold the change (the editor reloaded the disk text, or
-      // keeps the user's newer typing on top of it, which goes to a copy of its own)
-      if (copy !== null) return unapplied({ conflict: copy });
-      // The hash its own save left, never a re-read: typing saved on top since must not get a hash for text the agent
-      // never read, so its next hash-guarded write is refused instead of overwriting that typing (#134).
-      if (hash !== null) return { hash };
-      return "unsaved"; // the edit stays in the editor; its save error or conflict banner shows
-    } catch {
-      return "unsaved";
+      if ((bad = check())) return bad; // a keystroke landed during the snapshot
+      // check() found the clean editor holding the note's text at `saved.hash`: base the save (and a no-op's reply) on it,
+      // not on a base that lags a byte-only change on disk (line endings) check() normalizes away (#134)
+      this.editor.adopt(saved.hash);
+      const insert = req.insert ?? "";
+      const ok = req.kind === "append" ? this.editor.appendLine(insert) : this.editor.applyChange(changedSpan(this.editor.getText(), insert));
+      if (!ok) return "refused";
+      // Nothing changed (the agent's text is the note's, maybe in other line endings): reply the hash check() established
+      // before any await. One read after the drop's await could cover typing that landed during it (#134).
+      if (!this.editor.isDirty()) return { hash: saved.hash };
+      keep = true; // applied: from here no failure may invite a retry, which would apply it twice
+      try {
+        const { copy, hash } = await this.editor.flushOutcome();
+        // its save went to a conflict copy: the note does not hold the change (the editor reloaded the disk text, or
+        // keeps the user's newer typing on top of it, which goes to a copy of its own)
+        if (copy !== null) {
+          keep = false;
+          return { conflict: copy };
+        }
+        // The hash its own save left, never a re-read: typing saved on top since must not get a hash for text the agent
+        // never read, so its next hash-guarded write is refused instead of overwriting that typing (#134).
+        if (hash !== null) return { hash };
+        return "unsaved"; // the edit stays in the editor; its save error or conflict banner shows
+      } catch {
+        return "unsaved";
+      }
+    } finally {
+      if (snap && !keep) await this.api.dropAgentSnapshot(req.path, snap).catch((e) => logError("dropping the agent snapshot failed", e, "warn"));
     }
   }
 
