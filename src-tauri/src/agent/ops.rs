@@ -29,7 +29,7 @@ pub trait NoteOps {
     fn tasks(&self, query: &str, tags: &[String], show_done: bool, include_archived: bool) -> anyhow::Result<TaskView>;
     /// Returns the new path and its hash, read under the rename's own lock (None: unreadable). Never a later read: the
     /// open note's editor unfreezes after the rename, and a save it makes then must not be covered by the hash.
-    fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<(String, Option<String>)>;
+    fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<String>;
     fn trash(&mut self, path: &str, summary: &str) -> anyhow::Result<()>;
     /// Appends `source` to `target`, rewrites links to it and trashes it (see `Vault::merge_notes_with`).
     fn merge(&mut self, source: &str, target: &str, summary: &str) -> anyhow::Result<MergeResult>;
@@ -60,16 +60,21 @@ pub fn locked(path: &str) -> bool {
 }
 
 /// `r`, unless it failed after the file at `path` changed from `before` (its hash; `None` = missing): the write
-/// landed, so a plain error would invite a retry that applies it twice.
+/// landed, so a plain error would invite a retry that applies it twice. A save that went to a conflict copy
+/// (`ConflictCopy`) changed nothing in the note, whatever else touched the file: it names the copy, like `save`.
 fn landed<T>(r: anyhow::Result<T>, path: &Path, before: Option<&str>) -> anyhow::Result<T> {
-    r.map_err(|e| if crate::store::read_regular(path).ok().map(|b| hash(&b)).as_deref() != before { anyhow!(NO_ANSWER) } else { e })
+    r.map_err(|e| match e.downcast_ref::<crate::vault::ConflictCopy>() {
+        Some(c) => conflict_copy(&c.0),
+        None if crate::store::read_regular(path).ok().map(|b| hash(&b)).as_deref() != before => anyhow!(NO_ANSWER),
+        None => e,
+    })
 }
 
 fn hash_of(path: &Path) -> Option<String> {
     crate::store::read_regular(path).ok().map(|b| hash(&b))
 }
 
-fn title_of(path: &str) -> String {
+pub(crate) fn title_of(path: &str) -> String {
     parse_note_file(Path::new(path)).map(|n| n.title).unwrap_or_else(|| path.to_string())
 }
 
@@ -259,7 +264,7 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
         Ok(v)
     }
 
-    fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<(String, Option<String>)> {
+    fn rename(&mut self, path: &str, new_title: &str, rewrite_links: bool, summary: &str) -> anyhow::Result<String> {
         let path = plain(path)?;
         let mut snaps = vec![(path.to_string(), self.vault.agent_snapshot(path, summary)?)];
         let r = if rewrite_links { self.snapshot_link_sources(&title_of(path), &[path], summary, &mut snaps) } else { Ok(()) };
@@ -269,10 +274,7 @@ impl<V: DerefMut<Target = Vault>> NoteOps for VaultOps<V> {
             Err(e) => Err(e),
         });
         self.unsnapshot(&snaps, &r); // nothing moved when the rename failed
-        r.map(|p| {
-            let h = hash_of(Path::new(&p));
-            (p, h)
-        })
+        r
     }
 
     fn trash(&mut self, path: &str, summary: &str) -> anyhow::Result<()> {
@@ -439,7 +441,7 @@ mod tests {
     #[test] fn rename_snapshots_under_new_title() {
         let (mut o, _) = ops();
         let d = o.create("Before", "body", "c").unwrap();
-        let (np, _) = o.rename(&d.path, "After", false, "renamed it").unwrap();
+        let np = o.rename(&d.path, "After", false, "renamed it").unwrap();
         let r = o.vault.list_revisions(&np).unwrap();
         assert!(r.iter().any(|x| x.summary.as_deref() == Some("renamed it")));
     }
@@ -469,6 +471,22 @@ mod tests {
         assert!(o.write(&d.path, "x", "stale", "write").unwrap_err().to_string().starts_with("conflict"));
         assert_eq!(agent_revs(&o, &d.path), ["c"]);
         assert!(dir.join("A.md").exists());
+    }
+    /// #134: `add_task` on a closed note whose save went to a conflict copy (an outside change landed after the read):
+    /// the agent is told the copy, not "no answer", and no snapshot is kept for the write that did not land.
+    #[test] fn conflict_copy_from_append_is_named_and_leaves_no_snapshot() {
+        let (mut o, dir) = ops();
+        let d = o.create("A", "- [ ] t\n", "c").unwrap();
+        let snap = o.vault.agent_snapshot(&d.path, "add").unwrap();
+        let p = Path::new(&d.path);
+        let before = hash_of(p);
+        std::fs::write(p, "outside\n").unwrap(); // the file changed since `before`
+        let copy = dir.join("A (conflict 1).md").to_string_lossy().into_owned();
+        let r = landed(Err::<(), _>(crate::vault::ConflictCopy(copy).into()), p, before.as_deref());
+        let e = r.as_ref().unwrap_err().to_string();
+        assert!(e.starts_with("conflict:") && e.contains("A (conflict 1)"), "{e}");
+        o.unsnapshot(&[(d.path.clone(), snap)], &r);
+        assert_eq!(agent_revs(&o, &d.path), ["c"]);
     }
     #[test] fn created_note_has_no_stub_revision() {
         let (mut o, _) = ops(); // front matter on (default)

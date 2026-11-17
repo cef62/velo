@@ -128,6 +128,15 @@ fn err(e: anyhow::Error) -> String {
     e.to_string()
 }
 
+/// Writes `text` over `doc` (just read), unless it is the text already there: a write that changes nothing must leave
+/// no agent snapshot revision (#157). Returns the note's hash after the call.
+fn write_note(ops: &mut dyn NoteOps, path: &str, doc: &crate::vault::NoteDoc, text: &str, summary: &str) -> Result<String, String> {
+    if text == doc.text {
+        return Ok(doc.hash.clone());
+    }
+    ops.write(path, text, &doc.hash, summary).map_err(err)
+}
+
 /// `a[k]` as a title that maps to a file name (one of only dots and spaces would become "Untitled").
 fn title_arg<'a>(a: &'a Value, k: &str) -> Result<&'a str, String> {
     let t = arg(a, k)?;
@@ -245,7 +254,7 @@ fn dispatch(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
                 return Ok(json!({"title": doc.title}));
             };
             let doc = ops.read(&path).map_err(err)?;
-            ops.write(&path, &append_line(&doc.text, text), &doc.hash, summary).map_err(err)?;
+            write_note(ops, &path, &doc, &append_line(&doc.text, text), summary)?;
             Ok(json!({"title": doc.title}))
         }
         "edit_note" => {
@@ -258,7 +267,7 @@ fn dispatch(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
                 let hint = if n == 0 && doc.text.contains("\r\n") && old.contains('\n') && !old.contains("\r\n") { " This note uses CRLF line endings: use \\r\\n in old_text." } else { "" };
                 return Err(format!("old_text must occur exactly once in the note; it occurs {n} times. Nothing was changed.{hint}"));
             }
-            ops.write(&path, &doc.text.replacen(old, new, 1), &doc.hash, summary).map_err(err)?;
+            write_note(ops, &path, &doc, &doc.text.replacen(old, new, 1), summary)?;
             Ok(json!({"title": doc.title}))
         }
         "replace_note" => {
@@ -268,7 +277,7 @@ fn dispatch(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
             if doc.hash != expected {
                 return Err("note changed since you read it".into());
             }
-            let hash = ops.write(&path, text, &doc.hash, summary).map_err(err)?;
+            let hash = write_note(ops, &path, &doc, text, summary)?;
             Ok(json!({"title": doc.title, "hash": hash}))
         }
         "list_tasks" => {
@@ -318,11 +327,9 @@ fn dispatch(ops: &mut dyn NoteOps, name: &str, a: Value) -> Result<Value, String
         "rename_note" => {
             let rewrite = a.get("rewrite_links").and_then(Value::as_bool).ok_or("missing rewrite_links")?;
             // no hash in the reply: it would cover the whole note, typing the editor saves at unfreeze included (#157).
-            // Unreadable right after the move: still "no answer", as before.
-            let (new, read) = ops.rename(&path_of(ops, &a)?, title_arg(&a, "new_title")?, rewrite, summary).map_err(err)?;
-            read.ok_or(super::client::NO_ANSWER)?;
-            let doc = ops.read(&new).map_err(err)?;
-            Ok(json!({"title": doc.title}))
+            // No read after the move either: the title is the new path's, and a read could fail for a rename that happened.
+            let new = ops.rename(&path_of(ops, &a)?, title_arg(&a, "new_title")?, rewrite, summary).map_err(err)?;
+            Ok(json!({"title": super::ops::title_of(&new)}))
         }
         "move_to_trash" => {
             let path = path_of(ops, &a)?;
@@ -414,7 +421,7 @@ fn bulk_tags(ops: &mut dyn NoteOps, add: bool, a: &Value, summary: &str) -> Resu
             Some(cur).filter(|c| *c != doc.text)
         };
         if let Some(new) = &new {
-            ops.write(&path, new, &doc.hash, summary).map_err(err)?;
+            write_note(ops, &path, &doc, new, summary)?;
         }
         if !add {
             // A tag the index still sees (e.g. only in a link target) could not be removed: write what went, then fail.
@@ -916,6 +923,20 @@ mod tests {
             assert!(e.contains("invalid date"), "{d}: {e}");
         }
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+    }
+
+    /// #157: a write that changes nothing leaves no agent revision, and replace_note replies the unchanged hash.
+    #[test] fn no_op_writes_leave_no_agent_revision() {
+        let (mut ops, dir) = task_ops(&[("a.md", "one two\n")]);
+        let p = ops.find("a").unwrap().unwrap();
+        let h = ops.read(&p).unwrap().hash;
+        call(&mut ops, "edit_note", json!({"title": "a", "old_text": "two", "new_text": "two", "summary": "s"})).unwrap();
+        let r = call(&mut ops, "replace_note", json!({"title": "a", "text": "one two\n", "expected_hash": h, "summary": "s"})).unwrap();
+        assert_eq!(r["hash"], json!(h));
+        assert_eq!(read(&dir, "a.md"), "one two\n");
+        assert!(agent_revs(&ops, &p).is_empty());
+        call(&mut ops, "edit_note", json!({"title": "a", "old_text": "two", "new_text": "2", "summary": "real"})).unwrap();
+        assert_eq!(agent_revs(&ops, &p), ["real"]);
     }
 
     #[test] fn set_task_done_idempotent() {

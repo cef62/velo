@@ -101,6 +101,16 @@ pub struct NoteMeta {
     pub aliases: Vec<String>,
 }
 
+/// `append_task`'s save went to a conflict copy at this path, not the note.
+#[derive(Debug)]
+pub struct ConflictCopy(pub String);
+impl std::fmt::Display for ConflictCopy {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("conflict")
+    }
+}
+impl std::error::Error for ConflictCopy {}
+
 #[derive(Serialize)]
 pub struct RenameResult {
     pub path: String,
@@ -782,7 +792,7 @@ impl Vault {
         let sep = if doc.text.is_empty() || doc.text.ends_with('\n') { "" } else { eol };
         match self.save_note(&doc.path, &format!("{}{sep}- [ ] {text}{eol}", doc.text), &doc.hash, identity, write_fm)? {
             SaveResult::Saved { hash, .. } => Ok((doc.path, hash)),
-            SaveResult::Conflict { .. } => Err(anyhow!("conflict")),
+            SaveResult::Conflict { conflict_path, .. } => Err(ConflictCopy(conflict_path).into()),
         }
     }
 
@@ -3143,7 +3153,10 @@ mod tests {
         let d = stale(&mut v);
         assert_eq!(v.toggle_in(d, 0, "- [ ] a", None, false).unwrap_err().to_string(), "task-moved");
         let d = stale(&mut v);
-        assert_eq!(v.append_in(d, "x", None, false).unwrap_err().to_string(), "conflict");
+        let e = v.append_in(d, "x", None, false).unwrap_err();
+        assert_eq!(e.to_string(), "conflict");
+        let copy = &e.downcast_ref::<ConflictCopy>().expect("names the copy").0;
+        assert!(copy.contains("(conflict") && std::fs::read_to_string(copy).unwrap().contains("- [ ] x"), "{copy}");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "- [ ] a\n");
     }
     #[test] fn capture_trims_flattens_and_keeps_crlf() {
