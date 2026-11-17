@@ -1,5 +1,16 @@
 # velo
 
+## 0.20.0
+
+### Minor Changes
+
+- 81120d2: Added a Start at login switch in Settings (and a Toggle start at login command) that opens velo hidden when you log in.
+
+### Patch Changes
+
+- 33b2857: Fixed a note locked on another device without a key deleting the revision history of a different note whose name differs only in case or accents, a note locked elsewhere while Velo was closed keeping its earlier history readable in plain text, and Velo freezing on a pipe or other special file named like a note.
+- 56a8694: Stopped agent edits, appends, tag adds and removes, task changes, renames and merges from handing back a hash that could let a later full-note replace overwrite your typing; the agent must now read the note first.
+
 ## 0.19.2
 
 ### Patch Changes
