@@ -402,10 +402,17 @@ impl Vault {
                 if self.index.title_modified(&s(&p)).map_or(true, |r| r.is_some()) {
                     match self.read_for_index(&p) {
                         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                        r => match r.map_err(anyhow::Error::from).and_then(|b| self.reindex(&p, b.map(|b| lossy(&b)).as_deref())) {
-                            Ok(()) => self.rewritten.push(s(&p)),
-                            Err(_) => self.retry.push(p),
-                        },
+                        r => {
+                            // reported only when the row's twin mark flips: every save of a locked note re-indexes an
+                            // already stripped twin here, which changes nothing on screen
+                            let twin_mark = |v: &Self| v.index.size(&s(&p)).ok().flatten().map(|n| n == TWIN_SIZE);
+                            let before = twin_mark(self);
+                            match r.map_err(anyhow::Error::from).and_then(|b| self.reindex(&p, b.map(|b| lossy(&b)).as_deref())) {
+                                Ok(()) if twin_mark(self) != before => self.rewritten.push(s(&p)),
+                                Ok(()) => {}
+                                Err(_) => self.retry.push(p),
+                            }
+                        }
                     }
                 }
             }
@@ -2927,6 +2934,29 @@ mod tests {
         assert_eq!(event(age.clone(), true), sorted(vec![s(&age), s(&long)]), "by the scan");
         let age = dir.join("g.md.age");
         assert_eq!(event(age.clone(), true), sorted(vec![s(&age), s(&dir.join("g.md"))]), "a gone row erased");
+    }
+    /// #167 review m1: every save of a locked note re-indexes its plain twin by name; only the save that strips it
+    /// reports it, so autosaves don't refresh the whole list each time.
+    #[test] fn saving_a_locked_note_reports_its_twin_only_when_the_twin_changes() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, Some(&id)).unwrap();
+        let d = v.open_or_create("s", Some(&id), false).unwrap();
+        let locked = v.lock_note(&d.path, &id).unwrap();
+        v.apply_fs_changes(&[PathBuf::from(&d.path), PathBuf::from(&locked)], None); // the lock's own events
+        let plain = dir.join("s.md");
+        std::fs::write(&plain, BACK).unwrap(); // a twin indexed with its text by another process
+        v.index.upsert(&s(&plain), &parse_note_file(&plain).unwrap(), &stat(&plain).unwrap(), Some(BACK)).unwrap();
+        let mut h = v.open_note(&locked, Some(&id)).unwrap().hash;
+        let mut save = |v: &mut Vault, i: usize| {
+            match v.save_note(&locked, &format!("edit {i}"), &h, Some(&id), false).unwrap() { SaveResult::Saved { hash, .. } => h = hash, _ => panic!("conflict") }
+            v.apply_fs_changes(&[PathBuf::from(&locked)], None) // the save's own event, skipped
+        };
+        assert_eq!(save(&mut v, 0), vec![s(&plain)], "the strip is reported");
+        for i in 1..50 {
+            assert_eq!(save(&mut v, i), Vec::<String>::new(), "save {i}");
+        }
+        assert!(v.rewritten.is_empty());
+        assert_eq!((twin_text(&v), text_cells(&v)), ((0, 0, 0, 0), 0));
     }
     /// #158 test gap: a failed lock's stray locked copy over a stale row of it scans every row itself, so a twin out
     /// of reach by name (here the note being locked, whose erase failed) loses its text at once, not at the next event
