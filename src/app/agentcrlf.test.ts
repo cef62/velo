@@ -16,19 +16,27 @@ class CmEditor extends FakeEditor {
   }
   getText = () => this.state.doc.toString();
   applyChange(c: { from: number; to: number; insert: string }) {
-    this.state = this.state.update({ changes: c }).state;
-    this.dirty = true;
+    const tr = this.state.update({ changes: c });
+    this.state = tr.state;
+    if (tr.docChanged) this.dirty = true; // the editor's update listener marks an edit only on docChanged
     return true;
   }
   appendLine(text: string) {
-    this.state = this.state.update(appendSpec(this.state.doc, text)).state; // the production spec: the fake cannot drift
-    this.dirty = true;
+    const tr = this.state.update(appendSpec(this.state.doc, text)); // the production spec: the fake cannot drift
+    this.state = tr.state;
+    if (tr.docChanged) this.dirty = true;
     return true;
   }
 }
 
 async function write(note: string, req: { kind: "replace" | "append"; insert: string }) {
+  const r = await writeWith(note, req);
+  return { before: r.before, after: r.after };
+}
+
+async function writeWith(note: string, req: { kind: "replace" | "append"; insert: string }) {
   const { api } = fakeApi({ A: note });
+  api.snapshotAgent.mockResolvedValueOnce("3.md");
   const c = new Controller(createStore(initialState(true)), api, fakeUi().ui, { isMac: true, platform: "mac" });
   const editor = new CmEditor();
   c.attachEditor(editor);
@@ -36,8 +44,24 @@ async function write(note: string, req: { kind: "replace" | "append"; insert: st
   await c.show("/n/A.md");
   const before = editor.getText();
   await c.onAgentWrite({ id: 1, path: "/n/A.md", base: "h", summary: "s", ...req });
-  return { before, after: editor.getText() };
+  return { before, after: editor.getText(), api };
 }
+
+test("a no-op agent write through the real document, LF text on an open CRLF note, drops its snapshot (#134)", async () => {
+  for (const insert of ["a\nb\nc", "a\r\nb\r\nc"]) {
+    const { after, api } = await writeWith("a\r\nb\r\nc", { kind: "replace", insert });
+    expect(after).toBe("a\nb\nc");
+    expect(api.agentWriteDone).toHaveBeenCalledWith(1, { hash: "h" }); // the note's hash, read before the write
+    expect(api.dropAgentSnapshot).toHaveBeenCalledWith("/n/A.md", "3.md"); // main: kept
+  }
+});
+
+test("a real agent change through the real document keeps its snapshot (#134)", async () => {
+  const { after, api } = await writeWith("a\r\nb\r\nc", { kind: "replace", insert: "a\nX\nc" });
+  expect(after).toBe("a\nX\nc");
+  expect(api.agentWriteDone).toHaveBeenCalledWith(1, { hash: "h" });
+  expect(api.dropAgentSnapshot).not.toHaveBeenCalled();
+});
 
 test("a byte-identical replace with CRLF text on an open CRLF note changes nothing", async () => {
   const r = await write("a\r\nb\r\nc", { kind: "replace", insert: "a\r\nb\r\nc" });

@@ -1,5 +1,18 @@
 # velo
 
+## 0.20.3
+
+### Patch Changes
+
+- a75d1fe: Settings, Export and Merge no longer hide their Cancel and Save buttons in a short window: the dialog body scrolls instead.
+
+## 0.20.2
+
+### Patch Changes
+
+- 40b7ea5: An agent write that changed nothing in an open note, or that the editor could not apply, no longer left an agent revision in the note's history, and a task tick that went to a conflict copy because the note changed on disk at that moment now named the copy to the agent and said so in the app.
+- 5ed1bf6: A special file left in a note's revision history no longer froze that note's history list or its saves.
+
 ## 0.20.1
 
 ### Patch Changes

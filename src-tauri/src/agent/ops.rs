@@ -493,6 +493,25 @@ mod tests {
         o.unsnapshot(&[(d.path.clone(), snap)], &r);
         assert_eq!(agent_revs(&o, &d.path), ["c"]);
     }
+    /// #134: `set_task_done` on a closed note, an outside write landing between its read and its save: the toggle goes
+    /// to a conflict copy, the agent is told its name (not "task-moved" or "no answer"), and no snapshot is kept.
+    #[test] fn conflict_copy_from_toggle_is_named_and_leaves_no_snapshot() {
+        let (mut o, _) = ops();
+        let d = o.create("A", "- [ ] t\n", "c").unwrap();
+        let snap = o.vault.agent_snapshot(&d.path, "toggle").unwrap();
+        let p = Path::new(&d.path);
+        let before = hash_of(p);
+        let doc = o.vault.open_note(&d.path, None).unwrap(); // `toggle_task`'s read
+        let line = doc.text.lines().position(|l| l == "- [ ] t").unwrap(); // below the stamped front matter
+        let outside = format!("{}outside\n", doc.text);
+        std::fs::write(p, &outside).unwrap(); // lands before its save
+        let r = landed(o.vault.toggle_in(doc, line, "- [ ] t", None, false), p, before.as_deref());
+        let e = r.as_ref().unwrap_err().to_string();
+        assert!(e.starts_with("conflict:") && e.contains("A (conflict"), "{e}");
+        o.unsnapshot(&[(d.path.clone(), snap)], &r);
+        assert_eq!(agent_revs(&o, &d.path), ["c"]);
+        assert_eq!(std::fs::read_to_string(p).unwrap(), outside); // the outside write is kept
+    }
     /// The no-op skip needs the hash the agent read too: the same bytes under a stale hash is a conflict, not a success.
     #[test] fn same_bytes_with_a_stale_hash_conflicts_and_leaves_no_snapshot() {
         let (mut o, _) = ops();
