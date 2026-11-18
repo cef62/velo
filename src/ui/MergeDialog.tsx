@@ -9,7 +9,7 @@ import { useStore } from "./useStore";
 type Merge = NonNullable<AppState["merge"]>;
 
 const err = css({ display: "flex", alignItems: "center", gap: "1.5", fontSize: "uiSm", lineHeight: "1.4", color: "red.11", m: "0", "& svg": { w: "14px", h: "14px", flex: "none" } });
-const list = css({ listStyle: "none", m: "0", mt: "2", p: "1", maxH: "240px", overflowY: "auto", border: "1px solid", borderColor: "velo.divider", borderRadius: "l2" });
+const list = css({ listStyle: "none", m: "0", mt: "2", p: "1", maxH: "240px", minH: "0", overflowY: "auto", border: "1px solid", borderColor: "velo.divider", borderRadius: "l2" });
 const option = css({ px: "2.5", py: "1.5", borderRadius: "l1", fontSize: "uiSm", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", "&[aria-selected=true]": { bg: "gray.a3" } });
 const footer = css({ display: "flex", justifyContent: "flex-end", gap: "2", px: "5", py: "3.5", borderTop: "1px solid", borderColor: "velo.divider" });
 
@@ -22,7 +22,7 @@ export function MergeDialog({ controller, store }: { controller: Controller; sto
     <Dialog.Root open={merge !== null} onOpenChange={(d) => !d.open && controller.cancelMerge()} closeOnInteractOutside={false}>
       <Dialog.Backdrop />
       <Dialog.Positioner>
-        <Dialog.Content className={css({ maxW: "440px", p: "0", gap: "0", overflow: "hidden" })}>
+        <Dialog.Content className={css({ maxW: "440px", p: "0", gap: "0", overflow: "hidden", maxH: "calc(100dvh - 32px)" })}>
           <div className={css({ p: "20px 20px 4px" })}>
             <Dialog.Title className={css({ fontSize: "17px", fontWeight: "650", lineHeight: "1.3", letterSpacing: "-0.01em" })}>Merge note</Dialog.Title>
           </div>
@@ -49,8 +49,8 @@ function Pick({ m, controller }: { m: Merge; controller: Controller }) {
   }, [at]);
   return (
     <>
-      <div className={css({ p: "14px 20px 18px" })}>
-        <Field.Root invalid={m.err !== ""}>
+      <div className={css({ p: "14px 20px 18px", minH: "0", display: "flex", flexDirection: "column" })}>
+        <Field.Root invalid={m.err !== ""} className={css({ minH: "0", display: "flex", flexDirection: "column" })}>
           <Field.Label>Merge into</Field.Label>
           <Input
             value={m.query}
@@ -105,7 +105,7 @@ function Confirm({ m, controller }: { m: Merge; controller: Controller }) {
   const t = m.target!;
   return (
     <>
-      <div className={css({ p: "14px 20px 18px", display: "flex", flexDirection: "column", gap: "2", fontSize: "uiSm", lineHeight: "1.5" })}>
+      <div className={css({ p: "14px 20px 18px", minH: "0", overflowY: "auto", display: "flex", flexDirection: "column", gap: "2", fontSize: "uiSm", lineHeight: "1.5" })}>
         <p className={css({ m: "0" })}>
           Merge <strong>{m.sourceTitle}</strong> into <strong>{t.title}</strong>? <em>{t.count}</em> {t.count === 1 ? "link will be" : "links will be"} updated. {m.sourceTitle} goes to the Trash.
         </p>
