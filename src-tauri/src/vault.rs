@@ -946,7 +946,8 @@ impl Vault {
         }
         let nf = parse(&to)?; // same extension as `from`, which parsed: cannot fail
         self.revisions.rename(&old.title, &nf.title);
-        if nf.encrypted {
+        // a set another fold-equal locked note may own stays behind (hidden, pruned), as in `secure_held_back`
+        if nf.encrypted && self.locked_folds().is_some_and(|m| !m.contains_key(&fold(&old.title))) {
             self.revisions.rename_held(&old.title, &nf.title);
         }
         let body = (!nf.encrypted).then(|| lossy(&self.store.read(&to).unwrap_or_default()));
@@ -3607,6 +3608,23 @@ mod tests {
         assert_eq!(doubt, (true, true), "a doubt counts as a twin");
         std::fs::write(dir.join("s.md.age"), crypto::encrypt(&id, b"later").unwrap()).unwrap();
         assert!(v.list_revisions(&d.path).unwrap().is_empty() && v.read_revision(&d.path, &rid, None).is_err());
+    }
+    /// #180 Copilot: renaming one of two locked notes whose titles fold together leaves their shared held set behind
+    /// (the other may own it): the new title never receives it.
+    #[test] fn a_rename_never_carries_a_held_set_a_fold_equal_locked_note_may_own() {
+        let (dir, db) = setup(); let a = crypto::new_identity(); let b = crypto::new_identity();
+        std::fs::write(dir.join("Cafe.md.age"), crypto::encrypt(&a, b"a").unwrap()).unwrap();
+        std::fs::write(dir.join("Caf\u{e9}.md.age"), crypto::encrypt(&b, b"b").unwrap()).unwrap();
+        let v = open(dir.clone(), &db, None).unwrap();
+        v.revisions.snapshot_bytes("Cafe", b"cafe-presecret", false, now_ms() - 1_000, false).unwrap();
+        drop(v);
+        let mut v = open(dir.clone(), &db, None).unwrap(); // holds it
+        assert!(v.revisions.has_held("Cafe"));
+        let tea = v.rename_note(&s(&dir.join("Caf\u{e9}.md.age")), "Tea", false).unwrap().path;
+        assert!(v.revisions.has_held("Cafe") && !v.revisions.has_held("Tea"), "left behind");
+        drop(v);
+        let v = open(dir.clone(), &db, Some(&b)).unwrap();
+        assert!(v.list_revisions(&tea).unwrap().is_empty(), "never released to the new title");
     }
     /// #158: held-back history follows a rename of the locked note, still hidden, and is released under the new title.
     #[test] fn held_back_history_follows_a_rename_of_the_locked_note() {

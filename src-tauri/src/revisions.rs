@@ -130,7 +130,8 @@ impl Revisions {
     }
 
     pub fn read(&self, title: &str, id: &str) -> io::Result<(Vec<u8>, bool)> {
-        if id.contains(['/', '\\']) || id.contains("..") {
+        // snapshots only: a sidecar (an agent summary, maybe orphaned at the top level by a crash mid-`hold`) is no id
+        if id.contains(['/', '\\']) || id.contains("..") || !(id.ends_with(".md") || id.ends_with(".md.age")) {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
         Ok((crate::store::read_regular(&self.dir(title).join(id))?, id.ends_with(".age")))
@@ -342,6 +343,12 @@ mod tests {
         assert_eq!(l.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["20.md.age", "10.md"]);
         assert_eq!(r.read("n", "10.md").unwrap(), (b"a".to_vec(), false));
         assert!(r.read("n", "../x").is_err());
+    }
+    /// #180 Copilot: a sidecar is never read by id (a crash mid-`hold` can leave one with an agent summary).
+    #[test] fn a_sidecar_is_never_read_by_id() {
+        let r = rev();
+        r.snapshot_agent("n", b"a", false, 10, "secret why").unwrap();
+        assert!(r.read("n", "10.json").is_err() && r.read("n", "10.md").is_ok());
     }
     #[test] fn prune_old() {
         let r = rev();
