@@ -1233,9 +1233,10 @@ impl Vault {
     /// `apply_fs_changes`; `bulk`: a chunk of this process's bulk, whose own finish erases what it deletes.
     fn apply_paths(&mut self, paths: &[PathBuf], identity: Option<&str>, bulk: bool) -> Vec<String> {
         let mut paths = paths.to_vec();
-        for p in std::mem::take(&mut self.retry) {
-            if !paths.contains(&p) {
-                paths.push(p);
+        let retried = std::mem::take(&mut self.retry);
+        for p in &retried {
+            if !paths.contains(p) {
+                paths.push(p.clone());
             }
         }
         let mut changed = Vec::new();
@@ -1253,13 +1254,13 @@ impl Vault {
                 let mark = (changed.len(), v.rewritten.len());
                 // If `begin` fails, each upsert/remove commits on its own, as before.
                 let batched = v.index.begin().is_ok();
-                let ok = v.apply_chunk(chunk, identity, batched, &mut changed, &mut lost_plain);
+                let ok = v.apply_chunk(chunk, identity, batched, &retried, &mut changed, &mut lost_plain);
                 if batched && !(ok && v.index.commit().is_ok()) {
                     // Disk full or I/O error: the whole batch is gone, so redo it note by note, else `changed` would list
                     // notes that aren't indexed.
                     changed.truncate(mark.0);
                     v.rewritten.truncate(mark.1);
-                    v.apply_chunk(chunk, identity, false, &mut changed, &mut lost_plain);
+                    v.apply_chunk(chunk, identity, false, &retried, &mut changed, &mut lost_plain);
                 }
             }
         });
@@ -1302,13 +1303,14 @@ impl Vault {
     }
 
     /// `apply_fs_changes` for one chunk; false (and stop) when an error aborted the `batched` transaction.
-    fn apply_chunk(&mut self, paths: &[PathBuf], identity: Option<&str>, batched: bool, changed: &mut Vec<String>, lost_plain: &mut bool) -> bool {
+    fn apply_chunk(&mut self, paths: &[PathBuf], identity: Option<&str>, batched: bool, retried: &[PathBuf], changed: &mut Vec<String>, lost_plain: &mut bool) -> bool {
         let (mut listing, mut folds) = (None, None);
         for p in paths {
             let Some(nf) = parse_note_file(p) else { continue };
             let key = s(p);
             let read = self.read_for_index(p);
-            if let Ok(Some(b)) = &read && self.store.take_self_write(p, b) {
+            // a path waiting for a retry is never skipped: our own write of it does not settle what failed before
+            if let Ok(Some(b)) = &read && self.store.take_self_write(p, b) && !retried.contains(p) {
                 continue;
             }
             // A case-insensitive disk still opens `Meeting.md` once it is `meeting.md`: that spelling is gone, not a
@@ -1822,7 +1824,7 @@ mod tests {
         let other = std::thread::spawn(move || {
             rx.recv().unwrap(); // inside the lock's erase: `begin` waits for its commit
             b.index.begin().unwrap();
-            assert!(b.apply_chunk(&[p], None, true, &mut vec![], &mut false));
+            assert!(b.apply_chunk(&[p], None, true, &[], &mut vec![], &mut false));
             std::thread::sleep(std::time::Duration::from_millis(400));
             b.index.commit().unwrap();
         });
@@ -3097,6 +3099,24 @@ mod tests {
         assert!(v.index.known().is_err());
         assert_eq!((twin_text(&v).0, v.retry.clone()), (1, vec![dir.join("s.md.age")]));
         v.index.raw().execute_batch("DROP TRIGGER bad; DELETE FROM notes WHERE path='zz.md';").unwrap();
+        std::fs::write(dir.join("other.md"), "o").unwrap();
+        v.apply_fs_changes(&[dir.join("other.md")], None);
+        assert_eq!(twin_text(&v), (0, 0, 0, 0));
+    }
+    /// #158 item 2: Velo's own write of a locked path that waits for a retry must not swallow the retry.
+    #[test] fn a_retried_locked_path_is_not_swallowed_by_a_self_write() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        std::fs::write(dir.join("s.md"), BACK).unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        v.index.raw().execute_batch("CREATE TEMP TRIGGER bad AFTER INSERT ON notes WHEN NEW.encrypted = 1 BEGIN
+            INSERT INTO notes(path,title,title_folded,mtime,size,encrypted,preview,created,created_src,modified,modified_src) VALUES('zz.md','zz','zz',1,'x',0,'',1,'file',1,'file'); END;").unwrap();
+        let age = dir.join("s.md.age");
+        std::fs::remove_file(dir.join("s.md")).unwrap();
+        std::fs::write(&age, crypto::encrypt(&id, b"x").unwrap()).unwrap();
+        v.apply_fs_changes(&[age.clone()], None);
+        assert_eq!((twin_text(&v).0, v.retry.clone()), (1, vec![age.clone()]));
+        v.index.raw().execute_batch("DROP TRIGGER bad; DELETE FROM notes WHERE path='zz.md';").unwrap();
+        v.store.write_atomic(&age, &crypto::encrypt(&id, b"y").unwrap()).unwrap(); // Velo's own save marks it
         std::fs::write(dir.join("other.md"), "o").unwrap();
         v.apply_fs_changes(&[dir.join("other.md")], None);
         assert_eq!(twin_text(&v), (0, 0, 0, 0));
