@@ -1140,9 +1140,10 @@ impl Vault {
             return Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists).into());
         }
         let plain = crypto::decrypt(identity, &self.store.read(from)?)?;
-        // the key opens the note: its held-back history comes back (encrypted), as at a keyed open
+        // the key opens the note: its held-back history comes back (encrypted), as at a keyed open. A failed release
+        // fails the unlock before the note changes: once unlocked, nothing could release the rest.
         if self.revisions.has_held(&nf.title) && self.locked_folds().is_some_and(|m| m.get(&fold(&nf.title)) == Some(&1)) {
-            self.revisions.release_held(&nf.title, |b| crypto::encrypt(identity, b)).ok();
+            self.revisions.release_held(&nf.title, |b| crypto::encrypt(identity, b))?;
         }
         self.store.write_atomic(&to, &plain)?;
         finish_move(from, &to).context("removing encrypted note")?;
@@ -3591,6 +3592,24 @@ mod tests {
             let rel = r.iter().find(|r| r.id.ends_with(".age")).unwrap();
             assert_eq!(v.read_revision(&p, &rel.id, Some(&id)).unwrap(), "plainsecret", "watcher={watcher}");
         }
+    }
+    /// #180 Copilot: a held set that can't be released (here an unreadable held snapshot) fails the unlock before the
+    /// note changes: the locked file stays, no plain file is written, the set stays held for a retry.
+    #[cfg(unix)]
+    #[test] fn a_failed_release_fails_the_unlock() {
+        use std::os::unix::fs::PermissionsExt;
+        if unsafe { libc::geteuid() } == 0 {
+            return; // root reads a mode-000 file
+        }
+        let (mut v, dir, db, id, held) = held_back(true);
+        let snap = db.parent().unwrap().join("revisions").join(fnv64(&dir.to_string_lossy())).join(crate::revisions::key_for("s")).join("held").join(held);
+        std::fs::set_permissions(&snap, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let r = v.unlock_note(&s(&dir.join("s.md.age")), &id);
+        std::fs::set_permissions(&snap, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(r.is_err(), "the unlock fails");
+        assert!(dir.join("s.md.age").exists() && !dir.join("s.md").exists(), "the note is unchanged");
+        assert!(v.revisions.has_held("s"), "still held");
+        assert!(v.unlock_note(&s(&dir.join("s.md.age")), &id).is_ok() && !v.revisions.has_held("s"), "a retry releases it");
     }
     /// A plain twin counts as locked for history: before any event, `s.md` beside a new `s.md.age` lists and reads
     /// none of its plaintext history (fails if `plain_twin_of_locked` fails open).
