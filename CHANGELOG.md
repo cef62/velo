@@ -1,5 +1,11 @@
 # velo
 
+## 0.20.3
+
+### Patch Changes
+
+- a75d1fe: Settings, Export and Merge no longer hide their Cancel and Save buttons in a short window: the dialog body scrolls instead.
+
 ## 0.20.2
 
 ### Patch Changes
