@@ -3408,12 +3408,107 @@ mod tests {
         let hits = v.search("zebra", Sort::Modified, 0, &[]).unwrap().hits;
         assert_eq!(hits.len(), 1, "only the unreadable note stays listed");
     }
+    /// The history lock of the vault at `db`, held as another process would (one long `encrypt_all`, or stuck).
+    fn hold_history_lock(db: &Path) -> std::fs::File {
+        let vdir = std::fs::read_dir(db.parent().unwrap().join("revisions")).unwrap().flatten().find(|e| e.path().is_dir()).unwrap().path();
+        let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(vdir.join(".lock")).unwrap();
+        f.lock().unwrap();
+        f
+    }
+    /// A locked note `title` whose pre-lock plaintext ("<title>-own") is in its history; the watcher has not seen the lock yet.
+    fn locked_with_plain(v: &mut Vault, dir: &Path, id: &str, title: &str) {
+        let d = v.open_or_create(title, None, false).unwrap();
+        std::fs::write(&d.path, format!("{title}-own")).unwrap();
+        v.save_note(&d.path, "later", &stat_hash(&d.path), None, false).unwrap(); // snapshots "<title>-own"
+        std::fs::write(dir.join(format!("{title}.md.age")), crypto::encrypt(id, b"later").unwrap()).unwrap();
+        std::fs::remove_file(&d.path).unwrap();
+    }
+    fn history(v: &Vault, p: &Path, id: Option<&str>) -> Vec<String> {
+        let p = s(p);
+        v.list_revisions(&p).unwrap().iter().filter_map(|r| v.read_revision(&p, &r.id, id).ok()).collect()
+    }
+    /// #173 r9 m1 / r11 M1 (Copilot r4618792301): a keyless locked arrival while another party holds the history lock
+    /// past the wait holds the plaintext back without the lock: nothing stays listable (a later fold-equal plain note
+    /// lists nothing), nothing is deleted (a keyed open after the holder lets go releases it to the locked note).
+    #[test] fn a_keyless_arrival_under_a_busy_history_lock_holds_back_without_deleting() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        v.revisions.wait = std::time::Duration::from_millis(100);
+        locked_with_plain(&mut v, &dir, &id, "Cafe");
+        let holder = hold_history_lock(&db);
+        v.apply_fs_changes(&[dir.join("Cafe.md"), dir.join("Cafe.md.age")], None);
+        assert!(!v.revisions.has_plain("Cafe") && v.revisions.has_held("Cafe") && plain_revisions(&db) == 1, "held, not left listable, not deleted");
+        drop(holder);
+        let pp = dir.join("Caf\u{e9}.md");
+        std::fs::write(&pp, "mine").unwrap();
+        v.apply_fs_changes(std::slice::from_ref(&pp), None);
+        assert!(history(&v, &pp, None).is_empty(), "a later fold-equal plain note lists nothing");
+        std::fs::remove_file(&pp).unwrap();
+        drop(v);
+        let v = open(dir.clone(), &db, Some(&id)).unwrap();
+        assert_eq!(history(&v, &dir.join("Cafe.md.age"), Some(&id)), ["Cafe-own"], "released to the locked note");
+    }
+    /// #173 r11 M1, slow holder: a keyless open (`velo --mcp` direct mode) while another handle holds the lock past the
+    /// full wait (an `encrypt_all` of a large history) keeps the locked note's own history; a keyed open lists it.
+    #[test] fn a_keyless_open_under_a_slow_lock_holder_keeps_the_locked_notes_history() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        locked_with_plain(&mut v, &dir, &id, "B");
+        drop(v);
+        let holder = hold_history_lock(&db);
+        let v = open(dir.clone(), &db, None).unwrap(); // waits the full `LOCK_WAIT`, then holds back unlocked
+        assert!(!v.revisions.has_plain("B") && v.revisions.has_held("B"));
+        drop(v);
+        drop(holder);
+        let v = open(dir.clone(), &db, Some(&id)).unwrap();
+        assert_eq!(history(&v, &dir.join("B.md.age"), Some(&id)), ["B-own"]);
+    }
+    /// #173 r11 M1, renamed plain history: a holder renames plain note `Other` onto `Café` (fold-equal to locked `Cafe`)
+    /// and moves its revisions while this process's keyless batch (fold listing taken before the rename) holds `Cafe`
+    /// without the lock: no revision is lost. Whatever the hold saw is held, so it is released to the locked `Cafe` at a
+    /// keyed open (misattributed, as on `main`); whatever it did not see stays with `Café`.
+    #[test] fn a_plain_history_renamed_in_during_an_unlocked_hold_is_never_lost() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        v.revisions.wait = std::time::Duration::from_millis(300);
+        locked_with_plain(&mut v, &dir, &id, "Xnote");
+        locked_with_plain(&mut v, &dir, &id, "Cafe");
+        let other = v.open_or_create("Other", None, false).unwrap();
+        std::fs::write(&other.path, "other now").unwrap();
+        let t0 = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64 - 10_000;
+        v.revisions.snapshot_bytes("Other", b"other-1", false, t0, false).unwrap();
+        v.revisions.snapshot_bytes("Other", b"other-2", false, t0 + 1, false).unwrap();
+        let vroot = std::fs::read_dir(db.parent().unwrap().join("revisions")).unwrap().flatten().find(|e| e.path().is_dir()).unwrap().path();
+        let (from, to) = (vroot.join(crate::revisions::key_for("Other")), vroot.join(crate::revisions::key_for("Cafe")));
+        let (dir2, db2, to2) = (dir.clone(), db.clone(), to.clone());
+        let (go, go_rx) = std::sync::mpsc::channel::<()>();
+        let (locked_tx, locked) = std::sync::mpsc::channel::<()>();
+        let renamer = std::thread::spawn(move || {
+            let h = hold_history_lock(&db2);
+            locked_tx.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(100)); // this process's batch has listed the folder by now
+            std::fs::rename(dir2.join("Other.md"), dir2.join("Caf\u{e9}.md")).unwrap();
+            for e in std::fs::read_dir(&from).unwrap().flatten() {
+                std::fs::rename(e.path(), to2.join(e.file_name())).unwrap();
+            }
+            go_rx.recv().unwrap(); // stalls before letting go
+            drop(h);
+        });
+        locked.recv().unwrap();
+        v.apply_fs_changes(&[dir.join("Xnote.md"), dir.join("Xnote.md.age"), dir.join("Cafe.md"), dir.join("Cafe.md.age")], None);
+        go.send(()).unwrap();
+        renamer.join().unwrap();
+        let bodies = |d: &Path| std::fs::read_dir(d).map_or(vec![], |rd| rd.flatten().filter(|f| f.path().extension().is_some_and(|x| x == "md")).map(|f| std::fs::read_to_string(f.path()).unwrap()).collect::<Vec<_>>());
+        let mut all = [bodies(&to), bodies(&to.join("held"))].concat();
+        all.sort();
+        assert_eq!(all, ["Cafe-own", "other-1", "other-2"], "nothing lost");
+    }
     /// Plaintext snapshots on disk, held back (`held/`) or not.
     fn plain_revisions(db: &Path) -> usize {
         let root = db.parent().unwrap().join("revisions");
         let count = |d: &Path| std::fs::read_dir(d).map_or(0, |rd| rd.flatten().filter(|f| f.path().extension().is_some_and(|x| x == "md")).count());
         let mut n = 0;
-        for v in std::fs::read_dir(root).unwrap().flatten() { for k in std::fs::read_dir(v.path()).unwrap().flatten() {
+        for v in std::fs::read_dir(root).unwrap().flatten() { for k in std::fs::read_dir(v.path()).unwrap().flatten().filter(|k| k.path().is_dir()) {
             n += count(&k.path()) + count(&k.path().join("held"));
         } }
         n
@@ -3960,7 +4055,7 @@ mod tests {
         let root = db.parent().unwrap().join("revisions");
         let files = |root: &Path| -> Vec<String> {
             let mut out = vec![];
-            for k in std::fs::read_dir(root).unwrap().flatten() { for f in std::fs::read_dir(k.path()).unwrap().flatten() { out.push(f.file_name().to_string_lossy().into_owned()); } }
+            for k in std::fs::read_dir(root).unwrap().flatten().filter(|k| k.path().is_dir()) { for f in std::fs::read_dir(k.path()).unwrap().flatten() { out.push(f.file_name().to_string_lossy().into_owned()); } }
             out
         };
         let vdir = std::fs::read_dir(&root).unwrap().next().unwrap().unwrap().path();
@@ -3981,7 +4076,7 @@ mod tests {
         let mut v = open(dir.clone(), &db, Some(&id)).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
         v.lock_note(&d.path, &id).unwrap();
         let vdir = || std::fs::read_dir(db.parent().unwrap().join("revisions")).ok().and_then(|mut r| r.next()).map(|e| e.unwrap().path());
-        let names = || vdir().map(|d| std::fs::read_dir(d).unwrap().flatten().flat_map(|k| std::fs::read_dir(k.path()).unwrap().flatten().map(|f| f.file_name().to_string_lossy().into_owned()).collect::<Vec<_>>()).collect::<Vec<_>>()).unwrap_or_default();
+        let names = || vdir().map(|d| std::fs::read_dir(d).unwrap().flatten().filter(|k| k.path().is_dir()).flat_map(|k| std::fs::read_dir(k.path()).unwrap().flatten().map(|f| f.file_name().to_string_lossy().into_owned()).collect::<Vec<_>>()).collect::<Vec<_>>()).unwrap_or_default();
         assert_eq!(v.snapshot_text(&d.path, "stalesecret", None).err().unwrap().to_string(), "locked");
         assert!(names().is_empty());
         v.snapshot_text(&d.path, "stalesecret", Some(&id)).unwrap();
