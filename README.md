@@ -199,7 +199,7 @@ Turn on **Settings → General → Debug logging** (or **Toggle debug logging** 
 ## Known limitations
 
 - Quitting from the Dock or at logout bypasses the unsaved-edits prompt; edits are autosaved within about 0.5 s. Cmd+Q (and closing the window) asks first.
-- A note with Windows (CRLF) line endings, or with mixed or old-Mac (`\r`) ones, is saved with LF line endings the first time it is saved from the app's editor. An agent write to a note that is not open does not convert the file: lines it does not touch keep their line endings, appended text and added tasks take the file's, and an edit's or replacement's text, and a front-matter block velo adds to a note without one, are written as they are, so a CRLF note can end up mixed.
+- A note with Windows (CRLF) line endings, or with mixed or old-Mac (`\r`) ones, is saved with LF line endings the first time it is saved from the app's editor. An agent write to a note that is not open does not convert the file, so the note can end up with mixed line endings.
 
 ## Development
 
