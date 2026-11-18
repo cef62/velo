@@ -1,5 +1,12 @@
 # velo
 
+## 0.20.4
+
+### Patch Changes
+
+- 072fdbb: A note locked on another device that arrived while velo had no key no longer lost its earlier snapshots at once: they were kept hidden and encrypted for the locked note the next time velo opened with its key or the note was unlocked in velo, or deleted after 30 days.
+- 466db16: Fixed a locked note's plain copy keeping its searchable text after a failed index update, when Velo saved the locked note before the retry ran.
+
 ## 0.20.3
 
 ### Patch Changes
