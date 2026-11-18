@@ -9,7 +9,7 @@ import { useStore } from "./useStore";
 type Merge = NonNullable<AppState["merge"]>;
 
 const err = css({ display: "flex", alignItems: "center", gap: "1.5", fontSize: "uiSm", lineHeight: "1.4", color: "red.11", m: "0", "& svg": { w: "14px", h: "14px", flex: "none" } });
-const list = css({ listStyle: "none", m: "0", mt: "2", p: "1", maxH: "240px", overflowY: "auto", border: "1px solid", borderColor: "velo.divider", borderRadius: "l2" });
+const list = css({ listStyle: "none", m: "0", mt: "2", p: "1", maxH: "240px", minH: "0", overflowY: "auto", border: "1px solid", borderColor: "velo.divider", borderRadius: "l2" });
 const option = css({ px: "2.5", py: "1.5", borderRadius: "l1", fontSize: "uiSm", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", "&[aria-selected=true]": { bg: "gray.a3" } });
 const footer = css({ display: "flex", justifyContent: "flex-end", gap: "2", px: "5", py: "3.5", borderTop: "1px solid", borderColor: "velo.divider" });
 
@@ -49,8 +49,8 @@ function Pick({ m, controller }: { m: Merge; controller: Controller }) {
   }, [at]);
   return (
     <>
-      <div className={css({ p: "14px 20px 18px", minH: "0", overflowY: "auto" })}>
-        <Field.Root invalid={m.err !== ""}>
+      <div className={css({ p: "14px 20px 18px", minH: "0", display: "flex", flexDirection: "column" })}>
+        <Field.Root invalid={m.err !== ""} className={css({ minH: "0", display: "flex", flexDirection: "column" })}>
           <Field.Label>Merge into</Field.Label>
           <Input
             value={m.query}

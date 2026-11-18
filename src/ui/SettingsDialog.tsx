@@ -28,6 +28,8 @@ const cap = css({
   "&[data-rec]": { borderColor: "velo.accent", bg: "velo.accentSubtle", color: "velo.accentText", letterSpacing: "0", boxShadow: "0 0 0 3px var(--colors-velo-accent-halo)" },
   "&[data-bad]": { borderColor: "red.9", bg: "red.3", color: "red.11" },
 });
+// the panel is height-bounded: its children must overflow (and scroll the panel), never shrink into each other
+const panel = { flex: "1", minH: "0", overflowY: "auto", "& > *": { flexShrink: "0" } } as const;
 const dot = css({ w: "6px", h: "6px", borderRadius: "50%", bg: "velo.accent" });
 
 export function SettingsDialog({ controller, store }: { controller: Controller; store: Store<AppState> }) {
@@ -143,7 +145,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
           </Tabs.Trigger>
           <Tabs.Indicator />
         </Tabs.List>
-        <Tabs.Content value="general" className={css({ p: "5", display: "flex", flexDirection: "column", gap: "2.5", flex: "1", minH: "0", overflowY: "auto" })}>
+        <Tabs.Content value="general" className={css({ p: "5", display: "flex", flexDirection: "column", gap: "2.5", ...panel })}>
           <div className={frow}>
             <span className={flab}>Notes folder</span>
             <div className={css({ display: "flex", gap: "2" })}>
@@ -268,7 +270,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
             </div>
           </div>
         </Tabs.Content>
-        <Tabs.Content value="appearance" className={css({ p: "5", display: "flex", flexDirection: "column", gap: "4", flex: "1", minH: "0", overflowY: "auto" })}>
+        <Tabs.Content value="appearance" className={css({ p: "5", display: "flex", flexDirection: "column", gap: "4", ...panel })}>
           <div className={frow}>
             <span className={flab}>Theme</span>
             <div>{seg("Theme", d.theme, [["system", "System"], ["light", "Light"], ["dark", "Dark"]], (v) => look({ theme: v }))}</div>
@@ -278,12 +280,12 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
             <PalettePicker value={d.palette} onChange={(v) => look({ palette: v })} />
           </div>
         </Tabs.Content>
-        <Tabs.Content value="shortcuts" className={css({ p: "4 5 5", display: "flex", flexDirection: "column", gap: "3", flex: "1", minH: "0", overflowY: "auto" })}>
+        <Tabs.Content value="shortcuts" className={css({ p: "4 5 5", display: "flex", flexDirection: "column", gap: "3", ...panel })}>
           <div className={css({ display: "flex", alignItems: "center", gap: "3" })}>
             <p className={help}>{recMsg || "Click a key-cap, then press the new combination. Esc cancels, ⌫ clears."}</p>
             <Button variant="plain" size="xs" className={css({ ml: "auto" })} onClick={() => set({ shortcuts: { ...DEFAULTS } })}><RotateCcw /> Reset all</Button>
           </div>
-          {/* flex: none: as a shrinkable flex item with overflow:hidden it would squeeze to the tab's maxH and clip the rows, leaving the tab nothing to scroll */}
+          {/* flex: none: as a shrinkable flex item with overflow:hidden it would squeeze to the panel's height and clip the rows, leaving the panel nothing to scroll (`panel` sets it for every direct child; kept explicit here) */}
           <div className={css({ flex: "none", border: "1px solid", borderColor: "velo.divider", borderRadius: "8px", overflow: "hidden" })}>
             <table className={css({ w: "100%", borderCollapse: "collapse", fontSize: "ui" })}>
               <thead>
