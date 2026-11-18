@@ -912,7 +912,12 @@ mod tests {
             }
         };
         assert_eq!(id, "8000.md");
-        assert!(std::fs::File::open(r.root.join(".lock")).unwrap().try_lock().is_ok(), "the lock is free again");
+        // the first waiter's helper may still take the lock a moment later and release it at once: free means free soon
+        let t = std::time::Instant::now();
+        while std::fs::File::open(r.root.join(".lock")).unwrap().try_lock().is_err() {
+            assert!(t.elapsed() < std::time::Duration::from_secs(2), "the lock is free again");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
         // and the stuck-holder mark is gone: a change waits for a briefly busy lock again instead of failing at once
         let busy = hold_lock(&r);
         let release = std::thread::spawn(move || {
