@@ -32,3 +32,21 @@ for (const [w, h] of [[1280, 800], [1100, 800], [800, 400], [800, 300], [600, 40
     });
   }
 }
+
+test("Export with a ~1200-character search query at 600x400: Cancel and Export stay in the window", async ({ page }) => {
+  page.on("pageerror", (e) => { throw e; });
+  await page.setViewportSize({ width: 600, height: 400 });
+  await page.goto("/?pill=0");
+  await page.evaluate(() => window.__veloDemo.ready);
+  await page.getByLabel("Search or create").fill("lantern ".repeat(150));
+  await page.keyboard.press("ControlOrMeta+KeyP");
+  await page.keyboard.type("Export");
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "Export" })).toBeVisible();
+  for (const name of ["Cancel", "Export…"]) {
+    const b = await dialog.getByRole("button", { name }).boundingBox();
+    expect(b, name).not.toBeNull();
+    expect(b!.y + b!.height, `${name} bottom`).toBeLessThanOrEqual(400);
+  }
+});

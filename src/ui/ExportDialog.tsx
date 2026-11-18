@@ -60,9 +60,10 @@ function Body({ state, scope, controller }: { state: NonNullable<AppState["expor
     >
       <div className={css({ p: "20px 20px 4px" })}>
         <Dialog.Title className={css({ fontSize: "17px", fontWeight: "650", lineHeight: "1.3", letterSpacing: "-0.01em" })}>Export</Dialog.Title>
-        <Dialog.Description className={css({ mt: "1", fontSize: "uiSm", color: "velo.fgMuted" })}>{scope}</Dialog.Description>
       </div>
-      <div className={css({ p: "14px 20px 18px", display: "flex", flexDirection: "column", gap: "3", minH: "0", overflowY: "auto" })}>
+      <div className={css({ p: "4px 20px 18px", display: "flex", flexDirection: "column", gap: "3", minH: "0", overflowY: "auto" })}>
+        {/* in the scrolling body: a long search query in the scope must not push the footer out of the window */}
+        <Dialog.Description className={css({ fontSize: "uiSm", color: "velo.fgMuted", overflowWrap: "anywhere" })}>{scope}</Dialog.Description>
         <div className={row}>
           <span className={label} aria-hidden>Format</span>
           <Segments label="Format" value={state.format} items={[["md", "Markdown"], ["pdf", "PDF"]] as const} on={(format) => void controller.setExportOptions({ format })} />
