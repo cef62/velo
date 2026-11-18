@@ -223,23 +223,34 @@ impl Revisions {
     /// `held/`, which no reader lists or reads (`list` takes regular files only, `read` refuses a `/`), so no note
     /// ever shows it, whatever happens to the locked note. Only `release_held` (a key that opens the locked note) or
     /// `prune` takes it out. Each move is one rename, snapshot first: a crash in between leaves an orphan sidecar,
-    /// never listed. Only regular entries move.
+    /// never listed. Only regular entries move. Fails closed: a snapshot that can't be moved (a file, link or FIFO at
+    /// `held`, never moved through; a full disk; a read-only folder) is deleted with its sidecar, as before `held/`.
+    /// Errs only when that delete fails too: the snapshot then stays listable by a plain note with this title.
     pub fn hold(&self, title: &str) -> io::Result<()> {
         let dir = self.dir(title);
         let Ok(rd) = std::fs::read_dir(&dir) else { return Ok(()) };
         let held = dir.join(HELD);
-        if held.symlink_metadata().is_ok_and(|m| !m.is_dir()) {
-            return Err(io::ErrorKind::AlreadyExists.into()); // a link or file at that name: never moved through
-        }
+        let blocked = held.symlink_metadata().is_ok_and(|m| !m.is_dir());
+        let mut r = Ok(());
         for e in rd.flatten() {
             let (p, name) = (e.path(), e.file_name().to_string_lossy().into_owned());
             let Some(ts) = ts_of(&name).filter(|_| name.ends_with(".md") && e.file_type().is_ok_and(|t| t.is_file())) else { continue };
-            std::fs::create_dir_all(&held)?;
-            let (ms, id) = free_id(&held, ts, false);
-            std::fs::rename(&p, held.join(id))?;
-            std::fs::rename(dir.join(format!("{ts}.json")), held.join(format!("{ms}.json"))).ok();
+            let side = dir.join(format!("{ts}.json"));
+            let moved = if blocked { Err(io::ErrorKind::AlreadyExists.into()) } else {
+                std::fs::create_dir_all(&held).and_then(|()| {
+                    let (ms, id) = free_id(&held, ts, false);
+                    std::fs::rename(&p, held.join(id)).map(|()| ms)
+                })
+            };
+            match moved {
+                Ok(ms) => std::fs::rename(&side, held.join(format!("{ms}.json"))).ok(),
+                Err(_) => {
+                    r = r.and(std::fs::remove_file(&p));
+                    std::fs::remove_file(&side).ok()
+                }
+            };
         }
-        Ok(())
+        r
     }
 
     /// A locked note's rename takes its held-back set along, still held (a plain note's rename never does: the set is
@@ -254,8 +265,8 @@ impl Revisions {
     }
 
     /// Encrypt the held-back snapshots back into the note's history (sidecars scrubbed, as in `encrypt_all`). Per
-    /// snapshot: ciphertext and sidecar first, then the plaintext goes; a crash in between leaves the plaintext held
-    /// (hidden) and a second encrypted copy at the next release. Reads go through `read_regular`; non-regular entries
+    /// snapshot: ciphertext and sidecar first, then the plaintext, then its held sidecar; a crash before the plaintext
+    /// goes leaves it held (hidden) and a second encrypted copy at the next release. Reads go through `read_regular`; non-regular entries
     /// stay. Any error stops the rest, which stays held.
     pub fn release_held(&self, title: &str, encrypt: impl Fn(&[u8]) -> anyhow::Result<Vec<u8>>) -> anyhow::Result<()> {
         let (dir, Some(held)) = (self.dir(title), self.held_dir(title)) else { return Ok(()) };
@@ -267,9 +278,9 @@ impl Revisions {
             let side = held.join(format!("{ts}.json"));
             if side.symlink_metadata().is_ok() {
                 write_new(&dir.join(format!("{ms}.json")), &serde_json::to_vec(&Sidecar { summary: String::new(), agent: true })?)?;
-                std::fs::remove_file(&side)?;
             }
             std::fs::remove_file(&p)?;
+            std::fs::remove_file(&side).ok(); // after the plaintext: one that can't go (a folder) never repeats the release
         }
         std::fs::remove_dir(&held).ok(); // only when empty
         Ok(())
@@ -503,14 +514,35 @@ mod tests {
         r.prune(100 * 86_400_000);
         assert!(!r.dir("n").exists(), "the held set is pruned");
     }
-    /// #158: `hold` never moves snapshots through a link at `held`.
-    #[cfg(unix)]
-    #[test] fn hold_never_moves_through_a_link() {
+    /// #180 Copilot: a held sidecar that can't be removed (a folder) never makes a later release encrypt the snapshot
+    /// again.
+    #[test] fn a_stuck_held_sidecar_never_repeats_the_release() {
         let r = rev();
         r.snapshot_bytes("n", b"a", false, 10, false).unwrap();
-        let outside = tempfile::tempdir().unwrap();
-        std::os::unix::fs::symlink(outside.path(), r.dir("n").join(HELD)).unwrap();
-        assert!(r.hold("n").is_err() && !r.has_held("n"));
-        assert!(std::fs::read_dir(outside.path()).unwrap().next().is_none(), "nothing moved out");
+        r.hold("n").unwrap();
+        std::fs::create_dir(r.dir("n").join(HELD).join("10.json")).unwrap();
+        for _ in 0..2 {
+            r.release_held("n", |b| Ok(b.to_vec())).unwrap();
+        }
+        assert_eq!(r.list("n").len(), 1);
+    }
+    /// #158 (#180 review m2): `hold` never moves snapshots through a link, file or FIFO at `held`, and fails closed:
+    /// what it can't move is deleted with its sidecar, never left listable.
+    #[cfg(unix)]
+    #[test] fn hold_never_moves_through_a_link_and_fails_closed() {
+        for kind in ["link", "file", "fifo"] {
+            let r = rev();
+            r.snapshot_agent("n", b"a", false, 10, "why").unwrap();
+            let outside = tempfile::tempdir().unwrap();
+            let held = r.dir("n").join(HELD);
+            match kind {
+                "link" => std::os::unix::fs::symlink(outside.path(), &held).unwrap(),
+                "file" => std::fs::write(&held, "x").unwrap(),
+                _ => crate::store::fifo::make(&held),
+            }
+            r.hold("n").unwrap();
+            assert!(std::fs::read_dir(outside.path()).unwrap().next().is_none(), "{kind}: nothing moved out");
+            assert!(r.list("n").is_empty() && !r.has_plain("n") && !r.dir("n").join("10.json").exists(), "{kind}: deleted");
+        }
     }
 }
