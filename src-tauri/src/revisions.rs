@@ -202,21 +202,9 @@ impl Revisions {
         Ok(())
     }
 
-    /// Whether the note has a plaintext snapshot (what `remove_plain` would delete).
+    /// Whether the note has a plaintext snapshot (what `encrypt_all` would encrypt).
     pub fn has_plain(&self, title: &str) -> bool {
         std::fs::read_dir(self.dir(title)).is_ok_and(|rd| rd.flatten().any(|e| e.path().extension().is_some_and(|x| x == "md")))
-    }
-
-    /// Delete every plaintext snapshot of the note (no key to encrypt them with).
-    pub fn remove_plain(&self, title: &str) -> io::Result<()> {
-        let Ok(rd) = std::fs::read_dir(self.dir(title)) else { return Ok(()) };
-        for e in rd.flatten() {
-            if e.path().extension().is_some_and(|x| x == "md") {
-                std::fs::remove_file(e.path())?;
-                std::fs::remove_file(e.path().with_extension("json")).ok();
-            }
-        }
-        Ok(())
     }
 
     pub fn prune(&self, now_ms: i64) {
@@ -420,8 +408,5 @@ mod tests {
         assert!(!std::fs::read_to_string(r.dir("new").join("10.json")).unwrap().contains("why"));
         r.prune(now);
         assert!(!r.dir("new").exists(), "pair pruned, dir gone");
-        r.snapshot_agent("p", b"a", false, 10, "z").unwrap();
-        r.remove_plain("p").unwrap();
-        assert!(!r.dir("p").join("10.json").exists());
     }
 }
