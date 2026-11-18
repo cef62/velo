@@ -3408,6 +3408,28 @@ mod tests {
         let hits = v.search("zebra", Sort::Modified, 0, &[]).unwrap().hits;
         assert_eq!(hits.len(), 1, "only the unreadable note stays listed");
     }
+    /// #173 r9 m1 (Copilot r4618792301): a keyless locked arrival while the history lock is stuck fails closed: the
+    /// plaintext history is deleted (never left listable), so a later fold-equal plain note lists nothing of it.
+    #[test] fn a_keyless_arrival_under_a_stuck_history_lock_leaves_no_plaintext() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        v.revisions.wait = std::time::Duration::from_millis(100);
+        let d = v.open_or_create("Cafe", None, false).unwrap();
+        std::fs::write(&d.path, "plainsecret").unwrap();
+        v.save_note(&d.path, "later zebra", &stat_hash(&d.path), None, false).unwrap(); // snapshots "plainsecret"
+        std::fs::write(dir.join("Cafe.md.age"), crypto::encrypt(&id, b"later zebra").unwrap()).unwrap();
+        std::fs::remove_file(&d.path).unwrap();
+        let vdir = std::fs::read_dir(db.parent().unwrap().join("revisions")).unwrap().next().unwrap().unwrap().path();
+        let holder = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(vdir.join(".lock")).unwrap();
+        holder.lock().unwrap();
+        v.apply_fs_changes(&[dir.join("Cafe.md"), dir.join("Cafe.md.age")], None);
+        assert!(!v.revisions.has_plain("Cafe") && plain_revisions(&db) == 0, "deleted, not left listable");
+        drop(holder);
+        let pp = dir.join("Caf\u{e9}.md");
+        std::fs::write(&pp, "mine").unwrap();
+        v.apply_fs_changes(std::slice::from_ref(&pp), None);
+        assert!(v.list_revisions(&s(&pp)).unwrap().is_empty(), "a later fold-equal plain note lists nothing");
+    }
     /// Plaintext snapshots on disk, held back (`held/`) or not.
     fn plain_revisions(db: &Path) -> usize {
         let root = db.parent().unwrap().join("revisions");

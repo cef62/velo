@@ -49,7 +49,7 @@ pub struct Revisions {
     root: PathBuf,
     last_prune: i64,
     /// How long a change waits for the history lock (`LOCK_WAIT`; shorter in tests).
-    wait: std::time::Duration,
+    pub(crate) wait: std::time::Duration,
     /// Set while a waiter that timed out still blocks on the lock (a stuck holder): later changes then fail at once
     /// instead of each waiting and leaving a thread and a file handle behind, so a stuck holder costs one of each.
     stale: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -131,12 +131,15 @@ impl Revisions {
             Ok(_) => return unlocked(&"not a regular file"),
             Err(e) => return unlocked(&e),
         };
+        use std::sync::atomic::Ordering::SeqCst;
         match f.try_lock() {
-            Ok(()) => return Ok(Some(Held(f))),
+            Ok(()) => {
+                self.stale.store(false, SeqCst); // the holder let go: whatever helper still waits, it is no longer stuck
+                return Ok(Some(Held(f)));
+            }
             Err(std::fs::TryLockError::Error(e)) => return unlocked(&e),
             Err(std::fs::TryLockError::WouldBlock) => {}
         }
-        use std::sync::atomic::Ordering::SeqCst;
         let busy = || io::Error::new(io::ErrorKind::TimedOut, "revision history busy");
         if self.stale.load(SeqCst) {
             return Err(busy()); // an earlier waiter timed out and still waits: the holder is stuck
@@ -146,19 +149,20 @@ impl Revisions {
         let (tx, rx) = std::sync::mpsc::channel();
         let stale = self.stale.clone();
         std::thread::spawn(move || {
-            if let Err(std::sync::mpsc::SendError(Ok(f))) = tx.send(f.lock().map(|()| f)) {
-                drop(Held(f));
-            }
-            stale.store(false, SeqCst); // after the send: a waiter that timed out has set it already, or takes the lock
+            let sent = tx.send(f.lock().map(|()| Held(f)));
+            // after the send (a waiter that timed out has set the mark already, or takes the lock and clears it), and
+            // before a lock nobody took is released by its guard (`sent`, or the channel it is buffered in)
+            stale.store(false, SeqCst);
+            drop(sent);
         });
         match rx.recv_timeout(self.wait) {
-            Ok(r) => r.map(|f| Some(Held(f))), // an error while another party holds the lock never runs unlocked
+            Ok(r) => r.map(Some), // an error while another party holds the lock never runs unlocked
             Err(_) => {
                 self.stale.store(true, SeqCst);
                 // the helper may have got the lock just now: take it (and clear the mark) rather than leave the mark set
                 rx.try_recv().map_or_else(|_| Err(busy()), |r| {
                     self.stale.store(false, SeqCst);
-                    r.map(|f| Some(Held(f)))
+                    r.map(Some)
                 })
             }
         }
@@ -337,12 +341,14 @@ impl Revisions {
     /// never listed. Only regular entries move. Fails closed: a snapshot that can't be moved (a file, link or FIFO at
     /// `held`, never moved through; a full disk; a read-only folder) is deleted with its sidecar, as before `held/`.
     /// Errs only when that delete fails too: the snapshot then stays listable by a plain note with this title.
+    /// A lock it can't take (a stuck holder: `TimedOut`) fails closed the same way: every plaintext snapshot is deleted
+    /// without the lock, since a leak is not an accepted cost and the loss of history is.
     pub fn hold(&self, title: &str) -> io::Result<()> {
         let dir = self.dir(title);
-        let _held = self.lock()?;
+        let lock = self.lock().inspect_err(|e| crate::log::warn(&format!("velo: a locked note's plaintext history is deleted, not held back: {e}")));
         let Ok(rd) = std::fs::read_dir(&dir) else { return Ok(()) };
         let held = dir.join(HELD);
-        let blocked = held.symlink_metadata().is_ok_and(|m| !m.is_dir());
+        let blocked = lock.is_err() || held.symlink_metadata().is_ok_and(|m| !m.is_dir());
         let mut r = Ok(());
         for e in rd.flatten() {
             let (p, name) = (e.path(), e.file_name().to_string_lossy().into_owned());
@@ -979,5 +985,19 @@ mod tests {
             assert_eq!(got, want);
             assert!(!r.has_plain("n") && !r.has_held("n"));
         }
+    }
+    /// #173 r9 M1: the stuck-holder mark is cleared by the next change that gets the lock, so a short, legitimate
+    /// contention after a recovery waits again (deterministic: the mark is set by hand, no helper races the test).
+    #[test] fn a_change_that_gets_the_lock_clears_the_stuck_holder_mark() {
+        let (_d, r) = tmp_rev();
+        r.stale.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(r.snapshot_agent("n", b"a", false, 5, "why").unwrap(), "5.md", "a free lock is taken despite the mark");
+        let busy = hold_lock(&r);
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            busy.unlock().unwrap();
+        });
+        assert_eq!(r.snapshot_agent("n", b"b", false, 6, "why").unwrap(), "6.md", "waits instead of failing at once");
+        release.join().unwrap();
     }
 }
