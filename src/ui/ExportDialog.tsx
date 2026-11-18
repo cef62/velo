@@ -25,7 +25,7 @@ export function ExportDialog({ controller, store }: { controller: Controller; st
     <Dialog.Root open={exporting !== null} onOpenChange={(d) => !d.open && void controller.commitExport(false)} closeOnInteractOutside={false}>
       <Dialog.Backdrop />
       <Dialog.Positioner>
-        <Dialog.Content className={css({ maxW: "460px", p: "0", gap: "0", overflow: "hidden" })}>
+        <Dialog.Content className={css({ maxW: "460px", p: "0", gap: "0", overflow: "hidden", maxH: "calc(100dvh - 32px)" })}>
           {last.current && <Body state={exporting ?? last.current} scope={scope} controller={controller} />}
         </Dialog.Content>
       </Dialog.Positioner>
@@ -52,6 +52,7 @@ function Body({ state, scope, controller }: { state: NonNullable<AppState["expor
   const empty = counts !== null && counts.notes === 0;
   return (
     <form
+      className={css({ display: "flex", flexDirection: "column", minH: "0" })}
       onSubmit={(e) => {
         e.preventDefault();
         void controller.commitExport(true);
@@ -61,7 +62,7 @@ function Body({ state, scope, controller }: { state: NonNullable<AppState["expor
         <Dialog.Title className={css({ fontSize: "17px", fontWeight: "650", lineHeight: "1.3", letterSpacing: "-0.01em" })}>Export</Dialog.Title>
         <Dialog.Description className={css({ mt: "1", fontSize: "uiSm", color: "velo.fgMuted" })}>{scope}</Dialog.Description>
       </div>
-      <div className={css({ p: "14px 20px 18px", display: "flex", flexDirection: "column", gap: "3" })}>
+      <div className={css({ p: "14px 20px 18px", display: "flex", flexDirection: "column", gap: "3", minH: "0", overflowY: "auto" })}>
         <div className={row}>
           <span className={label} aria-hidden>Format</span>
           <Segments label="Format" value={state.format} items={[["md", "Markdown"], ["pdf", "PDF"]] as const} on={(format) => void controller.setExportOptions({ format })} />

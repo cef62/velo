@@ -22,7 +22,7 @@ export function MergeDialog({ controller, store }: { controller: Controller; sto
     <Dialog.Root open={merge !== null} onOpenChange={(d) => !d.open && controller.cancelMerge()} closeOnInteractOutside={false}>
       <Dialog.Backdrop />
       <Dialog.Positioner>
-        <Dialog.Content className={css({ maxW: "440px", p: "0", gap: "0", overflow: "hidden" })}>
+        <Dialog.Content className={css({ maxW: "440px", p: "0", gap: "0", overflow: "hidden", maxH: "calc(100dvh - 32px)" })}>
           <div className={css({ p: "20px 20px 4px" })}>
             <Dialog.Title className={css({ fontSize: "17px", fontWeight: "650", lineHeight: "1.3", letterSpacing: "-0.01em" })}>Merge note</Dialog.Title>
           </div>
@@ -49,7 +49,7 @@ function Pick({ m, controller }: { m: Merge; controller: Controller }) {
   }, [at]);
   return (
     <>
-      <div className={css({ p: "14px 20px 18px" })}>
+      <div className={css({ p: "14px 20px 18px", minH: "0", overflowY: "auto" })}>
         <Field.Root invalid={m.err !== ""}>
           <Field.Label>Merge into</Field.Label>
           <Input
@@ -105,7 +105,7 @@ function Confirm({ m, controller }: { m: Merge; controller: Controller }) {
   const t = m.target!;
   return (
     <>
-      <div className={css({ p: "14px 20px 18px", display: "flex", flexDirection: "column", gap: "2", fontSize: "uiSm", lineHeight: "1.5" })}>
+      <div className={css({ p: "14px 20px 18px", minH: "0", overflowY: "auto", display: "flex", flexDirection: "column", gap: "2", fontSize: "uiSm", lineHeight: "1.5" })}>
         <p className={css({ m: "0" })}>
           Merge <strong>{m.sourceTitle}</strong> into <strong>{t.title}</strong>? <em>{t.count}</em> {t.count === 1 ? "link will be" : "links will be"} updated. {m.sourceTitle} goes to the Trash.
         </p>

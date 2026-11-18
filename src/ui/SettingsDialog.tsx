@@ -124,14 +124,14 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
   const kbdOn = { background: "transparent", color: "inherit", boxShadow: "none" } as const;
 
   return (
-    <div onKeyDown={(e) => (isMac ? e.metaKey : e.ctrlKey) && e.key === "Enter" && (e.preventDefault(), void save())}>
-      <div className={css({ display: "flex", alignItems: "center", px: "5", pt: "4", pb: "2" })}>
+    <div className={css({ display: "flex", flexDirection: "column", minH: "0" })} onKeyDown={(e) => (isMac ? e.metaKey : e.ctrlKey) && e.key === "Enter" && (e.preventDefault(), void save())}>
+      <div className={css({ flex: "none", display: "flex", alignItems: "center", px: "5", pt: "4", pb: "2" })}>
         <Dialog.Title className={css({ fontSize: "17px", fontWeight: "650", letterSpacing: "-0.01em" })}>Settings</Dialog.Title>
         <Dialog.CloseTrigger asChild>
           <IconButton variant="plain" size="sm" aria-label="Close (Esc)" className={css({ ml: "auto", position: "static" })}><X /></IconButton>
         </Dialog.CloseTrigger>
       </div>
-      <Tabs.Root value={tab} onValueChange={(x) => setTab(x.value)} className={css({ gap: "0" })}>
+      <Tabs.Root value={tab} onValueChange={(x) => setTab(x.value)} className={css({ gap: "0", flex: "1", minH: "0", alignItems: "stretch" })}>
         <Tabs.List aria-label="Settings sections" className={css({ w: "100%", px: "3.5", borderBottom: "1px solid", borderColor: "velo.subtle", gap: "1" })}>
           <Tabs.Trigger value="general" className={css({ h: "38px", px: "2", fontSize: "ui" })}>General</Tabs.Trigger>
           <Tabs.Trigger value="appearance" className={css({ h: "38px", px: "2", fontSize: "ui" })}>Appearance</Tabs.Trigger>
@@ -143,7 +143,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
           </Tabs.Trigger>
           <Tabs.Indicator />
         </Tabs.List>
-        <Tabs.Content value="general" className={css({ p: "5", display: "flex", flexDirection: "column", gap: "2.5" })}>
+        <Tabs.Content value="general" className={css({ p: "5", display: "flex", flexDirection: "column", gap: "2.5", flex: "1", minH: "0", overflowY: "auto" })}>
           <div className={frow}>
             <span className={flab}>Notes folder</span>
             <div className={css({ display: "flex", gap: "2" })}>
@@ -268,7 +268,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
             </div>
           </div>
         </Tabs.Content>
-        <Tabs.Content value="appearance" className={css({ p: "5", display: "flex", flexDirection: "column", gap: "4", overflowY: "auto", maxH: "calc(100dvh - 240px)" })}>
+        <Tabs.Content value="appearance" className={css({ p: "5", display: "flex", flexDirection: "column", gap: "4", flex: "1", minH: "0", overflowY: "auto" })}>
           <div className={frow}>
             <span className={flab}>Theme</span>
             <div>{seg("Theme", d.theme, [["system", "System"], ["light", "Light"], ["dark", "Dark"]], (v) => look({ theme: v }))}</div>
@@ -278,7 +278,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
             <PalettePicker value={d.palette} onChange={(v) => look({ palette: v })} />
           </div>
         </Tabs.Content>
-        <Tabs.Content value="shortcuts" className={css({ p: "4 5 5", display: "flex", flexDirection: "column", gap: "3", overflowY: "auto", maxH: "calc(100dvh - 240px)" })}>
+        <Tabs.Content value="shortcuts" className={css({ p: "4 5 5", display: "flex", flexDirection: "column", gap: "3", flex: "1", minH: "0", overflowY: "auto" })}>
           <div className={css({ display: "flex", alignItems: "center", gap: "3" })}>
             <p className={help}>{recMsg || "Click a key-cap, then press the new combination. Esc cancels, ⌫ clears."}</p>
             <Button variant="plain" size="xs" className={css({ ml: "auto" })} onClick={() => set({ shortcuts: { ...DEFAULTS } })}><RotateCcw /> Reset all</Button>
@@ -320,7 +320,7 @@ function Body({ cur, controller, store }: { cur: Settings; controller: Controlle
           </div>
         </Tabs.Content>
       </Tabs.Root>
-      <div className={css({ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "2", px: "5", py: "3.5", borderTop: "1px solid", borderColor: "velo.divider" })}>
+      <div className={css({ flex: "none", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "2", px: "5", py: "3.5", borderTop: "1px solid", borderColor: "velo.divider" })}>
         {nConflicts > 0 ? (
           <span className={ferr} style={{ marginRight: "auto" }}>{nConflicts} conflict{nConflicts > 1 ? "s" : ""} — fix it to save</span>
         ) : noHotkey ? (
