@@ -341,14 +341,15 @@ impl Revisions {
     /// never listed. Only regular entries move. Fails closed: a snapshot that can't be moved (a file, link or FIFO at
     /// `held`, never moved through; a full disk; a read-only folder) is deleted with its sidecar, as before `held/`.
     /// Errs only when that delete fails too: the snapshot then stays listable by a plain note with this title.
-    /// A lock it can't take (a stuck holder: `TimedOut`) fails closed the same way: every plaintext snapshot is deleted
-    /// without the lock, since a leak is not an accepted cost and the loss of history is.
+    /// A lock it can't take (another change holds it past the wait: a large `encrypt_all` or `release_held`, or a stuck
+    /// process) never makes it delete: it holds back without the lock, as before the lock (leaving the plaintext
+    /// listable is a leak; deleting it would lose history that the next keyed open releases).
     pub fn hold(&self, title: &str) -> io::Result<()> {
         let dir = self.dir(title);
-        let lock = self.lock().inspect_err(|e| crate::log::warn(&format!("velo: a locked note's plaintext history is deleted, not held back: {e}")));
+        let _lock = self.lock().inspect_err(|e| crate::log::warn(&format!("velo: a locked note's plaintext history is held back without the history lock: {e}")));
         let Ok(rd) = std::fs::read_dir(&dir) else { return Ok(()) };
         let held = dir.join(HELD);
-        let blocked = lock.is_err() || held.symlink_metadata().is_ok_and(|m| !m.is_dir());
+        let blocked = held.symlink_metadata().is_ok_and(|m| !m.is_dir());
         let mut r = Ok(());
         for e in rd.flatten() {
             let (p, name) = (e.path(), e.file_name().to_string_lossy().into_owned());
