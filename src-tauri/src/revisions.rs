@@ -119,6 +119,7 @@ fn claim(dir: &std::path::Path, now_ms: i64, encrypted: bool, fill_sidecar: Opti
             }
         };
         if let Err(e) = make(&at(ext)) {
+            drop(side.take()); // a handle still open can keep a removed file's name busy on Windows
             undo(false);
             if e.kind() == io::ErrorKind::AlreadyExists {
                 continue;
@@ -126,6 +127,7 @@ fn claim(dir: &std::path::Path, now_ms: i64, encrypted: bool, fill_sidecar: Opti
             return Err(e);
         }
         if taken(other) || (fill_sidecar.is_none() && taken("json")) {
+            drop(side.take());
             undo(true);
             continue;
         }
@@ -270,6 +272,12 @@ impl Revisions {
             for e in rd.flatten() {
                 let name = e.file_name().to_string_lossy().into_owned();
                 let Some(ts) = name.strip_suffix(".json") else { continue };
+                // an empty sidecar may be an agent writer's fresh claim (it fills it through its handle, so removing the
+                // file would lose its label); a crashed writer's leftover stays too, until `prune` (its folder stays
+                // meanwhile)
+                if e.metadata().is_ok_and(|m| m.len() == 0) {
+                    continue;
+                }
                 if !from.join(format!("{ts}.md")).exists() && !from.join(format!("{ts}.md.age")).exists() {
                     std::fs::remove_file(e.path()).ok();
                 }
@@ -726,6 +734,18 @@ mod tests {
         assert_eq!(unsafe { libc::chflags(side.as_ptr(), 0) }, 0, "flag cleared so the temp dir can go");
         let l = r.list("new");
         assert_eq!((l.len(), l[0].summary.as_deref(), r.read("new", &l[0].id).unwrap().0), (1, Some("why"), b"body".to_vec()));
+    }
+    /// The source sweep of `rename` keeps an empty `<ms>.json` (an agent writer's fresh claim, not yet filled) and
+    /// still removes a non-empty orphan.
+    #[test] fn rename_sweep_keeps_a_writers_claimed_empty_sidecar() {
+        let (_d, r) = tmp_rev();
+        r.snapshot_agent("old", b"a", false, 10, "why").unwrap();
+        put(&r.dir("old").join("50.json"), &[]).unwrap(); // claimed by a writer whose snapshot does not exist yet
+        std::fs::write(r.dir("old").join("60.json"), br#"{"summary":"orphan","agent":true}"#).unwrap();
+        r.rename("old", "new");
+        assert!(r.dir("old").join("50.json").exists(), "claim kept");
+        assert!(!r.dir("old").join("60.json").exists(), "non-empty orphan swept");
+        assert_eq!(r.list("new").len(), 1);
     }
     #[test] fn sidecar_follows_rename_prune_encrypt() {
         let r = rev();
