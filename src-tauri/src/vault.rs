@@ -3300,7 +3300,7 @@ mod tests {
     fn plain_revisions(db: &Path) -> usize {
         let root = db.parent().unwrap().join("revisions");
         let mut n = 0;
-        for v in std::fs::read_dir(root).unwrap().flatten() { for k in std::fs::read_dir(v.path()).unwrap().flatten() {
+        for v in std::fs::read_dir(root).unwrap().flatten() { for k in std::fs::read_dir(v.path()).unwrap().flatten().filter(|k| k.path().is_dir()) {
             n += std::fs::read_dir(k.path()).unwrap().flatten().filter(|f| f.path().extension().is_some_and(|x| x == "md")).count();
         } }
         n
@@ -3611,7 +3611,7 @@ mod tests {
         let root = db.parent().unwrap().join("revisions");
         let files = |root: &Path| -> Vec<String> {
             let mut out = vec![];
-            for k in std::fs::read_dir(root).unwrap().flatten() { for f in std::fs::read_dir(k.path()).unwrap().flatten() { out.push(f.file_name().to_string_lossy().into_owned()); } }
+            for k in std::fs::read_dir(root).unwrap().flatten().filter(|k| k.path().is_dir()) { for f in std::fs::read_dir(k.path()).unwrap().flatten() { out.push(f.file_name().to_string_lossy().into_owned()); } }
             out
         };
         let vdir = std::fs::read_dir(&root).unwrap().next().unwrap().unwrap().path();
@@ -3632,7 +3632,7 @@ mod tests {
         let mut v = open(dir.clone(), &db, Some(&id)).unwrap(); let d = v.open_or_create("s", None, false).unwrap();
         v.lock_note(&d.path, &id).unwrap();
         let vdir = || std::fs::read_dir(db.parent().unwrap().join("revisions")).ok().and_then(|mut r| r.next()).map(|e| e.unwrap().path());
-        let names = || vdir().map(|d| std::fs::read_dir(d).unwrap().flatten().flat_map(|k| std::fs::read_dir(k.path()).unwrap().flatten().map(|f| f.file_name().to_string_lossy().into_owned()).collect::<Vec<_>>()).collect::<Vec<_>>()).unwrap_or_default();
+        let names = || vdir().map(|d| std::fs::read_dir(d).unwrap().flatten().filter(|k| k.path().is_dir()).flat_map(|k| std::fs::read_dir(k.path()).unwrap().flatten().map(|f| f.file_name().to_string_lossy().into_owned()).collect::<Vec<_>>()).collect::<Vec<_>>()).unwrap_or_default();
         assert_eq!(v.snapshot_text(&d.path, "stalesecret", None).err().unwrap().to_string(), "locked");
         assert!(names().is_empty());
         v.snapshot_text(&d.path, "stalesecret", Some(&id)).unwrap();
