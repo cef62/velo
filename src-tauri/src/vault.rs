@@ -1277,15 +1277,16 @@ impl Vault {
                 if i >= rest_chunks && v.index.bulk_off() {
                     v.index.finish_bulk();
                 }
-                let mark = (changed.len(), v.rewritten.len());
+                let mark = changed.len();
                 // If `begin` fails, each upsert/remove commits on its own, as before.
                 let batched = v.index.begin().is_ok();
                 let ok = v.apply_chunk(chunk, identity, batched, &retried, &mut changed, &mut lost_plain);
                 if batched && !(ok && v.index.commit().is_ok()) {
                     // Disk full or I/O error: the whole batch is gone, so redo it note by note, else `changed` would list
                     // notes that aren't indexed.
-                    changed.truncate(mark.0);
-                    v.rewritten.truncate(mark.1);
+                    changed.truncate(mark);
+                    // `rewritten` keeps its keys: a twin stripped in autocommit after the batch ended stays stripped, and the
+                    // redo no longer flips its mark; a rolled-back one is rewritten again by the redo (a spare refresh at worst)
                     v.apply_chunk(chunk, identity, false, &retried, &mut changed, &mut lost_plain);
                 }
             }
@@ -3203,12 +3204,33 @@ mod tests {
         let age = dir.join("s.md.age");
         std::fs::remove_file(dir.join("s.md")).unwrap();
         std::fs::write(&age, crypto::encrypt(&id, b"x").unwrap()).unwrap();
-        v.apply_fs_changes(&[age.clone()], None);
+        v.apply_fs_changes(std::slice::from_ref(&age), None);
         assert_eq!((twin_text(&v).0, v.retry.clone()), (1, vec![age.clone()]));
         v.index.raw().execute_batch("DROP TRIGGER bad; DELETE FROM notes WHERE path='zz.md';").unwrap();
         v.store.write_atomic(&age, &crypto::encrypt(&id, b"y").unwrap()).unwrap(); // Velo's own save marks it
         std::fs::write(dir.join("other.md"), "o").unwrap();
         v.apply_fs_changes(&[dir.join("other.md")], None);
+        assert_eq!(twin_text(&v), (0, 0, 0, 0));
+    }
+    /// #178 test gap: the note-by-note redo of a failed batch still treats a retried path as retried, so Velo's own
+    /// write of it does not swallow it there either.
+    #[test] fn a_retried_locked_path_survives_the_redo_of_a_failed_batch() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        std::fs::write(dir.join("s.md"), BACK).unwrap();
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        v.index.raw().execute_batch("CREATE TEMP TRIGGER bad AFTER INSERT ON notes WHEN NEW.encrypted = 1 BEGIN
+            INSERT INTO notes(path,title,title_folded,mtime,size,encrypted,preview,created,created_src,modified,modified_src) VALUES('zz.md','zz','zz',1,'x',0,'',1,'file',1,'file'); END;").unwrap();
+        let age = dir.join("s.md.age");
+        std::fs::remove_file(dir.join("s.md")).unwrap();
+        std::fs::write(&age, crypto::encrypt(&id, b"x").unwrap()).unwrap();
+        v.apply_fs_changes(std::slice::from_ref(&age), None);
+        assert_eq!(v.retry, vec![age.clone()]);
+        v.index.raw().execute_batch("DROP TRIGGER bad; DELETE FROM notes WHERE path='zz.md';
+            CREATE TEMP TRIGGER full BEFORE INSERT ON notes WHEN NEW.path LIKE '%bad.md' BEGIN SELECT RAISE(ROLLBACK, 'disk I/O error'); END;").unwrap();
+        v.store.write_atomic(&age, &crypto::encrypt(&id, b"y").unwrap()).unwrap(); // Velo's own save marks it
+        std::fs::write(dir.join("bad.md"), "bad").unwrap();
+        v.apply_fs_changes(&[dir.join("bad.md")], None); // the batch fails at bad.md: note by note
+        assert!(v.index.title_modified(&s(&age)).unwrap().is_some(), "the retried path was indexed by the redo");
         assert_eq!(twin_text(&v), (0, 0, 0, 0));
     }
     /// #148: a lock whose erase fails puts back the text of a twin row another process wrote meanwhile (`velo --mcp`
@@ -3297,6 +3319,18 @@ mod tests {
         assert_eq!(event(age.clone(), true), sorted(vec![s(&age), s(&long)]), "by the scan");
         let age = dir.join("g.md.age");
         assert_eq!(event(age.clone(), true), sorted(vec![s(&age), s(&dir.join("g.md"))]), "a gone row erased");
+    }
+    /// #158: `s.md`'s by-name re-index ends the batch's transaction, so `s.txt` is stripped in autocommit; the redo
+    /// finds it already stripped. It is still reported: its text left the index, and the screen shows it.
+    #[test] fn a_twin_stripped_during_a_failed_batch_is_reported() {
+        let (dir, db) = setup(); let id = crypto::new_identity();
+        for n in ["s.md", "s.txt"] { std::fs::write(dir.join(n), BACK).unwrap(); }
+        let mut v = open(dir.clone(), &db, None).unwrap();
+        v.index.raw().execute_batch("CREATE TEMP TRIGGER full BEFORE INSERT ON notes WHEN NEW.path LIKE '%s.md' BEGIN SELECT RAISE(ROLLBACK, 'disk I/O error'); END;").unwrap();
+        std::fs::write(dir.join("s.md.age"), crypto::encrypt(&id, b"x").unwrap()).unwrap();
+        let changed = v.apply_fs_changes(&[dir.join("s.md.age")], None);
+        assert_eq!(v.index.size(&s(&dir.join("s.txt"))).unwrap(), Some(TWIN_SIZE), "s.txt is stripped");
+        assert!(changed.contains(&s(&dir.join("s.txt"))), "{changed:?}");
     }
     /// #167 review m1: every save of a locked note re-indexes its plain twin by name; only the save that strips it
     /// reports it, so autosaves don't refresh the whole list each time.
