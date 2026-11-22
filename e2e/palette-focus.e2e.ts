@@ -5,12 +5,17 @@ import { expect, test, type Page } from "@playwright/test";
 const mod = process.platform === "darwin" ? "Meta" : "Control";
 const palette = (page: Page) => page.getByRole("dialog", { name: "Command palette" });
 
+// Two animation frames: an Escape within ~10 ms of the input getting focus finds the focus trap still activating and leaves
+// focus on <body> (as on main), which is not what these tests probe.
+const settle = (page: Page) => page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+
 // Waits for the palette to settle; the zero-delay test below is the one that covers the open itself.
 const openPalette = async (page: Page) => {
   await page.keyboard.press(`${mod}+KeyP`);
   await expect(palette(page)).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Command" })).toBeFocused();
   await expect(page.locator("body")).toHaveCSS("pointer-events", "none"); // the dialog's dismiss layer is live: a click earlier is ignored
+  await settle(page);
 };
 
 test.beforeEach(async ({ page }) => {
@@ -68,6 +73,7 @@ for (const origin of ["editor", "search field", "list row"] as const) {
     await page.keyboard.type("Focus search");
     expect(await page.evaluate(() => (window as unknown as { __at: string }).__at)).toBe("Command");
     await expect(page.getByRole("combobox", { name: "Command" })).toHaveValue("Focus search");
+    await settle(page); // only the typing above is zero-delay
     await page.keyboard.press("Escape");
     await expect(palette(page)).toBeHidden();
     expect(await editor.innerText()).toBe(note);
