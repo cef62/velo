@@ -5,13 +5,13 @@ import { expect, test, type Page } from "@playwright/test";
 
 const row = (page: Page, title: string) => page.getByRole("option", { name: new RegExp(`^${title}`) }).first();
 
-/** Where focus is: "inert" inside the wrapper, "editor" in CodeMirror, else a short label of the element. */
+/** Where focus is: "editor" in CodeMirror, "behind" elsewhere inside the wrapper (found by structure, not by `[inert]`, so the checks still run without it), else a short label of the element. */
 const focusAt = (page: Page) =>
   page.evaluate(() => {
     const a = document.activeElement as HTMLElement | null;
     if (!a || a === document.body) return "body";
-    if (a.closest("[inert]")) return "inert";
     if (a.closest(".cm-editor")) return "editor";
+    if (document.querySelector("[data-titlebar]")?.parentElement?.contains(a)) return "behind";
     return a.getAttribute("aria-label") ?? a.getAttribute("role") ?? a.tagName.toLowerCase();
   });
 
@@ -27,16 +27,16 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("behind the unlock screen the note area is inert: Tab, focus() and typing never reach it", async ({ page }) => {
-  // the title bar and the editor are inside the inert wrapper
+  // the wrapper is the title bar's parent: it holds the tag bar, the editor and the preview too
   const wrapped = await page.evaluate(() => {
-    const w = document.querySelector(".cm-content")?.closest<HTMLElement>("[inert]");
+    const w = document.querySelector("[data-titlebar]")?.parentElement;
     return {
-      titleBar: !!w?.querySelector("[data-titlebar]"),
+      parts: ['[aria-label="Note tags"]', ".cm-content", "[data-preview-host]"].filter((q) => w?.querySelector(q)),
       display: w && getComputedStyle(w).display,
       focusables: w?.querySelectorAll("button, input, textarea, [tabindex], [contenteditable=true]").length ?? 0,
     };
   });
-  expect(wrapped.titleBar).toBe(true);
+  expect(wrapped.parts).toEqual(['[aria-label="Note tags"]', ".cm-content", "[data-preview-host]"]);
   expect(wrapped.display).toBe("contents");
   expect(wrapped.focusables).toBeGreaterThan(1); // the title bar's controls and the editor: there is something to keep out
 
@@ -49,19 +49,23 @@ test("behind the unlock screen the note area is inert: Tab, focus() and typing n
       seen.add(await focusAt(page));
     }
   }
-  expect(seen).not.toContain("inert");
-  expect(seen).not.toContain("editor");
+  // soft: without `inert` each behaviour check below reports its own failure
+  expect.soft(seen).not.toContain("behind");
+  expect.soft(seen).not.toContain("editor");
   expect(seen).toContain("option"); // a note row: the list stays reachable
 
   // a script cannot focus inside it either (inert applies through `display: contents`), and typing goes nowhere
   const before = await page.locator(".cm-content").innerText();
   const focused = await page.evaluate(() => {
-    const w = document.querySelector(".cm-content")!.closest("[inert]")!;
+    const w = document.querySelector("[data-titlebar]")!.parentElement!;
     return [...w.querySelectorAll<HTMLElement>("button, input, textarea, [tabindex], [contenteditable=true]")].filter((el) => (el.focus(), document.activeElement === el)).length;
   });
-  expect(focused).toBe(0);
+  expect.soft(focused).toBe(0);
+  await page.locator(".cm-content").evaluate((el: HTMLElement) => el.focus()); // stays put while inert; in the editor without it
   await page.keyboard.type("zzz");
-  expect(await page.locator(".cm-content").innerText()).toBe(before);
+  expect.soft(await page.locator(".cm-content").innerText()).toBe(before);
+  // last, so that without `inert` the behaviour checks above are what fail
+  expect(await page.locator("[data-titlebar]").evaluate((t) => t.parentElement!.hasAttribute("inert"))).toBe(true);
 });
 
 test("Escape lifts inert, puts focus back on the list, and the highlight stays on the locked row (#131)", async ({ page }) => {
