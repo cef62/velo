@@ -4,6 +4,7 @@ import { css } from "styled-system/css";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { Button, Dialog, Field, Input } from "@/components/ui";
+import { useReturnFocus } from "./modal";
 import { useStore } from "./useStore";
 
 type Merge = NonNullable<AppState["merge"]>;
@@ -18,8 +19,9 @@ export function MergeDialog({ controller, store }: { controller: Controller; sto
   const last = useRef(merge);
   if (merge) last.current = merge; // keeps the body mounted through the exit animation
   const m = last.current;
+  const finalFocusEl = useReturnFocus(merge !== null);
   return (
-    <Dialog.Root open={merge !== null} onOpenChange={(d) => !d.open && controller.cancelMerge()} closeOnInteractOutside={false}>
+    <Dialog.Root open={merge !== null} finalFocusEl={finalFocusEl}onOpenChange={(d) => !d.open && controller.cancelMerge()} closeOnInteractOutside={false}>
       <Dialog.Backdrop />
       <Dialog.Positioner>
         <Dialog.Content className={css({ maxW: "440px", p: "0", gap: "0", overflow: "hidden", maxH: "calc(100dvh - 32px)" })}>

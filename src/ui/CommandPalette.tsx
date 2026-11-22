@@ -8,6 +8,7 @@ import { Dialog, Kbd } from "@/components/ui";
 import { paletteGroups, paletteSearch, type PaletteItem } from "../palette";
 import { formatBinding } from "../shortcuts";
 import { HighlightedText } from "./HighlightedText";
+import { useReturnFocus } from "./modal";
 import { useStore } from "./useStore";
 
 // ⌘P (v2 §3 #7–#8): every action by name with its live binding. Actions only; notes stay in the search field.
@@ -17,14 +18,8 @@ const empty = css({ p: "6", textAlign: "center", color: "velo.fgMuted", fontSize
 
 export function CommandPalette({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const open = useStore(store, (s) => s.palette);
-  // The input's autoFocus (synchronous, so keys typed right after the shortcut reach it) runs at commit, before the dialog's focus trap
-  // records what had focus, so the trap would "return" focus to the removed input, i.e. <body> (#111). Record the origin in the render
-  // that opens the palette, still before that commit, and hand it to the dialog as its final focus.
-  const origin = useRef<Element | null>(null);
-  const wasOpen = useRef(false);
-  if (open && !wasOpen.current) origin.current = document.activeElement;
-  wasOpen.current = open;
-  const finalFocusEl = () => (origin.current instanceof HTMLElement && origin.current.isConnected ? origin.current : null);
+  // keeps the input's synchronous autoFocus (keys typed right after the shortcut reach it) without losing the origin on close (#111)
+  const finalFocusEl = useReturnFocus(open);
   return (
     <Dialog.Root open={open} finalFocusEl={finalFocusEl} onOpenChange={(d) => !d.open && controller.closePalette()}>
       <Dialog.Backdrop />

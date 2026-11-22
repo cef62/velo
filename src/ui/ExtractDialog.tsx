@@ -4,6 +4,7 @@ import { css } from "styled-system/css";
 import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { Button, Dialog, Field, Input } from "@/components/ui";
+import { useReturnFocus } from "./modal";
 import { useStore } from "./useStore";
 
 const err = css({ display: "flex", alignItems: "center", gap: "1.5", fontSize: "uiSm", lineHeight: "1.4", color: "red.11", m: "0", "& svg": { w: "14px", h: "14px", flex: "none" } });
@@ -12,8 +13,9 @@ export function ExtractDialog({ controller, store }: { controller: Controller; s
   const extract = useStore(store, (s) => s.extract);
   const last = useRef(extract);
   if (extract) last.current = extract; // keeps the body mounted through the exit animation
+  const finalFocusEl = useReturnFocus(extract !== null);
   return (
-    <Dialog.Root open={extract !== null} onOpenChange={(d) => !d.open && void controller.commitExtract(null)} closeOnInteractOutside={false}>
+    <Dialog.Root open={extract !== null} finalFocusEl={finalFocusEl}onOpenChange={(d) => !d.open && void controller.commitExtract(null)} closeOnInteractOutside={false}>
       <Dialog.Backdrop />
       <Dialog.Positioner>
         <Dialog.Content className={css({ maxW: "420px", p: "0", gap: "0", overflow: "hidden" })}>

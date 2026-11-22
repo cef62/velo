@@ -10,6 +10,7 @@ import { DEFAULTS, LABELS, NONE, formatBinding, resolve, type Action } from "../
 import { PalettePicker } from "./PalettePicker";
 import { conflictsOf } from "./settingsModel";
 import { platform } from "./platform";
+import { useReturnFocus } from "./modal";
 import { useStore } from "./useStore";
 
 const actions = Object.keys(DEFAULTS) as Action[];
@@ -36,8 +37,9 @@ export function SettingsDialog({ controller, store }: { controller: Controller; 
   const settings = useStore(store, (s) => s.settings);
   const last = useRef(settings);
   if (settings) last.current = settings; // keeps the body mounted through the exit animation
+  const finalFocusEl = useReturnFocus(settings !== null);
   return (
-    <Dialog.Root open={settings !== null} onOpenChange={(d) => !d.open && controller.closeSettings()} closeOnInteractOutside={false}>
+    <Dialog.Root open={settings !== null} finalFocusEl={finalFocusEl}onOpenChange={(d) => !d.open && controller.closeSettings()} closeOnInteractOutside={false}>
       <Dialog.Backdrop />
       <Dialog.Positioner>
         <Dialog.Content className={css({ maxW: "720px", p: "0", gap: "0", overflow: "hidden", maxH: "calc(100dvh - 32px)" })}>

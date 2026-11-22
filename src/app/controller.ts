@@ -60,6 +60,7 @@ export type KeyEventLike = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctr
   inSearchWithText: boolean;
   inSearch?: boolean; // focus in the search field
   inDialog: boolean; // a dialog or the settings recorder owns the keys
+  inPalette?: boolean; // the command palette is the only open dialog: its own shortcut closes it
   inRename: boolean;
 };
 
@@ -2224,8 +2225,14 @@ export class Controller {
    * (so e.g. ⌘R works from the editor). true = handled: the caller preventDefaults and stops propagation.
    */
   onKeyDown(e: KeyEventLike): boolean {
-    if (e.inDialog || e.inRename) return false; // dialogs and the rename field own their keys
-    const { sel, keys, paneMode } = this.store.get();
+    const { sel, keys, paneMode, palette } = this.store.get();
+    if (e.inDialog) {
+      // dialogs own their keys; the one exception is the palette's own shortcut, which toggles it shut
+      if (!(e.inPalette && palette &&matches(e, keys.command_palette, this.opts.isMac))) return false;
+      if (!e.repeat) this.closePalette();
+      return true;
+    }
+    if (e.inRename) return false; // the rename field owns its keys
     const notes = paneMode === "notes"; // the note list's keys do nothing while the pane lists tasks
     if (notes && this.isMenuKey(e) && !e.inEditor && sel >= 0) {
       void this.openContextMenu(sel, true);
