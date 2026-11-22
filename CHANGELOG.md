@@ -1,5 +1,13 @@
 # velo
 
+## 0.20.7
+
+### Patch Changes
+
+- 689fe77: Focus went back to where it was after closing the Move to new note, Merge, Lock note and Save search dialogs, also when they were opened from the command palette.
+- 05549dd: Focus went back to where it was after closing the command palette, so Escape still closes the Filters panel.
+- 689fe77: Pressing the command palette shortcut again while the palette is open closed it.
+
 ## 0.20.6
 
 ### Patch Changes
