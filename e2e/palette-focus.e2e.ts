@@ -5,6 +5,7 @@ import { expect, test, type Page } from "@playwright/test";
 const mod = process.platform === "darwin" ? "Meta" : "Control";
 const palette = (page: Page) => page.getByRole("dialog", { name: "Command palette" });
 
+// Waits for the palette to settle; the zero-delay test below is the one that covers the open itself.
 const openPalette = async (page: Page) => {
   await page.keyboard.press(`${mod}+KeyP`);
   await expect(palette(page)).toBeVisible();
@@ -49,6 +50,30 @@ test("palette closed by Escape: focus returns to the editor, the search field an
     await expect(el).toBeFocused();
   }
 });
+
+// The palette input has focus the moment it opens: keys typed right after the shortcut, with no wait, all land in it.
+for (const origin of ["editor", "search field", "list row"] as const) {
+  test(`typing right after the shortcut from the ${origin}: the palette input gets every key, nothing else changes`, async ({ page }) => {
+    await page.getByRole("option", { name: /^Welcome to velo/ }).first().click();
+    const search = page.getByLabel(/^Search or create/);
+    const editor = page.locator(".cm-content");
+    const typed = origin === "search field" ? "zz" : ""; // a filter would leave the list too short for a row
+    if (origin === "editor") await editor.click();
+    else if (origin === "search field") await search.fill(typed);
+    else await page.getByRole("option").nth(1).focus();
+    const note = await editor.innerText();
+    // the key-up follows the key-down at once: where focus is then is where a fast typist's next key goes
+    await page.evaluate(() => document.addEventListener("keyup", () => ((window as unknown as { __at: string }).__at = document.activeElement?.getAttribute("aria-label") ?? ""), { capture: true, once: true }));
+    await page.keyboard.press(`${mod}+KeyP`);
+    await page.keyboard.type("Focus search");
+    expect(await page.evaluate(() => (window as unknown as { __at: string }).__at)).toBe("Command");
+    await expect(page.getByRole("combobox", { name: "Command" })).toHaveValue("Focus search");
+    await page.keyboard.press("Escape");
+    await expect(palette(page)).toBeHidden();
+    expect(await editor.innerText()).toBe(note);
+    await expect(search).toHaveValue(typed);
+  });
+}
 
 test("a palette command that moves focus keeps its own result", async ({ page }) => {
   await page.getByRole("option", { name: /^Welcome to velo/ }).first().click();
