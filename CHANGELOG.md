@@ -1,5 +1,11 @@
 # velo
 
+## 0.20.6
+
+### Patch Changes
+
+- 76cc879: Fixed search results showing a note's old text after a disk error while another copy of that note was being locked.
+
 ## 0.20.5
 
 ### Patch Changes
