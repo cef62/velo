@@ -67,7 +67,7 @@ function Body({ controller, store }: { controller: Controller; store: Store<AppS
           aria-activedescendant={flat.length ? `palette-opt-${cur}` : undefined}
           aria-label="Command"
           placeholder="Type a command…"
-          autoFocus
+          // no autoFocus: it would focus the input before the dialog's focus trap records what had focus, so closing would "return" focus to the removed input, i.e. <body> (#111). The trap focuses the first tabbable, this input.
           autoComplete="off"
           spellCheck={false}
           value={query}

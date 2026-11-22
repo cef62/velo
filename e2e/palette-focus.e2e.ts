@@ -3,13 +3,14 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const mod = process.platform === "darwin" ? "Meta" : "Control";
-const focusAt = (page: Page) =>
-  page.evaluate(() => {
-    const a = document.activeElement as HTMLElement | null;
-    if (!a || a === document.body) return "body";
-    if (a.closest(".cm-editor")) return "editor";
-    return a.getAttribute("aria-label") ?? a.textContent?.trim() ?? a.tagName.toLowerCase();
-  });
+const palette = (page: Page) => page.getByRole("dialog", { name: "Command palette" });
+
+const openPalette = async (page: Page) => {
+  await page.keyboard.press(`${mod}+KeyP`);
+  await expect(palette(page)).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Command" })).toBeFocused();
+  await expect(page.locator("body")).toHaveCSS("pointer-events", "none"); // the dialog's dismiss layer is live: a click earlier is ignored
+};
 
 test.beforeEach(async ({ page }) => {
   page.on("pageerror", (e) => { throw e; });
@@ -24,31 +25,44 @@ for (const how of ["Escape", "backdrop click"] as const) {
     await expect(panel).toBeVisible();
     const noLinks = panel.getByRole("button", { name: "No links" });
     await noLinks.focus();
-    await page.keyboard.press(`${mod}+KeyP`);
-    await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible();
+    await openPalette(page);
     if (how === "Escape") await page.keyboard.press("Escape");
-    else await page.mouse.click(2, 2);
-    await expect(page.getByRole("dialog", { name: "Command palette" })).toBeHidden();
+    else {
+      await page.mouse.move(40, 600);
+      await page.mouse.click(40, 600, { delay: 50 });
+    }
+    await expect(palette(page)).toBeHidden();
     await expect(noLinks).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(panel).toBeHidden();
   });
 }
 
-test("diag: where focus lands after the palette, from each origin", async ({ page }) => {
-  const out: Record<string, string> = {};
-  const roundTrip = async (name: string, prep: () => Promise<void>) => {
-    await prep();
-    await page.keyboard.press(`${mod}+KeyP`);
-    await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(page.getByRole("dialog", { name: "Command palette" })).toBeHidden();
-    await page.waitForTimeout(300);
-    out[name] = await focusAt(page);
-  };
+test("palette closed by Escape: focus returns to the editor, the search field and a list row", async ({ page }) => {
   await page.getByRole("option", { name: /^Welcome to velo/ }).first().click();
-  await roundTrip("editor", () => page.locator(".cm-content").click());
-  await roundTrip("search", () => page.getByRole("combobox", { name: /search/i }).first().focus());
-  await roundTrip("list row", () => page.getByRole("option").nth(1).focus());
-  console.log("DIAG " + JSON.stringify(out));
+  const origins = [page.locator(".cm-content"), page.getByLabel(/^Search or create/), page.getByRole("option").nth(1)];
+  for (const el of origins) {
+    await el.focus();
+    await openPalette(page);
+    await page.keyboard.press("Escape");
+    await expect(palette(page)).toBeHidden();
+    await expect(el).toBeFocused();
+  }
+});
+
+test("a palette command that moves focus keeps its own result", async ({ page }) => {
+  await page.getByRole("option", { name: /^Welcome to velo/ }).first().click();
+  await page.locator(".cm-content").focus();
+  await openPalette(page);
+  await page.keyboard.type("Focus search");
+  await page.keyboard.press("Enter");
+  await expect(palette(page)).toBeHidden();
+  await expect(page.getByLabel(/^Search or create/)).toBeFocused();
+
+  await page.getByRole("button", { name: /^Filters/ }).click();
+  await page.getByRole("region", { name: "Filters" }).getByRole("button", { name: "No links" }).focus();
+  await openPalette(page);
+  await page.keyboard.type("Rename note");
+  await page.keyboard.press("Enter");
+  await expect(page.getByLabel("Note title")).toBeFocused();
 });
