@@ -17,8 +17,16 @@ const empty = css({ p: "6", textAlign: "center", color: "velo.fgMuted", fontSize
 
 export function CommandPalette({ controller, store }: { controller: Controller; store: Store<AppState> }) {
   const open = useStore(store, (s) => s.palette);
+  // The input's autoFocus (synchronous, so keys typed right after the shortcut reach it) runs at commit, before the dialog's focus trap
+  // records what had focus, so the trap would "return" focus to the removed input, i.e. <body> (#111). Record the origin in the render
+  // that opens the palette, still before that commit, and hand it to the dialog as its final focus.
+  const origin = useRef<Element | null>(null);
+  const wasOpen = useRef(false);
+  if (open && !wasOpen.current) origin.current = document.activeElement;
+  wasOpen.current = open;
+  const finalFocusEl = () => (origin.current instanceof HTMLElement && origin.current.isConnected ? origin.current : null);
   return (
-    <Dialog.Root open={open} onOpenChange={(d) => !d.open && controller.closePalette()}>
+    <Dialog.Root open={open} finalFocusEl={finalFocusEl} onOpenChange={(d) => !d.open && controller.closePalette()}>
       <Dialog.Backdrop />
       <Dialog.Positioner className={css({ alignItems: "flex-start" })}>
         <Dialog.Content className={`${c.content} ${css({ p: "0", gap: "0", w: "palette", maxW: "calc(100vw - 32px)", mt: "10vh", mb: "auto", bg: "velo.panel", boxShadow: "veloPopover", borderRadius: "l3" })}`} aria-label="Command palette">
