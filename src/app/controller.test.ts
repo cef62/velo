@@ -396,6 +396,15 @@ test("the palette opens and closes; a chosen action runs after the next frame an
   expect(store.get().palette).toBe(true);
   c.onKeyDown({ ...KEY_P, inDialog: true });
   expect(store.get().palette).toBe(true); // keys inside the dialog are its own
+  expect(c.onKeyDown({ ...KEY_P, inDialog: true, inPalette: true, repeat: true })).toBe(true); // a held key does not flicker it
+  expect(store.get().palette).toBe(true);
+  expect(c.onKeyDown({ ...KEY_P, inDialog: true, inPalette: true })).toBe(true); // only the palette lets its own shortcut through
+  expect(store.get().palette).toBe(false);
+  expect(c.onKeyDown({ ...KEY_P, inDialog: true, inPalette: true })).toBe(false); // not open: nothing to close, nothing opens
+  expect(store.get().palette).toBe(false);
+  c.openPalette();
+  expect(c.onKeyDown({ ...KEY_C, inDialog: true, inPalette: true })).toBe(false); // no other shortcut leaks through
+  expect(store.get().palette).toBe(true);
   c.closePalette();
   expect(store.get().palette).toBe(false);
   c.onKeyDown(KEY_P);

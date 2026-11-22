@@ -5,6 +5,7 @@ import type { Controller } from "../app/controller";
 import type { AppState, Store } from "../app/store";
 import { Button, Dialog, Field, Input } from "@/components/ui";
 import { fold } from "../search";
+import { useReturnFocus } from "./modal";
 import { useStore } from "./useStore";
 
 const err = css({ display: "flex", alignItems: "center", gap: "1.5", fontSize: "uiSm", lineHeight: "1.4", color: "red.11", m: "0", "& svg": { w: "14px", h: "14px", flex: "none" } });
@@ -14,8 +15,9 @@ export function SaveSearchDialog({ controller, store }: { controller: Controller
   const saveSearch = useStore(store, (s) => s.saveSearch);
   const last = useRef(saveSearch);
   if (saveSearch) last.current = saveSearch; // keeps the body mounted through the exit animation
+  const finalFocusEl = useReturnFocus(saveSearch !== null);
   return (
-    <Dialog.Root open={saveSearch !== null} onOpenChange={(d) => !d.open && void controller.commitSaveSearch(null)} closeOnInteractOutside={false}>
+    <Dialog.Root open={saveSearch !== null} finalFocusEl={finalFocusEl}onOpenChange={(d) => !d.open && void controller.commitSaveSearch(null)} closeOnInteractOutside={false}>
       <Dialog.Backdrop />
       <Dialog.Positioner>
         <Dialog.Content className={css({ maxW: "420px", p: "0", gap: "0", overflow: "hidden" })}>

@@ -11,7 +11,7 @@ import { createStore, initialState } from "../app/store";
 import { isSearchInput, platform } from "./platform";
 import { App } from "./App";
 import { installWindowHandlers } from "../log";
-import { modalOpen, overlayOpen } from "./modal";
+import { modalOpen, overlayOpen, paletteOnly } from "./modal";
 
 installWindowHandlers(window); // before the controller starts: an error while starting up reaches velo.log too
 
@@ -52,6 +52,7 @@ window.addEventListener(
       inSearchWithText: isSearchInput(t) && (t as HTMLInputElement).value !== "",
       inSearch: isSearchInput(t),
       inDialog: !!t.closest?.("[role=menu], [data-lock-screen]") || overlayOpen(),
+      inPalette: paletteOnly(t),
       inRename: !!t.closest?.("[data-rename]"),
     });
     if (handled) {

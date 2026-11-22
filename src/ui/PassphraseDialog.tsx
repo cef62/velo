@@ -6,6 +6,7 @@ import { Button, Dialog, Field, Input } from "@/components/ui";
 import { errText } from "../errtext";
 import { WRONG_PASSPHRASE, passphraseDialogMode, passphraseError, passphraseSubtitle } from "../passphrase";
 import { LockScreen } from "./LockScreen";
+import { useReturnFocus } from "./modal";
 import { registerPassphrase } from "./platform";
 
 type Req = Parameters<UiPort["passphrase"]>[0];
@@ -21,6 +22,7 @@ export function PassphraseDialog() {
   const [n, setN] = useState(0); // a new request remounts the inline field: fresh text, error and focus
   const done = useRef<((ok: boolean) => void) | null>(null);
   const pending = useRef<Req | null>(null); // the canceller drops only an inline prompt; dialogs stay up
+  const finalFocusEl = useReturnFocus(req !== null);
   const finish = (ok: boolean) => {
     done.current?.(ok);
     done.current = null;
@@ -43,7 +45,7 @@ export function PassphraseDialog() {
   // App makes the note area inert from the controller's `unlocking`, set and cleared with the request rendered here
   if (req?.mode === "unlock" && req.inline) return <LockScreen key={n} req={req} finish={finish} />;
   return (
-    <Dialog.Root open={req !== null} onOpenChange={(d) => !d.open && finish(false)} role="dialog" closeOnInteractOutside={false}>
+    <Dialog.Root open={req !== null} finalFocusEl={finalFocusEl}onOpenChange={(d) => !d.open && finish(false)} role="dialog" closeOnInteractOutside={false}>
       <Dialog.Backdrop />
       <Dialog.Positioner>
         <Dialog.Content className={content}>{req && <Body req={req} finish={finish} />}</Dialog.Content>

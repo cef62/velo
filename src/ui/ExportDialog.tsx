@@ -6,6 +6,7 @@ import type { AppState, Store } from "../app/store";
 import { Button, Dialog, SegmentGroup, Spinner } from "@/components/ui";
 import { countsLine } from "../export";
 import { filtersLine } from "../timeline";
+import { useReturnFocus } from "./modal";
 import { useStore } from "./useStore";
 
 const err = css({ display: "flex", alignItems: "center", gap: "1.5", fontSize: "uiSm", lineHeight: "1.4", color: "red.11", m: "0", "& svg": { w: "14px", h: "14px", flex: "none" } });
@@ -21,8 +22,9 @@ export function ExportDialog({ controller, store }: { controller: Controller; st
   );
   const last = useRef(exporting);
   if (exporting) last.current = exporting; // keeps the body mounted through the exit animation
+  const finalFocusEl = useReturnFocus(exporting !== null);
   return (
-    <Dialog.Root open={exporting !== null} onOpenChange={(d) => !d.open && void controller.commitExport(false)} closeOnInteractOutside={false}>
+    <Dialog.Root open={exporting !== null} finalFocusEl={finalFocusEl}onOpenChange={(d) => !d.open && void controller.commitExport(false)} closeOnInteractOutside={false}>
       <Dialog.Backdrop />
       <Dialog.Positioner>
         <Dialog.Content className={css({ maxW: "460px", p: "0", gap: "0", overflow: "hidden", maxH: "calc(100dvh - 32px)" })}>
