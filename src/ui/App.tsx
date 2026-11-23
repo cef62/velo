@@ -38,8 +38,9 @@ const app = css({
   color: "velo.fg",
   "[data-layout=horizontal] &": {
     display: "grid",
-    // Panda reads literals only: 216 = MIN_LIST_W (src/divider.ts), pinned by divider.test.ts
-    gridTemplateColumns: "minmax(216px, var(--list-w, 260px)) auto minmax(320px, 1fr)",
+    // Panda reads literals only: 216 = MIN_LIST_W, 320 + 1 = NOTE_TRACK + divider (src/divider.ts), pinned by divider.test.ts;
+    // --velo-list-min-w is listMinW(font) (applyFontScale); the min() keeps the note column whole in a small window
+    gridTemplateColumns: "minmax(min(var(--velo-list-min-w, 216px), calc(100% - 321px)), var(--list-w, 260px)) auto minmax(320px, 1fr)",
     gridTemplateRows: "auto minmax(0, 1fr)",
   },
 });

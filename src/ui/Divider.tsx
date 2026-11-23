@@ -10,6 +10,7 @@ export function Divider({ store, app }: { store: Store<AppState>; app: React.Ref
   const el = useRef<HTMLDivElement>(null);
   const restore = useRef<(() => void) | null>(null);
   const layout = useStore(store, (s) => s.layout);
+  const fontSize = useStore(store, (s) => s.fontSize);
   useEffect(() => {
     const a = app.current!, d = el.current!;
     const ctl = new AbortController();
@@ -22,16 +23,17 @@ export function Divider({ store, app }: { store: Store<AppState>; app: React.Ref
       a,
       a.querySelector<HTMLElement>("[data-titlebar]") ?? undefined,
       () => rowHeight(store.get().fontSize, store.get().layout),
+      () => store.get().fontSize,
       ctl.signal,
     );
     restore.current();
     return () => ctl.abort();
   }, [app, store]);
   useEffect(() => {
-    restore.current?.(); // layout change: that layout's remembered size
+    restore.current?.(); // layout or font change: that layout's remembered size, clamped to the font's minimum (storage keeps what the user chose)
     const l = el.current!.previousElementSibling as HTMLElement;
     el.current!.setAttribute("aria-valuenow", String(layout === "horizontal" ? l.offsetWidth : l.offsetHeight)); // default size when nothing is remembered
-  }, [layout]);
+  }, [layout, fontSize]);
   return (
     <div
       ref={el}
