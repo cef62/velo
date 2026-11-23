@@ -2,4 +2,4 @@
 "velo": patch
 ---
 
-Escape closed the Filters panel only when focus was inside it; it now closes the panel after a click on the Filters button and after using the command palette.
+One Escape closed the Filters panel wherever focus was, also right after the command palette or a dialog closed, and no tooltip appeared on its own to take that Escape.
