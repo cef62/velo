@@ -102,6 +102,19 @@ test("Filters open, Settings opened by a click and closed by Escape: the next Es
   await page.keyboard.press("Escape");
   await expect(filtersPanel(page)).toBeHidden();
 });
+// Roving keys ask for the tooltip too (the pane-bar tablist moves on arrows, Home and End). Each measured key starts with no tooltip
+// open (Escape closes any): a step taken while a tooltip shows gets none every other time, on main too (a zag quirk).
+for (const [key, to] of [["ArrowRight", "tasks"], ["End", "timeline"], ["Home", "notes"]] as const) {
+  test(`a pane tab reached by ${key} shows its tooltip`, async ({ page }) => {
+    await page.locator("[role=tab][data-tab=notes]").focus();
+    if (key === "Home") await page.keyboard.press("End");
+    await page.keyboard.press("Escape");
+    await expect(tooltips(page)).toHaveCount(0);
+    await page.keyboard.press(key);
+    await expect(page.locator(`[role=tab][data-tab=${to}]`)).toBeFocused();
+    await expect(tooltips(page)).toHaveCount(1);
+  });
+}
 test("a tooltip asked for by Tab still shows, and Escape closes it before the Filters panel", async ({ page }) => {
   await openFilters.keyboard(page);
   await expect(filtersPanel(page)).toBeVisible();
