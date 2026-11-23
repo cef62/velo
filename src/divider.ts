@@ -4,6 +4,14 @@
 export const MIN_LIST = 116; // px: list never collapses (36px pane bar + a couple of rows)
 export const MIN_LIST_W = 216; // px: horizontal layout, the pane bar fits icon-only tabs and controls in every mode (see PANE_FULL in ui/layout.ts)
 export const MIN_NOTE = 160; // px: note pane never collapses
+export const NOTE_TRACK = 320; // px: the note column's minimum in the App grid (pinned by divider.test.ts); the divider is 1 px net
+
+/**
+ * Horizontal layout: the narrowest list for a font size. The archived Timeline row (clock time + archived icon, about
+ * 83 px + 2.5em beside the title, measured in the demo) keeps its title at 7em, the width it has at font 14 and 216 px.
+ * 216 is the floor (default font); `total` caps it so the note keeps NOTE_TRACK (the window minimum is 600, so 279 at most).
+ */
+export const listMinW = (font: number, total = Infinity): number => Math.min(Math.max(MIN_LIST_W, Math.round(83 + 9.5 * font)), total - NOTE_TRACK - 1);
 
 /** Size clamped so both the list and the note keep a usable minimum within `total` px. */
 export const clampSize = (size: number, total: number, min = MIN_LIST): number => Math.round(Math.max(min, Math.min(size, total - MIN_NOTE)));
@@ -17,14 +25,14 @@ export const nudge = (size: number, key: string, shift: boolean, rowH: number): 
 const key = (horizontal: boolean) => (horizontal ? "velo.list-w" : "velo.list-h");
 const cssVar = (horizontal: boolean) => (horizontal ? "--list-w" : "--list-h");
 
-/** `titlebar` also drags in the vertical layout: it is the band that reads as the divider there. `rowH`: keyboard step (the list row height). `signal` removes the listeners. */
-export function mountDivider(divider: HTMLElement, app: HTMLElement, titlebar?: HTMLElement, rowH: () => number = () => 16, signal?: AbortSignal) {
+/** `titlebar` also drags in the vertical layout: it is the band that reads as the divider there. `rowH`: keyboard step (the list row height). `font`: the font size, which sets the horizontal minimum. `signal` removes the listeners. */
+export function mountDivider(divider: HTMLElement, app: HTMLElement, titlebar?: HTMLElement, rowH: () => number = () => 16, font: () => number = () => 14, signal?: AbortSignal) {
   const horizontal = () => !!app.closest("[data-layout=horizontal]");
   // looked up each time: switching to Tasks or Connections swaps the element before the divider
   const list = () => divider.previousElementSibling as HTMLElement;
   const total = () => (horizontal() ? app.clientWidth : app.clientHeight - list().getBoundingClientRect().top + app.getBoundingClientRect().top);
   const set = (size: number, save: boolean) => {
-    const h = horizontal(), v = clampSize(size, total(), h ? MIN_LIST_W : MIN_LIST);
+    const h = horizontal(), v = clampSize(size, total(), h ? listMinW(font(), total()) : MIN_LIST);
     app.style.setProperty(cssVar(h), `${v}px`);
     divider.setAttribute("aria-valuenow", String(v));
     if (save) try { localStorage.setItem(key(h), String(v)); } catch { /* storage blocked: size just isn't remembered */ }
