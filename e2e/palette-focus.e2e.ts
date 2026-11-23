@@ -44,42 +44,77 @@ for (const how of ["Escape", "backdrop click"] as const) {
   });
 }
 
-// Real mouse clicks, no pre-focusing (#111): WebKit leaves a clicked button unfocused, so focus is on <body> or wherever the palette
-// returned it, never inside the panel. Escape still closes the panel.
+// Real mouse clicks and keys, no pre-focusing (#111). Focus is on <body> (WebKit leaves a clicked button unfocused), on a header
+// button (Chromium focuses it on click; a keyboard user), or wherever a dialog handed it back; never inside the panel. One Escape
+// still closes the panel: a tooltip that focus coming back opens would take that Escape, so none opens.
 const closings = {
   Escape: (p: Page) => p.keyboard.press("Escape"),
   "outside click": (p: Page) => p.mouse.click(40, 600),
   "palette shortcut": (p: Page) => p.keyboard.press(`${mod}+KeyP`),
 };
+const filtersButton = (p: Page) => p.getByRole("button", { name: /^Filters/ });
+const filtersPanel = (p: Page) => p.getByRole("region", { name: "Filters" });
+const tooltips = (p: Page) => p.locator("[data-scope=tooltip][data-part=content][data-state=open]");
+const openFilters = {
+  click: (p: Page) => filtersButton(p).click(),
+  keyboard: (p: Page) => filtersButton(p).focus().then(() => p.keyboard.press("Enter")),
+};
 test("Filters opened by a click on its button: one Escape closes it", async ({ page }) => {
-  await page.getByRole("button", { name: /^Filters/ }).click();
-  const panel = page.getByRole("region", { name: "Filters" });
-  await expect(panel).toBeVisible();
+  await filtersButton(page).click();
+  await expect(filtersPanel(page)).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(panel).toBeHidden();
+  await expect(filtersPanel(page)).toBeHidden();
 });
-for (const tag of [false, true]) for (const opener of ["shortcut", "header button click"] as const) for (const [how, close] of Object.entries(closings)) {
-  test(`Filters opened${tag ? " and a tag picked" : ""} by clicks, palette opened by ${opener}, closed by ${how}: one Escape closes the panel`, async ({ page, browserName }) => {
-    // Chromium focuses a clicked header button (Filters, Command palette) and the palette gives focus back to it: after a key, its
-    // tooltip opens and takes the first Escape. WebKit, the app's engine, leaves the button unfocused.
-    test.skip(browserName !== "webkit" && (opener === "header button click" || !tag), "Chromium focuses a clicked button");
+const hows = Object.keys(closings) as (keyof typeof closings)[];
+const paletteCases: { filters: keyof typeof openFilters; opener: "shortcut" | "header button click"; how: keyof typeof closings }[] = [
+  ...hows.map((how) => ({ filters: "click" as const, opener: "shortcut" as const, how })),
+  ...hows.map((how) => ({ filters: "click" as const, opener: "header button click" as const, how })),
+  ...hows.map((how) => ({ filters: "keyboard" as const, opener: "shortcut" as const, how })),
+];
+for (const c of paletteCases) {
+  test(`Filters opened by ${c.filters}, palette opened by ${c.opener}, closed by ${c.how}: one Escape closes the panel, no tooltip shows`, async ({ page }) => {
     await page.getByRole("option", { name: /^Welcome to velo/ }).first().click();
-    await page.getByRole("button", { name: /^Filters/ }).click();
-    const panel = page.getByRole("region", { name: "Filters" });
-    if (tag) await panel.getByRole("group", { name: "Filter by tag" }).getByRole("button").nth(1).click();
-    if (opener === "shortcut") await openPalette(page);
+    await openFilters[c.filters](page);
+    await expect(filtersPanel(page)).toBeVisible();
+    if (c.opener === "shortcut") await openPalette(page);
     else {
       await page.getByRole("button", { name: "Command palette" }).click();
       await expect(page.getByRole("combobox", { name: "Command" })).toBeFocused();
       await settle(page);
     }
-    await close(page);
+    await closings[c.how](page);
     await expect(palette(page)).toBeHidden();
     await settle(page);
+    await expect(tooltips(page)).toHaveCount(0);
     await page.keyboard.press("Escape");
-    await expect(panel).toBeHidden();
+    await expect(filtersPanel(page)).toBeHidden();
   });
 }
+test("Filters open, Settings opened by a click and closed by Escape: the next Escape closes the panel", async ({ page }) => {
+  await filtersButton(page).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await settle(page);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("[role=dialog][data-state=open]")).toHaveCount(0);
+  await settle(page);
+  await expect(tooltips(page)).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(filtersPanel(page)).toBeHidden();
+});
+test("a tooltip asked for by Tab still shows, and Escape closes it before the Filters panel", async ({ page }) => {
+  await openFilters.keyboard(page);
+  await expect(filtersPanel(page)).toBeVisible();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(filtersButton(page)).toBeFocused();
+  await expect(tooltips(page)).toHaveCount(1);
+  await page.keyboard.press("Escape"); // one Escape, one consumer: the tooltip
+  await expect(tooltips(page)).toHaveCount(0);
+  await expect(filtersPanel(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(filtersPanel(page)).toBeHidden();
+});
 test("Escape with the Filters panel open: the editor and a search query keep their own Escape first", async ({ page }) => {
   await page.getByRole("option", { name: /^Welcome to velo/ }).first().click();
   await page.getByRole("button", { name: /^Filters/ }).click();

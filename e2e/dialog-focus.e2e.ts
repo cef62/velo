@@ -127,8 +127,26 @@ for (const c of clicked) {
     await expect(anyDialog(page)).toHaveCount(0);
     if (browserName === "webkit") await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).toBe("BODY");
     else await expect(c.back(page)).toBeFocused();
+    // focus handed back after Escape opens no tooltip: shown unasked, it would take the next Escape
+    await settle(page);
+    await expect(page.locator("[data-scope=tooltip][data-part=content][data-state=open]")).toHaveCount(0);
   });
 }
+test("the window losing focus while the palette is open: the dialog it runs still returns focus to the editor", async ({ page }) => {
+  await origins.editor.put(page);
+  await page.keyboard.press(`${mod}+KeyP`);
+  await expect(page.getByRole("combobox", { name: "Command" })).toBeFocused();
+  await settle(page);
+  await page.evaluate(() => window.dispatchEvent(new FocusEvent("blur"))); // switching apps and back
+  await page.keyboard.type("Merge into");
+  await page.keyboard.press("Enter");
+  await expect(anyDialog(page)).toHaveCount(1);
+  await expect(palette(page)).toBeHidden();
+  await settle(page);
+  await page.keyboard.press("Escape");
+  await expect(anyDialog(page)).toHaveCount(0);
+  await expect(origins.editor.el(page)).toBeFocused();
+});
 test("a dialog opened by its shortcut with focus on <body>: closing it leaves focus on <body>, not on an older origin", async ({ page }) => {
   await useNoteMenu(page);
   await page.evaluate(() => (document.activeElement as HTMLElement).blur());

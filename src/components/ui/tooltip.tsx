@@ -30,6 +30,12 @@ export interface TooltipProps extends Omit<RootProps, 'content'> {
   disabled?: boolean
 }
 
+// Whether the last key moved focus (Tab, Shift+Tab, an arrow key): only then does a keyboard focus ask for the tooltip.
+let navKey = false
+if (typeof window !== 'undefined') {
+  window.addEventListener('keydown', (e) => (navKey = e.key === 'Tab' || e.key.startsWith('Arrow')), true)
+}
+
 export const Tooltip = forwardRef<HTMLDivElement, TooltipProps>(function Tooltip(props, ref) {
   const {
     showArrow,
@@ -45,7 +51,16 @@ export const Tooltip = forwardRef<HTMLDivElement, TooltipProps>(function Tooltip
   // Root's own `disabled` (not an early return): the same tree in both states keeps the trigger mounted, so focus survives a toggle
   return (
     <Root disabled={disabled} {...rootProps}>
-      <Trigger asChild>{children}</Trigger>
+      <ArkTooltip.Context>
+        {(api) => (
+          // zag opens a tooltip on any keyboard-modality focus, also focus a closing dialog hands back after Escape or Enter: shown
+          // unasked, it would take the next Escape (#111). Only focus moved by Tab or an arrow key keeps it; hover is unchanged.
+          // A microtask: zag runs its own "open" in one, and a close sent in the same tick finds the tooltip not open yet.
+          <Trigger asChild onFocus={() => !navKey && queueMicrotask(() => api.setOpen(false))}>
+            {children}
+          </Trigger>
+        )}
+      </ArkTooltip.Context>
       <Portal disabled={!portalled} container={portalRef}>
         <Positioner>
           <Content ref={ref} {...contentProps}>

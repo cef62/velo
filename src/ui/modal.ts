@@ -28,7 +28,8 @@ const fresh = (e: Event) => {
 if (typeof window !== "undefined") {
   window.addEventListener("pointerdown", fresh, true);
   window.addEventListener("keydown", fresh, true);
-  window.addEventListener("blur", (e) => e.target === window && (lastOrigin = null)); // the window's own (the tray), not an element's
+  // the window's own blur (the tray), not an element's; an open palette still hands its origin to the dialog it runs
+  window.addEventListener("blur", (e) => e.target === window && !overlayOpen() && (lastOrigin = null));
 }
 
 function focusOrigin(): Element | null {
