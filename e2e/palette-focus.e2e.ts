@@ -1,5 +1,5 @@
-// Focus after the command palette closes (#111): it returns to where it was when the palette opened, so Escape in the
-// Filters panel (its handler only hears keys from inside it) still closes the panel.
+// Focus after the command palette closes (#111): it returns to where it was when the palette opened, and the next Escape still
+// closes the Filters panel.
 import { expect, test, type Page } from "@playwright/test";
 
 const mod = process.platform === "darwin" ? "Meta" : "Control";
@@ -58,14 +58,15 @@ test("Filters opened by a click on its button: one Escape closes it", async ({ p
   await page.keyboard.press("Escape");
   await expect(panel).toBeHidden();
 });
-for (const opener of ["shortcut", "header button click"] as const) for (const [how, close] of Object.entries(closings)) {
-  test(`Filters opened and a tag picked by clicks, palette opened by ${opener}, closed by ${how}: one Escape closes the panel`, async ({ page, browserName }) => {
-    // Chromium focuses the clicked palette button and gives focus back to it: its tooltip opens and takes the first Escape
-    test.skip(browserName !== "webkit" && opener === "header button click", "Chromium focuses a clicked button");
+for (const tag of [false, true]) for (const opener of ["shortcut", "header button click"] as const) for (const [how, close] of Object.entries(closings)) {
+  test(`Filters opened${tag ? " and a tag picked" : ""} by clicks, palette opened by ${opener}, closed by ${how}: one Escape closes the panel`, async ({ page, browserName }) => {
+    // Chromium focuses a clicked header button (Filters, Command palette) and the palette gives focus back to it: after a key, its
+    // tooltip opens and takes the first Escape. WebKit, the app's engine, leaves the button unfocused.
+    test.skip(browserName !== "webkit" && (opener === "header button click" || !tag), "Chromium focuses a clicked button");
     await page.getByRole("option", { name: /^Welcome to velo/ }).first().click();
     await page.getByRole("button", { name: /^Filters/ }).click();
     const panel = page.getByRole("region", { name: "Filters" });
-    await panel.getByRole("group", { name: "Filter by tag" }).getByRole("button").nth(1).click();
+    if (tag) await panel.getByRole("group", { name: "Filter by tag" }).getByRole("button").nth(1).click();
     if (opener === "shortcut") await openPalette(page);
     else {
       await page.getByRole("button", { name: "Command palette" }).click();
