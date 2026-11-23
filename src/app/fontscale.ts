@@ -11,6 +11,8 @@
  *    14   16/27        30               46              17
  *    20   22/37        43               66              24
  */
+import { listMinW } from '../divider'
+
 export type ListLayout = "vertical" | "horizontal";
 
 export const FONT_MIN = 10
@@ -44,4 +46,5 @@ export function applyFontScale(size: number, root: HTMLElement = document.docume
   set('--velo-row-h', f.rowCompact)
   set('--velo-row2-h', f.rowTwoLine)
   set('--velo-title-fs', f.title)
+  set('--velo-list-min-w', listMinW(size))
 }
