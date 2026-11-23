@@ -15,17 +15,28 @@ export const paletteOnly = (t: Element, root: ParentNode = document) => {
   return open.length > 0 && open.every((d) => d.matches("[aria-label='Command palette']")) && !t.closest("[role=menu], [data-lock-screen]");
 };
 
-// The last element that had real focus when a dialog opened. A dialog opened from the command palette opens while the palette's
-// input is going away (focus in limbo): it returns to where the palette itself was opened from.
+// The origin of the last dialog opened from outside a dialog. A dialog opened from the command palette opens while the palette's
+// input is going away (focus in the palette or, in Chromium, already on <body>): it returns to where the palette was opened from.
+// A key or a click outside any dialog starts afresh: a dialog opened with focus on <body> (WebKit leaves a clicked button unfocused)
+// returns focus to <body>, never to an older origin (#111). Not to the clicked button either: focus there opens its tooltip, which
+// shows unasked and takes the next Escape.
 let lastOrigin: Element | null = null;
+const fresh = (e: Event) => {
+  if (!(e.target instanceof Element && e.target.closest("[role=dialog]"))) lastOrigin = null;
+};
+// registered when this module loads, before main.tsx's shortcut handler: a dialog a key opens finds that key's reset done
+if (typeof window !== "undefined") {
+  window.addEventListener("pointerdown", fresh, true);
+  window.addEventListener("keydown", fresh, true);
+  window.addEventListener("blur", (e) => e.target === window && (lastOrigin = null)); // the window's own (the tray), not an element's
+}
 
 function focusOrigin(): Element | null {
   const a = document.activeElement;
-  if (a && a !== document.body && !a.closest("[role=dialog]")) {
-    // a menu item (Move selection to new note) is about to vanish with its menu: the menu's trigger is where focus belongs
-    const menu = a.closest("[role=menu]");
-    lastOrigin = (menu && menu.id && document.querySelector(`[aria-controls="${menu.id}"]`)) || (menu ? null : a);
-  }
+  if (!a || a === document.body || a.closest("[role=dialog]")) return lastOrigin;
+  // a menu item (Move selection to new note) is about to vanish with its menu: the menu's trigger is where focus belongs
+  const menu = a.closest("[role=menu]");
+  lastOrigin = menu ? (menu.id && document.querySelector(`[aria-controls="${menu.id}"]`)) || null : a;
   return lastOrigin;
 }
 

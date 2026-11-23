@@ -44,6 +44,59 @@ for (const how of ["Escape", "backdrop click"] as const) {
   });
 }
 
+// Real mouse clicks, no pre-focusing (#111): WebKit leaves a clicked button unfocused, so focus is on <body> or wherever the palette
+// returned it, never inside the panel. Escape still closes the panel.
+const closings = {
+  Escape: (p: Page) => p.keyboard.press("Escape"),
+  "outside click": (p: Page) => p.mouse.click(40, 600),
+  "palette shortcut": (p: Page) => p.keyboard.press(`${mod}+KeyP`),
+};
+test("Filters opened by a click on its button: one Escape closes it", async ({ page }) => {
+  await page.getByRole("button", { name: /^Filters/ }).click();
+  const panel = page.getByRole("region", { name: "Filters" });
+  await expect(panel).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
+});
+for (const opener of ["shortcut", "header button click"] as const) for (const [how, close] of Object.entries(closings)) {
+  test(`Filters opened and a tag picked by clicks, palette opened by ${opener}, closed by ${how}: one Escape closes the panel`, async ({ page, browserName }) => {
+    // Chromium focuses the clicked palette button and gives focus back to it: its tooltip opens and takes the first Escape
+    test.skip(browserName !== "webkit" && opener === "header button click", "Chromium focuses a clicked button");
+    await page.getByRole("option", { name: /^Welcome to velo/ }).first().click();
+    await page.getByRole("button", { name: /^Filters/ }).click();
+    const panel = page.getByRole("region", { name: "Filters" });
+    await panel.getByRole("group", { name: "Filter by tag" }).getByRole("button").nth(1).click();
+    if (opener === "shortcut") await openPalette(page);
+    else {
+      await page.getByRole("button", { name: "Command palette" }).click();
+      await expect(page.getByRole("combobox", { name: "Command" })).toBeFocused();
+      await settle(page);
+    }
+    await close(page);
+    await expect(palette(page)).toBeHidden();
+    await settle(page);
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
+  });
+}
+test("Escape with the Filters panel open: the editor and a search query keep their own Escape first", async ({ page }) => {
+  await page.getByRole("option", { name: /^Welcome to velo/ }).first().click();
+  await page.getByRole("button", { name: /^Filters/ }).click();
+  const panel = page.getByRole("region", { name: "Filters" });
+  const search = page.getByLabel(/^Search or create/);
+  await page.locator(".cm-content").click();
+  await page.keyboard.press("Escape"); // the editor's Escape: to the search field
+  await expect(search).toBeFocused();
+  await expect(panel).toBeVisible();
+  await page.keyboard.type("velo");
+  await page.keyboard.press("Escape"); // clears the query
+  await expect(search).toHaveValue("");
+  await expect(panel).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
+  await expect(search).toBeFocused();
+});
+
 test("palette closed by Escape: focus returns to the editor, the search field and a list row", async ({ page }) => {
   await page.getByRole("option", { name: /^Welcome to velo/ }).first().click();
   const origins = [page.locator(".cm-content"), page.getByLabel(/^Search or create/), page.getByRole("option").nth(1)];
