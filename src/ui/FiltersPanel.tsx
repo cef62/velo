@@ -8,6 +8,7 @@ import { activeFilterCount, appliedSearch } from "../saved";
 import { fold } from "../search";
 import { chipTags, focusAfterRemoval } from "../tags";
 import { formatBinding, NONE } from "../shortcuts";
+import { overlayOpen } from "./modal";
 import { useStore } from "./useStore";
 
 const panel = css({ display: "flex", flexDirection: "column", gap: "2.5", pt: "3", px: "3.5", pb: "3.5", bg: "velo.chrome", boxShadow: "inset 0 1px 0 {colors.velo.highlight}", borderBottom: "1px solid", borderColor: "velo.divider", flex: "none", maxH: "40vh", overflowY: "auto" });
@@ -46,6 +47,19 @@ export function FiltersPanel({ controller, store }: { controller: Controller; st
   };
   useEffect(() => refocus(menuAt, "saved"), [k]);
   useEffect(() => refocus(tagAt, "tag"), [visibleTags, selectedTags]);
+  // Escape closes the panel from anywhere, not only from inside it: a click on the Filters button leaves focus on <body> in WebKit
+  // (#111). Whatever handles Escape first (a dialog, the editor, a search query, a rename) prevents the default and keeps it.
+  useEffect(() => {
+    if (!tagPanelOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing || overlayOpen()) return;
+      e.preventDefault();
+      controller.showTags(false);
+      controller.focusSearch();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [tagPanelOpen, controller]);
   if (!tagPanelOpen) return null;
   const tags = chipTags(visibleTags, selectedTags); // derived per render: no stale or missing chip
   const move = (to: number) => {
@@ -64,13 +78,6 @@ export function FiltersPanel({ controller, store }: { controller: Controller; st
       id="filters-panel"
       className={panel}
       aria-label="Filters"
-      onKeyDown={(e) => {
-        if (e.key === "Escape") {
-          e.preventDefault();
-          controller.showTags(false);
-          controller.focusSearch();
-        }
-      }}
     >
       <div className={line}>
         <span className={css({ fontWeight: "600", color: "velo.fg" })}>Filters</span>

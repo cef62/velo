@@ -81,6 +81,84 @@ for (const c of cases) for (const o of c.origins) {
   });
 }
 
+// Real mouse clicks, no pre-focusing (#111). WebKit does not focus a clicked button, so focus is on <body> when these dialogs open,
+// and it stays there when they close; Chromium focuses the button and gets it back. The note menu is used first: its button used to
+// become the origin of every later dialog opened from <body>.
+const clicked: { dialog: string; query?: string; open: (p: Page) => Promise<void>; back: (p: Page) => Locator }[] = [
+  { dialog: "Lock note", open: (p) => p.getByRole("button", { name: "Encrypt note" }).click(), back: (p) => p.getByRole("button", { name: "Encrypt note" }) },
+  {
+    dialog: "Save search", query: "velo",
+    open: async (p) => { await p.getByRole("button", { name: /^Filters/ }).click(); await p.getByRole("button", { name: /^Save search/ }).click(); },
+    back: (p) => p.getByRole("button", { name: /^Save search/ }),
+  },
+  { dialog: "Settings", open: (p) => p.getByRole("button", { name: "Settings" }).click(), back: (p) => p.getByRole("button", { name: "Settings" }) },
+  {
+    dialog: "Merge (from the palette opened by a click)",
+    open: async (p) => {
+      await p.getByRole("button", { name: "Command palette" }).click();
+      await expect(p.getByRole("combobox", { name: "Command" })).toBeFocused();
+      await settle(p);
+      await p.keyboard.type("Merge into");
+      await p.keyboard.press("Enter");
+    },
+    back: (p) => p.getByRole("button", { name: "Command palette" }),
+  },
+];
+const useNoteMenu = async (page: Page) => {
+  await noteMenu(/Merge into/)(page);
+  await expect(anyDialog(page)).toHaveCount(1);
+  await settle(page);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Note menu" })).toBeFocused();
+};
+for (const c of clicked) {
+  test(`${c.dialog} opened by a mouse click after the note menu was used: closing it returns focus to the clicked button or <body>`, async ({ page, browserName }) => {
+    await useNoteMenu(page);
+    await page.getByRole("option").nth(2).click();
+    if (c.query) {
+      await page.getByLabel(/^Search or create/).click();
+      await page.keyboard.type(c.query);
+    }
+    await c.open(page);
+    await expect(anyDialog(page)).toHaveCount(1);
+    await expect(palette(page)).toBeHidden();
+    await settle(page);
+    await page.keyboard.press("Escape");
+    await expect(anyDialog(page)).toHaveCount(0);
+    if (browserName === "webkit") await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).toBe("BODY");
+    else await expect(c.back(page)).toBeFocused();
+    // focus handed back after Escape opens no tooltip: shown unasked, it would take the next Escape
+    await settle(page);
+    await expect(page.locator("[data-scope=tooltip][data-part=content][data-state=open]")).toHaveCount(0);
+  });
+}
+test("the window losing focus while the palette is open: the dialog it runs still returns focus to the editor", async ({ page }) => {
+  await origins.editor.put(page);
+  await page.keyboard.press(`${mod}+KeyP`);
+  await expect(page.getByRole("combobox", { name: "Command" })).toBeFocused();
+  await settle(page);
+  await page.evaluate(() => window.dispatchEvent(new FocusEvent("blur"))); // switching apps and back
+  await page.keyboard.type("Merge into");
+  await page.keyboard.press("Enter");
+  await expect(anyDialog(page)).toHaveCount(1);
+  await expect(palette(page)).toBeHidden();
+  await settle(page);
+  await page.keyboard.press("Escape");
+  await expect(anyDialog(page)).toHaveCount(0);
+  await expect(origins.editor.el(page)).toBeFocused();
+});
+test("a dialog opened by its shortcut with focus on <body>: closing it leaves focus on <body>, not on an older origin", async ({ page }) => {
+  await useNoteMenu(page);
+  await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+  await page.keyboard.press(`${mod}+Shift+KeyE`);
+  await expect(anyDialog(page)).toHaveCount(1);
+  await settle(page);
+  await page.keyboard.press("Escape");
+  await expect(anyDialog(page)).toHaveCount(0);
+  await settle(page);
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+});
+
 for (const o of all) {
   test(`palette shortcut pressed twice from the ${o}: the second press closes it and focus returns`, async ({ page }) => {
     await origins[o].put(page);
