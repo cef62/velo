@@ -1,5 +1,13 @@
 # velo
 
+## 0.20.8
+
+### Patch Changes
+
+- 1323008: Closing a dialog opened by a mouse click no longer sent focus to the note menu button or another control used earlier.
+- 1323008: Escape closed the Filters panel also when focus was outside it, such as right after the command palette or a dialog closed, and a tooltip no longer appeared on its own there to take that Escape.
+- 334db26: The note list now keeps a wider minimum at larger font sizes, so titles of archived notes no longer shrink to a sliver.
+
 ## 0.20.7
 
 ### Patch Changes
